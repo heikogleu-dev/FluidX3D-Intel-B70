@@ -194,65 +194,93 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
 } /**/
 
-// ============== CC#3: Aero-Box 20×4×5m, 20mm uniform, Halbdomain, Headless, Force-Output, 50k Steps ==============
-// Domain 20m × 4m × 5m bei cell_size 20mm = 1000×200×250 = 50M cells.
-// Vehicle X-center bei Cell 250 (= 5m vom Inlet, 15m bis Outlet, in Welt-X=0).
-// Halbdomain: Vehicle Y-CENTER auf Y=0 → Vehicle wird durch Symmetrie-Plane Y_min HALBIERT (kritisch! siehe sanity-check unten).
-// Forces via lbm.object_force(TYPE_S|TYPE_X).
-void main_setup() { // CC#3 Aero-Box 20mm asym (5/15/4/5), Halbdomain, Headless, Force-Output, 50k Steps. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
+// ============== CC#6: Aero-Box 14×2.5×4.5m (half) | 14×5×4.5m (full), 10mm uniform, Auto-Stop bei <1% Force-Drift ==============
+// Compile-time toggle CC6_FULL_DOMAIN: false=Halbdomain (Y[0,2.5m]), true=Volldomain (Y[-2.5,+2.5m])
+//
+// Halbdomain: 1500×250×450 = 168.75 M cells (~10 GB). Volldomain: 1500×500×450 = 337.5 M cells (~19 GB).
+//
+// Geometrie-Updates ggü. CC#5:
+//   - X: Domain bleibt 15m, aber Vehicle wird um 1m nach +X verschoben (Inlet rückt -1m weg)
+//        Vehicle X-center @ Cell 400 statt 300 → 4m Anlauf, 11m Wake (statt 3m / 12m)
+//   - Y: Halbdomain um 0.5m gekürzt (Y_max: 3m → 2.5m). Volldomain entsprechend symmetrisch.
+//   - Z: unverändert 4.5m (450 cells).
+//
+// Wall-config (identisch zu CC#5, FluidX3D-Aero-Konvention):
+//   - Boden Z=0: TYPE_S Moving-Wall +x (rolling road)
+//   - Alle anderen Außenwände: TYPE_E free-stream u_x=lbm_u
+//
+// Auto-Stop-Konvergenz:
+//   - Tracking: Sliding-Window von 50 Chunks (5000 Steps).
+//   - Convergence-Test: |Fx_recent_avg - Fx_prev_avg| / |Fx_recent_avg| < 1% UND dito für Fy.
+//   - Frühester Exit: nach 100 Chunks (10000 Steps), damit beide Fenster gefüllt sind.
+//   - Max-Run: 1000 Chunks (100k Steps).
+//
+// Ground clearance: 1 cell = 10 mm.
+#define CC6_FULL_DOMAIN false  // false = Halbdomain (TYPE_E pseudo-symmetry an Y=0); true = Volldomain (Vehicle Y-center mittig)
+void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
 	// ============== Domain Setup ==============
-	const uint3 lbm_N = uint3(1000u, 200u, 250u);  // 50.0 M Cells, 20m × 4m × 5m (Halbdomain Symmetrie an Y_min)
+#if CC6_FULL_DOMAIN
+	const uint3 lbm_N = uint3(1500u, 500u, 450u);  // 337.5 M Cells: 15m × 5m × 4.5m (Volldomain, Y[-2.5,+2.5m])
+	const string label = "CC#6-FULL";
+#else
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, Y[0,+2.5m] sym an Y_min)
+	const string label = "CC#6-HALF";
+#endif
 	const float lbm_u = 0.075f;                    // standard LBM velocity scale
 	const float si_u = 30.0f;                      // 30 m/s Wind
-	const float si_length = 4.5f;                  // Vehicle-Länge in SI [m] (corrected post-CC#3 from 4.0 to actual 4.5 m × 1.8 m × 1.1 m geometry)
-	const float si_width  = 1.8f;                  // Vehicle-Breite in SI [m] (reference, not used in scale — STL aspect determines width)
-	const float si_height = 1.1f;                  // Vehicle-Höhe in SI [m] (reference)
-	const float cell_size = 0.020f;                // 20 mm uniform
-	const float lbm_length = si_length / cell_size; // 225 LBM-cells/Vehicle-Länge bei 4.5 m / 20 mm
+	const float si_length = 4.5f;                  // Vehicle-Länge in SI [m]
+	const float cell_size = 0.010f;                // 10 mm uniform
+	const float lbm_length = si_length / cell_size; // 450 LBM-cells/Vehicle-Länge
 	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft 15°C
 	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
 	const float lbm_nu = units.nu(si_nu);
-	print_info("CC#3 Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
-	print_info("CC#3 Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
-	print_info("CC#3 Box (cells): X[-5m,+15m]=20m | Y[0,4m]=4m (half) | Z[0,5m]=5m | Vehicle X-center @ cell 250 (=5m vom Inlet)");
+	print_info(label+" Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+	print_info(label+" Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
+#if CC6_FULL_DOMAIN
+	print_info(label+" Box: X[-4m,+11m]=15m | Y[-2.5m,+2.5m]=5m (FULL) | Z[0,4.5m]=4.5m | Vehicle X-center @ cell 400 / Y-center @ 250");
+#else
+	print_info(label+" Box: X[-4m,+11m]=15m | Y[0,2.5m]=2.5m (HALF) | Z[0,4.5m]=4.5m | Vehicle X-center @ cell 400 / Y-center @ 0");
+#endif
+	print_info(label+" Walls: floor=TYPE_S Moving-Wall (rolling road); rest=TYPE_E free-stream u_x=lbm_u");
 	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
 
-	// ============== Vehicle: STL laden, Halbdomain-Position (X-Center cell 250, Y-Center=0 für Symmetrie-Halbierung, Z-Min=1) ==============
+	// ============== Vehicle: STL laden + positionieren ==============
 	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
 	const float3 bbox_orig = vehicle->get_bounding_box_size();
-	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 200 cells
+	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 450 cells (4.5 m / 10 mm)
 	const float3 vbbox = vehicle->get_bounding_box_size();
 	const float3 vctr  = vehicle->get_bounding_box_center();
+#if CC6_FULL_DOMAIN
+	const float vehicle_y_target = (float)(lbm_N.y / 2u); // Volldomain: Y-mitte = Cell 250
+#else
+	const float vehicle_y_target = 0.0f;                  // Halbdomain: Y-Center auf 0 → Vehicle wird vom Y_min sym-plane mittig durchschnitten
+#endif
 	vehicle->translate(float3(
-		250.0f - vctr.x,                       // X-Center bei Cell 250 (= 5m vom Inlet)
-		0.0f   - vctr.y,                       // Y-CENTER auf 0 (NICHT Y-Min!): Halbdomain-Symmetrie schneidet Vehicle mittig
-		1.0f   - (vctr.z - vbbox.z * 0.5f)));  // Z-Min auf 1 (1 Zelle Bodenfreiheit)
+		400.0f - vctr.x,                       // X-Center bei Cell 400 (= 4m vom Inlet, 11m bis Outlet)
+		vehicle_y_target - vctr.y,             // Halb: 0; Voll: Ny/2
+		1.0f   - (vctr.z - vbbox.z * 0.5f)));  // Z-Min auf 1 (Räder auf Boden)
 
-	// ============== Halbdomain-Sanity-Check: Vehicle muss Y=0 SCHNEIDEN ==============
-	// Wenn Y-Min > 0: ganzes Vehicle in pos. Y → Bug wie in CC#2 (Drag/Lift falsch).
-	// Wenn Y-Max < 0: ganzes Vehicle in neg. Y → komplett außerhalb Domain.
+	// Geometrie-Sanity-Check
 	const float3 vmin = vehicle->pmin, vmax = vehicle->pmax;
 	print_info("Vehicle BBox after translate: X["+to_string(vmin.x,1u)+", "+to_string(vmax.x,1u)+"] Y["+to_string(vmin.y,1u)+", "+to_string(vmax.y,1u)+"] Z["+to_string(vmin.z,1u)+", "+to_string(vmax.z,1u)+"]");
+#if !CC6_FULL_DOMAIN
 	if(vmin.y > 0.5f || vmax.y < -0.5f) {
-		print_info("FATAL: Vehicle does not cross Y=0! Half-domain symmetry won't slice the vehicle. Aborting setup before voxelization.");
+		print_info("FATAL: Half-domain Vehicle does not cross Y=0! Aborting before voxelization.");
 		std::fflush(nullptr); _exit(2);
 	}
-	print_info("Halbdomain-Check OK: Vehicle Y-bbox crosses Y=0 (vmin.y="+to_string(vmin.y,2u)+", vmax.y="+to_string(vmax.y,2u)+")");
+	print_info("Halbdomain-Check OK: Vehicle Y-bbox crosses Y=0");
+#endif
 
 	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X); // Vehicle: TYPE_S|TYPE_X für object_force-Filter
 
-	// ============== Boundaries (Vehicle-Cells via TYPE_X-Test geschützt) ==============
+	// ============== Boundaries (FluidX3D-Aero-Konvention) ==============
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz();
 	parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
 		if((lbm.flags[n] & TYPE_X) != 0u) return; // Vehicle nicht überschreiben
-		if(z==0u) {                               // Boden: moving wall +x (Fahrzeug fährt)
+		if(z==0u) {                               // Boden Z=0: rolling road, TYPE_S moving wall +x
 			lbm.flags[n] = TYPE_S;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
-		} else if(z==Nz-1u) {                     // Decke: no-slip
-			lbm.flags[n] = TYPE_S;
-		} else if(y==Ny-1u) {                     // Y_max: outer wall no-slip
-			lbm.flags[n] = TYPE_S;
-		} else if(x==0u || x==Nx-1u) {            // Inlet (-X) / Outlet (+X)
+		} else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { // Inlet/Outlet/Y_min/Y_max/Decke: TYPE_E free-stream
 			lbm.flags[n] = TYPE_E;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		} else {                                  // Fluid: initial flow +x
@@ -260,26 +288,52 @@ void main_setup() { // CC#3 Aero-Box 20mm asym (5/15/4/5), Halbdomain, Headless,
 		}
 	});
 
-	// ============== Run-Schleife: 500 chunks × 100 = 50.000 Steps, Force-CSV pro Chunk ==============
-	const string force_csv_path = get_exe_path()+"../bin/forces_cc3.csv";
+	// ============== Run-Schleife mit Auto-Stop bei Force-Konvergenz ==============
+#if CC6_FULL_DOMAIN
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_full.csv";
+#else
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_half.csv";
+#endif
 	std::ofstream fcsv(force_csv_path);
 	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si\n";
 	fcsv << std::scientific;
 
-	const uint chunk = 100u;
-	const uint chunks = 500u; // 500 × 100 = 50.000 Steps
-	print_info("CC#3 Run: "+to_string(chunks*chunk)+" steps in "+to_string(chunks)+" chunks of "+to_string(chunk));
-	for(uint c = 0u; c < chunks; c++) {
+	const uint chunk = 100u;            // 1 chunk = 100 Steps
+	const uint chunks_max = 1000u;      // Hard cap = 100.000 Steps
+	const uint conv_window = 50u;       // 50 chunks = 5000 Steps Sliding-Window
+	const uint conv_min_chunks = 100u;  // Frühester Exit = 100 chunks (10.000 Steps), damit recent + prev je 50 chunks haben
+	const float conv_tol = 0.01f;       // 1 % relative Änderung
+	std::vector<float3> Fhist;
+	Fhist.reserve(chunks_max);
+	print_info(label+" Run start: max "+to_string(chunks_max*chunk)+" Steps; Auto-Stop bei |dF/F| < 1% in X & Y über 5000 Steps (frühester Exit nach 10000 Steps)");
+	uint final_chunks = chunks_max;
+	for(uint c = 0u; c < chunks_max; c++) {
 		lbm.run(chunk);
 		lbm.update_force_field();
 		const float3 F_lbm = lbm.object_force(TYPE_S|TYPE_X);
 		const float3 F_si  = float3(units.si_F(F_lbm.x), units.si_F(F_lbm.y), units.si_F(F_lbm.z));
+		Fhist.push_back(F_si);
 		const ulong step = (ulong)(c+1u) * chunk;
 		const float t_si = units.si_t(step);
 		fcsv << step << "," << t_si << "," << F_si.x << "," << F_si.y << "," << F_si.z << "\n";
 		if((c+1u) % 25u == 0u) fcsv.flush();
 		if((c+1u) % 50u == 0u) {
-			print_info("step="+to_string(step)+" t="+to_string(t_si, 3u)+"s  Fx="+to_string(F_si.x, 1u)+"N  Fz="+to_string(F_si.z, 1u)+"N");
+			print_info("step="+to_string(step)+" t="+to_string(t_si, 3u)+"s  Fx="+to_string(F_si.x, 1u)+"N  Fy="+to_string(F_si.y, 1u)+"N  Fz="+to_string(F_si.z, 1u)+"N");
+		}
+		// Convergence test
+		if(c+1u >= conv_min_chunks) {
+			float3 recent_avg(0.0f), prev_avg(0.0f);
+			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist[Fhist.size()-1u-k];
+			for(uint k=0u; k<conv_window; k++) prev_avg   += Fhist[Fhist.size()-1u-conv_window-k];
+			recent_avg /= (float)conv_window;
+			prev_avg   /= (float)conv_window;
+			const float dx = (recent_avg.x!=0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
+			const float dy = (recent_avg.y!=0.0f) ? fabs(recent_avg.y - prev_avg.y) / fabs(recent_avg.y) : 1.0f;
+			if(dx < conv_tol && dy < conv_tol) {
+				print_info(label+" CONVERGED at step "+to_string(step)+": |dFx|/|Fx|="+to_string(dx*100.0f, 3u)+"%  |dFy|/|Fy|="+to_string(dy*100.0f, 3u)+"%  Fx_avg="+to_string(recent_avg.x, 1u)+"N");
+				final_chunks = c+1u;
+				break;
+			}
 		}
 	}
 	fcsv.close();
@@ -291,10 +345,10 @@ void main_setup() { // CC#3 Aero-Box 20mm asym (5/15/4/5), Halbdomain, Headless,
 	lbm.flags.write_device_to_vtk(export_path);
 	lbm.F.write_device_to_vtk(export_path);
 	lbm.write_mesh_to_vtk(vehicle, export_path);
-	print_info("CC#3 done. Force-CSV: "+force_csv_path+" | VTKs: "+export_path);
+	print_info(label+" done after "+to_string(final_chunks)+" chunks ("+to_string(final_chunks*chunk)+" steps). Force-CSV: "+force_csv_path+" | VTKs: "+export_path);
 	std::fflush(nullptr);
-	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
-} // CC#2 NEW BLOCK END
+	_exit(0); // umgehe xe-driver Cleanup-Race
+} // CC#6 BLOCK END
 
 #if 0 // ===== OLD CC#1/CC#3 main_setup (10000 step test, 16.85M cells), deactivated 2026-05-10 for CC#2 (50000 step Aero-Box) =====
 void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + force-field export. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS, VOLUME_FORCE, FORCE_FIELD

@@ -47,7 +47,27 @@ Original 1299 × 288 × 361 grid was axis-halved to 650 × 144 × 180. 10 000-st
 - VTK exports: u, rho, flags, F, mesh
 - Per-cell CSV `forces_solid_cells.csv` (one row per non-zero TYPE_S cell)
 
-### CC#3 (current active) — Aero-Box 20 mm asym, 50 M cells, 50 000 steps, half-domain symmetry fix applied
+### CC#6 (current active) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
+
+The currently-active `main_setup()` is a compile-time-toggleable Half/Full-Domain block (line ~197 onwards), driven by `#define CC6_FULL_DOMAIN false|true`:
+
+- **Half-domain grid:** `uint3(1500u, 250u, 450u)` = **168.75 M cells** (Y[0, 2.5m] sym at Y_min)
+- **Full-domain grid:** `uint3(1500u, 500u, 450u)` = **337.5 M cells** (Y[-2.5, +2.5m], no symmetry)
+- **Cell size:** 10 mm uniform; X = 15 m (X[-4, +11]); Z = 4.5 m
+- **Vehicle X-center at cell 400** (= 4 m from inlet, 11 m to outlet — more upstream room than CC#3-CC#5)
+- **Vehicle Z-min = 1 cell** (wheels on ground, 10 mm sub-cell offset for moving-floor BC)
+- **Walls (FluidX3D-Aero convention):** floor=`TYPE_S` Moving-Wall +x (rolling road); ceiling/Y_min/Y_max/inlet/outlet=`TYPE_E` free-stream u_x=lbm_u
+- **Vehicle marker:** `voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X)`. `object_force(TYPE_S|TYPE_X)` filter is **exact-match** in `kernel.cpp:1941` (`flags[n]==flag_marker`), so it correctly isolates vehicle cells from floor/walls (which only carry `TYPE_S` resp. `TYPE_E`).
+- **Auto-Stop:** sliding-window of 5000 steps (50 chunks × 100). Convergence test: `|Fx_recent_avg − Fx_prev_avg| / |Fx_recent_avg| < 1 %` AND same for Fy. Earliest exit: 10 000 steps. Hard cap: 100 000 steps.
+- **Force CSV:** `bin/forces_cc6_half.csv` or `bin/forces_cc6_full.csv` with schema `step,t_si,Fx_si,Fy_si,Fz_si`.
+- **Final VTK exports:** u, rho, flags, F, mesh.
+- **`_exit(0)`** after exports (xe-driver cleanup-race workaround).
+
+### CC#5 (previous, deactivated) — Aero-Box 10 mm half-domain, TYPE_E walls, 50k steps fixed-length
+
+CC#5 was the first run with the FluidX3D-correct boundary configuration (TYPE_E free-stream walls) after CC#4 had been broken by all-walls TYPE_S Moving Wall (which created an artificial 3D Couette flow and gave Fx = 14749 N). CC#5 result: **Fx = 16 180 N steady, 5464 MLUPS, 585 GB/s, ~7.8 min wall-time at 202.5 M cells**. Force still 50-80× higher than OpenFOAM reference — diagnosed cause is **missing wall model** (FluidX3D's own Ahmed-body comment: "expect Cd to be too large by a factor 1.3-2.0x; need wall model"). CC#5 grid was `uint3(1500u, 300u, 450u)` (15m × 3m × 4.5m), Vehicle X-center at cell 300, Z-min at cell 1.
+
+### CC#3 (deactivated) — Aero-Box 20 mm asym, 50 M cells, 50 000 steps, half-domain symmetry fix applied
 
 The currently-active `main_setup()` (line ~197 onwards):
 
