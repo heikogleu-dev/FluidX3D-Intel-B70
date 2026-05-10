@@ -221,7 +221,7 @@ void main_setup() { // CC#2 Aero-Box 20mm, Halbdomain, Headless, Force-Output, 5
 	const float3 vctr  = vehicle->get_bounding_box_center();
 	vehicle->translate(float3(
 		350.0f - vctr.x,                       // X-Center bei Cell-Index 350
-		0.0f   - (vctr.y - vbbox.y * 0.5f),    // Y-Min des Vehicles auf 0 (Symmetrie-Plane an Y_min)
+		0.0f   - vctr.y,                       // Y-CENTER des Vehicles auf 0: Symmetrie-Plane schneidet Auto in der Mitte → nur Halb-Auto in Domain (Y>=0); andere Hälfte via Symmetrie-Spiegel
 		1.0f   - (vctr.z - vbbox.z * 0.5f)));  // Z-Min auf 1 (1 Zelle Bodenfreiheit)
 	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X); // Vehicle: TYPE_S|TYPE_X für object_force-Filter
 
