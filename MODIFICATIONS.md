@@ -100,7 +100,17 @@ For **non-EP-opposite Y-mirror pairs (7, 13), (8, 14), (11, 18), (12, 17)**, the
 
 Net effect: the swap produces ~10 % drag reduction (a partial perturbation of the Y_min flow) but no actual specular-reflection symmetry plane.
 
-**A correct CC#7 implementation would require a separate kernel that runs after stream_collide, reads DDFs from neighbors directly, and writes the specular-reflected values without using EP storage layout.** That is a non-trivial 1-2 hour patch with further EP-conflict risk. Deferred until a future iteration.
+**A correct CC#7 implementation would require a separate kernel that runs after stream_collide, reads DDFs from neighbors directly, and writes the specular-reflected values without using EP storage layout.** Deferred until a future iteration.
+
+**Reference implementations researched (2026-05-10):**
+
+- **waLBerla `FreeSlip::treatDirection()`** ([source](https://github.com/lssfau/walberla/blob/master/src/lbm/boundary/FreeSlip.h)): operates as a **post-stream-step boundary handler** (not inline in the main kernel). For each direction `dir` from a fluid cell `n` to a boundary cell `b`, the algorithm:
+  1. Detects the wall normal by checking which neighbor of `b` is fluid (`isPartOfMaskSet`).
+  2. Looks up the reflected direction `ref_dir = mirrorX/Y/Z[inverseDir[dir]]` from precomputed tables.
+  3. Copies `pdfField(n, invDirIdx(dir)) = pdfField(n + wnx, n + wny, n + wnz, idx[ref_dir])` — i.e. the reflected PDF source is in a fluid *neighbor* of `n` along the wall-tangent direction, not in `n` or `b` itself.
+- **OpenLB `addSlipBoundary`**: same algorithmic family — specular reflection in post-stream BC handlers. Initially 2D-only, later extended to D3Q15/19/27 stencils.
+
+The architectural pattern is consistent across both: **boundary handlers run after the main collide-stream kernel and read/write PDFs in fluid cells using stencil-aware lookup tables**. FluidX3D's Esoteric-Pull-coupled `apply_moving_boundaries` is *inline* in stream_collide and only handles velocity-Dirichlet, not specular reflection. For CC#7-V2, the correct architecture is to follow the waLBerla pattern: a new OpenCL kernel `apply_freeslip_y` running over the fluid cells at `y=1` (one above the sym-plane), with a precomputed `y_mirror_idx[19]` lookup table.
 
 The TYPE_Y kernel patch, the CC6_MODE=2 setup branch, and the diagnostic counter remain in the source tree under `#define CC7_DIAGNOSE`. Production default is set to **CC6_MODE=1 (Volldomain reference)**.
 

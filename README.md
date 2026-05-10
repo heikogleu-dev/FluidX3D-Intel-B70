@@ -18,7 +18,7 @@ This is a fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX
 | Linux x11 windowed mode | ✅ default 2560×1440, env-var configurable |
 | Linux xe-driver clean shutdown | ⚠️ requires `_exit(0)` workaround (see below) |
 | Live visualisation FPS | ⚠️ 0–1 FPS at large window — FluidX3D's CPU software renderer is the bottleneck, **not** the GPU |
-| Multi-GPU on B70 | ❓ untested (single-tile B70) |
+| Multi-GPU on B70 | 🚫 **out of scope** for this fork (single-tile B70). The TYPE_Y symmetry-plane patch attempt (CC#7) has not been validated for the halo-exchange path multi-GPU requires. |
 
 ## Hardware target
 
@@ -153,6 +153,53 @@ Drag dropped 45 % vs CC#2 (1927 N → 1058 N half-dom) and the half-domain mathe
 4. **Vehicle si_length** was 4.0 m in CC#2/CC#3, real geometry is **4.5 m × 1.8 m × 1.1 m**. Fixed in setup.cpp post-CC#3 (changes Reynolds by +12.5 %, time-step scaling, and effective resolution per vehicle length).
 
 For aero-converged values: CC#4 with explicit symmetry-plane handling, 5-cell ground clearance, optionally 16 mm cells, 200 k+ steps (~6–10 h wall-time on B70).
+
+### Force-field runs status (CC#4 → CC#7) — vehicle 4.5 × 1.8 × 1.1 m, 30 m/s, 10 mm cells
+
+| Run | Cells | Steps to converge | Fx (Drag) | Fz (Lift) | Wall-time | Status |
+|---|---:|---:|---:|---:|---:|---|
+| **CC#4 all-walls Moving** | 202.5 M | 50 000 (no auto-stop) | 14 749 N | -250 N | ~28 min | broken: Couette-tunnel artifact |
+| **CC#5 TYPE_E walls + wheels-on-floor** | 202.5 M | 50 000 (no auto-stop) | 16 180 N | -67 N | ~28 min | broken: Y_min TYPE_E ≠ symmetry |
+| **CC#6-Half (TYPE_E pseudo-sym)** | 168.75 M | 16 000 (auto-stop @ 1 % drift Fx+Fy) | 16 177 N | -73 N | ~ 6 min | broken: see CC#5 |
+| **CC#6-Full (no symmetry)** | **337.5 M** | 33 100 (manual stop) | **2 219 N** | +9 N | ~ 17 min | ✅ **reference** (still ~5× OpenFOAM, but physically correct) |
+| **CC#7 TYPE_Y specular swap** | 168.75 M | 12 100 (manual stop) | 14 472 N | +7 N | ~ 7 min | FAILED: kernel-level Esoteric-Pull conflict |
+| **CC#7-Alt1 TYPE_S Moving Y_min** | 168.75 M | 5 000 (manual stop) | 17 736 N | -240 N | ~ 3 min | FAILED: u_z=0 at sym-plane induces BL |
+
+The Volldomain (CC#6-Full) is currently the production-default (`CC6_MODE=1` in `setup.cpp`). Half-domain handling with a true symmetry plane is documented under [Roadmap](#roadmap--findings) below.
+
+## Roadmap & Findings
+
+The current absolute drag is ~2 200 N for the Volldomain reference, against an OpenFOAM RANS reference of ~400–600 N — i.e. **~5× too high**. The plan is to close this gap stepwise:
+
+### Open work items (priority order)
+
+| # | Task | Estimated effort | Expected drag impact |
+|---|---|---|---|
+| 1 | **True symmetry plane (specular reflection)** — separate post-stream-collide kernel that reads/writes PDFs in fluid neighbors of TYPE_Y cells, bypassing Esoteric-Pull layout. Modeled after waLBerla `FreeSlip` and OpenLB `addSlipBoundary`. | 1–2 days | enables half-domain runs at full accuracy → 2× resolution at same VRAM |
+| 2 | **Ghost-cell mirror at Y_min** — alternative to #1: keep TYPE_E at Y_min but a small post-stream kernel writes `u(y=0) = u(y=1)` with `u_y → -u_y` so the equilibrium-forced TYPE_E cells produce the symmetric counter-flow. Less mathematically pure than #1 but uses existing FluidX3D primitives. | 1–2 hours | same as #1 if it works (less proven) |
+| 3 | **Werner-Wengle wall model** — Two-Layer power-law wall function (`u+ = y+` for `y+ ≤ 11.81`, `u+ = 8.3·y+^(1/7)` else). Replaces no-slip bounceback at vehicle surface with a slip-velocity that approximates the unresolved viscous sublayer. | 1–2 days | factor 1.5–3× drag reduction (FluidX3D's own Ahmed-body comment estimates 1.3–2×) |
+| 4 | **Rotating wheels** — split `vehicle.stl` into body + front_wheels + rear_wheels in Blender, voxelise wheels with `omega = lbm_u / r_wheel` per F1-W14 example pattern (`voxelize_mesh_on_device(wheel, TYPE_S, center, 0, omega)`). | 30 min user (Blender) + 30 min code | 5–15 % lift correction, 5–10 % drag reduction (eliminates artificial vortex at static-tyre/moving-floor contact line) |
+| 5 | **AMR (Adaptive Mesh Refinement) feasibility study** — FluidX3D upstream is uniform-mesh only. Static-grid refinement at vehicle surface would let us reach 5 mm at the body without 8× VRAM cost. Investigate (a) what other LBM frameworks support AMR (waLBerla does, OpenLB does), (b) whether a non-conformal patch can be added to FluidX3D, (c) what the streaming-across-resolution-boundary cost is. | 2–4 days research, large implementation effort beyond | up to 4× resolution at vehicle without VRAM blow-up |
+
+### Investigations completed
+
+| # | Topic | Outcome |
+|---|---|---|
+| ✅ | Vehicle STL manifold check (trimesh) | Watertight (0 open edges, 1.48 M tris, 99.98 % manifold). NOT the source of the high drag. |
+| ✅ | `lbm.object_force(TYPE_S\|TYPE_X)` filter semantics | Exact-match in `kernel.cpp:1941` (`flags[n]==flag_marker`). Correctly isolates vehicle from floor/walls — verified. |
+| ✅ | F1 W14 example boundary-condition convention | All FluidX3D aero examples (Ahmed body, NASA CRM, Concorde, F1) use `TYPE_E` for outer walls + `TYPE_S` for floor only. Matches CC#6 default. F1 example uses **rotating wheels** but no force computation. |
+| ✅ | Half- vs full-domain drag-factor diagnosis | TYPE_E at Y=0 is NOT a valid symmetry approximation: it acts as an absorbing free-stream (= a virtual second inlet next to the car), inflates drag ~7× over full-domain reference. |
+| ✅ | TYPE_Y specular-reflection kernel patch (CC#7) | FAILED. Root cause: Esoteric-Pull DDF storage. For EP-opposite pairs (3,4) the swap+store_f is a no-op (writes same value back to same slot). For non-EP-opposite Y-mirror pairs (7,13), (8,14), (11,18), (12,17) the swap writes data to wrong neighbor cells (y=−1, periodic-wrap to TYPE_E cap). **Conclusion: a correct sym-plane needs a separate post-stream BC handler** (work item #1). |
+| ✅ | OpenLB / waLBerla reference architectures | Both use **specular reflection** but as **post-stream-step boundary handlers**, not inline in the main collision/stream kernel. waLBerla `FreeSlip::treatDirection()` reads the fluid neighbor of the boundary cell and copies a mirror-direction PDF. Per-stencil precomputed `mirrorX/Y/Z` lookup tables. This is the correct architectural pattern for FluidX3D too. |
+| ✅ | Multi-GPU scope | **Out of scope for this fork.** Single-GPU only. The TYPE_Y patch's halo-exchange interaction was not investigated. |
+
+### Goal
+
+Close the gap to **OpenFOAM-RANS-equivalent forces** (Cd ≈ 0.35–0.5, Fx ≈ 400–600 N for our vehicle at 30 m/s). FluidX3D delivers **5 464 MLUPS at 96–100 % of B70 spec bandwidth** even for 337 M cells — the throughput is excellent. The current bottleneck is purely physical fidelity (wall model, true symmetry plane, rotating wheels), not GPU performance.
+
+### B70 Pro hardware verdict
+
+The **Intel Arc Pro B70 (BMG-G31)** consistently delivers **96–100 % of its 608 GB/s nominal memory bandwidth** at all working-set sizes tested (16.85 M to 337.5 M cells), at 71 °C package / 84 °C VRAM under sustained 275 W load — comfortable thermal headroom (90/95 °C throttle). The card is **fully bandwidth-saturated for LBM workloads**, which is the expected and ideal regime. A ~4× speed-up over the prior RTX 3060 Ti reference. ASRock Creator B70 Pro cooler handles the load with no throttling at 1 600–2 900 RPM fan.
 
 ## Companion repos
 
