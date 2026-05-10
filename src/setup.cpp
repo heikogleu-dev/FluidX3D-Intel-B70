@@ -1,3 +1,6 @@
+// MODIFIED FILE — see MODIFICATIONS.md for changes vs upstream ProjectPhysX/FluidX3D.
+// Fork: github.com/heikogleu-dev/FluidX3D-Intel-B70 — Intel Arc Pro B70 (Battlemage) patches.
+// Original copyright: (c) 2022-2026 Dr. Moritz Lehmann, see LICENSE.md.
 #include "setup.hpp"
 
 
@@ -37,7 +40,239 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 
 
 
-/*void main_setup() { // 3D Taylor-Green vortices; required extensions in defines.hpp: INTERACTIVE_GRAPHICS
+/*/*void main_setup() { // WINDKANAL mit ursprünglichen Abmessungen & Flussrichtung (+x); required extensions: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS
+	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
+	const uint3 lbm_N = uint3(910u, 455u, 325u); // Grid-Verhältnis ~7 : 3.5 : 2.5; preserves physical dimensions
+	const float lbm_u = 0.075f; // LBM velocity (standard)
+	const float si_T = 15.0f; // Simulationszeit 15 Sekunden
+	const float si_u = 30.0f; // 30 m/s Wind
+	const float si_length = 4.0f; // Fahrzeuglänge: 4.0 m (echte Modell-Länge)
+	const float cell_size = 7.0f / (float)lbm_N.x; // Box-Länge 7 m → Zellgröße ~8.54 mm
+	const float lbm_length = si_length / cell_size; // 4.0 m / 8.54 mm ≈ 469 Zellen Fahrzeuglänge
+	const float si_width = 1.8f; // Fahrzeugbreite 1.8 m
+	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft bei 15°C
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+	const ulong lbm_T = units.t(si_T);
+	print_info("Re (basierend auf Länge) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+	// ###################################################################################### define geometry ######################################################################################
+	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	// Skalierung entlang der X-Achse (Modell ist in X-Richtung orientiert)
+	const float3 bbox = vehicle->get_bounding_box_size();
+	const float vehicle_length_x = bbox.x;
+	const float scale = lbm_length / vehicle_length_x; // mappe 4.5 m SI auf X-Länge des STL
+	vehicle->scale(scale);
+	// Positionierung: x/y zentrieren, z auf Boden mit definierter Bodenfreiheit
+	const float ground_clearance_cells = 1.0f; // ~1 Zelle Bodenfreiheit
+	const float3 offset = float3(
+		lbm.center().x - vehicle->get_bounding_box_center().x,
+		lbm.center().y - vehicle->get_bounding_box_center().y,
+		ground_clearance_cells - vehicle->pmin.z);
+	vehicle->translate(float3(
+		(1.0f/3.0f)*(float)lbm_N.x - vehicle->get_bounding_box_center().x, // nach vorn auf 1/3 der Box
+		lbm.center().y - vehicle->get_bounding_box_center().y,              // seitlich zentriert
+		offset.z));
+	vehicle->set_center(vehicle->get_center_of_mass()); // Rotation um Schwerpunkt
+	lbm.voxelize_mesh_on_device(vehicle);
+	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		// Solids: Boden (z=0), Seitenwände (y), Decke (z=Nz-1)
+		if(z==0u) lbm.flags[n] = TYPE_S; // Boden: statisch
+		if(y==0u||y==Ny-1u) lbm.flags[n] = TYPE_S; // Seitenwände: no-slip
+		if(z==Nz-1u) lbm.flags[n] = TYPE_S; // Decke: no-slip
+		// Inlet/Outlet auf x-Flächen
+		if(x==0u||x==Nx-1u) lbm.flags[n] = TYPE_E; // Einlass/Auslass
+		// Strömung in +x Richtung für Fluidzellen
+		if(lbm.flags[n]!=TYPE_S) { lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+	}); // ####################################################################### run simulation, export images and data ##########################################################################
+	lbm.graphics.visualization_modes = VIS_Q_CRITERION; // Nur Q-Criterion (Wirbel), Wände ausgeblendet
+	lbm.run(10000u); // 10000 Steps Test-Run, dann VTK + Force-Field-Export + CSV
+	lbm.update_force_field(); // Kräfte auf TYPE_S (Fahrzeug + Boden + Decke) berechnen
+	const string export_path = get_exe_path()+"../export/";
+	lbm.u.write_device_to_vtk(export_path);          // velocity field
+	lbm.rho.write_device_to_vtk(export_path);        // density field
+	lbm.flags.write_device_to_vtk(export_path);      // cell type flags
+	lbm.F.write_device_to_vtk(export_path);          // force field on solid boundaries
+	lbm.write_mesh_to_vtk(vehicle, export_path);     // vehicle STL as VTK
+	{ // CSV-Export der Forces auf Solid-Cells (für manuelle Auswertung)
+		std::ofstream csv(export_path+"forces_solid_cells.csv");
+		csv << "step,x,y,z,Fx_lbm,Fy_lbm,Fz_lbm,Fx_SI,Fy_SI,Fz_SI\n";
+		const float Fconv = units.si_F(1.0f);
+		const ulong N = lbm.get_N(); const uint Nx2=lbm.get_Nx(), Ny2=lbm.get_Ny(); ulong written = 0ull;
+		for(ulong n=0ull; n<N; n++) {
+			if(lbm.flags[n]==TYPE_S && (lbm.F.x[n]!=0.0f || lbm.F.y[n]!=0.0f || lbm.F.z[n]!=0.0f)) {
+				const uint x = (uint)(n%Nx2), y = (uint)((n/Nx2)%Ny2), z = (uint)(n/((ulong)Nx2*Ny2));
+				csv << lbm.get_t() << "," << x << "," << y << "," << z << ","
+				    << lbm.F.x[n] << "," << lbm.F.y[n] << "," << lbm.F.z[n] << ","
+				    << lbm.F.x[n]*Fconv << "," << lbm.F.y[n]*Fconv << "," << lbm.F.z[n]*Fconv << "\n";
+				written++;
+			}
+		}
+		csv.close();
+		print_info("CSV-Force-Export: "+to_string(written)+" Solid-Cells mit F!=0");
+	}
+	print_info("VTK + Force-Field + CSV-Export abgeschlossen: "+export_path);
+	std::fflush(nullptr);
+	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
+} /**/
+
+/*void main_setup() { // WINDKANAL halbe Domain - andere Seite mit Symmetrieebene & Flussrichtung (+x); required extensions: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS
+	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
+	const uint3 lbm_N = uint3(1143u, 285u, 408u); // Grid-Verhältnis ~7 : 1.75 : 2.5; halbe Y-Ausdehnung mit Symmetrie, ~133.8 Mio Zellen
+	const float lbm_u = 0.075f; // LBM velocity (standard)
+	const float si_T = 15.0f; // Simulationszeit 15 Sekunden
+	const float si_u = 30.0f; // 30 m/s Wind
+	const float si_length = 4.0f; // Fahrzeuglänge: 4.0 m (echte Modell-Länge)
+	const float cell_size = 7.0f / (float)lbm_N.x; // Box-Länge 7 m → Zellgröße ~8.54 mm
+	const float lbm_length = si_length / cell_size; // 4.0 m / 8.54 mm ≈ 469 Zellen Fahrzeuglänge
+	const float si_width = 1.8f; // Fahrzeugbreite 1.8 m
+	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft bei 15°C
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+	const ulong lbm_T = units.t(si_T);
+	print_info("Re (basierend auf Länge) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+	// ###################################################################################### define geometry ######################################################################################
+	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	// Skalierung entlang der X-Achse (Modell ist in X-Richtung orientiert)
+	const float3 bbox = vehicle->get_bounding_box_size();
+	const float vehicle_length_x = bbox.x;
+	const float scale = lbm_length / vehicle_length_x; // mappe 4.5 m SI auf X-Länge des STL
+	vehicle->scale(scale);
+	// Positionierung: x/y zentrieren (nur halbe Domain in Y), z auf Boden mit definierter Bodenfreiheit
+	const float ground_clearance_cells = 1.0f; // ~1 Zelle Bodenfreiheit
+	vehicle->translate(float3(
+		(1.0f/3.0f)*(float)lbm_N.x - vehicle->get_bounding_box_center().x, // nach vorn auf 1/3 der Box
+		-2.0f * vehicle->get_bounding_box_center().y,                     // auf andere Seite der Symmetrieebene spiegeln (negative Y)
+		ground_clearance_cells - vehicle->pmin.z));
+	vehicle->set_center(vehicle->get_center_of_mass()); // Rotation um Schwerpunkt
+	lbm.voxelize_mesh_on_device(vehicle);
+	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		// Boden: moving wall mit 30 m/s in +x (Fahrzeug fährt)
+		if(z==0u) {
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = lbm_u; // Bewegter Boden in Strömungsrichtung
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		}
+		if(z==Nz-1u) lbm.flags[n] = TYPE_S; // Decke: no-slip
+		// Symmetrieebene bei y=0 (Slip-Bedingung), Wand bei y=Ny-1
+		if(y==Ny-1u) lbm.flags[n] = TYPE_S; // Außenwand: no-slip
+		// Inlet/Outlet auf x-Flächen
+		if(x==0u||x==Nx-1u) lbm.flags[n] = TYPE_E; // Einlass/Auslass
+		// Strömung in +x Richtung für Fluidzellen
+		if(lbm.flags[n]!=TYPE_S) { lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+	}); // ####################################################################### run simulation, export images and data ##########################################################################
+	lbm.graphics.visualization_modes = VIS_Q_CRITERION; // Nur Q-Criterion (Wirbel), Wände ausgeblendet
+	lbm.run(10000u); // 10000 Steps Test-Run, dann VTK + Force-Field-Export + CSV
+	lbm.update_force_field(); // Kräfte auf TYPE_S (Fahrzeug + Boden + Decke) berechnen
+	const string export_path = get_exe_path()+"../export/";
+	lbm.u.write_device_to_vtk(export_path);          // velocity field
+	lbm.rho.write_device_to_vtk(export_path);        // density field
+	lbm.flags.write_device_to_vtk(export_path);      // cell type flags
+	lbm.F.write_device_to_vtk(export_path);          // force field on solid boundaries
+	lbm.write_mesh_to_vtk(vehicle, export_path);     // vehicle STL as VTK
+	{ // CSV-Export der Forces auf Solid-Cells (für manuelle Auswertung)
+		std::ofstream csv(export_path+"forces_solid_cells.csv");
+		csv << "step,x,y,z,Fx_lbm,Fy_lbm,Fz_lbm,Fx_SI,Fy_SI,Fz_SI\n";
+		const float Fconv = units.si_F(1.0f);
+		const ulong N = lbm.get_N(); const uint Nx2=lbm.get_Nx(), Ny2=lbm.get_Ny(); ulong written = 0ull;
+		for(ulong n=0ull; n<N; n++) {
+			if(lbm.flags[n]==TYPE_S && (lbm.F.x[n]!=0.0f || lbm.F.y[n]!=0.0f || lbm.F.z[n]!=0.0f)) {
+				const uint x = (uint)(n%Nx2), y = (uint)((n/Nx2)%Ny2), z = (uint)(n/((ulong)Nx2*Ny2));
+				csv << lbm.get_t() << "," << x << "," << y << "," << z << ","
+				    << lbm.F.x[n] << "," << lbm.F.y[n] << "," << lbm.F.z[n] << ","
+				    << lbm.F.x[n]*Fconv << "," << lbm.F.y[n]*Fconv << "," << lbm.F.z[n]*Fconv << "\n";
+				written++;
+			}
+		}
+		csv.close();
+		print_info("CSV-Force-Export: "+to_string(written)+" Solid-Cells mit F!=0");
+	}
+	print_info("VTK + Force-Field + CSV-Export abgeschlossen: "+export_path);
+	std::fflush(nullptr);
+	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
+} /**/
+
+void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + force-field export. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS, VOLUME_FORCE, FORCE_FIELD
+	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
+	const uint3 lbm_N = uint3(650u, 144u, 180u); // halbierte Auflösung (von 1299x288x361): 16.85 Mio Zellen, jede Achse / 2
+	const float lbm_u = 0.075f; // LBM velocity (standard)
+	const float si_T = 15.0f; // Simulationszeit 15 Sekunden
+	const float si_u = 30.0f; // 30 m/s Wind
+	const float si_length = 4.0f; // Fahrzeuglänge: 4.0 m (echte Modell-Länge)
+	const float cell_size = 4.5f / (float)lbm_N.x; // Box-Länge 4.5 m → Zellgröße ~3.46 mm
+	const float lbm_length = si_length / cell_size; // 4.0 m / 3.46 mm ≈ 1156 Zellen Fahrzeuglänge
+	const float si_width = 1.8f; // Fahrzeugbreite 1.8 m
+	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft bei 15°C
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+	const ulong lbm_T = units.t(si_T);
+	print_info("Re (basierend auf Länge) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+	// ###################################################################################### define geometry ######################################################################################
+	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	// Skalierung entlang der X-Achse (Modell ist in X-Richtung orientiert)
+	const float3 bbox = vehicle->get_bounding_box_size();
+	const float vehicle_length_x = bbox.x;
+	const float scale = lbm_length / vehicle_length_x; // mappe 4.0 m SI auf X-Länge des STL
+	vehicle->scale(scale);
+	// Positionierung: mittig im Windkanal (X und Y)
+	const float ground_clearance_cells = 1.0f; // ~1 Zelle Bodenfreiheit
+	vehicle->translate(float3(
+		(0.5f)*(float)lbm_N.x - vehicle->get_bounding_box_center().x, // mittig in X-Richtung
+		-2.0f * vehicle->get_bounding_box_center().y,                 // auf andere Seite der Symmetrieebene spiegeln (negative Y)
+		ground_clearance_cells - vehicle->pmin.z));
+	vehicle->set_center(vehicle->get_center_of_mass()); // Rotation um Schwerpunkt
+	lbm.voxelize_mesh_on_device(vehicle);
+	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		// Boden: moving wall mit 30 m/s in +x (Fahrzeug fährt)
+		if(z==0u) {
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = lbm_u; // Bewegter Boden in Strömungsrichtung
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		}
+		if(z==Nz-1u) lbm.flags[n] = TYPE_S; // Decke: no-slip
+		// Symmetrieebene bei y=0 (Slip-Bedingung), Wand bei y=Ny-1
+		if(y==Ny-1u) lbm.flags[n] = TYPE_S; // Außenwand: no-slip
+		// Inlet/Outlet auf x-Flächen
+		if(x==0u||x==Nx-1u) lbm.flags[n] = TYPE_E; // Einlass/Auslass
+		// Strömung in +x Richtung für Fluidzellen
+		if(lbm.flags[n]!=TYPE_S) { lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+	}); // ####################################################################### run simulation, export images and data ##########################################################################
+	lbm.graphics.visualization_modes = VIS_Q_CRITERION; // Nur Q-Criterion (Wirbel), Wände ausgeblendet
+	lbm.run(10000u); // 10000 Steps Test-Run, dann VTK + Force-Field-Export + CSV
+	lbm.update_force_field(); // Kräfte auf TYPE_S (Fahrzeug + Boden + Decke) berechnen
+	const string export_path = get_exe_path()+"../export/";
+	lbm.u.write_device_to_vtk(export_path);          // velocity field
+	lbm.rho.write_device_to_vtk(export_path);        // density field
+	lbm.flags.write_device_to_vtk(export_path);      // cell type flags
+	lbm.F.write_device_to_vtk(export_path);          // force field on solid boundaries
+	lbm.write_mesh_to_vtk(vehicle, export_path);     // vehicle STL as VTK
+	{ // CSV-Export der Forces auf Solid-Cells (für manuelle Auswertung)
+		std::ofstream csv(export_path+"forces_solid_cells.csv");
+		csv << "step,x,y,z,Fx_lbm,Fy_lbm,Fz_lbm,Fx_SI,Fy_SI,Fz_SI\n";
+		const float Fconv = units.si_F(1.0f);
+		const ulong N = lbm.get_N(); const uint Nx2=lbm.get_Nx(), Ny2=lbm.get_Ny(); ulong written = 0ull;
+		for(ulong n=0ull; n<N; n++) {
+			if(lbm.flags[n]==TYPE_S && (lbm.F.x[n]!=0.0f || lbm.F.y[n]!=0.0f || lbm.F.z[n]!=0.0f)) {
+				const uint x = (uint)(n%Nx2), y = (uint)((n/Nx2)%Ny2), z = (uint)(n/((ulong)Nx2*Ny2));
+				csv << lbm.get_t() << "," << x << "," << y << "," << z << ","
+				    << lbm.F.x[n] << "," << lbm.F.y[n] << "," << lbm.F.z[n] << ","
+				    << lbm.F.x[n]*Fconv << "," << lbm.F.y[n]*Fconv << "," << lbm.F.z[n]*Fconv << "\n";
+				written++;
+			}
+		}
+		csv.close();
+		print_info("CSV-Force-Export: "+to_string(written)+" Solid-Cells mit F!=0");
+	}
+	print_info("VTK + Force-Field + CSV-Export abgeschlossen: "+export_path);
+	std::fflush(nullptr);
+	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
+} /**/
+
+/*void main_setup() { // WINDKANAL halbe Domain - andere Seite mit Symmetrieebene & Flussrichtung (+x); required extensions: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS
 	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
 	LBM lbm(128u, 128u, 128u, 1u, 1u, 1u, 0.01f);
 	// ###################################################################################### define geometry ######################################################################################
@@ -1364,3 +1599,168 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 	lbm.run();
 	//lbm.run(1000u); lbm.u.read_from_device(); println(lbm.u.x[lbm.index(Nx/2u, Ny/2u, Nz/2u)]); wait(); // test for binary identity
 } /**/
+
+
+
+// ╔═════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+// ║ WINDKANAL-SIMULATION MIT FAHRZEUG UND MOVING FLOOR - OPTIMIERT FÜR RTX 3060 Ti (8GB VRAM)                ║
+// ║ Fahrzeug fährt in x-Minus-Richtung, Wind von x-Minus, Boden bewegt sich mit Vehicle                       ║
+// ║ Asymmetrische Boundary Box: x[-3, +6], y[0, +3] (Symmetrie/Wand durch Fahrzeugmitte), z[0, +3]            ║
+// ║ Required extensions in defines.hpp: FP16C, FORCE_FIELD, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES        ║
+// ╚═════════════════════════════════════════════════════════════════════════════════════════════════════════╝
+
+/*void main_setup_old() { // Wind tunnel simulation with vehicle and moving floor; required extensions: FP16C, FORCE_FIELD, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, INTERACTIVE_GRAPHICS
+	// ################################################################## PHYSIKALISCHE PARAMETER ##################################################################
+	
+	// Standardatmosphäre (20°C, 1 atm)
+	const float si_nu = 1.48E-5f;    // kinematische Viskosität [m^2/s]
+	const float si_rho = 1.225f;     // Dichte [kg/m^3]
+	const float si_u = 30.0f;        // Windgeschwindigkeit [m/s]
+	
+	// Boundary Box (in SI-Einheiten, Meter)
+	const float si_Lx = 9.0f;        // Länge: x von 0 bis +9 [m]
+	const float si_Ly = 6.0f;        // Breite: y von -3 bis +3 [m] (symmetrische Domäne)
+	const float si_Lz = 3.0f;        // Höhe: z von 0 bis +3 [m]
+	
+	// Fahrzeugabmessungen (Schätzung basierend auf vehicle.stl Skalierung)
+	const float si_vehicle_length = 4.5f;   // [m]
+	const float si_vehicle_width = 1.8f;    // [m]
+	const float si_vehicle_height = 1.4f;   // [m]
+	const float si_vehicle_A = si_vehicle_width * si_vehicle_height;  // Frontalfläche [m^2]
+	
+	// VRAM und Gitterauflösung - OPTIMIERT FÜR RTX 3060 Ti (8GB)
+	const uint memory = 6000u;  // stabiler Puffer, da komplexes STL
+	
+	// Berechne Gitterauflösung basierend auf VRAM und Aspektverhältnis
+	const uint3 lbm_N = resolution(float3(si_Lx, si_Ly, si_Lz), memory);
+	
+	// LBM-spezifische Parameter
+	const float lbm_u = 0.05f;  // LBM-Geschwindigkeit (skaliert die numerische Stabilität)
+	
+	// Unit-Konversion: SI ↔ LBM
+	units.set_m_kg_s((float)lbm_N.x, lbm_u, 1.0f, si_Lx, si_u, si_rho);
+	
+	const float lbm_nu = units.nu(si_nu);
+	const ulong lbm_T = units.t(15.0f);  // Simulationsdauer: 15 Sekunden
+	
+	// Reynolds-Zahl (turbulent/laminar Indikator)
+	const float Re = units.si_Re(si_vehicle_length, si_u, si_nu);
+	
+	print_info("════════════════════════════════════════════════════════════════");
+	print_info("  WINDKANALSIMULATION MIT MOVING FLOOR - RTX 3060 Ti 8GB");
+	print_info("════════════════════════════════════════════════════════════════");
+	print_info("  Fahrzeugposition: x∈[+1,+5], y∈[-1,+1], z≈[0,+1.5] (auf Boden, z-shifted)");
+	print_info("  Fahrtrichtung: -x (nach links)");
+	print_info("  Wind: 30 m/s von x=0 Inlet in +x Richtung");
+	print_info("  Boden (z=0): Moving Floor, 30 m/s in +x Richtung");
+	print_info("────────────────────────────────────────────────────────────────");
+	print_info("  Fahrzeugbreite: "+to_string(si_vehicle_width, 2u)+" m");
+	print_info("  Fahrzeuglänge: "+to_string(si_vehicle_length, 2u)+" m");
+	print_info("  Reynolds-Zahl (basierend auf Länge): "+to_string(to_uint(Re)));
+	print_info("  Windgeschwindigkeit: "+to_string(si_u, 1u)+" m/s");
+	print_info("  Gitter-Auflösung: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z));
+	print_info("  Simulationszeit: 15 Sekunden = "+to_string(lbm_T)+" Zeitschritte");
+	print_info("════════════════════════════════════════════════════════════════\n");
+	
+	// Erstelle LBM-Objekt
+	LBM lbm(lbm_N.x, lbm_N.y, lbm_N.z, lbm_nu);
+	
+	// ################################################################## FAHRZEUGGEOMETRIE LADEN ##################################################################
+	
+	// Lade vehicle.stl aus scenes/ Ordner - KOMPLETTES Fahrzeug
+	const float cells_per_meter = (float)lbm_N.x / si_Lx; // m -> Zellen
+	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl", cells_per_meter);
+
+	if(vehicle==nullptr) {
+		print_error("Fehler: scenes/vehicle.stl nicht gefunden!");
+		print_error("Bitte eine STL-Datei nach scenes/vehicle.stl kopieren!");
+		return;
+	}
+
+	// Positioniere Fahrzeug: x∈[+1,+5], y∈[-1,+1], z∈[0,+1.5]
+	// Domain: x∈[0,+9], y∈[-3,+3], z∈[0,+3]
+	// Fahrzeug-Center soll bei (+3, 0, 0.75) liegen (Mittelpunkt + z-Versatz für Reifen)
+	// In Grid-Koordinaten (Grid mappt zu Domain-Bereich):
+	//   x: (+3 - 0) / 9 * Nx = 3/9 * Nx = Nx/3
+	//   y: (0 - (-3)) / 6 * Ny = 3/6 * Ny = Ny/2
+	//   z: Räder auf Boden: setze pmin.z auf eine kleine Bodenfreiheit (1 Zelle)
+	const float target_x = ((3.0f) - (0.0f)) / si_Lx * (float)lbm_N.x;   // 1/3 * Nx
+	const float target_y = ((0.0f) - (-3.0f)) / si_Ly * (float)lbm_N.y;   // 1/2 * Ny
+	const float ground_clearance_cells = 1.0f; // ~1 Zelle = 12 mm
+	const float target_z = ground_clearance_cells; // setze pmin.z auf Boden + clearance
+
+	const float3 vehicle_center = vehicle->get_bounding_box_center();
+	const float3 translate = float3(target_x - vehicle_center.x,
+	                               target_y - vehicle_center.y,
+	                               target_z - vehicle->pmin.z);
+	vehicle->translate(translate);
+
+	print_info("✓ Fahrzeug geladen (komplettes STL, nicht gefiltert)");
+	print_info("  Bounding Box nach Skalierung und Positionierung [Zellen]:");
+	print_info("    Min="+to_string(vehicle->pmin.x, 1u)+","+to_string(vehicle->pmin.y, 1u)+","+to_string(vehicle->pmin.z, 1u));
+	print_info("    Max="+to_string(vehicle->pmax.x, 1u)+","+to_string(vehicle->pmax.y, 1u)+","+to_string(vehicle->pmax.z, 1u));
+
+	// Voxelisiere das Fahrzeug (Solid mit TYPE_X für Kraft-Berechnung)
+	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X);
+
+	print_info("✓ Fahrzeug voxelisiert und zentriert bei x∈[-2,+2], y∈[-1,+1], z∈[0,+1.5]\n");
+	
+	// ################################################################## DOMAIN UND GRENZBEDINGUNGEN ##################################################################
+	
+	const uint Nx = lbm.get_Nx(), Ny = lbm.get_Ny(), Nz = lbm.get_Nz();
+	
+	// Boundary Box
+	// Boundary Box: x[0, +9], y[-3, +3], z[0, +3]
+	// Das bedeutet: Linker Rand bei x=0, rechter Rand bei x=+9
+	// Untere Wand bei y=-3 (Grid Index 0), obere Wand bei y=+3 (Grid Index Ny-1)
+	// Inlet bei x=0 (Grid Index 0)
+	
+	parallel_for(lbm.get_N(), [&](ulong n) {
+		uint x=0u, y=0u, z=0u;
+		lbm.coordinates(n, x, y, z);
+		
+		// Default: alle Zellen sind Fluid mit Windgeschwindigkeit
+		lbm.u.x[n] = lbm_u;
+		lbm.u.y[n] = 0.0f;
+		lbm.u.z[n] = 0.0f;
+		
+		// Wände in y: No-slip walls
+		if(y == 0u || y == Ny-1u) {
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = 0.0f;
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		}
+		// Decke: No-slip wall
+		if(z == Nz-1u) {
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = 0.0f;
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		}
+		// Boden: Moving floor
+		if(z == 0u) {
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = lbm_u;
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		}
+		// EINLASS: Equilibrium Boundary mit fester Geschwindigkeit (bei x=0, Grid Index 0)
+		if(x == 0u) {
+			lbm.flags[n] = TYPE_E;
+			lbm.u.x[n] = lbm_u;
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		}
+		// AUSLASS: Equilibrium Boundary (u bleibt auf lbm_u initial)
+		if(x == Nx - 1u) {
+			lbm.flags[n] = TYPE_E;
+		}
+	});
+
+	
+	print_info("✓ Boundary Conditions gesetzt (nur Fahrzeug als Solid visualisiert):");
+	print_info("  Einlass (x=0): Equilibrium Boundary, u_x=0.05 (30 m/s Wind)");
+	print_info("  Auslass (x=+9): Equilibrium Boundary DRUCK-Outlet (Geschwindigkeit frei)");
+} // end of old wind tunnel setup
+*/
