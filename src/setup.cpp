@@ -216,14 +216,24 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //   - Max-Run: 1000 Chunks (100k Steps).
 //
 // Ground clearance: 1 cell = 10 mm.
-#define CC6_FULL_DOMAIN false  // false = Halbdomain (TYPE_E pseudo-symmetry an Y=0); true = Volldomain (Vehicle Y-center mittig)
-void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
+// CC6_MODE: 0 = Halbdomain TYPE_E pseudo-sym (CC#6-Half, Drag 16k N — broken)
+//           1 = Volldomain (CC#6-Full, no symmetry — reference Drag 2.2k N)
+//           2 = Halbdomain TYPE_Y specular-reflection sym-plane (CC#7 — FAILED, Drag 14.5k N)
+//           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1: u=(lbm_u,0,0) erzwingt u_y=0)
+#define CC6_MODE 3
+void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
 	// ============== Domain Setup ==============
-#if CC6_FULL_DOMAIN
+#if CC6_MODE==1
 	const uint3 lbm_N = uint3(1500u, 500u, 450u);  // 337.5 M Cells: 15m × 5m × 4.5m (Volldomain, Y[-2.5,+2.5m])
 	const string label = "CC#6-FULL";
+#elif CC6_MODE==2
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_Y specular sym an Y_min)
+	const string label = "CC#7-HALF-SYM";
+#elif CC6_MODE==3
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_S moving-wall sym-approx an Y_min)
+	const string label = "CC#7-ALT1-MOVING";
 #else
-	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, Y[0,+2.5m] sym an Y_min)
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_E pseudo-sym an Y_min)
 	const string label = "CC#6-HALF";
 #endif
 	const float lbm_u = 0.075f;                    // standard LBM velocity scale
@@ -236,7 +246,7 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 	const float lbm_nu = units.nu(si_nu);
 	print_info(label+" Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
 	print_info(label+" Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
-#if CC6_FULL_DOMAIN
+#if CC6_MODE==1
 	print_info(label+" Box: X[-4m,+11m]=15m | Y[-2.5m,+2.5m]=5m (FULL) | Z[0,4.5m]=4.5m | Vehicle X-center @ cell 400 / Y-center @ 250");
 #else
 	print_info(label+" Box: X[-4m,+11m]=15m | Y[0,2.5m]=2.5m (HALF) | Z[0,4.5m]=4.5m | Vehicle X-center @ cell 400 / Y-center @ 0");
@@ -250,7 +260,7 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 450 cells (4.5 m / 10 mm)
 	const float3 vbbox = vehicle->get_bounding_box_size();
 	const float3 vctr  = vehicle->get_bounding_box_center();
-#if CC6_FULL_DOMAIN
+#if CC6_MODE==1
 	const float vehicle_y_target = (float)(lbm_N.y / 2u); // Volldomain: Y-mitte = Cell 250
 #else
 	const float vehicle_y_target = 0.0f;                  // Halbdomain: Y-Center auf 0 → Vehicle wird vom Y_min sym-plane mittig durchschnitten
@@ -263,7 +273,7 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 	// Geometrie-Sanity-Check
 	const float3 vmin = vehicle->pmin, vmax = vehicle->pmax;
 	print_info("Vehicle BBox after translate: X["+to_string(vmin.x,1u)+", "+to_string(vmax.x,1u)+"] Y["+to_string(vmin.y,1u)+", "+to_string(vmax.y,1u)+"] Z["+to_string(vmin.z,1u)+", "+to_string(vmax.z,1u)+"]");
-#if !CC6_FULL_DOMAIN
+#if CC6_MODE!=1
 	if(vmin.y > 0.5f || vmax.y < -0.5f) {
 		print_info("FATAL: Half-domain Vehicle does not cross Y=0! Aborting before voxelization.");
 		std::fflush(nullptr); _exit(2);
@@ -280,7 +290,16 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 		if(z==0u) {                               // Boden Z=0: rolling road, TYPE_S moving wall +x
 			lbm.flags[n] = TYPE_S;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
-		} else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { // Inlet/Outlet/Y_min/Y_max/Decke: TYPE_E free-stream
+#if CC6_MODE==2
+		} else if(y==0u) {                        // CC#7: Y_min Symmetrieebene = TYPE_Y specular reflection
+			lbm.flags[n] = TYPE_Y;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+#elif CC6_MODE==3
+		} else if(y==0u) {                        // CC#7-Alt1: Y_min = TYPE_S Moving-Wall (u_x=lbm_u, u_y=0, u_z=0) — sym-approx via no-y-flow
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+#endif
+		} else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { // Inlet/Outlet/Y_min(CC#6-Half:TYPE_E)/Y_max/Decke: TYPE_E free-stream
 			lbm.flags[n] = TYPE_E;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		} else {                                  // Fluid: initial flow +x
@@ -289,8 +308,12 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 	});
 
 	// ============== Run-Schleife mit Auto-Stop bei Force-Konvergenz ==============
-#if CC6_FULL_DOMAIN
+#if CC6_MODE==1
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_full.csv";
+#elif CC6_MODE==2
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc7_half_sym.csv";
+#elif CC6_MODE==3
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc7_alt1_moving.csv";
 #else
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_half.csv";
 #endif
@@ -302,10 +325,10 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 	const uint chunks_max = 1000u;      // Hard cap = 100.000 Steps
 	const uint conv_window = 50u;       // 50 chunks = 5000 Steps Sliding-Window
 	const uint conv_min_chunks = 100u;  // Frühester Exit = 100 chunks (10.000 Steps), damit recent + prev je 50 chunks haben
-	const float conv_tol = 0.01f;       // 1 % relative Änderung
+	const float conv_tol = 0.02f;       // 2 % relative Änderung (Fx only — Fy/Fz zu klein für rel. Konvergenz)
 	std::vector<float3> Fhist;
 	Fhist.reserve(chunks_max);
-	print_info(label+" Run start: max "+to_string(chunks_max*chunk)+" Steps; Auto-Stop bei |dF/F| < 1% in X & Y über 5000 Steps (frühester Exit nach 10000 Steps)");
+	print_info(label+" Run start: max "+to_string(chunks_max*chunk)+" Steps; Auto-Stop bei |dFx/Fx| < 2% über 5000 Steps (frühester Exit nach 10000 Steps)");
 	uint final_chunks = chunks_max;
 	for(uint c = 0u; c < chunks_max; c++) {
 		lbm.run(chunk);
@@ -320,7 +343,7 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 		if((c+1u) % 50u == 0u) {
 			print_info("step="+to_string(step)+" t="+to_string(t_si, 3u)+"s  Fx="+to_string(F_si.x, 1u)+"N  Fy="+to_string(F_si.y, 1u)+"N  Fz="+to_string(F_si.z, 1u)+"N");
 		}
-		// Convergence test
+		// Convergence test (Fx only — Fy/Fz im Volldomain nahe Null und unkonvergierbar)
 		if(c+1u >= conv_min_chunks) {
 			float3 recent_avg(0.0f), prev_avg(0.0f);
 			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist[Fhist.size()-1u-k];
@@ -328,9 +351,8 @@ void main_setup() { // CC#6 Aero-Box 10mm, Auto-Stop bei <1% Force-Drift. Requir
 			recent_avg /= (float)conv_window;
 			prev_avg   /= (float)conv_window;
 			const float dx = (recent_avg.x!=0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
-			const float dy = (recent_avg.y!=0.0f) ? fabs(recent_avg.y - prev_avg.y) / fabs(recent_avg.y) : 1.0f;
-			if(dx < conv_tol && dy < conv_tol) {
-				print_info(label+" CONVERGED at step "+to_string(step)+": |dFx|/|Fx|="+to_string(dx*100.0f, 3u)+"%  |dFy|/|Fy|="+to_string(dy*100.0f, 3u)+"%  Fx_avg="+to_string(recent_avg.x, 1u)+"N");
+			if(dx < conv_tol) {
+				print_info(label+" CONVERGED at step "+to_string(step)+": |dFx|/|Fx|="+to_string(dx*100.0f, 3u)+"%  Fx_avg="+to_string(recent_avg.x, 1u)+"N  Fz_avg="+to_string(recent_avg.z, 1u)+"N");
 				final_chunks = c+1u;
 				break;
 			}

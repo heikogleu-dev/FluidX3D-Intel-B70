@@ -1485,6 +1485,22 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t); // perform streaming (part 2)
 
+	// CC#7 SYM_PLANE_Y: specular reflection at TYPE_Y cells (D3Q19 only).
+	// Y-mirror DDF pairs: (3,4) (7,13) (8,14) (11,18) (12,17). Cell acts as DDF-mirror-relay,
+	// no collision/forces. Esoteric-Pull-konsistent via load_f/store_f.
+	if(flagsn&TYPE_Y) {
+)+"#if defined(D3Q19)"+R(
+		float ymtmp;
+		ymtmp = fhn[3];  fhn[3]  = fhn[4];  fhn[4]  = ymtmp;
+		ymtmp = fhn[7];  fhn[7]  = fhn[13]; fhn[13] = ymtmp;
+		ymtmp = fhn[8];  fhn[8]  = fhn[14]; fhn[14] = ymtmp;
+		ymtmp = fhn[11]; fhn[11] = fhn[18]; fhn[18] = ymtmp;
+		ymtmp = fhn[12]; fhn[12] = fhn[17]; fhn[17] = ymtmp;
+		store_f(n, fhn, fi, j, t);
+)+"#endif"+R( // D3Q19
+		return;
+	}
+
 )+"#ifdef MOVING_BOUNDARIES"+R(
 	if(flagsn_bo==TYPE_MS) apply_moving_boundaries(fhn, j, u, flags); // apply Dirichlet velocity boundaries if necessary (reads velocities of only neighboring boundary cells, which do not change during simulation)
 )+"#endif"+R( // MOVING_BOUNDARIES
@@ -1814,7 +1830,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_fields() on halo
 	const uchar flagsn = flags[n];
 	const uchar flagsn_bo=flagsn&TYPE_BO, flagsn_su=flagsn&TYPE_SU; // extract boundary and surface flags
-	if(flagsn_bo==TYPE_S||flagsn_su==TYPE_G) return; // don't update fields for boundary or gas lattice points
+	if(flagsn_bo==TYPE_S||flagsn_su==TYPE_G||(flagsn&TYPE_Y)) return; // don't update fields for boundary, gas or sym-plane cells
 
 	uxx j[def_velocity_set]; // neighbor indices
 	neighbors(n, j); // calculate neighbor indices

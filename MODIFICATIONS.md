@@ -4,6 +4,8 @@
 
 **Modifications:** Heiko Gleu, May 2026, for Intel Arc Pro B70 (BMG-G31, xe driver) on Linux. Verified runtime: oneAPI OpenCL 26.05.037020, GCC 15.2, kernel 7.0.
 
+**Scope:** **Single-GPU only.** Multi-GPU (domain decomposition `LBM(N, Dx, Dy, Dz, nu)` with Dx·Dy·Dz>1) is intentionally not supported in this fork. The TYPE_Y symmetry-plane patch in CC#7 has not been validated for the halo-exchange path that multi-GPU requires.
+
 License clause 1 — _"Altered source versions must be plainly marked as such"_ — is fulfilled by:
 - A 3-line marker comment at the top of every modified source file pointing to this document
 - This `MODIFICATIONS.md` listing every change file-by-file
@@ -47,7 +49,39 @@ Original 1299 × 288 × 361 grid was axis-halved to 650 × 144 × 180. 10 000-st
 - VTK exports: u, rho, flags, F, mesh
 - Per-cell CSV `forces_solid_cells.csv` (one row per non-zero TYPE_S cell)
 
-### CC#6 (current active) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
+### CC#7 (current active default) — Halbdomain mit echter Symmetrieebene (TYPE_Y specular reflection)
+
+CC#7 introduces a new boundary-condition class `TYPE_Y` (bit 7, was reserved upstream) for specular-reflection symmetry planes. CC#6 had shown empirically that `TYPE_E` is **not** a valid Y=0 symmetry approximation: half-domain Fx (16 177 N) was ~7× the half of full-domain Fx (2 219 N / 2). CC#7 fixes this with a true reflection BC.
+
+**Implementation (D3Q19 only):**
+
+In `kernel.cpp`:
+- `stream_collide` kernel: after `load_f()`, before MOVING_BOUNDARIES — TYPE_Y cells get DDF y-mirror swap then `store_f()` + `return`. Y-mirror DDF pairs (5 pairs in D3Q19): (3,4), (7,13), (8,14), (11,18), (12,17). All other DDFs (no y-component) are unchanged.
+- `update_fields` kernel: TYPE_Y cells skipped (`if(flagsn_bo==TYPE_S||flagsn_su==TYPE_G||(flagsn&TYPE_Y)) return;`). rho/u of TYPE_Y cells stay at init values.
+
+In `setup.cpp`:
+- New compile-time toggle `#define CC6_MODE` with values `0` (CC#6-Half TYPE_E), `1` (CC#6-Full reference), `2` (CC#7-Half TYPE_Y).
+- Mode 2: Y_min cells get `TYPE_Y` instead of `TYPE_E`, everything else identical to CC#6-Half (10 mm, 1500×250×450 = 168.75 M cells, vehicle X-center @ cell 400).
+
+**Bit topology (no conflicts):**
+| Mask | Bits | Members |
+|---|---|---|
+| TYPE_BO | 0x03 | TYPE_S, TYPE_E, TYPE_MS=TYPE_S\|TYPE_E |
+| TYPE_T  | 0x04 | TYPE_T |
+| TYPE_SU | 0x38 | TYPE_F, TYPE_I, TYPE_G |
+| user    | 0xC0 | TYPE_X (vehicle marker), **TYPE_Y (sym-plane)** |
+
+TYPE_Y (0x80) lies outside TYPE_BO+TYPE_SU, so it can be set additionally to TYPE_MS (e.g. when a sym-plane cell is adjacent to a moving-wall floor) without breaking the bounceback/moving-boundary logic — the TYPE_Y check in `stream_collide` runs *before* the MOVING_BOUNDARIES check.
+
+**Auto-Stop:** simplified to `|dFx|/|Fx| < 2 %` (Fy/Fz omitted — both are near zero in the full-domain reference and not relative-convergeable; the goal is to match Fx within 10% of full-domain/2).
+
+**Force CSV:** `bin/forces_cc7_half_sym.csv`.
+
+**Validation criterion:** CC#7-Half × 2 must match CC#6-Full within ±10 % on Fx. Reference: CC#6-Full Fx = 2 219 N (50-chunk average over steps 28200-33100). Target window: CC#7-Half Fx ∈ [999, 1221] N.
+
+**First-pass result (2026-05-10): FAILED.** CC#7-Half stabilised at Fx ≈ 14 472 N (50-chunk avg over steps 7200-12100, |dFx|=2.27 %, killed before convergence). That is **× 13 over target** and only ~10 % below CC#6-Half (TYPE_E pseudo-sym, 16 177 N). The TYPE_Y patch is logically broken or the DDF-mirror-pair indices are misaligned with FluidX3D's Esoteric-Pull storage convention. Diagnostic pending. The TYPE_Y kernel patch and CC6_MODE=2 setup branch remain in the source tree for later iteration; production default is set elsewhere (see below).
+
+### CC#6 (deactivated, reference baseline) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
 
 The currently-active `main_setup()` is a compile-time-toggleable Half/Full-Domain block (line ~197 onwards), driven by `#define CC6_FULL_DOMAIN false|true`:
 
