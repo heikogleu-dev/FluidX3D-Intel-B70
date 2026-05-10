@@ -217,10 +217,12 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //
 // Ground clearance: 1 cell = 10 mm.
 // CC6_MODE: 0 = Halbdomain TYPE_E pseudo-sym (CC#6-Half, Drag 16k N — broken)
-//           1 = Volldomain (CC#6-Full, no symmetry — reference Drag 2.2k N)
+//           1 = Volldomain (CC#6-Full, no symmetry — reference Drag 2.2k N) — DEFAULT
 //           2 = Halbdomain TYPE_Y specular-reflection sym-plane (CC#7 — FAILED, Drag 14.5k N)
-//           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1: u=(lbm_u,0,0) erzwingt u_y=0)
-#define CC6_MODE 3
+//           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1 — FAILED, Drag 17.7k N)
+#define CC6_MODE 1
+#define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
+#define CC7_DIAG_MAXSTEPS 1000u
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
 	// ============== Domain Setup ==============
 #if CC6_MODE==1
@@ -307,6 +309,22 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 		}
 	});
 
+#if CC7_DIAGNOSE && CC6_MODE==2
+	// === CC#7 DIAGNOSE: count TYPE_Y, TYPE_S|TYPE_X, TYPE_E, TYPE_S(only) cells ===
+	{ ulong cy=0, cv=0, ce=0, cs=0, cf=0;
+	  for(ulong nn=0; nn<lbm.get_N(); nn++) {
+	    const uchar fl = lbm.flags[nn];
+	    if (fl & TYPE_Y) cy++;
+	    else if ((fl & TYPE_X) && (fl & TYPE_S)) cv++;
+	    else if (fl & TYPE_E) ce++;
+	    else if (fl & TYPE_S) cs++;
+	    else cf++;
+	  }
+	  print_info("CC#7-DIAG cells: TYPE_Y="+to_string(cy)+" Vehicle(S|X)="+to_string(cv)+" TYPE_E="+to_string(ce)+" TYPE_S(floor)="+to_string(cs)+" Fluid="+to_string(cf));
+	  print_info("CC#7-DIAG expected TYPE_Y count: 1500*1*449 = 673500 (Y_min plane minus z=0 floor cells)");
+	}
+#endif
+
 	// ============== Run-Schleife mit Auto-Stop bei Force-Konvergenz ==============
 #if CC6_MODE==1
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_full.csv";
@@ -322,7 +340,11 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	fcsv << std::scientific;
 
 	const uint chunk = 100u;            // 1 chunk = 100 Steps
+#if CC7_DIAGNOSE
+	const uint chunks_max = CC7_DIAG_MAXSTEPS / chunk; // DIAGNOSE: nur kurzer Run
+#else
 	const uint chunks_max = 1000u;      // Hard cap = 100.000 Steps
+#endif
 	const uint conv_window = 50u;       // 50 chunks = 5000 Steps Sliding-Window
 	const uint conv_min_chunks = 100u;  // Frühester Exit = 100 chunks (10.000 Steps), damit recent + prev je 50 chunks haben
 	const float conv_tol = 0.02f;       // 2 % relative Änderung (Fx only — Fy/Fz zu klein für rel. Konvergenz)

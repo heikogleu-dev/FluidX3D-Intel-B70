@@ -79,7 +79,30 @@ TYPE_Y (0x80) lies outside TYPE_BO+TYPE_SU, so it can be set additionally to TYP
 
 **Validation criterion:** CC#7-Half × 2 must match CC#6-Full within ±10 % on Fx. Reference: CC#6-Full Fx = 2 219 N (50-chunk average over steps 28200-33100). Target window: CC#7-Half Fx ∈ [999, 1221] N.
 
-**First-pass result (2026-05-10): FAILED.** CC#7-Half stabilised at Fx ≈ 14 472 N (50-chunk avg over steps 7200-12100, |dFx|=2.27 %, killed before convergence). That is **× 13 over target** and only ~10 % below CC#6-Half (TYPE_E pseudo-sym, 16 177 N). The TYPE_Y patch is logically broken or the DDF-mirror-pair indices are misaligned with FluidX3D's Esoteric-Pull storage convention. Diagnostic pending. The TYPE_Y kernel patch and CC6_MODE=2 setup branch remain in the source tree for later iteration; production default is set elsewhere (see below).
+**First-pass result (2026-05-10): FAILED.** CC#7-Half stabilised at Fx ≈ 14 472 N (50-chunk avg over steps 7200-12100, |dFx|=2.27 %, killed before convergence). That is **× 13 over target** and only ~10 % below CC#6-Half (TYPE_E pseudo-sym, 16 177 N).
+
+**Alt 1 (TYPE_S Moving-Wall at Y_min, CC6_MODE=3, 2026-05-10): FAILED, Fx ≈ 17 736 N** — even higher than TYPE_E. Y_min as no-slip wall (with u=(lbm_u, 0, 0) for symmetry-conformity in u_y, u_z) creates an unwanted boundary layer in u_z (which should equal the interior u_z, not zero).
+
+**Alt 3 — Diagnostic root cause (2026-05-10):** TYPE_Y cell counter shows 650 654 / 673 500 (97 %) cells correctly marked at Y_min plane (the small deficit is the Vehicle-Y_min overlap region where TYPE_X cells take precedence). So the setup-branch is correct.
+
+**Root cause is in the kernel.cpp swap interaction with FluidX3D's Esoteric-Pull DDF storage:**
+
+In Esoteric-Pull, opposite-direction pairs (i, i+1) are stored alternating between self-cell and neighbor-cell, with parity-dependent slot indices. `load_f(n, fhn, fi, j, t)` reads:
+- fhn[i]   from self n   at slot t%2?i:i+1   (for odd i)
+- fhn[i+1] from neighbor j[i] at slot t%2?i+1:i
+
+`store_f` writes the post-collision DDFs back symmetrically. **For an EP-opposite pair like (3, 4)**, the swap-and-store_f sequence ends up **writing the same values back to the same memory locations** — net effect = no-op:
+- fhn[3] read from self-slot-A, fhn[4] read from j[3]-slot-B
+- swap: fhn[3] := old V_at_j[3]_slot_B, fhn[4] := old V_at_self_slot_A
+- store_f: fhn[3] → j[3]-slot-B (same location it was loaded from!), fhn[4] → self-slot-A (same location)
+
+For **non-EP-opposite Y-mirror pairs (7, 13), (8, 14), (11, 18), (12, 17)**, the swap-and-store does move data, but to the **wrong neighbor cells**: e.g. fhn[13] (representing direction (+1, -1, 0)) gets written to j[13] = (+x, -y) neighbor, which at a Y_min sym-plane cell is OUTSIDE the half-domain (y = -1). FluidX3D wraps this periodically to y = Ny-1 (a TYPE_E cell), where the value is immediately overwritten by the equilibrium-boundary forcing.
+
+Net effect: the swap produces ~10 % drag reduction (a partial perturbation of the Y_min flow) but no actual specular-reflection symmetry plane.
+
+**A correct CC#7 implementation would require a separate kernel that runs after stream_collide, reads DDFs from neighbors directly, and writes the specular-reflected values without using EP storage layout.** That is a non-trivial 1-2 hour patch with further EP-conflict risk. Deferred until a future iteration.
+
+The TYPE_Y kernel patch, the CC6_MODE=2 setup branch, and the diagnostic counter remain in the source tree under `#define CC7_DIAGNOSE`. Production default is set to **CC6_MODE=1 (Volldomain reference)**.
 
 ### CC#6 (deactivated, reference baseline) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
 
