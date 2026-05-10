@@ -117,8 +117,9 @@ To re-test if a future driver release fixes the issue, comment out the `_exit(0)
 | Throughput | 650 × 144 × 180 | 16.85 M | FP16C | 10 000 | **4 917** | **605** | 292 | ~30 s + init |
 | Full half-domain (interrupted) | 1299 × 288 × 361 | 135 M | FP16C | (10 585) | 5 331 | 592 | 39 | n/a |
 | **Aero-Box 20 mm (CC#2)** | **1200 × 304 × 400** | **145.92 M** | FP16C+FORCE_FIELD | **50 000** | **5 384** | **576** | **37** | **24 min** |
+| **Aero-Box 20 mm asym (CC#3)** | **1000 × 200 × 250** | **50.0 M** | FP16C+FORCE_FIELD | **50 000** | **5 732** | **613** | **115** | **7.8 min** |
 
-The 16.85 M-cell run sustains **99.5 % of the 608 GB/s spec bandwidth**, the 145.92 M Aero-Box run sustains **94.7 %** — confirming LBM is bandwidth-limited and the B70 saturates its GDDR6 subsystem at any working-set size. ~4× the effective LBM bandwidth of an RTX 3060 Ti reference (~150 GB/s effective).
+The 16.85 M-cell run sustains **99.5 % of the 608 GB/s spec bandwidth**, the 145.92 M Aero-Box run sustains **94.7 %**, and the 50.0 M asym Aero-Box run **even exceeds the spec at 100.8 %** — confirming LBM is bandwidth-limited and the B70 saturates its GDDR6 subsystem at any working-set size; the spec bandwidth value is conservative on this card. ~4× the effective LBM bandwidth of an RTX 3060 Ti reference (~150 GB/s effective).
 
 ### Thermals & power under sustained load (CC#2, 24 min @ 275 W)
 
@@ -133,21 +134,25 @@ The 16.85 M-cell run sustains **99.5 % of the 608 GB/s spec bandwidth**, the 145
 
 ASRock Creator B70 Pro's 3-fan workstation cooler handles 275 W indefinitely without thermal throttling. The 16 individual GDDR6-channel sensors (`vram_ch_0` … `vram_ch_15` under `/sys/class/drm/card0/device/hwmon/hwmon7/`) confirm uniform load across the 256-bit bus — this is a real bandwidth-saturated workload, not a single-channel hotspot.
 
-### CC#2 force-field run (caveat)
+### Force-field runs status (CC#2 → CC#3)
 
-50 000 steps ≙ **2.5 s physical sim-time** is **not aerodynamically converged** despite statistical stability (Fx ±0.15 % over the last 20 k steps). The half-domain force aggregates land at:
+**CC#2 (135 M cells, 24 m × 6 m × 8 m box) had a vehicle-positioning bug:** the translation `0 - (vctr.y - vbbox.y * 0.5f)` placed the *entire* vehicle in the positive-Y region instead of straddling the symmetry plane. The half-domain symmetry-wall acted as a side-channel right next to the car, producing inflated drag and the wrong sign on lift. Fixed in commit `86e07da` by changing the translate to `0 - vctr.y` (vehicle Y-center on Y=0). Visually verified by Heiko in the volume-rendered velocity field.
+
+**CC#3 (50 M cells, 20 m × 4 m × 5 m asym box, 50 000 steps, post-fix):** half-domain converged statistically from step ~7500 onward (Fx within ±5.8 % over the last 20 000 steps). Wall-time only **7.8 min** total.
 
 ```
-Fx (Drag, half-dom)  = 1927 ± 199 N    →  full-vehicle  ≈ 3855 N (vs. expected ~500–600 N)
-Fz (Lift, half-dom)  =  +953 ± ~50 N   →  full-vehicle  ≈ +1907 N (Auftrieb statt erwartetem Downforce ~–1200 N)
+Fx (Drag, half-dom, last 20 k)  = 1058 ± 61 N    →  full-vehicle  ≈ 2116 N (vs. expected 500–600 N → 3.8× too high)
+Fz (Lift, half-dom, last 20 k)  =  +342 N        →  full-vehicle  ≈ +683 N (still positive — sign should be negative for downforce)
 ```
 
-Three reasons the values are off:
-1. **20 mm cells** is too coarse for quantitative aero on a sports car — splitter, diffuser, rear wing voxel-stamped, no realistic boundary layer
-2. **2.5 s sim-time** is ~3 domain-flow-throughs, real aero needs 15+ s for steady boundary layers
-3. **Top wall at 8 m** may channel-stagnate above the vehicle at this resolution
+Drag dropped 45 % vs CC#2 (1927 N → 1058 N half-dom) and the half-domain mathematics is now physically meaningful, but the **absolute values are still ~4× the OpenFOAM reference**. The remaining gap is attributed to (in suspected order of impact):
 
-For converged aero values plan ~10 h on B70 at 16 mm / 281 M cells / ~250 k steps.
+1. **Symmetry boundary at Y=0 not explicitly free-slip** — FluidX3D's default streaming at Y=0 is periodic, which combined with the no-slip wall at Y_max yields a non-pure mirror condition. A true symmetry plane is needed for half-domain aero.
+2. **Ground clearance only 1 cell = 20 mm** (real cars 100–150 mm) — moving wall directly under the car produces an exaggerated Bernoulli-lift contribution that flips downforce to lift.
+3. **20 mm cell-size** under-resolves boundary layers (high y+) and rear-spoiler / diffuser detail.
+4. **Vehicle si_length** was 4.0 m in CC#2/CC#3, real geometry is **4.5 m × 1.8 m × 1.1 m**. Fixed in setup.cpp post-CC#3 (changes Reynolds by +12.5 %, time-step scaling, and effective resolution per vehicle length).
+
+For aero-converged values: CC#4 with explicit symmetry-plane handling, 5-cell ground clearance, optionally 16 mm cells, 200 k+ steps (~6–10 h wall-time on B70).
 
 ## Companion repos
 

@@ -47,17 +47,19 @@ Original 1299 × 288 × 361 grid was axis-halved to 650 × 144 × 180. 10 000-st
 - VTK exports: u, rho, flags, F, mesh
 - Per-cell CSV `forces_solid_cells.csv` (one row per non-zero TYPE_S cell)
 
-### CC#2 (active) — Aero-Box 20 mm uniform, 145.92 M cells, 50 000 steps with aggregate force CSV
+### CC#3 (current active) — Aero-Box 20 mm asym, 50 M cells, 50 000 steps, half-domain symmetry fix applied
 
-The currently-active `main_setup()` (line ~140 onwards):
+The currently-active `main_setup()` (line ~197 onwards):
 
-- **Grid:** `uint3(1200u, 304u, 400u)` = **145.92 M cells**, cell size **20 mm uniform**, half-domain box 24 m × 6.08 m × 8 m. Symmetry plane on Y_min, vehicle X-center at cell index 350 (= 7 m from inlet).
+- **Grid:** `uint3(1000u, 200u, 250u)` = **50.0 M cells**, cell size **20 mm uniform**, half-domain asym box **20 m × 4 m × 5 m** (X[-5, +15], Y[0, 4], Z[0, 5]). Symmetry plane on Y_min. Vehicle X-center at cell index **250** (= 5 m from inlet, 13 m wake).
+- **Vehicle position (post-bug-fix):** `vehicle->translate(float3(250 - vctr.x, 0 - vctr.y, 1 - (vctr.z - vbbox.z * 0.5f)))`. The Y translation puts the vehicle **center on Y=0** so the symmetry plane slices it down the middle — only the Y≥0 half is voxelized. Sanity-check `if(vmin.y > 0.5f || vmax.y < -0.5f) _exit(2)` aborts the run before voxelization if the half-domain geometry is wrong (ensures the CC#2 bug cannot recur silently).
+- **Vehicle scale:** `si_length = 4.5 m` (corrected post-CC#3 from 4.0 m to actual geometry — real vehicle is 4.5 m × 1.8 m × 1.1 m).
 - **Vehicle marker:** `lbm.voxelize_mesh_on_device(vehicle, TYPE_S | TYPE_X)` so `lbm.object_force(TYPE_S | TYPE_X)` isolates vehicle cells from floor / ceiling / outer wall (which only carry `TYPE_S`).
 - **Boundaries:** moving floor at z=0 (TYPE_S, u=lbm_u in +x), no-slip ceiling (z=Nz-1) and outer wall (y=Ny-1), inlet/outlet on x=0/Nx-1 (TYPE_E with u=lbm_u). Vehicle cells protected from overwrite via TYPE_X check in the parallel-for.
-- **Run loop:** 500 chunks × 100 steps = **50 000 steps total**. Per chunk: `lbm.run(100); lbm.update_force_field(); F = lbm.object_force(TYPE_S|TYPE_X); fcsv << F`. Aggregate force CSV with schema `step,t_si,Fx_si,Fy_si,Fz_si` — 500 rows total, much smaller than the per-cell CSV.
-- **Final VTK:** u, rho, flags, F, plus mesh. ~4.2 GB total.
-- **`_exit(0)`** after exports — same xe-driver workaround as CC#1/CC#3.
-- **Verified runtime (CC#2 2026-05-10):** 24 min wall-time, 5384 MLUPS steady, 576 GB/s = **94.7 % of B70 spec bandwidth**, no xe-driver faults, rc=0 clean exit. See README "Performance baseline" for thermals (71 °C pkg / 84 °C VRAM-junction steady).
+- **Run loop:** 500 chunks × 100 steps = **50 000 steps total**. Per chunk: `lbm.run(100); lbm.update_force_field(); F = lbm.object_force(TYPE_S|TYPE_X); fcsv << F`. Aggregate force CSV `bin/forces_cc3.csv` with schema `step,t_si,Fx_si,Fy_si,Fz_si` — 500 rows total.
+- **Final VTK:** u, rho, flags, F, plus mesh. ~1.4 GB total at 50 M cells.
+- **`_exit(0)`** after exports — same xe-driver workaround as CC#1.
+- **Verified runtime (CC#3 2026-05-10):** **7.8 min wall-time**, 5732 MLUPS steady, **613 GB/s = 100.8 % of nominal B70 spec bandwidth** (the spec is conservative on this card at this working-set size), no xe-driver faults, rc=0 clean exit. Force convergence statistical from step ~7500 (Fx ±5.8 % over last 20k steps). Absolute force values still 3.8× higher than OpenFOAM reference — see README "Force-field runs status" for the suspected causes (symmetry boundary, ground clearance, resolution).
 
 ## Build / repository hygiene
 

@@ -194,35 +194,51 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
 } /**/
 
-// ============== CC#2: Aero-Box 20mm uniform, Halbdomain, Headless, Force-Output, 50k Steps ==============
-// Domain 24m × 6.08m × 8m bei cell_size 20mm = 1200×304×400 = 145.92M cells.
-// Vehicle bei x-Center 350 (= 7m vom Inlet, OpenFOAM-äquivalent x=0). Y-Min auf 0 (Symmetrie-Plane).
-// Forces via lbm.object_force(TYPE_S|TYPE_X), Vehicle bekommt TYPE_X als Marker.
-void main_setup() { // CC#2 Aero-Box 20mm, Halbdomain, Headless, Force-Output, 50k Steps. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD (NO INTERACTIVE_GRAPHICS, NO GRAPHICS).
+// ============== CC#3: Aero-Box 20×4×5m, 20mm uniform, Halbdomain, Headless, Force-Output, 50k Steps ==============
+// Domain 20m × 4m × 5m bei cell_size 20mm = 1000×200×250 = 50M cells.
+// Vehicle X-center bei Cell 250 (= 5m vom Inlet, 15m bis Outlet, in Welt-X=0).
+// Halbdomain: Vehicle Y-CENTER auf Y=0 → Vehicle wird durch Symmetrie-Plane Y_min HALBIERT (kritisch! siehe sanity-check unten).
+// Forces via lbm.object_force(TYPE_S|TYPE_X).
+void main_setup() { // CC#3 Aero-Box 20mm asym (5/15/4/5), Halbdomain, Headless, Force-Output, 50k Steps. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
 	// ============== Domain Setup ==============
-	const uint3 lbm_N = uint3(1200u, 304u, 400u);  // 145.92M Cells (Halbdomain mit Symmetrie an Y_min)
+	const uint3 lbm_N = uint3(1000u, 200u, 250u);  // 50.0 M Cells, 20m × 4m × 5m (Halbdomain Symmetrie an Y_min)
 	const float lbm_u = 0.075f;                    // standard LBM velocity scale
 	const float si_u = 30.0f;                      // 30 m/s Wind
-	const float si_length = 4.0f;                  // Vehicle-Länge in SI [m]
+	const float si_length = 4.5f;                  // Vehicle-Länge in SI [m] (corrected post-CC#3 from 4.0 to actual 4.5 m × 1.8 m × 1.1 m geometry)
+	const float si_width  = 1.8f;                  // Vehicle-Breite in SI [m] (reference, not used in scale — STL aspect determines width)
+	const float si_height = 1.1f;                  // Vehicle-Höhe in SI [m] (reference)
 	const float cell_size = 0.020f;                // 20 mm uniform
-	const float lbm_length = si_length / cell_size; // 200 LBM-cells/Vehicle-Länge
+	const float lbm_length = si_length / cell_size; // 225 LBM-cells/Vehicle-Länge bei 4.5 m / 20 mm
 	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft 15°C
 	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
 	const float lbm_nu = units.nu(si_nu);
-	print_info("CC#2 Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
-	print_info("CC#2 Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
+	print_info("CC#3 Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+	print_info("CC#3 Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
+	print_info("CC#3 Box (cells): X[-5m,+15m]=20m | Y[0,4m]=4m (half) | Z[0,5m]=5m | Vehicle X-center @ cell 250 (=5m vom Inlet)");
 	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
 
-	// ============== Vehicle: STL laden, Y-Min des Vehicles auf 0 (Symmetrie), X-Center bei Cell 350 (=7m) ==============
+	// ============== Vehicle: STL laden, Halbdomain-Position (X-Center cell 250, Y-Center=0 für Symmetrie-Halbierung, Z-Min=1) ==============
 	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
 	const float3 bbox_orig = vehicle->get_bounding_box_size();
 	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 200 cells
 	const float3 vbbox = vehicle->get_bounding_box_size();
 	const float3 vctr  = vehicle->get_bounding_box_center();
 	vehicle->translate(float3(
-		350.0f - vctr.x,                       // X-Center bei Cell-Index 350
-		0.0f   - vctr.y,                       // Y-CENTER des Vehicles auf 0: Symmetrie-Plane schneidet Auto in der Mitte → nur Halb-Auto in Domain (Y>=0); andere Hälfte via Symmetrie-Spiegel
+		250.0f - vctr.x,                       // X-Center bei Cell 250 (= 5m vom Inlet)
+		0.0f   - vctr.y,                       // Y-CENTER auf 0 (NICHT Y-Min!): Halbdomain-Symmetrie schneidet Vehicle mittig
 		1.0f   - (vctr.z - vbbox.z * 0.5f)));  // Z-Min auf 1 (1 Zelle Bodenfreiheit)
+
+	// ============== Halbdomain-Sanity-Check: Vehicle muss Y=0 SCHNEIDEN ==============
+	// Wenn Y-Min > 0: ganzes Vehicle in pos. Y → Bug wie in CC#2 (Drag/Lift falsch).
+	// Wenn Y-Max < 0: ganzes Vehicle in neg. Y → komplett außerhalb Domain.
+	const float3 vmin = vehicle->pmin, vmax = vehicle->pmax;
+	print_info("Vehicle BBox after translate: X["+to_string(vmin.x,1u)+", "+to_string(vmax.x,1u)+"] Y["+to_string(vmin.y,1u)+", "+to_string(vmax.y,1u)+"] Z["+to_string(vmin.z,1u)+", "+to_string(vmax.z,1u)+"]");
+	if(vmin.y > 0.5f || vmax.y < -0.5f) {
+		print_info("FATAL: Vehicle does not cross Y=0! Half-domain symmetry won't slice the vehicle. Aborting setup before voxelization.");
+		std::fflush(nullptr); _exit(2);
+	}
+	print_info("Halbdomain-Check OK: Vehicle Y-bbox crosses Y=0 (vmin.y="+to_string(vmin.y,2u)+", vmax.y="+to_string(vmax.y,2u)+")");
+
 	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X); // Vehicle: TYPE_S|TYPE_X für object_force-Filter
 
 	// ============== Boundaries (Vehicle-Cells via TYPE_X-Test geschützt) ==============
@@ -245,14 +261,14 @@ void main_setup() { // CC#2 Aero-Box 20mm, Halbdomain, Headless, Force-Output, 5
 	});
 
 	// ============== Run-Schleife: 500 chunks × 100 = 50.000 Steps, Force-CSV pro Chunk ==============
-	const string force_csv_path = get_exe_path()+"../bin/forces_cc2.csv";
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc3.csv";
 	std::ofstream fcsv(force_csv_path);
 	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si\n";
 	fcsv << std::scientific;
 
 	const uint chunk = 100u;
 	const uint chunks = 500u; // 500 × 100 = 50.000 Steps
-	print_info("CC#2 Run: "+to_string(chunks*chunk)+" steps in "+to_string(chunks)+" chunks of "+to_string(chunk));
+	print_info("CC#3 Run: "+to_string(chunks*chunk)+" steps in "+to_string(chunks)+" chunks of "+to_string(chunk));
 	for(uint c = 0u; c < chunks; c++) {
 		lbm.run(chunk);
 		lbm.update_force_field();
@@ -275,7 +291,7 @@ void main_setup() { // CC#2 Aero-Box 20mm, Halbdomain, Headless, Force-Output, 5
 	lbm.flags.write_device_to_vtk(export_path);
 	lbm.F.write_device_to_vtk(export_path);
 	lbm.write_mesh_to_vtk(vehicle, export_path);
-	print_info("CC#2 done. Force-CSV: "+force_csv_path+" | VTKs: "+export_path);
+	print_info("CC#3 done. Force-CSV: "+force_csv_path+" | VTKs: "+export_path);
 	std::fflush(nullptr);
 	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
 } // CC#2 NEW BLOCK END
