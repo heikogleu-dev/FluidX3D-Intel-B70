@@ -1,3 +1,6 @@
+// MODIFIED FILE — see MODIFICATIONS.md for changes vs upstream ProjectPhysX/FluidX3D.
+// Fork: github.com/heikogleu-dev/FluidX3D-Intel-B70 — Intel Arc Pro B70 (Battlemage) patches.
+// Original copyright: (c) 2022-2026 Dr. Moritz Lehmann, see LICENSE.md.
 #pragma once
 
 #define WINDOW_NAME "FluidX3D"
@@ -339,8 +342,8 @@ extern bool key_E, key_G, key_H, key_O, key_P, key_Q, key_T, key_Z; // defined i
 extern bool key_1, key_2, key_3, key_4, key_5, key_6, key_7, key_8, key_9, key_0; // defined in graphics.cpp
 
 #define GRAPHICS_CONSOLE // open console additionally to graphics window
-#define FONT_HEIGHT 11 // default: 11
-#define FONT_WIDTH 6 // default: 6
+#define FONT_HEIGHT 22 // doubled from 11 for HiDPI 8K display readability
+#define FONT_WIDTH 12 // doubled from 6 for HiDPI 8K display readability
 
 void set_light(const uint i, const float3& p);
 

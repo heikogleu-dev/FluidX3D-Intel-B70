@@ -1,3 +1,6 @@
+// MODIFIED FILE — see MODIFICATIONS.md for changes vs upstream ProjectPhysX/FluidX3D.
+// Fork: github.com/heikogleu-dev/FluidX3D-Intel-B70 — Intel Arc Pro B70 (Battlemage) patches.
+// Original copyright: (c) 2022-2026 Dr. Moritz Lehmann, see LICENSE.md.
 #include "graphics.hpp"
 
 vector<string> main_arguments = vector<string>(); // console arguments
@@ -9,7 +12,7 @@ Camera camera;
 // reserved keys for graphics: W,A,S,D, I,J,K,L, F, R,U, V,B, C,VK_SPACE, Y,X, N,M
 //bool key_A=false, key_B=false, key_C=false, key_D=false, key_E=false, key_F=false, key_G=false, key_H=false, key_I=false, key_J=false, key_K=false, key_L=false, key_M=false;
 //bool key_N=false, key_O=false, key_P=false, key_Q=false, key_R=false, key_S=false, key_T=false, key_U=false, key_V=false, key_W=false, key_X=false, key_Y=false, key_Z=false;
-bool key_E=false, key_G=false, key_H=false, key_O=false, key_P=false, key_Q=false, key_T=false, key_Z=false;
+bool key_E=false, key_G=false, key_H=false, key_O=false, key_P=true, key_Q=false, key_T=false, key_Z=false; // key_P=true: auto-start (no manual P-press needed)
 bool key_1=false, key_2=false, key_3=false, key_4=false, key_5=false, key_6=false, key_7=false, key_8=false, key_9=false, key_0=false;
 
 const uint light_sources_N = 100u; // maximal number of light sources
@@ -305,11 +308,19 @@ void draw_rectangle(const int x0, const int y0, const int x1, const int y1, cons
 	}
 }
 void draw_text(const int x, const int y, const string& s, const int color) {
+	// 2x pixel-doubled font (FONT_WIDTH=12, FONT_HEIGHT=22) for HiDPI displays. Source bitmaps stay 6 wide; each pixel is drawn as a 2x2 block.
 	for(int i=0; i<(int)length(s); i++) {
 		const int character = (int)s[i];
 		const ulong pixels = get_font_pixels(character);
 		for(int k=0; k<64; k++) {
-			if((pixels>>(63-k))&1) draw_pixel(x+i*6+k%6+(character==113), y+k/6, color);
+			if((pixels>>(63-k))&1) {
+				const int px = x + i*FONT_WIDTH + (k%6)*2 + (character==113 ? 2 : 0);
+				const int py = y + (k/6)*2;
+				draw_pixel(px,   py,   color);
+				draw_pixel(px+1, py,   color);
+				draw_pixel(px,   py+1, color);
+				draw_pixel(px+1, py+1, color);
+			}
 		}
 	}
 }
@@ -725,12 +736,29 @@ int main(int argc, char* argv[]) {
 		fps_limit = 60u; // fallback to 60fps default
 	}
 
+	// windowed-mode override: env FLUIDX3D_WINDOW=WxH (e.g. 2560x1440); default = 2560x1440 windowed; "fullscreen" keeps original behavior
+	{
+		const char* envwin = getenv("FLUIDX3D_WINDOW");
+		uint win_w = 2560u, win_h = 1440u;
+		bool windowed = true;
+		if(envwin!=nullptr) {
+			if(string(envwin)=="fullscreen") { windowed = false; }
+			else { unsigned int w=0u, h=0u; if(sscanf(envwin, "%ux%u", &w, &h)==2 && w>=320u && h>=240u) { win_w=w; win_h=h; } }
+		}
+		if(windowed && win_w<width && win_h<height) {
+			window_offset_x += (int)(width  - win_w)/2;
+			window_offset_y += (int)(height - win_h)/2;
+			width  = win_w;
+			height = win_h;
+		}
+	}
+
 	camera = Camera(width, height, fps_limit);
 
 	x11_window = XCreateWindow(x11_display, x11_root_window, window_offset_x, window_offset_y, width, height, 0, CopyFromParent, CopyFromParent, CopyFromParent, 0, 0);
 	XSizeHints x11_size_hints = { PPosition|PSize, window_offset_x, window_offset_y, (int)width, (int)height };
 	XSetNormalHints(x11_display, x11_window, &x11_size_hints); // place window on the primary monitor
-	struct Hints { long flags=2l, functions=0l, decorations=0b0000000l, input_mode=0l, status=0l; } x11_hints; // decorations=maximize|minimize|menu|title|resize|border|all
+	struct Hints { long flags=2l, functions=0l, decorations=0b1111111l, input_mode=0l, status=0l; } x11_hints; // decorations=maximize|minimize|menu|title|resize|border|all
 	Atom x11_property = XInternAtom(x11_display, "_MOTIF_WM_HINTS", 0);
 	XChangeProperty(x11_display, x11_window, x11_property, x11_property, 32, PropModeReplace, (unsigned char*)&x11_hints, 5); // remove window decorations
 	XStoreName(x11_display, x11_window, WINDOW_NAME);
