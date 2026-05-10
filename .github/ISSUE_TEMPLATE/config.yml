@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Upstream FluidX3D issues
+    url: https://github.com/ProjectPhysX/FluidX3D/issues
+    about: For FluidX3D bugs that are not specific to Intel B70 / Battlemage / xe driver
+  - name: Intel Compute Runtime issues
+    url: https://github.com/intel/compute-runtime/issues
+    about: For Level Zero / OpenCL driver bugs on Intel GPUs
+  - name: xe Linux kernel driver
+    url: https://gitlab.freedesktop.org/drm/xe/kernel/-/issues
+    about: For kernel-side xe driver bugs (-EINVAL faults, GPU hangs, etc.)
+  - name: oneAPI Forum
+    url: https://community.intel.com/t5/Intel-oneAPI-Toolkits/bd-p/oneapi
+    about: General oneAPI / SYCL / OpenCL questions on Intel Arc
+  - name: CFD-Online LBM Forum
+    url: https://www.cfd-online.com/Forums/main/
+    about: General Lattice Boltzmann discussion (algorithm, theory, validation)

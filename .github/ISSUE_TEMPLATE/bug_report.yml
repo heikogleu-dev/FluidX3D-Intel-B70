@@ -1,0 +1,86 @@
+name: Bug Report / Different Result
+description: Report a crash, wrong result, or different benchmark on Intel Arc Pro B70 (or another GPU)
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report. Real reproduction data
+        is genuinely useful — please be specific.
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: GPU, CPU, RAM
+      placeholder: "Intel Arc Pro B70 / Core Ultra 9 285K / 96 GB DDR5-6800"
+    validations:
+      required: true
+
+  - type: input
+    id: software
+    attributes:
+      label: Software versions
+      description: kernel, xe driver, Intel Compute Runtime, oneAPI, GCC, FluidX3D commit
+      placeholder: "Kernel 7.0.0-15, xe 26.05.037020, intel-opencl-icd 26.05.37020.3, GCC 15.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Issue kind
+      options:
+        - Crash / SIGSEGV / abort
+        - Wrong result (NaN, instability, unphysical values)
+        - Performance regression
+        - Build failure
+        - Visualisation / rendering issue
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Concrete description of the failure or unexpected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What this repo's README / MODIFICATIONS.md says should happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Exact commands run, env-vars set, scenes/STL used, defines.hpp / setup.cpp diff if non-default
+      render: shell
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: FluidX3D stdout/stderr (paste the relevant section, especially MLUPS line and final messages)
+      render: shell
+
+  - type: textarea
+    id: kernel
+    attributes:
+      label: Kernel / dmesg output
+      description: "journalctl -k --since '5 min ago' | grep xe — particularly relevant for shutdown crashes and GPU faults"
+      render: shell
+
+  - type: input
+    id: section
+    attributes:
+      label: Related section in README / MODIFICATIONS
+      description: e.g. "Crash workaround" or "src/setup.cpp"
+      placeholder: README § Crash workaround
