@@ -3,3 +3,12 @@ temp/
 stl/
 .vs/
 FluidX3D.vcxproj.user
+# Intel B70 fork: build artifacts and test outputs
+export/
+_portbackup/
+*.vtk
+*.csv
+
+# scenes/ symlink to user data drive (CFD-EXC), not committed
+# Users provide their own STLs under scenes/
+scenes
