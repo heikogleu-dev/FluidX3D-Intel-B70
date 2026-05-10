@@ -194,6 +194,93 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
 } /**/
 
+// ============== CC#2: Aero-Box 20mm uniform, Halbdomain, Headless, Force-Output, 50k Steps ==============
+// Domain 24m × 6.08m × 8m bei cell_size 20mm = 1200×304×400 = 145.92M cells.
+// Vehicle bei x-Center 350 (= 7m vom Inlet, OpenFOAM-äquivalent x=0). Y-Min auf 0 (Symmetrie-Plane).
+// Forces via lbm.object_force(TYPE_S|TYPE_X), Vehicle bekommt TYPE_X als Marker.
+void main_setup() { // CC#2 Aero-Box 20mm, Halbdomain, Headless, Force-Output, 50k Steps. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD (NO INTERACTIVE_GRAPHICS, NO GRAPHICS).
+	// ============== Domain Setup ==============
+	const uint3 lbm_N = uint3(1200u, 304u, 400u);  // 145.92M Cells (Halbdomain mit Symmetrie an Y_min)
+	const float lbm_u = 0.075f;                    // standard LBM velocity scale
+	const float si_u = 30.0f;                      // 30 m/s Wind
+	const float si_length = 4.0f;                  // Vehicle-Länge in SI [m]
+	const float cell_size = 0.020f;                // 20 mm uniform
+	const float lbm_length = si_length / cell_size; // 200 LBM-cells/Vehicle-Länge
+	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft 15°C
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+	print_info("CC#2 Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+	print_info("CC#2 Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
+	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+
+	// ============== Vehicle: STL laden, Y-Min des Vehicles auf 0 (Symmetrie), X-Center bei Cell 350 (=7m) ==============
+	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	const float3 bbox_orig = vehicle->get_bounding_box_size();
+	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 200 cells
+	const float3 vbbox = vehicle->get_bounding_box_size();
+	const float3 vctr  = vehicle->get_bounding_box_center();
+	vehicle->translate(float3(
+		350.0f - vctr.x,                       // X-Center bei Cell-Index 350
+		0.0f   - (vctr.y - vbbox.y * 0.5f),    // Y-Min des Vehicles auf 0 (Symmetrie-Plane an Y_min)
+		1.0f   - (vctr.z - vbbox.z * 0.5f)));  // Z-Min auf 1 (1 Zelle Bodenfreiheit)
+	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X); // Vehicle: TYPE_S|TYPE_X für object_force-Filter
+
+	// ============== Boundaries (Vehicle-Cells via TYPE_X-Test geschützt) ==============
+	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz();
+	parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		if((lbm.flags[n] & TYPE_X) != 0u) return; // Vehicle nicht überschreiben
+		if(z==0u) {                               // Boden: moving wall +x (Fahrzeug fährt)
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+		} else if(z==Nz-1u) {                     // Decke: no-slip
+			lbm.flags[n] = TYPE_S;
+		} else if(y==Ny-1u) {                     // Y_max: outer wall no-slip
+			lbm.flags[n] = TYPE_S;
+		} else if(x==0u || x==Nx-1u) {            // Inlet (-X) / Outlet (+X)
+			lbm.flags[n] = TYPE_E;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+		} else {                                  // Fluid: initial flow +x
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+		}
+	});
+
+	// ============== Run-Schleife: 500 chunks × 100 = 50.000 Steps, Force-CSV pro Chunk ==============
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc2.csv";
+	std::ofstream fcsv(force_csv_path);
+	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si\n";
+	fcsv << std::scientific;
+
+	const uint chunk = 100u;
+	const uint chunks = 500u; // 500 × 100 = 50.000 Steps
+	print_info("CC#2 Run: "+to_string(chunks*chunk)+" steps in "+to_string(chunks)+" chunks of "+to_string(chunk));
+	for(uint c = 0u; c < chunks; c++) {
+		lbm.run(chunk);
+		lbm.update_force_field();
+		const float3 F_lbm = lbm.object_force(TYPE_S|TYPE_X);
+		const float3 F_si  = float3(units.si_F(F_lbm.x), units.si_F(F_lbm.y), units.si_F(F_lbm.z));
+		const ulong step = (ulong)(c+1u) * chunk;
+		const float t_si = units.si_t(step);
+		fcsv << step << "," << t_si << "," << F_si.x << "," << F_si.y << "," << F_si.z << "\n";
+		if((c+1u) % 25u == 0u) fcsv.flush();
+		if((c+1u) % 50u == 0u) {
+			print_info("step="+to_string(step)+" t="+to_string(t_si, 3u)+"s  Fx="+to_string(F_si.x, 1u)+"N  Fz="+to_string(F_si.z, 1u)+"N");
+		}
+	}
+	fcsv.close();
+
+	// ============== Final VTK-Snapshot ==============
+	const string export_path = get_exe_path()+"../export/";
+	lbm.u.write_device_to_vtk(export_path);
+	lbm.rho.write_device_to_vtk(export_path);
+	lbm.flags.write_device_to_vtk(export_path);
+	lbm.F.write_device_to_vtk(export_path);
+	lbm.write_mesh_to_vtk(vehicle, export_path);
+	print_info("CC#2 done. Force-CSV: "+force_csv_path+" | VTKs: "+export_path);
+	std::fflush(nullptr);
+	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
+} // CC#2 NEW BLOCK END
+
+#if 0 // ===== OLD CC#1/CC#3 main_setup (10000 step test, 16.85M cells), deactivated 2026-05-10 for CC#2 (50000 step Aero-Box) =====
 void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + force-field export. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS, VOLUME_FORCE, FORCE_FIELD
 	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
 	const uint3 lbm_N = uint3(650u, 144u, 180u); // halbierte Auflösung (von 1299x288x361): 16.85 Mio Zellen, jede Achse / 2
@@ -271,6 +358,7 @@ void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + f
 	std::fflush(nullptr);
 	_exit(0); // umgehe xe-driver Cleanup-Race (bekannter -EINVAL fault); Daten sind bereits flushed
 } /**/
+#endif // OLD CC#1/CC#3 main_setup
 
 /*void main_setup() { // WINDKANAL halbe Domain - andere Seite mit Symmetrieebene & Flussrichtung (+x); required extensions: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS
 	// ################################################################## define simulation box size, viscosity and volume force ###################################################################

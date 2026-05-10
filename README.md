@@ -111,13 +111,43 @@ To re-test if a future driver release fixes the issue, comment out the `_exit(0)
 
 ## Performance baseline
 
-| Test | Grid | FP | Steps | MLUPS | GB/s | Steps/s | Wall |
-|---|---|---|---:|---:|---:|---:|---:|
-| Smoke (CC#2) | 650 × 144 × 180 | FP16C | 100 | 3 342 | 411 | 198 | < 1 s + init |
-| Throughput (CC#3) | 650 × 144 × 180 | FP16C | 10 000 | **4 917** | **605** | 292 | ~30 s + init |
-| Full domain (CC#1, interrupted at step 10 585) | 1299 × 288 × 361 | FP16C | n/a | 5 331 | 592 | 39 | n/a |
+| Test | Grid | Cells | FP | Steps | MLUPS | GB/s | Steps/s | Wall |
+|---|---|---:|---|---:|---:|---:|---:|---:|
+| Smoke | 650 × 144 × 180 | 16.85 M | FP16C | 100 | 3 342 | 411 | 198 | < 1 s + init |
+| Throughput | 650 × 144 × 180 | 16.85 M | FP16C | 10 000 | **4 917** | **605** | 292 | ~30 s + init |
+| Full half-domain (interrupted) | 1299 × 288 × 361 | 135 M | FP16C | (10 585) | 5 331 | 592 | 39 | n/a |
+| **Aero-Box 20 mm (CC#2)** | **1200 × 304 × 400** | **145.92 M** | FP16C+FORCE_FIELD | **50 000** | **5 384** | **576** | **37** | **24 min** |
 
-The 16.85 M-cell run sustains **99.5 % of the 608 GB/s spec bandwidth** — confirming LBM is bandwidth-limited and the B70 saturates its GDDR6 subsystem. ~4× the effective LBM bandwidth of an RTX 3060 Ti reference (~150 GB/s effective).
+The 16.85 M-cell run sustains **99.5 % of the 608 GB/s spec bandwidth**, the 145.92 M Aero-Box run sustains **94.7 %** — confirming LBM is bandwidth-limited and the B70 saturates its GDDR6 subsystem at any working-set size. ~4× the effective LBM bandwidth of an RTX 3060 Ti reference (~150 GB/s effective).
+
+### Thermals & power under sustained load (CC#2, 24 min @ 275 W)
+
+| Sensor | Value | Headroom |
+|---|---:|---:|
+| GPU package (`pkg`) | **71 °C** (steady) | ~20 °C to throttle |
+| GDDR6 junction (`vram`) | **84 °C** (steady) | ~11 °C to 95 °C throttle |
+| Memory controller (`mctrl`) | 53 °C | trivial |
+| Fan | 2913 → 2965 RPM (1156 RPM idle) | spins up smoothly under load |
+| Power (Ressourcenmonitor) | 275 W | ~80 % of TDP |
+| VRAM allocation | 12.4 GB (incl. desktop) ≙ 40 % | ~17 GB room for finer grids |
+
+ASRock Creator B70 Pro's 3-fan workstation cooler handles 275 W indefinitely without thermal throttling. The 16 individual GDDR6-channel sensors (`vram_ch_0` … `vram_ch_15` under `/sys/class/drm/card0/device/hwmon/hwmon7/`) confirm uniform load across the 256-bit bus — this is a real bandwidth-saturated workload, not a single-channel hotspot.
+
+### CC#2 force-field run (caveat)
+
+50 000 steps ≙ **2.5 s physical sim-time** is **not aerodynamically converged** despite statistical stability (Fx ±0.15 % over the last 20 k steps). The half-domain force aggregates land at:
+
+```
+Fx (Drag, half-dom)  = 1927 ± 199 N    →  full-vehicle  ≈ 3855 N (vs. expected ~500–600 N)
+Fz (Lift, half-dom)  =  +953 ± ~50 N   →  full-vehicle  ≈ +1907 N (Auftrieb statt erwartetem Downforce ~–1200 N)
+```
+
+Three reasons the values are off:
+1. **20 mm cells** is too coarse for quantitative aero on a sports car — splitter, diffuser, rear wing voxel-stamped, no realistic boundary layer
+2. **2.5 s sim-time** is ~3 domain-flow-throughs, real aero needs 15+ s for steady boundary layers
+3. **Top wall at 8 m** may channel-stagnate above the vehicle at this resolution
+
+For converged aero values plan ~10 h on B70 at 16 mm / 281 M cells / ~250 k steps.
 
 ## Companion repos
 

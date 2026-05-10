@@ -36,13 +36,28 @@ The license itself (see [`LICENSE.md`](LICENSE.md)) is **unchanged**. Non-commer
 
 ## `src/setup.cpp`
 
-Modifications to the active `main_setup()` (the "Windkanal halbe Domain HighRes" block, line ~140):
+Two distinct test setups have been built on top of the upstream Windkanal block:
 
-- **Grid:** `uint3(1299u, 288u, 361u) → uint3(650u, 144u, 180u)` (axis-halved). 134.7 M cells → 16.85 M cells; cell size 3.46 mm → 6.92 mm. Faster test/iteration on B70; full 134 M still fits in B70's 28.6 GB VRAM if reverted.
-- **Run length:** `lbm.run()` (infinite) → `lbm.run(10000u)`. Finite test run; can be set to `100u` for a smoke test or to a higher count for converged aerodynamics.
-- **VTK output (after run):** added `lbm.{u,rho,flags,F}.write_device_to_vtk(export_path)` and `lbm.write_mesh_to_vtk(vehicle, export_path)` to `~/CFD/FluidX3D/export/`.
-- **CSV force export (after run):** new block writes `forces_solid_cells.csv` with one row per solid cell that has non-zero force. Schema: `step,x,y,z,Fx_lbm,Fy_lbm,Fz_lbm,Fx_SI,Fy_SI,Fz_SI`. SI conversion via FluidX3D's `units.si_F(1.0f)`. ~690 k rows for the current setup; trivially aggregable with `awk` for drag/lift sums.
-- **`_exit(0)` after exports:** workaround for an xe-driver bug. On Linux 7.0 / xe 26.05.037020, FluidX3D's regular C++ destructor cleanup triggers a chain of `[drm] Tile0: GT0: Fault response: Unsuccessful -EINVAL` followed by SIGSEGV in user space. Data are flushed to disk before `_exit(0)`, so no data loss. See README "Crash workaround" section for the full kernel-log signature.
+### CC#1/CC#3 (small half-domain, 16.85 M cells, 10 000 steps) — preserved under `#if 0`
+
+Original 1299 × 288 × 361 grid was axis-halved to 650 × 144 × 180. 10 000-step finite test run with full VTK + per-cell force CSV export. This block is **kept in the source under `#if 0` / `#endif`** so the small-grid smoke test can be re-enabled with a single line change.
+
+- Grid: `uint3(650u, 144u, 180u)` (16.85 M cells, 6.92 mm cell size)
+- `lbm.run(10000u)`
+- VTK exports: u, rho, flags, F, mesh
+- Per-cell CSV `forces_solid_cells.csv` (one row per non-zero TYPE_S cell)
+
+### CC#2 (active) — Aero-Box 20 mm uniform, 145.92 M cells, 50 000 steps with aggregate force CSV
+
+The currently-active `main_setup()` (line ~140 onwards):
+
+- **Grid:** `uint3(1200u, 304u, 400u)` = **145.92 M cells**, cell size **20 mm uniform**, half-domain box 24 m × 6.08 m × 8 m. Symmetry plane on Y_min, vehicle X-center at cell index 350 (= 7 m from inlet).
+- **Vehicle marker:** `lbm.voxelize_mesh_on_device(vehicle, TYPE_S | TYPE_X)` so `lbm.object_force(TYPE_S | TYPE_X)` isolates vehicle cells from floor / ceiling / outer wall (which only carry `TYPE_S`).
+- **Boundaries:** moving floor at z=0 (TYPE_S, u=lbm_u in +x), no-slip ceiling (z=Nz-1) and outer wall (y=Ny-1), inlet/outlet on x=0/Nx-1 (TYPE_E with u=lbm_u). Vehicle cells protected from overwrite via TYPE_X check in the parallel-for.
+- **Run loop:** 500 chunks × 100 steps = **50 000 steps total**. Per chunk: `lbm.run(100); lbm.update_force_field(); F = lbm.object_force(TYPE_S|TYPE_X); fcsv << F`. Aggregate force CSV with schema `step,t_si,Fx_si,Fy_si,Fz_si` — 500 rows total, much smaller than the per-cell CSV.
+- **Final VTK:** u, rho, flags, F, plus mesh. ~4.2 GB total.
+- **`_exit(0)`** after exports — same xe-driver workaround as CC#1/CC#3.
+- **Verified runtime (CC#2 2026-05-10):** 24 min wall-time, 5384 MLUPS steady, 576 GB/s = **94.7 % of B70 spec bandwidth**, no xe-driver faults, rc=0 clean exit. See README "Performance baseline" for thermals (71 °C pkg / 84 °C VRAM-junction steady).
 
 ## Build / repository hygiene
 
