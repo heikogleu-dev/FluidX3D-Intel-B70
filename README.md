@@ -203,7 +203,39 @@ Close the gap to **OpenFOAM-RANS-equivalent forces** (Cd ≈ 0.35–0.5, Fx ≈ 
 
 ### B70 Pro hardware verdict
 
-The **Intel Arc Pro B70 (BMG-G31)** consistently delivers **96–100 % of its 608 GB/s nominal memory bandwidth** at all working-set sizes tested (16.85 M to 337.5 M cells), at 71 °C package / 84 °C VRAM under sustained 275 W load — comfortable thermal headroom (90/95 °C throttle). The card is **fully bandwidth-saturated for LBM workloads**, which is the expected and ideal regime. A ~4× speed-up over the prior RTX 3060 Ti reference. ASRock Creator B70 Pro cooler handles the load with no throttling at 1 600–2 900 RPM fan.
+The **Intel Arc Pro B70 (BMG-G31)** consistently delivers **96–100 % of its 608 GB/s nominal memory bandwidth** at all working-set sizes tested (16.85 M to 337.5 M cells), at 71 °C package / 84 °C VRAM under sustained 275 W load — comfortable thermal headroom (90/95 °C throttle). The card is **fully bandwidth-saturated for LBM workloads**, which is the expected and ideal regime. A ~4× speed-up over the prior RTX 3060 Ti reference.
+
+The **ASRock Creator B70 Pro** uses a workstation-class **blower-type cooler** (single rear-exhaust radial fan exhausting hot air OUT of the chassis via the rear PCIe bracket — not into the case interior, unlike consumer-class axial-fan designs). This makes it the right pick for multi-GPU rigs and tight workstation chassis where heat must not recirculate. Fan speed 1 600–2 900 RPM under load; no throttling observed.
+
+## LBM solver landscape — why FluidX3D on the Intel Arc Pro B70
+
+For full transparency, here is the comparison of FluidX3D against the other major open-source LBM solvers, evaluated specifically against our requirements (Intel Arc Pro B70 GPU, vehicle aerodynamics, half/full domain, force computation, sym-plane, wall model, rotating wheels, AMR):
+
+| Solver | License | GPU backend | Runs on B70? | AMR | Wall model | Free-slip BC | Rotating mesh | Peak perf | Maintained |
+|---|---|---|---|---|---|---|---|---:|---|
+| **FluidX3D** (this fork's base) | FluidX3D Public License (non-commercial) | **OpenCL** (NVIDIA, AMD, Intel) | ✅ **yes, native** | ❌ planned `no, not yet` | ❌ none (factor 1.3-2× drag overshoot acknowledged) | ⚠️ partial via TYPE_E (= absorbing, ≠ specular) | ✅ via `voxelize_mesh_on_device(..., omega)` | **5 464 MLUPS @ 96-100 % BW (B70)** | ✅ active (Moritz Lehmann) |
+| **waLBerla** | GPLv3 | CUDA + HIP only | 🚫 no (CPU-fallback only — ~50× slower) | ✅ `BasicRecursiveTimeStep` | ✅ via `lbmpy` codegen | ✅ `FreeSlip` class | ✅ generated via `lbmpy` | ~ 1 200 MLUPS @ 72 % BW (GTX Titan) | ✅ active (FAU) |
+| **OpenLB** | GPLv2 | OpenMP+MPI (CPU), **SYCL** experimental for GPU | ⚠️ SYCL backend would target B70, but not yet production-grade | ✅ static grid refinement | ✅ Werner-Wengle / Musker, van Driest | ✅ `addSlipBoundary` | ✅ moving boundaries | ~ 1 500–2 500 MLUPS GPU; "32× faster than OpenFOAM" CPU | ✅ active (KIT) |
+| **TCLB** (CFD-GO) | GPLv3 | CUDA + HIP + CPU (MPI) | 🚫 no | ⚠️ partial | ⚠️ depends on model | ⚠️ depends on model | ⚠️ depends on model | ~ 1 000–1 500 MLUPS | ✅ active (204 stars) |
+| **Palabos** (FlowKit Ltd / EPFL) | GPLv3 / FlowKit commercial | OpenMP + MPI (**CPU only** — official builds; experimental Palabos-GPU exists separately) | 🚫 no GPU | ✅ hierarchical grid refinement | ✅ several models | ✅ free-slip | ✅ moving objects | ~ 10–50 MLUPS (CPU only) | ⚠️ slow upstream pace |
+| **Sailfish** (sailfish-team) | LGPLv3 | **OpenCL** + CUDA | ✅ yes (via OpenCL) | ❌ | ⚠️ partial | ⚠️ partial | ❓ | unknown / not benchmarked recently | 🚫 **abandoned (last push 2022-02)** |
+| **lbmpy** (FAU) | AGPLv3 | code-generator only — emits CUDA/HIP/CPU kernels for waLBerla | only via waLBerla → 🚫 not on B70 | ✅ via waLBerla | ✅ via waLBerla | ✅ via waLBerla | ✅ via waLBerla | inherits waLBerla | ✅ active (FAU) |
+| **Musubi** (TUD APES) | BSD | MPI + OpenMP (CPU); some OpenACC | 🚫 no usable GPU | ✅ octree-based | ⚠️ research models | ✅ | ⚠️ | unknown | ⚠️ academic, slow updates |
+| **STLBM** (Latt et al.) | GPL | C++17 STL parallel exec (CPU) | 🚫 CPU only | ❌ | ❌ | ❌ | ❌ | ~ tens of MLUPS | ⚠️ research demo |
+
+### Verdict for the Intel Arc Pro B70 platform
+
+Of the solvers above, only three actually run on the B70 with GPU acceleration:
+
+1. **FluidX3D (OpenCL)** — natively. **Highest single-GPU bandwidth utilisation in the field at 96-100 %**, ahead of waLBerla's ~72 % and OpenLB's ~60-70 %. **No AMR, no built-in wall model, no specular sym-plane** — these are the open work items (and the reason for this fork).
+2. **OpenLB SYCL backend** — experimental, not production-grade as of mid-2026. Would give us AMR + Werner-Wengle + free-slip out of the box, but with a less mature SYCL path on Intel GPUs and likely 30-50 % lower bandwidth efficiency.
+3. **Sailfish OpenCL** — abandoned upstream, unsuitable for serious work.
+
+waLBerla, TCLB, lbmpy-via-waLBerla, Palabos, Musubi all require **NVIDIA or AMD GPUs** (CUDA/HIP) — for them to be options, the GPU itself would need to be replaced.
+
+### Strategic conclusion
+
+**FluidX3D + the custom patches in this fork is the right choice for the B70.** The 5× drag overshoot vs. OpenFOAM-RANS is fundamentally a **boundary-condition fidelity gap (sym-plane, wall model, rotating wheels)**, not a solver-quality gap. FluidX3D's compute throughput is class-leading for our hardware. Closing the BC gap via the [Roadmap](#roadmap--findings) work items #1, #3, #4 is much cheaper than porting to another solver — and porting to waLBerla/TCLB would also require leaving the B70 platform behind. **OpenLB-SYCL is the only real "Plan B" if Intel improves its SYCL stack and OpenLB's GPU support matures, but until then FluidX3D wins on every concrete metric that matters here.**
 
 ## Companion repos
 
