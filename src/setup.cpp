@@ -224,6 +224,8 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //           5 = Halbdomain TYPE_Y + separate post-stream apply_freeslip_y kernel (CC#9 — waLBerla pattern, FAILED ~13.5-14.4k)
 // V6 strip-TYPE_X-from-y=0 patch applies to all half-domain modes (0,2,3,4,5) — gives ~20% drag reduction.
 // V7 = Mode 5 + V6 was the best combined half-domain achievable: Fx ≈ 14045 N (still 12× target).
+// V8 = Mode 3 with sym-plane = TYPE_S|TYPE_Y → isolated diagnostic: Fx_sym = 3.4 MN bookkeeping confirms
+//      the sym-plane is a pseudo-rolling-road, NOT a free-slip mirror (Fy_sym ≠ 0, Fz_sym ≠ 0).
 #define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
@@ -307,20 +309,6 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 
 	// ============== Boundaries (FluidX3D-Aero-Konvention) ==============
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz();
-#if CC6_MODE!=1
-	// CC#9-V6 USER HYPOTHESIS: Strip TYPE_X from vehicle cells at y=0 cut-surface.
-	// These cells would be INTERIOR (no fluid contact) in the full-vehicle setup; in Halbdomain
-	// they spuriously contribute to object_force because their -y neighbor is the TYPE_E top wall
-	// via periodic-wrap. Stripping TYPE_X excludes them from object_force(TYPE_S|TYPE_X).
-	// They remain TYPE_S so they still act as solid wall in stream_collide (no flow penetration).
-	parallel_for(Nx*Nz, [&](ulong i) {
-		const uint x = (uint)(i % Nx), z = (uint)(i / Nx);
-		const ulong n = (ulong)x + (ulong)0u*Nx + (ulong)z*Nx*Ny; // y=0 slice
-		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
-			lbm.flags[n] = TYPE_S; // strip TYPE_X, keep solid
-		}
-	});
-#endif
 	parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
 		if((lbm.flags[n] & TYPE_X) != 0u) return; // Vehicle nicht überschreiben
 		if(z==0u) {                               // Boden Z=0: rolling road, TYPE_S moving wall +x
@@ -331,8 +319,8 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 			lbm.flags[n] = TYPE_Y;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 #elif CC6_MODE==3
-		} else if(y==0u) {                        // CC#7-Alt1: Y_min = TYPE_S Moving-Wall (FAILED)
-			lbm.flags[n] = TYPE_S;
+		} else if(y==0u) {                        // CC#7-Alt1 / V8 diagnostic: Y_min = TYPE_S|TYPE_Y Moving-Wall — TYPE_Y marker for isolated force measurement via object_force(TYPE_S|TYPE_Y)
+			lbm.flags[n] = TYPE_S | TYPE_Y;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 #elif CC6_MODE==4
 		} else if(y==0u) {                        // CC#8: Y_min = TYPE_E|TYPE_Y Ghost-Cell-Mirror
@@ -350,6 +338,20 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		}
 	});
+
+#if CC6_MODE!=1
+	// CC#9-V6 (NACH parallel_for!): Strip TYPE_X from vehicle cells at y=0 cut-surface.
+	// In Halbdomain they spuriously contribute to object_force because their -y neighbor is
+	// the TYPE_E top wall via periodic-wrap. Stripping TYPE_X excludes them from object_force.
+	// Order matters: must run AFTER parallel_for to avoid relabeling-bug (V8 found this).
+	parallel_for(Nx*Nz, [&](ulong i) {
+		const uint x = (uint)(i % Nx), z = (uint)(i / Nx);
+		const ulong n = (ulong)x + (ulong)0u*Nx + (ulong)z*Nx*Ny; // y=0 slice
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
+			lbm.flags[n] = TYPE_S; // strip TYPE_X, keep solid
+		}
+	});
+#endif
 
 #if CC7_DIAGNOSE && CC6_MODE==2
 	// === CC#7 DIAGNOSE: count TYPE_Y, TYPE_S|TYPE_X, TYPE_E, TYPE_S(only) cells ===
@@ -382,7 +384,11 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_half.csv";
 #endif
 	std::ofstream fcsv(force_csv_path);
+#if CC6_MODE==3
+	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si,Fx_sym,Fy_sym,Fz_sym\n"; // CC#7-Alt1 V8: separate columns for sym-plane force isolated via TYPE_S|TYPE_Y
+#else
 	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si\n";
+#endif
 	fcsv << std::scientific;
 
 	const uint chunk = 100u;            // 1 chunk = 100 Steps
@@ -406,7 +412,14 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 		Fhist.push_back(F_si);
 		const ulong step = (ulong)(c+1u) * chunk;
 		const float t_si = units.si_t(step);
+#if CC6_MODE==3
+		// V8 diagnostic: separately measure force on TYPE_S|TYPE_Y sym-plane cells
+		const float3 F_sym_lbm = lbm.object_force(TYPE_S|TYPE_Y);
+		const float3 F_sym_si  = float3(units.si_F(F_sym_lbm.x), units.si_F(F_sym_lbm.y), units.si_F(F_sym_lbm.z));
+		fcsv << step << "," << t_si << "," << F_si.x << "," << F_si.y << "," << F_si.z << "," << F_sym_si.x << "," << F_sym_si.y << "," << F_sym_si.z << "\n";
+#else
 		fcsv << step << "," << t_si << "," << F_si.x << "," << F_si.y << "," << F_si.z << "\n";
+#endif
 		if((c+1u) % 25u == 0u) fcsv.flush();
 		if((c+1u) % 50u == 0u) {
 			print_info("step="+to_string(step)+" t="+to_string(t_si, 3u)+"s  Fx="+to_string(F_si.x, 1u)+"N  Fy="+to_string(F_si.y, 1u)+"N  Fz="+to_string(F_si.z, 1u)+"N");

@@ -97,6 +97,30 @@ The user's diagnostic suggestion to "measure sym-plane drag separately" would yi
 
 After items #3 and #4, the Volldomain Fx could realistically drop from 2 219 N to 600-1 200 N — within engineering accuracy of OpenFOAM RANS (~400-600 N).
 
+## V8 isolated sym-plane force measurement (user request)
+
+User asked to directly measure sym-plane force separately, not just interpret. Implementation: in Mode 3 (TYPE_S Moving Wall sym-plane), assign sym-plane cells `TYPE_S | TYPE_Y` (instead of just TYPE_S). Then `object_force(TYPE_S|TYPE_Y)` isolates the sym-plane via exact-match.
+
+**V8 bug discovered**: V6 cut-surface-strip patch was running BEFORE the boundary-assignment parallel_for. This caused vehicle cells at y=0 to lose their TYPE_X bit, fall through the early-return, and get relabeled as `TYPE_S|TYPE_Y` (i.e., as sym-plane cells). Polluted the sym-plane force measurement to ~3.6 MN (mostly from misclassified vehicle cells).
+
+**V8 fix**: V6 strip moved to AFTER parallel_for. Now sym-plane cells stay sym-plane, vehicle stays vehicle (with cut-surface cells excluded via V6).
+
+**V8-fixed final result (75 chunks avg):**
+
+| Cell group | Fx (drag, N) | Fy (normal, N) | Fz (lift, N) |
+|---|---:|---:|---:|
+| Vehicle (`TYPE_S\|TYPE_X`) | 7 260 | 3 544 | -1 918 |
+| Sym-plane (`TYPE_S\|TYPE_Y`) | **3 389 160** | -8 391 | -8 310 |
+
+**Interpretation:**
+- The 3.4 MN Fx_sym = bookkeeping of total bounce-back momentum exchange at 675 000 sym-plane cells each contributing F_per_cell = 2 · ρ · u_local · conversion ≈ 5 N. Theoretical estimate matches measurement.
+- This is **not a physical force on the simulation** but reveals the SCALE of momentum exchange. The TYPE_S Moving Wall sym-plane acts as a giant "rolling road" pulling fluid in +x direction.
+- For TYPE_E sym-plane (Modes 0,4,5): the same momentum exchange occurs but `update_force_field` returns 0 for TYPE_E cells (check `(flags[n]&TYPE_BO)!=TYPE_S`), so we don't see it directly. The fluid distortion still happens and contaminates vehicle drag.
+- **Fy_sym = -8 391 N ≠ 0** and **Fz_sym = -8 310 N ≠ 0** are the smoking gun: a perfect free-slip sym-plane would have **only normal-direction reflection** (Fy_sym ≠ 0 if pressure mismatch, but Fx_sym = Fz_sym = 0). Both Fx_sym AND Fz_sym are large → sym-plane is doing wholesale momentum redirection, not symmetry-mirror.
+- **Vehicle Fy = +3 544 N** (away from sym-plane): vehicle is being pushed by the +y-direction pseudo-flow created by the sym-plane wall.
+
+**Take-away**: Mode 3 TYPE_S Moving Wall sym-plane is fundamentally a no-slip rolling-road BC, not symmetry. Mode 0 TYPE_E does the same artifact in a less-visible way. The 71 % of drag overshoot we attributed to "flow-field-level pollution" IS this pseudo-rolling-road effect — now visibly diagnosed by separate force measurement.
+
 ## Production-relevant artifacts retained in source
 
 - `kernel.cpp`: deprecated CC#7-V1 inline patch in `#if 0` block (documentation)
