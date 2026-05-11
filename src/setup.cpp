@@ -229,7 +229,148 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
+#define VEHICLE_GR_YARIS 1  // CC#10-VAL: 1 = Toyota GR Yaris MY21 Stock (vehicle-alt.stl, L=3.995m), 0 = default vehicle.stl (L=4.5m)
+#define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
+
+#if AHMED_MODE>0
+// ============================================================================
+// CC#X Phase 1 — Ahmed Body Wall-Model Validation (Volldomain, simplified flat-front Ahmed)
+// Reference: Lienhart & Stoots 2003. CD literature: 0.285 (25°) / 0.378 (35°)
+// Domain: 8L × 2L × 2L at 5 mm cells → 1672 × 416 × 416 = 289 M cells
+// u_∞ = 40 m/s, ν = 1.5e-5, Re_L = 2.78e6
+// ============================================================================
+void main_setup_ahmed() {
+#if AHMED_MODE==1
+	const int slant_deg = 25;
+	const string ahmed_stl = "../ahmed_25.stl";
+	const string csv_name = "forces_ahmed_25.csv";
+	const float CD_lit = 0.285f;
+	const float CL_lit = +0.345f;
+#elif AHMED_MODE==2
+	const int slant_deg = 35;
+	const string ahmed_stl = "../ahmed_35.stl";
+	const string csv_name = "forces_ahmed_35.csv";
+	const float CD_lit = 0.378f;
+	const float CL_lit = -0.105f;
+#endif
+	const float si_L = 1.044f;        // Ahmed body length [m]
+	const float si_W = 0.389f;        // Ahmed body width  [m]
+	const float si_H = 0.288f;        // Ahmed body height [m]
+	const float si_A = 0.1124f;       // frontal area [m²]
+	const float lbm_u = 0.075f;
+	const float si_u = 40.0f;
+	const float cell_size = 0.010f;   // CC#X retry: 10 mm (use proven MR2 domain, smaller blockage)
+	const float lbm_length = si_L / cell_size; // 104.4 cells per body length
+	const float si_nu = 1.5E-5f, si_rho = 1.225f;
+	// Domain: 15m × 5m × 4.5m (proven MR2 domain → 7.8% Y-blockage, 6.4% Z-blockage for Ahmed)
+	const uint Nx = 1500u;
+	const uint Ny = 500u;
+	const uint Nz = 450u;
+	const uint3 lbm_N = uint3(Nx, Ny, Nz);
+	const string label = "CC#X-AHMED-" + to_string(slant_deg) + "deg";
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_L, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+	print_info(label+" Re(L) = "+to_string(to_uint(units.si_Re(si_L, si_u, si_nu))));
+	print_info(label+" Cells: "+to_string(Nx)+" x "+to_string(Ny)+" x "+to_string(Nz)+" = "+to_string((ulong)Nx*Ny*Nz));
+	print_info(label+" Literature: CD="+to_string(CD_lit,3u)+", CL="+to_string(CL_lit,3u)+" (Lienhart-Stoots 2003)");
+	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+
+	// Vehicle laden
+	Mesh* vehicle = read_stl(get_exe_path()+ahmed_stl);
+	const float3 bbox_orig = vehicle->get_bounding_box_size();
+	vehicle->scale(lbm_length / bbox_orig.x); // scale STL to lbm_length cells in X
+	const float3 vbbox = vehicle->get_bounding_box_size();
+	const float3 vctr  = vehicle->get_bounding_box_center();
+	// Body placement: X-center @ cell 400 (= 4m from inlet, 11m wake — same as MR2), Y-center, Z-min at clearance (baked into STL)
+	const float x_target = 400.0f;
+	const float y_target = (float)(Ny / 2u);
+	vehicle->translate(float3(
+		x_target - vctr.x,
+		y_target - vctr.y,
+		0.0f                              // STL already has z_bot=clearance baked in → no Z-shift needed
+	));
+	const float3 vmin = vehicle->pmin, vmax = vehicle->pmax;
+	print_info(label+" Ahmed BBox in cells: X["+to_string(vmin.x,1u)+", "+to_string(vmax.x,1u)+"] Y["+to_string(vmin.y,1u)+", "+to_string(vmax.y,1u)+"] Z["+to_string(vmin.z,1u)+", "+to_string(vmax.z,1u)+"]");
+
+	// Voxelize Ahmed body FIRST (marks body cells with TYPE_S|TYPE_X; standard FluidX3D pattern)
+	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X);
+
+	// Floor + Walls (rolling road convention: Z=0 floor moves at u_∞)
+	// Body cells (TYPE_X) protected via early-return — their u stays at default (0)
+	parallel_for(lbm.get_N(), [&](ulong n) {
+		uint x=0, y=0, z=0;
+		lbm.coordinates(n, x, y, z);
+		if((lbm.flags[n] & TYPE_X) != 0u) return;   // Ahmed body cells protected
+		if(z==0u) {
+			lbm.flags[n] = TYPE_S;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+		} else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) {
+			lbm.flags[n] = TYPE_E;
+		}
+		if(lbm.flags[n]!=TYPE_S) { lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+	});
+
+	// Run-Loop mit Auto-Stop (CC#X verschärfte Konvergenz: 25 chunks window, 50 chunks min, 2% tol)
+	const string force_csv_path = get_exe_path() + "../bin/" + csv_name;
+	std::ofstream fcsv(force_csv_path);
+	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si\n";
+	fcsv << std::scientific;
+	const uint chunk = 100u;
+	const uint chunks_max = 500u;       // hard cap 50k steps
+	const uint conv_window = 25u;       // 2500 steps window
+	const uint conv_min_chunks = 50u;   // earliest exit 5000 steps
+	const float conv_tol = 0.02f;
+	std::vector<float3> Fhist;
+	Fhist.reserve(chunks_max);
+	print_info(label+" Run start: max "+to_string(chunks_max*chunk)+" Steps; Auto-Stop |dFx/Fx|<2% over 2500 Steps (earliest @5000)");
+	uint final_chunks = chunks_max;
+	for(uint c = 0u; c < chunks_max; c++) {
+		lbm.run(chunk);
+		lbm.update_force_field();
+		const float3 F_lbm = lbm.object_force(TYPE_S|TYPE_X);
+		const float3 F_si  = float3(units.si_F(F_lbm.x), units.si_F(F_lbm.y), units.si_F(F_lbm.z));
+		Fhist.push_back(F_si);
+		const ulong step = (ulong)(c+1u) * chunk;
+		const float t_si = units.si_t(step);
+		fcsv << step << "," << t_si << "," << F_si.x << "," << F_si.y << "," << F_si.z << "\n";
+		if((c+1u) % 10u == 0u) fcsv.flush();
+		if((c+1u) % 25u == 0u) {
+			const float CD_meas = F_si.x / (0.5f * si_rho * si_A * si_u * si_u);
+			const float CL_meas = F_si.z / (0.5f * si_rho * si_A * si_u * si_u);
+			print_info("step="+to_string(step)+" t="+to_string(t_si,3u)+"s Fx="+to_string(F_si.x,1u)+"N Fz="+to_string(F_si.z,1u)+"N | CD="+to_string(CD_meas,3u)+" (lit "+to_string(CD_lit,3u)+") CL="+to_string(CL_meas,3u)+" (lit "+to_string(CL_lit,3u)+")");
+		}
+		if(c+1u >= conv_min_chunks) {
+			float3 recent_avg(0.0f), prev_avg(0.0f);
+			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist[Fhist.size()-1u-k];
+			for(uint k=0u; k<conv_window; k++) prev_avg   += Fhist[Fhist.size()-1u-conv_window-k];
+			recent_avg /= (float)conv_window;
+			prev_avg   /= (float)conv_window;
+			const float dx = (recent_avg.x!=0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
+			if(dx < conv_tol) {
+				const float CD_final = recent_avg.x / (0.5f * si_rho * si_A * si_u * si_u);
+				const float CL_final = recent_avg.z / (0.5f * si_rho * si_A * si_u * si_u);
+				print_info(label+" CONVERGED at step "+to_string(step)+": |dFx|/|Fx|="+to_string(dx*100.0f,3u)+"%  Fx="+to_string(recent_avg.x,1u)+"N (CD="+to_string(CD_final,3u)+", lit "+to_string(CD_lit,3u)+")  Fz="+to_string(recent_avg.z,1u)+"N (CL="+to_string(CL_final,3u)+", lit "+to_string(CL_lit,3u)+")");
+				final_chunks = c+1u;
+				break;
+			}
+		}
+	}
+	fcsv.close();
+	const string export_path = get_exe_path()+"../export/";
+	lbm.u.write_device_to_vtk(export_path);
+	lbm.flags.write_device_to_vtk(export_path);
+	lbm.F.write_device_to_vtk(export_path);
+	print_info(label+" done after "+to_string(final_chunks)+" chunks ("+to_string(final_chunks*chunk)+" steps).");
+	std::fflush(nullptr);
+	_exit(0);
+}
+#endif // AHMED_MODE>0
+
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
+#if AHMED_MODE>0
+	main_setup_ahmed();
+	return;
+#endif
 	// ============== Domain Setup ==============
 #if CC6_MODE==1
 	const uint3 lbm_N = uint3(1500u, 500u, 450u);  // 337.5 M Cells: 15m × 5m × 4.5m (Volldomain, Y[-2.5,+2.5m])
@@ -252,12 +393,21 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 #endif
 	const float lbm_u = 0.075f;                    // standard LBM velocity scale
 	const float si_u = 30.0f;                      // 30 m/s Wind
-	const float si_length = 4.5f;                  // Vehicle-Länge in SI [m]
+#if VEHICLE_GR_YARIS
+	const float si_length = 3.995f;                // Toyota GR Yaris MY21 length [m]
+#else
+	const float si_length = 4.5f;                  // default vehicle length [m]
+#endif
 	const float cell_size = 0.010f;                // 10 mm uniform
-	const float lbm_length = si_length / cell_size; // 450 LBM-cells/Vehicle-Länge
+	const float lbm_length = si_length / cell_size; // Vehicle X-Länge in LBM-cells (Yaris: 399.5, default: 450)
 	const float si_nu = 1.48E-5f, si_rho = 1.225f; // Luft 15°C
 	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
 	const float lbm_nu = units.nu(si_nu);
+#if VEHICLE_GR_YARIS
+	print_info(label+" Vehicle: Toyota GR Yaris MY21 (Fully Stock), L="+to_string(si_length,3u)+"m, Frontal Area=2.078 m^2 (per OpenFOAM RANS reference)");
+#else
+	print_info(label+" Vehicle: default sport car, L="+to_string(si_length,3u)+"m");
+#endif
 	print_info(label+" Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
 	print_info(label+" Cells: "+to_string(lbm_N.x)+" x "+to_string(lbm_N.y)+" x "+to_string(lbm_N.z)+" = "+to_string((ulong)lbm_N.x*lbm_N.y*lbm_N.z));
 #if CC6_MODE==1
@@ -269,7 +419,11 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
 
 	// ============== Vehicle: STL laden + positionieren ==============
+#if VEHICLE_GR_YARIS
+	Mesh* vehicle = read_stl(get_exe_path()+"../vehicle-alt-bin.stl"); // Toyota GR Yaris MY21 Stock (5.34M tri, 99.985% watertight, binary STL, units=meters)
+#else
 	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+#endif
 	const float3 bbox_orig = vehicle->get_bounding_box_size();
 	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 450 cells (4.5 m / 10 mm)
 	const float3 vbbox = vehicle->get_bounding_box_size();
@@ -371,7 +525,11 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 
 	// ============== Run-Schleife mit Auto-Stop bei Force-Konvergenz ==============
 #if CC6_MODE==1
+#if VEHICLE_GR_YARIS
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc10_yaris.csv";
+#else
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_full.csv";
+#endif
 #elif CC6_MODE==2
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc7_half_sym.csv";
 #elif CC6_MODE==3
@@ -397,8 +555,8 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 #else
 	const uint chunks_max = 1000u;      // Hard cap = 100.000 Steps
 #endif
-	const uint conv_window = 50u;       // 50 chunks = 5000 Steps Sliding-Window
-	const uint conv_min_chunks = 100u;  // Frühester Exit = 100 chunks (10.000 Steps), damit recent + prev je 50 chunks haben
+	const uint conv_window = 25u;       // CC#X: 25 chunks = 2500 Steps Sliding-Window (was 50)
+	const uint conv_min_chunks = 50u;   // CC#X: Frühester Exit = 50 chunks (5000 Steps), damit recent+prev je 25 chunks haben (was 100)
 	const float conv_tol = 0.02f;       // 2 % relative Änderung (Fx only — Fy/Fz zu klein für rel. Konvergenz)
 	std::vector<float3> Fhist;
 	Fhist.reserve(chunks_max);
