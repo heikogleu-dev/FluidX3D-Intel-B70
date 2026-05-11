@@ -222,7 +222,9 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1 — FAILED, Drag 17.7k N)
 //           4 = Halbdomain TYPE_E|TYPE_Y Ghost-Cell-Mirror (CC#8 — FAILED, Drag 14.3k N)
 //           5 = Halbdomain TYPE_Y + separate post-stream apply_freeslip_y kernel (CC#9 — waLBerla pattern, FAILED ~13.5-14.4k)
-#define CC6_MODE 1
+// CC#9-V6: USER hypothesis test — vehicle cut-surface at y=0 contaminates object_force via
+// periodic-wrap to TYPE_E top wall. Strip TYPE_X from those cells. Tested on Mode 0 baseline.
+#define CC6_MODE 0
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
@@ -305,6 +307,20 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 
 	// ============== Boundaries (FluidX3D-Aero-Konvention) ==============
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz();
+#if CC6_MODE!=1
+	// CC#9-V6 USER HYPOTHESIS: Strip TYPE_X from vehicle cells at y=0 cut-surface.
+	// These cells would be INTERIOR (no fluid contact) in the full-vehicle setup; in Halbdomain
+	// they spuriously contribute to object_force because their -y neighbor is the TYPE_E top wall
+	// via periodic-wrap. Stripping TYPE_X excludes them from object_force(TYPE_S|TYPE_X).
+	// They remain TYPE_S so they still act as solid wall in stream_collide (no flow penetration).
+	parallel_for(Nx*Nz, [&](ulong i) {
+		const uint x = (uint)(i % Nx), z = (uint)(i / Nx);
+		const ulong n = (ulong)x + (ulong)0u*Nx + (ulong)z*Nx*Ny; // y=0 slice
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
+			lbm.flags[n] = TYPE_S; // strip TYPE_X, keep solid
+		}
+	});
+#endif
 	parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
 		if((lbm.flags[n] & TYPE_X) != 0u) return; // Vehicle nicht überschreiben
 		if(z==0u) {                               // Boden Z=0: rolling road, TYPE_S moving wall +x
