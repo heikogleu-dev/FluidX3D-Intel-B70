@@ -140,7 +140,16 @@ Three more variants tested after CC#9-V1/V2:
 
 After 9 distinct variants spanning swap/assignment/Moving-Wall/ghost-mirror/post-stream-kernel/different-pair-subsets/direct-slot-copy/vehicle-shift, all results cluster in the 13.0-17.7 k range. The achievable reduction is consistently ~20 %, far from the ~93 % needed. The Esoteric-Pull layout in combination with FluidX3D's periodic-by-default neighbor function is a true architectural block for sym-plane in half-domain.
 
-**The only remaining path to true sym-plane**: modify FluidX3D's `neighbors()` function to NOT periodic-wrap at TYPE_Y cell faces — i.e., a virtual ghost-layer that returns "self" for the -y direction at sym-plane cells. This requires modifying `neighbors()`, `index_f()`, and the EP storage interpretation. Multi-day kernel rewrite (Ansatz B in the README roadmap). Not attempted in this session.
+**The only remaining theoretical path "Ansatz B"** would modify FluidX3D's `calculate_indices()` to NOT periodic-wrap at TYPE_Y cell faces — a virtual ghost-layer returning "self" for the -y direction. Researched in detail (2026-05-11):
+- `calculate_indices()` is currently flag-unaware. Three architectural options:
+  - Pass flag parameter to `calculate_indices` (modify ALL callers — invasive)
+  - Separate `neighbors_sym_plane()` function for TYPE_Y cells
+  - In `apply_freeslip_y` only: manually compute non-wrap j-indices before reads (least invasive)
+- **For D3Q19, only ONE odd-index j-array uses `ym` directly: `j[13] = xp+ym+z0`** (the (+1,-1,0) direction). All other odd-i neighbor reads use `yp` or no-y components.
+- The Y-mirror DDFs read in our apply_freeslip_y workflow (fhn[4], fhn[8], fhn[12], fhn[18]) **come from yp-direction neighbors** — these are FLUID cells (y=1), NOT polluted by periodic-wrap.
+- The only "polluted" reads are fhn[14] (from j[13]=top wall via wrap) and fhn[13] (written to j[13]). **Both are OVERWRITTEN by our reflection assignment `fhn[14] = fhn[8]` anyway.**
+
+**Conclusion: Ansatz B would NOT improve the result for our apply_freeslip_y reflection logic.** The remaining 12× drag overshoot is NOT from periodic-wrap pollution — it's something else in the EP-Pull mechanic. Modifying `neighbors()` is therefore **NOT recommended** as it would add architectural complexity without measurable benefit.
 
 **Recommendation for next steps:** the sym-plane work has hit a confirmed architectural wall. The 5× drag overshoot vs OpenFOAM RANS (Volldomain Fx = 2 219 N vs expected ~400-600 N) is now best addressed via:
 - **Werner-Wengle wall model** (Roadmap item #3 in README): impact 1.5-3× drag reduction, independent of sym-plane architecture, ~3-5 days implementation. **This is the recommended next step.**
