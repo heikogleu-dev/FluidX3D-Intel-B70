@@ -188,6 +188,10 @@ The Volldomain (CC#6-Full) is currently the production-default (`CC6_MODE=1` in 
 
 The current absolute drag is ~2 200 N for the Volldomain reference, against an OpenFOAM RANS reference of ~400–600 N — i.e. **~5× too high**. The plan is to close this gap stepwise:
 
+### Session detail logs
+
+- [findings/SESSION_2026-05-11_SUMMARY.md](findings/SESSION_2026-05-11_SUMMARY.md) — Full investigation of half-domain symmetry-plane: 11 variants tested, Esoteric-Pull architecture diagnosis, configuration audit, recommended path forward.
+
 ### Open work items (priority order, with feasibility verdicts)
 
 | # | Task | Effort in FluidX3D | Reference impl | Feasibility |
