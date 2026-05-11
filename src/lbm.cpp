@@ -140,6 +140,7 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_object_torque = Kernel(device, N, "object_torque", F, flags, (uchar)0u, 0.0f, 0.0f, 0.0f, object_sum);
 #endif // FORCE_FIELD
 
+	kernel_apply_freeslip_y = Kernel(device, N, "apply_freeslip_y", fi, flags, t); // CC#9 post-stream sym-plane
 #ifdef MOVING_BOUNDARIES
 	kernel_update_moving_boundaries = Kernel(device, N, "update_moving_boundaries", u, flags);
 #endif // MOVING_BOUNDARIES
@@ -180,6 +181,9 @@ void LBM_Domain::enqueue_initialize() { // call kernel_initialize
 }
 void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to perform one LBM time step
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz).enqueue_run();
+}
+void LBM_Domain::enqueue_apply_freeslip_y() { // CC#9: post-stream specular reflection at TYPE_Y cells
+	kernel_apply_freeslip_y.set_parameters(2u, t).enqueue_run();
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
@@ -894,6 +898,7 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS

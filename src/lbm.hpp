@@ -48,6 +48,7 @@ private:
 #ifdef MOVING_BOUNDARIES
 	Kernel kernel_update_moving_boundaries; // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 #endif // MOVING_BOUNDARIES
+	Kernel kernel_apply_freeslip_y; // CC#9: post-stream specular reflection for TYPE_Y sym-plane cells
 #ifdef SURFACE
 	Kernel kernel_surface_0; // additional kernel for computing mass conservation and mass flux computation
 	Kernel kernel_surface_1; // additional kernel for flag handling
@@ -111,6 +112,7 @@ public:
 #ifdef MOVING_BOUNDARIES
 	void enqueue_update_moving_boundaries(); // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 #endif // MOVING_BOUNDARIES
+	void enqueue_apply_freeslip_y(); // CC#9: post-stream specular reflection at TYPE_Y cells
 #ifdef PARTICLES
 	void enqueue_integrate_particles(const uint time_step_multiplicator=1u); // intgegrates particles forward in time and couples particles to fluid
 #endif // PARTICLES

@@ -110,7 +110,28 @@ Net effect: the swap produces ~10 % drag reduction (a partial perturbation of th
 
 ### Architectural verdict
 
-After five distinct approaches (TYPE_E pseudo-sym, TYPE_Y inline swap, TYPE_Y inline assignment, TYPE_S Moving-Wall, TYPE_E|TYPE_Y Ghost-Cell-Mirror), all producing Fx in the 14 000-17 700 N range against a Volldomain reference of 2 219 N, we conclude: **a true specular-reflection symmetry plane is architecturally not feasible in FluidX3D without rewriting the Esoteric-Pull storage layer or adding a separate boundary-handler pass with parity-aware slot access.** This matches the upstream maintainer's own statement in [issue #288](https://github.com/ProjectPhysX/FluidX3D/issues/288): *"I'm stuck with the literal corner case in 3D where specular reflection of DDFs reflect them from space diagonals to axis-aligned directions … no solution to this in literature either."*
+After **SEVEN** distinct approaches (Session 2026-05-11 extended), all producing Fx in the 13 600-17 700 N range against a Volldomain reference of 2 219 N, we conclude: **a true specular-reflection symmetry plane is architecturally not feasible in FluidX3D without rewriting the Esoteric-Pull storage layer.**
+
+**Full attempt log:**
+1. CC#6-Half plain TYPE_E pseudo-sym → Fx = 16 177 N (velocity-Dirichlet pin)
+2. CC#7-V1 TYPE_Y inline swap → Fx = 14 472 N (EP-storage cancels swap)
+3. CC#7-V2 TYPE_Y inline one-way assignment (OpenLB pattern) → Fx = 14 386 N (bit-identical to V1)
+4. CC#7-Alt1 TYPE_S Moving-Wall at Y_min → Fx = 17 736 N (no-slip BL induced)
+5. CC#8 TYPE_E|TYPE_Y Ghost-Cell-Mirror in equilibrium-branch → Fx = 14 307 N (Dirichlet pin with mirror state)
+6. CC#9-V1 separate post-stream `apply_freeslip_y` kernel à la waLBerla, TYPE_Y as fluid → Fx ≈ 13 600 N (best so far, but 12× target; reflection on collision-relaxed DDFs)
+7. CC#9-V2 separate kernel + TYPE_Y early-return in stream_collide → Fx = 14 386 N (**bit-identical to CC#7-V2 inline**)
+
+**Crucial empirical finding (CC#9-V2 vs CC#7-V2):** the post-stream-kernel separation gives **bit-identical results** to the inline modification — proving that EP-storage layout is the genuine block, NOT kernel-boundary synchronization. Any approach that reads DDFs via `load_f`, modifies the local `fhn[]` array, and writes back via `store_f` will produce the same memory state, regardless of where in the pipeline it sits.
+
+**Upstream maintainer corroborates** in [issue #301](https://github.com/ProjectPhysX/FluidX3D/issues/301): *"I've been looking into free-slip boundaries for a long time, and have a beta implementation. However it only works normal to axis-aligned or edge diagonal directions. For space diagonals the DDF reflection method fails — as differently weighted DDFs from axis-aligned/edge diagonals with different lattice weights have to be reflected into one another, and there is no solution to this problem in literature."*
+
+Our D3Q19 case has NO space-diagonals (those exist only in D3Q27), so weight-mismatch is not the limitation here. The limitation is the EP-Pull layout itself: a "local" specular reflection at a sym-plane cell N0 requires writing to PDF locations that, in EP layout, are physically owned by N0's neighbors. When N0's `store_f` writes the reflected fhn[3] to "j[3]=N1 at slot t%2?4:3" (which is N1's self-storage), N1 reads that slot as its own fhn[3] in the next step — *but* the reflection's intended target slot for fhn[7]/fhn[13] etc. is split across non-EP-paired indices and lands at wrong neighbors (e.g., j[13]=(+x,-y) cell, which for sym-plane is outside the half-domain and periodic-wraps to a TYPE_E top wall cell where the value gets immediately overwritten).
+
+**Production default reverted to CC6_MODE=1 (Volldomain reference, Fx = 2 219 N).** All seven failed approaches are documented and preserved as compile-time variants `CC6_MODE=0..5` in `setup.cpp` plus deprecated `#if 0` blocks in `kernel.cpp`. CC#9 post-stream kernel infrastructure (kernel_apply_freeslip_y in lbm.hpp/cpp + enqueue after stream_collide) is retained — it does no harm when CC6_MODE!=5 since the kernel early-returns when no TYPE_Y cells exist.
+
+**Recommendation for next steps:** the sym-plane work has hit a confirmed architectural wall. The 5× drag overshoot vs OpenFOAM RANS (Volldomain Fx = 2 219 N vs expected ~400-600 N) is now best addressed via:
+- **Werner-Wengle wall model** (Roadmap item #3 in README): impact 1.5-3× drag reduction, independent of sym-plane architecture, ~3-5 days implementation. **This is the recommended next step.**
+- **Rotating wheels** (Roadmap item #4): FluidX3D has the API built-in, ~1 hour implementation. Lift correction.
 
 Production default reverted to `CC6_MODE=1` (Volldomain reference, Fx = 2 219 N). The deprecated TYPE_Y inline patch is preserved under `#if 0` in `kernel.cpp:1488` for documentation. CC#8 ghost-mirror remains available as `CC6_MODE=4` for users who prioritise compute time over correctness (~12 % drag reduction vs plain TYPE_E, but still order-of-magnitude wrong).
 

@@ -217,10 +217,11 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //
 // Ground clearance: 1 cell = 10 mm.
 // CC6_MODE: 0 = Halbdomain TYPE_E pseudo-sym (CC#6-Half, Drag 16k N — broken)
-//           1 = Volldomain (CC#6-Full, no symmetry — REFERENCE Drag 2.2k N) — DEFAULT
+//           1 = Volldomain (CC#6-Full, no symmetry — REFERENCE Drag 2.2k N)
 //           2 = Halbdomain TYPE_Y inline specular-reflection (CC#7-V1/V2 — FAILED, EP-storage no-op)
 //           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1 — FAILED, Drag 17.7k N)
 //           4 = Halbdomain TYPE_E|TYPE_Y Ghost-Cell-Mirror (CC#8 — FAILED, Drag 14.3k N)
+//           5 = Halbdomain TYPE_Y + separate post-stream apply_freeslip_y kernel (CC#9 — waLBerla pattern, FAILED ~13.5-14.4k)
 #define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
@@ -238,6 +239,9 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 #elif CC6_MODE==4
 	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_E|TYPE_Y Ghost-Cell-Mirror an Y_min)
 	const string label = "CC#8-GHOST-MIRROR";
+#elif CC6_MODE==5
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_Y + post-stream apply_freeslip_y kernel)
+	const string label = "CC#9-POSTSTREAM-FREESLIP";
 #else
 	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_E pseudo-sym an Y_min)
 	const string label = "CC#6-HALF";
@@ -308,6 +312,10 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 		} else if(y==0u) {                        // CC#8: Y_min = TYPE_E|TYPE_Y Ghost-Cell-Mirror
 			lbm.flags[n] = TYPE_E | TYPE_Y;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; // initial; kernel overrides w/ mirror per step
+#elif CC6_MODE==5
+		} else if(y==0u) {                        // CC#9: Y_min = TYPE_Y, processed by post-stream apply_freeslip_y kernel
+			lbm.flags[n] = TYPE_Y;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 #endif
 		} else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { // Inlet/Outlet/Y_min(CC#6-Half:TYPE_E)/Y_max/Decke: TYPE_E free-stream
 			lbm.flags[n] = TYPE_E;
@@ -342,6 +350,8 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc7_alt1_moving.csv";
 #elif CC6_MODE==4
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc8_ghost_mirror.csv";
+#elif CC6_MODE==5
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc9_poststream_freeslip.csv";
 #else
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_half.csv";
 #endif
