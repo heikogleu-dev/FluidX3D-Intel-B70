@@ -144,6 +144,9 @@ void LBM_Domain::allocate(Device& device) {
 #ifdef MOVING_BOUNDARIES
 	kernel_update_moving_boundaries = Kernel(device, N, "update_moving_boundaries", u, flags);
 #endif // MOVING_BOUNDARIES
+#ifdef WALL_MODEL_VEHICLE
+	kernel_apply_wall_model_vehicle = Kernel(device, N, "apply_wall_model_vehicle", u, flags); // CC#10 WW wall model
+#endif // WALL_MODEL_VEHICLE
 
 #ifdef SURFACE
 	phi = Memory<float>(device, N);
@@ -185,6 +188,11 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 void LBM_Domain::enqueue_apply_freeslip_y() { // CC#9: post-stream specular reflection at TYPE_Y cells
 	kernel_apply_freeslip_y.set_parameters(2u, t).enqueue_run();
 }
+#ifdef WALL_MODEL_VEHICLE
+void LBM_Domain::enqueue_apply_wall_model_vehicle() { // CC#10: Werner-Wengle wall model on vehicle cells
+	kernel_apply_wall_model_vehicle.enqueue_run();
+}
+#endif // WALL_MODEL_VEHICLE
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
 	if(t!=t_last_update_fields) { // only run kernel_update_fields if the time step has changed since last update
@@ -369,6 +377,7 @@ string LBM_Domain::device_defines() const { return
 
 	"\n	#define def_c 0.57735027f" // lattice speed of sound c = 1/sqrt(3)*dt
 	"\n	#define def_w " +to_string(1.0f/get_tau())+"f" // relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
+	"\n	#define def_nu " +to_string(this->nu)+"f" // CC#10: kinematic viscosity in LB units (for wall model)
 #if defined(D2Q9)
 	"\n	#define def_w0 (1.0f/2.25f)" // center (0)
 	"\n	#define def_ws (1.0f/9.0f)" // straight (1-4)
@@ -439,6 +448,10 @@ string LBM_Domain::device_defines() const { return
 #ifdef MOVING_BOUNDARIES
 	"\n	#define MOVING_BOUNDARIES"
 #endif // MOVING_BOUNDARIES
+
+#ifdef WALL_MODEL_VEHICLE
+	"\n	#define WALL_MODEL_VEHICLE" // CC#10: Werner-Wengle wall model on vehicle cells
+#endif // WALL_MODEL_VEHICLE
 
 #ifdef EQUILIBRIUM_BOUNDARIES
 	"\n	#define EQUILIBRIUM_BOUNDARIES"
@@ -897,6 +910,12 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 #ifdef SURFACE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
+#ifdef WALL_MODEL_VEHICLE
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_model_vehicle(); // CC#10: Werner-Wengle wall model on vehicle cells BEFORE stream_collide
+#ifdef MOVING_BOUNDARIES
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_update_moving_boundaries(); // refresh TYPE_MS flags after wall model updates u_solid
+#endif // MOVING_BOUNDARIES
+#endif // WALL_MODEL_VEHICLE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
 #if defined(SURFACE) || defined(GRAPHICS)

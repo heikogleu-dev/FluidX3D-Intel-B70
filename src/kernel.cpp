@@ -1468,6 +1468,57 @@ string opencl_c_container() { return R( // ########################## begin of O
 
 
 
+// CC#10: Werner-Wengle wall model for vehicle cells (TYPE_S|TYPE_X).
+// Runs BEFORE stream_collide each step. For each vehicle cell, averages u over fluid neighbors (u_2 proxy),
+// computes u_tau via WW PowerLaw closed form (no Newton-Raphson), derives u_slip at y_1=0.5lu, writes
+// u[wall_cell] = u_slip * direction(u_avg). Krueger Moving-Wall (apply_moving_boundaries) then transfers
+// the slip into the fluid via the standard bounce-back+forcing pattern.
+// References: Werner&Wengle 1991, Han/Chen/Sagaut 2021 (Phys Fluids 33), Krueger LBM Book Ch. 5.3.4
+)+"#ifdef WALL_MODEL_VEHICLE"+R(
+)+R(kernel void apply_wall_model_vehicle(global float* u, const global uchar* flags) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N||is_halo(n)) return;
+	const uchar fn = flags[n];
+	if((fn & (TYPE_S|TYPE_X)) != (TYPE_S|TYPE_X)) return; // only vehicle surface cells
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	float ux_avg = 0.0f, uy_avg = 0.0f, uz_avg = 0.0f;
+	uint count = 0u;
+	for(uint i=1u; i<def_velocity_set; i++) {
+		const uchar fj = flags[j[i]];
+		if(!(fj & (TYPE_S|TYPE_E|TYPE_T))) { // fluid/interface neighbor
+			ux_avg += u[              j[i]];
+			uy_avg += u[def_N+(ulong)j[i]];
+			uz_avg += u[2ul*def_N+(ulong)j[i]];
+			count++;
+		}
+	}
+	if(count == 0u) return; // interior solid voxel, no fluid neighbor
+	const float inv_count = 1.0f/(float)count;
+	ux_avg *= inv_count;
+	uy_avg *= inv_count;
+	uz_avg *= inv_count;
+	const float u_t_mag = sqrt(ux_avg*ux_avg + uy_avg*uy_avg + uz_avg*uz_avg);
+	if(u_t_mag < 1e-6f) return; // skip stagnation cells
+	// Werner-Wengle PowerLaw closed form, y_2 = 1 lu (one-cell normal distance)
+	const float nu = def_nu;
+	const float u_visc2 = 2.0f*nu*u_t_mag;
+	const float u_log2  = 0.0246384f * pow(nu, 0.25f) * pow(u_t_mag, 1.75f);
+	const float u_tau   = sqrt(max(u_visc2, u_log2));
+	// u_1 at y_1 = 0.5 lu (cell-center distance to wall in half-way bounce-back)
+	const float y1plus  = 0.5f * u_tau / nu;
+	const float uplus_1 = (y1plus <= 11.81f) ? y1plus : 8.3f * pow(y1plus, 1.0f/7.0f);
+	float u_slip_mag    = uplus_1 * u_tau;
+	if(u_slip_mag > 0.95f*u_t_mag) u_slip_mag = 0.95f*u_t_mag; // safety cap
+	const float scale = u_slip_mag / u_t_mag;
+	u[              n] = scale * ux_avg;
+	u[def_N+(ulong)n ] = scale * uy_avg;
+	u[2ul*def_N+(ulong)n] = scale * uz_avg;
+} // apply_wall_model_vehicle()
+)+"#endif"+R( // WALL_MODEL_VEHICLE
+
+
+
 )+"#ifdef MOVING_BOUNDARIES"+R(
 )+R(kernel void update_moving_boundaries(const global float* u, global uchar* flags) { // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx

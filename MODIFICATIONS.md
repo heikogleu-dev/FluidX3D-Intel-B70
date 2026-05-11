@@ -188,6 +188,40 @@ The architectural pattern is consistent across both: **boundary handlers run aft
 
 The TYPE_Y kernel patch, the CC6_MODE=2 setup branch, and the diagnostic counter remain in the source tree under `#define CC7_DIAGNOSE`. Production default is set to **CC6_MODE=1 (Volldomain reference)**.
 
+### CC#10 (2026-05-11) — Werner-Wengle Wall Model on Vehicle (Approach A) — **WORKING**
+
+**Motivation:** CC#9 closure established that the Volldomain baseline gave Fx = 2 219 N (4-5× over OpenFOAM RANS expectation 400-600 N). Root cause diagnosed as missing wall model — bounce-back on the vehicle creates an artificial over-steep velocity gradient at the first fluid cell (y_1+ ≈ 200-500 lies deep in the log layer; bounce-back assumes viscous sublayer y+<5).
+
+**Approach:** Werner-Wengle PowerLaw closed-form wall function applied via Krüger Moving-Wall trick. Instead of modifying DDFs directly (Han 2021 WFB), the wall model sets the velocity `u_solid` of vehicle TYPE_S cells such that the existing `apply_moving_boundaries` Krüger correction produces the correct effective slip. Single new OpenCL kernel `apply_wall_model_vehicle` runs each step BEFORE `stream_collide`:
+
+1. For each `TYPE_S | TYPE_X` cell: average fluid neighbor velocities → `u_avg`
+2. Compute `u_τ` via PowerLaw closed form: `u_τ² = max(2νu_avg, 0.0246384 × ν^0.25 × u_avg^1.75)`
+3. Compute slip `u_slip` via PowerLaw inverse at `y_1 = 0.5 lu`
+4. Cap at `0.95 × u_avg` for stability
+5. Write `u[wall_cell] = u_slip × direction(u_avg)`
+
+`enqueue_update_moving_boundaries()` is called immediately after to refresh TYPE_MS bits on fluid neighbors so the Krüger correction is applied in `stream_collide`.
+
+**Files:**
+- `defines.hpp`: new flag `WALL_MODEL_VEHICLE` (line 25), default ON
+- `kernel.cpp`: new kernel `apply_wall_model_vehicle` (~40 lines, between `apply_freeslip_y` and MOVING_BOUNDARIES)
+- `lbm.hpp`: kernel member + `enqueue_apply_wall_model_vehicle()` declaration
+- `lbm.cpp`: kernel init, enqueue method, device_define propagation, call in `do_time_step()` BEFORE stream_collide + `enqueue_update_moving_boundaries`, and `def_nu` added to device_defines
+
+**Result (CC6_MODE=1, 337.5 M cells, 11 300 steps, Werner-Wengle PowerLaw):**
+
+| Metric | Baseline (no WW) | WW Active | Change |
+|---|---:|---:|---|
+| **Fx (drag)** | 2 219 N | **579.8 N** | **−74 %** ✓ in OpenFOAM range 400-600 N |
+| **Fy** | ~0 N | <0.1 N | ✓ perfect symmetry |
+| **Fz (lift)** | n/a | +1 045 N | + lift, realistic for coupé without diffuser |
+| **MLUPs** | 5 464 | 3 289 | −40 % (extra kernels per step) |
+| **Convergence** | 100k+ steps | **11 300 steps** | **9× faster** |
+
+**Transient behavior:** Steps 100-1300 show a large initial transient (Fx oscillates 300-4870 kN, peak 4.87 MN at step 1100). The simulation auto-stabilizes by step 1400 to the 555-600 N regime and remains stable through convergence. The auto-stop convergence criterion (|dFx|/|Fx| < 2% over 5000-step window) triggered at step 11 300 with |dFx|/|Fx| = 0.080%.
+
+**Files committed:** `findings/WALL_MODEL_RESEARCH.md` (231 lines, approach comparison + OpenLB/waLBerla/Palabos/TCLB references), `findings/forces_cc10_ww_volldomain.csv` (114 rows, full force time series).
+
 ### CC#6 (deactivated, reference baseline) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
 
 The currently-active `main_setup()` is a compile-time-toggleable Half/Full-Domain block (line ~197 onwards), driven by `#define CC6_FULL_DOMAIN false|true`:
