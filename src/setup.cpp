@@ -217,9 +217,10 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //
 // Ground clearance: 1 cell = 10 mm.
 // CC6_MODE: 0 = Halbdomain TYPE_E pseudo-sym (CC#6-Half, Drag 16k N — broken)
-//           1 = Volldomain (CC#6-Full, no symmetry — reference Drag 2.2k N) — DEFAULT
-//           2 = Halbdomain TYPE_Y specular-reflection sym-plane (CC#7 — FAILED, Drag 14.5k N)
+//           1 = Volldomain (CC#6-Full, no symmetry — REFERENCE Drag 2.2k N) — DEFAULT
+//           2 = Halbdomain TYPE_Y inline specular-reflection (CC#7-V1/V2 — FAILED, EP-storage no-op)
 //           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1 — FAILED, Drag 17.7k N)
+//           4 = Halbdomain TYPE_E|TYPE_Y Ghost-Cell-Mirror (CC#8 — FAILED, Drag 14.3k N)
 #define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
@@ -229,11 +230,14 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const uint3 lbm_N = uint3(1500u, 500u, 450u);  // 337.5 M Cells: 15m × 5m × 4.5m (Volldomain, Y[-2.5,+2.5m])
 	const string label = "CC#6-FULL";
 #elif CC6_MODE==2
-	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_Y specular sym an Y_min)
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_Y inline sym — FAILED)
 	const string label = "CC#7-HALF-SYM";
 #elif CC6_MODE==3
-	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_S moving-wall sym-approx an Y_min)
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_S moving-wall sym-approx an Y_min — FAILED)
 	const string label = "CC#7-ALT1-MOVING";
+#elif CC6_MODE==4
+	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_E|TYPE_Y Ghost-Cell-Mirror an Y_min)
+	const string label = "CC#8-GHOST-MIRROR";
 #else
 	const uint3 lbm_N = uint3(1500u, 250u, 450u);  // 168.75 M Cells: 15m × 2.5m × 4.5m (Halbdomain, TYPE_E pseudo-sym an Y_min)
 	const string label = "CC#6-HALF";
@@ -293,13 +297,17 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 			lbm.flags[n] = TYPE_S;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 #if CC6_MODE==2
-		} else if(y==0u) {                        // CC#7: Y_min Symmetrieebene = TYPE_Y specular reflection
+		} else if(y==0u) {                        // CC#7: Y_min = TYPE_Y inline sym (FAILED, EP-storage)
 			lbm.flags[n] = TYPE_Y;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 #elif CC6_MODE==3
-		} else if(y==0u) {                        // CC#7-Alt1: Y_min = TYPE_S Moving-Wall (u_x=lbm_u, u_y=0, u_z=0) — sym-approx via no-y-flow
+		} else if(y==0u) {                        // CC#7-Alt1: Y_min = TYPE_S Moving-Wall (FAILED)
 			lbm.flags[n] = TYPE_S;
 			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+#elif CC6_MODE==4
+		} else if(y==0u) {                        // CC#8: Y_min = TYPE_E|TYPE_Y Ghost-Cell-Mirror
+			lbm.flags[n] = TYPE_E | TYPE_Y;
+			lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; // initial; kernel overrides w/ mirror per step
 #endif
 		} else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { // Inlet/Outlet/Y_min(CC#6-Half:TYPE_E)/Y_max/Decke: TYPE_E free-stream
 			lbm.flags[n] = TYPE_E;
@@ -332,6 +340,8 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc7_half_sym.csv";
 #elif CC6_MODE==3
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc7_alt1_moving.csv";
+#elif CC6_MODE==4
+	const string force_csv_path = get_exe_path()+"../bin/forces_cc8_ghost_mirror.csv";
 #else
 	const string force_csv_path = get_exe_path()+"../bin/forces_cc6_half.csv";
 #endif

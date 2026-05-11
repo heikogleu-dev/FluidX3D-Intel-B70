@@ -1485,21 +1485,23 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t); // perform streaming (part 2)
 
-	// CC#7 SYM_PLANE_Y: specular reflection at TYPE_Y cells (D3Q19 only).
-	// Y-mirror DDF pairs: (3,4) (7,13) (8,14) (11,18) (12,17). Cell acts as DDF-mirror-relay,
-	// no collision/forces. Esoteric-Pull-konsistent via load_f/store_f.
+	// DEPRECATED: CC#7-V1/V2 TYPE_Y inline specular reflection (swap AND one-way assignment
+	// were both tried, both produced bit-identical Fx≈14400 N — Esoteric-Pull layout effectively
+	// neutralises inline DDF modifications at TYPE_Y cells). Kept under #if 0 for documentation.
+	// See MODIFICATIONS.md CC#7 section. Working solution is CC#8 Ghost-Cell-Mirror below.
+)+"#if 0"+R(
 	if(flagsn&TYPE_Y) {
 )+"#if defined(D3Q19)"+R(
-		float ymtmp;
-		ymtmp = fhn[3];  fhn[3]  = fhn[4];  fhn[4]  = ymtmp;
-		ymtmp = fhn[7];  fhn[7]  = fhn[13]; fhn[13] = ymtmp;
-		ymtmp = fhn[8];  fhn[8]  = fhn[14]; fhn[14] = ymtmp;
-		ymtmp = fhn[11]; fhn[11] = fhn[18]; fhn[18] = ymtmp;
-		ymtmp = fhn[12]; fhn[12] = fhn[17]; fhn[17] = ymtmp;
+		fhn[3]  = fhn[4];
+		fhn[7]  = fhn[13];
+		fhn[14] = fhn[8];
+		fhn[11] = fhn[18];
+		fhn[17] = fhn[12];
 		store_f(n, fhn, fi, j, t);
 )+"#endif"+R( // D3Q19
 		return;
 	}
+)+"#endif"+R( // 0
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
 	if(flagsn_bo==TYPE_MS) apply_moving_boundaries(fhn, j, u, flags); // apply Dirichlet velocity boundaries if necessary (reads velocities of only neighboring boundary cells, which do not change during simulation)
@@ -1510,10 +1512,22 @@ string opencl_c_container() { return R( // ########################## begin of O
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
-		rhon = rho[               n]; // apply preset velocity/density
-		uxn  = u[                 n];
-		uyn  = u[    def_N+(ulong)n];
-		uzn  = u[2ul*def_N+(ulong)n];
+		// CC#8 Ghost-Cell-Mirror: TYPE_E with TYPE_Y bit → equilibrium uses MIRROR state of +y neighbor
+		// (u_y → -u_y), so the sym-plane cell emits equilibrium DDFs that represent the y<0 mirror image.
+		// Race-tolerant: reads u/rho of +y neighbor; either current-step or previous-step value is acceptable
+		// (1-step delay introduces no steady-state error). j[3] = +y neighbor in c_3 direction.
+		if(flagsn&TYPE_Y) {
+			const uxx j_yp1 = j[3]; // +y neighbor at y+1
+			rhon = rho[               j_yp1];
+			uxn  = u[                 j_yp1];
+			uyn  = -u[    def_N+(ulong)j_yp1]; // MIRROR: flip y-component
+			uzn  = u[2ul*def_N+(ulong)j_yp1];
+		} else {
+			rhon = rho[               n]; // apply preset velocity/density
+			uxn  = u[                 n];
+			uyn  = u[    def_N+(ulong)n];
+			uzn  = u[2ul*def_N+(ulong)n];
+		}
 	} else {
 		calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
 	}
