@@ -12,3 +12,10 @@ _portbackup/
 # scenes/ symlink to user data drive (CFD-EXC), not committed
 # Users provide their own STLs under scenes/
 scenes
+
+# Large vehicle STLs in repo root (user-provided, > GitHub 100 MB limit).
+# Tracked: ahmed_25.stl, ahmed_35.stl (small synthetic geometry, reproducible).
+vehicle-alt.stl
+vehicle-alt-bin.stl
+vehicle-mr2.stl
+vehicle-mr2-bin.stl

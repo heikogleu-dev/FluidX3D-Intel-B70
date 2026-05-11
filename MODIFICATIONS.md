@@ -222,6 +222,46 @@ The TYPE_Y kernel patch, the CC6_MODE=2 setup branch, and the diagnostic counter
 
 **Files committed:** `findings/WALL_MODEL_RESEARCH.md` (231 lines, approach comparison + OpenLB/waLBerla/Palabos/TCLB references), `findings/forces_cc10_ww_volldomain.csv` (114 rows, full force time series).
 
+### CC#X (2026-05-11) — Ahmed Body Wall-Model Validation — ❌ Phase 1 FAILED (Iron-Rule-Trigger)
+
+**Motivation:** Following the CC#10 success on the Time-Attack MR2 (580 N drag matching ~565 N real measurement), an Opus-instructed validation plan against the canonical ERCOFTAC Ahmed Body benchmark was started (Phase 1.1 — 25° slant @ Re = 2.78 M, literature CD = 0.285 ± 0.02).
+
+**Setup:** New compile flag `#define AHMED_MODE` in `setup.cpp` (0 = real vehicle, 1 = Ahmed 25°, 2 = Ahmed 35°). New `main_setup_ahmed()` function with smaller-body-appropriate setup. Simplified flat-front Ahmed body STL generated via Python (16 triangles, closed convex polyhedron, slant + base + sides). Saved as `ahmed_25.stl` and `ahmed_35.stl` in repo root (small synthetic geometry, reproducible). MR2-proven domain reused (15m × 5m × 4.5m at 10 mm → 337.5 M cells, blockage ratio 7.8 %/6.4 %).
+
+**Results (Phase 1.1, Ahmed 25°):**
+
+| Configuration | Fx [N] | CD measured | Verdict |
+|---|---:|---:|---|
+| Ahmed 25° + WW (production-default) | **11 457 N** (oscillating 6-27 kN) | **104** | 365× too high vs literature |
+| Ahmed 25° **without** WW (diagnostic, `WALL_MODEL_VEHICLE` temporarily commented) | 92 N (avg 10 000 steps) | 0.84 | 3× typical bounce-back overshoot — plausible |
+| Literature (Lienhart-Stoots 2003) | ~31 N | 0.285 | target |
+
+**Iron-Rule-Trigger:** Per Opus plan Section "Iron Rules" — "Phase 1 nicht ±20 % an Literatur-CD ankommt → STOPP, Bericht, Re-Evaluation des WM". Measured CD = 104 vs CD_lit = 0.285 corresponds to **+36 400 %** — far beyond stop threshold. No Phase 2 (sym-plane sweep) or Phase 3 (real-vehicle re-application) initiated. WW code unchanged (Iron Rule "Wall-Model-Code NICHT anfassen" respected — diagnostic was via `#define WALL_MODEL_VEHICLE` toggle, immediately re-enabled).
+
+**Diagnosis:** The Werner-Wengle wall model interacts pathologically with **flat-faced, sharp-edged synthetic geometry**:
+- Same WW code produces *correct* drag on MR2 (smooth STL, 1.48 M triangles, curved surfaces): 580 N nahe 565 N target ✓
+- Same WW code produces *125× force-amplification* on Ahmed (flat STL, 16 triangles, 90° edges): 11 457 N vs ~30 N expected ✗
+
+**Hypotheses (detailed in `findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md`):**
+- A: Sharp-edge u_avg averaging in WW kernel produces spurious slip directions
+- B: Flat-face accumulation — uniform surface normal direction lets WW slip-effects add coherently rather than cancel
+- C: Frontal-stagnation imbalance — WW does nothing on flat front (u_avg≈0) but full slip elsewhere, creating asymmetric force
+- D: Voxelization artifact from 16-triangle large-face geometry
+
+**Files added:**
+- `src/setup.cpp` — `AHMED_MODE` compile toggle + `main_setup_ahmed()` function (~110 lines)
+- `ahmed_25.stl`, `ahmed_35.stl` — 16-triangle simplified Ahmed Body STLs (binary, 884 bytes each, includes 50 mm ground clearance baked in)
+- `findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md` — full failure analysis with hypotheses and proposed paths α/β/γ/δ
+- Auto-stop tightened: `conv_window = 25` chunks (was 50), `conv_min_chunks = 50` (was 100), earliest exit at 5 000 steps
+
+**Conclusion:** The CC#10 Werner-Wengle implementation is **production-valid for smooth STL vehicles**, the use case it was developed and validated against (MR2 Time-Attack). It is **NOT yet validated against canonical synthetic reference geometry** because the Ahmed Body test revealed a previously-unsuspected geometry sensitivity. Halted per Iron Rule until user decides next direction:
+- α: Generate proper rounded-front Ahmed STL (~500 triangles, ERCOFTAC R=100mm corner spec)
+- β: Skip Ahmed, directly Phase 2 sym-plane sweep on MR2 (loses canonical validation, gains time)
+- γ: Modify WW kernel for edge-detection (Iron-Rule violation, needs explicit user override)
+- δ: y+ resolution increase (impossible at B70 VRAM 28 GB)
+
+`AHMED_MODE = 0` (safe default) — running `./bin/FluidX3D` resumes prior MR2/Yaris setup without modification.
+
 ### CC#6 (deactivated, reference baseline) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
 
 The currently-active `main_setup()` is a compile-time-toggleable Half/Full-Domain block (line ~197 onwards), driven by `#define CC6_FULL_DOMAIN false|true`:

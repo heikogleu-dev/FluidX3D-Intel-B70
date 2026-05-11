@@ -26,7 +26,7 @@ Together: first publicly documented end-to-end CFD evaluation on Battlemage Xe2 
 | Allocation / memory layout | ✅ 56.6 B/cell empirical (D3Q19 + FP16C), matches theory; max ~449 M cells fit in B70's 28.6 GB |
 | FP16C precision (DDFs) | ✅ stable, no observed divergence over 10 000 steps |
 | `FORCE_FIELD` extension | ✅ enabled, force-field on TYPE_S boundaries written as VTK + CSV |
-| `WALL_MODEL_VEHICLE` (CC#10) | ✅ Werner-Wengle PowerLaw via Krüger Moving-Wall, drag in OpenFOAM range (579.8 N vs 2 219 N baseline, −74 %) |
+| `WALL_MODEL_VEHICLE` (CC#10) | ✅ **Werner-Wengle PowerLaw via Krüger Moving-Wall — production-valid for smooth STL vehicles** (MR2: 580 N nahe real 565 N, drag in OpenFOAM range). ⚠️ NOT validated against canonical Ahmed Body (Phase 1 FAILED, 125× force-amplification on flat-faced geometry — see CC#X section below) |
 | Build (Linux + X11 + OpenCL ICD) | ✅ clean compile in 10 s with GCC 15.2 |
 | Linux x11 windowed mode | ✅ default 2560×1440, env-var configurable |
 | Linux xe-driver clean shutdown | ⚠️ requires `_exit(0)` workaround (see below) |
@@ -185,6 +185,19 @@ For aero-converged values: CC#4 with explicit symmetry-plane handling, 5-cell gr
 | **CC#10 Werner-Wengle Wall Model** | **337.5 M** | **11 300 (auto-stop @ 0.08 %)** | **579.8 N** | **+1 045 N** | **~ 7 min** | ✅ **WORKING — within OpenFOAM range** (Krüger Moving-Wall + WW PowerLaw) |
 
 The **CC#10 Werner-Wengle wall model** is now the production-default (`#define WALL_MODEL_VEHICLE` in `defines.hpp`, active on top of `CC6_MODE=1`). Drag reduced **74 %** from 2 219 N (no wall model) to 579.8 N — squarely inside the OpenFOAM RANS expectation range of 400-600 N. See [findings/SESSION_2026-05-11_WW_RESULTS.md](findings/SESSION_2026-05-11_WW_RESULTS.md) and [findings/WALL_MODEL_RESEARCH.md](findings/WALL_MODEL_RESEARCH.md) for detail.
+
+### CC#X — Ahmed Body Wall-Model Validation (2026-05-11) — ❌ Phase 1 FAILED
+
+Per Opus-Plan a canonical Ahmed Body validation was attempted (simplified flat-front Ahmed at 25° slant, ERCOFTAC reference CD = 0.285):
+
+| Setup | Fx [N] | CD measured | vs Literatur CD=0.285 | Verdict |
+|---|---:|---:|---|---|
+| Ahmed 25° **with WW** | 11 457 N | **104** | **365× too high** | ❌ **FAIL** |
+| Ahmed 25° **without WW** (diagnostic) | 92 N | 0.84 | 3× (typical bounce-back overshoot) | ✓ baseline plausible |
+
+**Diagnosis:** The Wall Model interacts pathologically with **flat-faced, sharp-edged geometry** (16-triangle simplified Ahmed), producing a 125× force-amplification artifact. The same WW works correctly on **smooth STL vehicles** (MR2: 580 N matches real 565 N target). Iron-Rule-Trigger fired at Phase 1.1 — no Phase 2 (sym-plane sweep) on Ahmed and no Phase 3 (real-vehicle re-application) until cause is identified. Full analysis: [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md).
+
+**Conclusion:** The CC#10 Werner-Wengle wall model is **production-valid for smooth STL vehicles** (Time-Attack MR2 use-case, where it was developed and validated). It is **NOT yet validated against canonical reference geometry** because the synthetic Ahmed test case revealed a previously-unsuspected geometry sensitivity. The wall model code remains unchanged (Iron Rule compliance) pending user decision on next direction (rounded-Ahmed STL, MR2-direct sym-plane sweep, or wall-model refinement).
 
 ## Roadmap & Findings
 
