@@ -178,6 +178,9 @@ For aero-converged values: CC#4 with explicit symmetry-plane handling, 5-cell gr
 | **CC#7-V2 TYPE_Y one-way assignment** | 168.75 M | 5 000 (manual stop) | 14 386 N | -102 N | ~ 3 min | FAILED: bit-identical to V1 swap (EP cancels inline mod) |
 | **CC#7-Alt1 TYPE_S Moving Y_min** | 168.75 M | 5 000 (manual stop) | 17 736 N | -240 N | ~ 3 min | FAILED: u_z=0 at sym-plane induces BL |
 | **CC#8 TYPE_E\|TYPE_Y Ghost-Cell-Mirror** | 168.75 M | ~13 000 (auto-stop) | ~14 300 N | -100 N | ~ 7 min | FAILED: equilibrium-projection is Dirichlet BC, not specular reflection |
+| **CC#9-V1..V5 various** | 168.75 M | 5-12 k | 13-14k N | -100 N | varied | All FAILED: only 19% reduction vs CC#6-Half |
+| **CC#9-V6 Cut-surface strip** (Mode 0 + strip TYPE_X y=0) | 168.75 M | 5 000 | 13 206 N | -50 N | ~ 3 min | partial fix: 20% reduction (user hypothesis confirmed) |
+| **CC#9-V7 = Mode 5 + V6** | 168.75 M | 5 000 | 13 046 N | -43 N | ~ 3 min | best half-domain achievable: 22% reduction (still 12× target) |
 
 The Volldomain (CC#6-Full) is currently the production-default (`CC6_MODE=1` in `setup.cpp`). Half-domain handling with a true symmetry plane is documented under [Roadmap](#roadmap--findings) below.
 

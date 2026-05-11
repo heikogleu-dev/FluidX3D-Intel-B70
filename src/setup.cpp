@@ -222,9 +222,9 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 //           3 = Halbdomain TYPE_S Moving-Wall am Y_min (CC#7-Alt1 — FAILED, Drag 17.7k N)
 //           4 = Halbdomain TYPE_E|TYPE_Y Ghost-Cell-Mirror (CC#8 — FAILED, Drag 14.3k N)
 //           5 = Halbdomain TYPE_Y + separate post-stream apply_freeslip_y kernel (CC#9 — waLBerla pattern, FAILED ~13.5-14.4k)
-// CC#9-V6: USER hypothesis test — vehicle cut-surface at y=0 contaminates object_force via
-// periodic-wrap to TYPE_E top wall. Strip TYPE_X from those cells. Tested on Mode 0 baseline.
-#define CC6_MODE 0
+// V6 strip-TYPE_X-from-y=0 patch applies to all half-domain modes (0,2,3,4,5) — gives ~20% drag reduction.
+// V7 = Mode 5 + V6 was the best combined half-domain achievable: Fx ≈ 14045 N (still 12× target).
+#define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.

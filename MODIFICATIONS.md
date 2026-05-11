@@ -138,6 +138,25 @@ Three more variants tested after CC#9-V1/V2:
 
 **Maximum drag reduction achievable across all 9 sym-plane variants tested: from CC#6-Half 16 177 N (plain TYPE_E) down to CC#9-V3 13 016 N = 19.5 %. Target reduction required: 93 % (down to ~1 110 N).**
 
+### Session 2026-05-11 final: CC#9-V6/V7 — user hypothesis confirmed (partially)
+
+**User raised a sharp diagnostic question:** could the half-domain's vehicle "cut-surface" at y=0 be spuriously contributing to `object_force`? In Volldomain those cells would be interior (no fluid contact) with zero force; in Halbdomain they have TYPE_E top wall as -y neighbor via periodic-wrap.
+
+**CC#9-V6 patch (53e88e9):** after `voxelize_mesh_on_device`, scan the y=0 slice (Nx × Nz cells), strip TYPE_X bit from any vehicle cells found. They remain TYPE_S (solid in stream_collide) but are excluded from `object_force(TYPE_S|TYPE_X)`. Equivalent to user's "post-hoc filter real vehicle patches" approach.
+
+**V6 result** (Mode 0 baseline plain TYPE_E pseudo-sym + V6 strip): Fx = 13 206 N at step 5000 (50-chunk avg = 14 190 N). **20 % reduction vs CC#6-Half 16 177 N.**
+
+**CC#9-V7 (Mode 5 specular reflection + V6 strip combined):** Fx = 13 046 N at step 5000 (50-chunk avg = 14 045 N). **22 % reduction** — only marginally better than V6 alone. The two fixes (sym-plane reflection + cut-surface strip) **partially overlap** (combined reduction ≈ either alone, not additive).
+
+**Verdict:**
+- User's hypothesis CONFIRMED in part: cut-surface periodic-wrap pollution contributes ~20 % of the drag overshoot. **V6 is a legitimate fix and should be kept on for all half-domain modes.**
+- The remaining ~71 % overshoot (to reach the 93 % needed) is **flow-field-level pollution**: TYPE_E pseudo-stream at sym-plane distorts the velocity field near the vehicle, and that distortion is felt by the REAL vehicle surfaces (y >= 1) — NOT directly fixable via flag manipulation alone.
+- The remaining work would be: a TRUE specular-reflection BC that doesn't pin velocity to (lbm_u, 0, 0) at y=0 — requires either Ansatz B (multi-day kernel rewrite via modified `calculate_indices` for TYPE_Y cells) or a different LBM solver.
+
+V6 strip patch is now unconditional in setup.cpp for all half-domain modes (`#if CC6_MODE != 1`). Combined with the post-stream apply_freeslip_y kernel (Mode 5), the best half-domain result is **Fx ≈ 14 000 N average**. Still well above target, but ~14 % better than the original CC#6-Half (16 177 N).
+
+Production default remains CC6_MODE=1 (Volldomain reference, Fx = 2 219 N).
+
 After 9 distinct variants spanning swap/assignment/Moving-Wall/ghost-mirror/post-stream-kernel/different-pair-subsets/direct-slot-copy/vehicle-shift, all results cluster in the 13.0-17.7 k range. The achievable reduction is consistently ~20 %, far from the ~93 % needed. The Esoteric-Pull layout in combination with FluidX3D's periodic-by-default neighbor function is a true architectural block for sym-plane in half-domain.
 
 **The only remaining theoretical path "Ansatz B"** would modify FluidX3D's `calculate_indices()` to NOT periodic-wrap at TYPE_Y cell faces — a virtual ghost-layer returning "self" for the -y direction. Researched in detail (2026-05-11):
