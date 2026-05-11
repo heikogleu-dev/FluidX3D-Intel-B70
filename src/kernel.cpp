@@ -1446,20 +1446,22 @@ string opencl_c_container() { return R( // ########################## begin of O
 // stores via store_f. Runs AFTER stream_collide each step — kernel boundary forces global memory
 // sync so all stream_collide writes are visible before this kernel reads.
 )+R(kernel void apply_freeslip_y(global fpxx* fi, const global uchar* flags, const ulong t) {
+	// CC#9-V1..V5: tested (waLBerla pattern, single-pair (3,4), direct-slot-copy, vehicle-shift). Best result Fx=13.0k still
+	// 12x over target. EP-Pull layout is the genuine architectural block. See MODIFICATIONS.md.
 	const uxx n = get_global_id(0);
 	if(n>=(uxx)def_N||is_halo(n)) return;
-	if(!(flags[n]&TYPE_Y)) return; // only process TYPE_Y sym-plane cells
+	if(!(flags[n]&TYPE_Y)) return;
 	uxx j[def_velocity_set];
 	neighbors(n, j);
 	float fhn[def_velocity_set];
 	load_f(n, fhn, fi, j, t);
 )+"#if defined(D3Q19)"+R(
-	// Y-mirror DDF pairs for D3Q19 (target_index = mirror_index for c.y>0 directions):
-	fhn[3]  = fhn[4];   // c=(0,+1,0)  := c=(0,-1,0)
-	fhn[7]  = fhn[13];  // c=(+1,+1,0) := c=(+1,-1,0)
-	fhn[14] = fhn[8];   // c=(-1,+1,0) := c=(-1,-1,0)
-	fhn[11] = fhn[18];  // c=(0,+1,+1) := c=(0,-1,+1)
-	fhn[17] = fhn[12];  // c=(0,+1,-1) := c=(0,-1,-1)
+	// Y-mirror reflection (waLBerla / OpenLB pattern). All 5 mirror pairs.
+	fhn[3]  = fhn[4];
+	fhn[7]  = fhn[13];
+	fhn[14] = fhn[8];
+	fhn[11] = fhn[18];
+	fhn[17] = fhn[12];
 )+"#endif"+R( // D3Q19
 	store_f(n, fhn, fi, j, t);
 } // apply_freeslip_y()

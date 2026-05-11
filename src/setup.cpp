@@ -272,6 +272,8 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const float3 vctr  = vehicle->get_bounding_box_center();
 #if CC6_MODE==1
 	const float vehicle_y_target = (float)(lbm_N.y / 2u); // Volldomain: Y-mitte = Cell 250
+#elif CC6_MODE==5
+	const float vehicle_y_target = 1.0f;                  // CC#9-V5 DIAGNOSE: vehicle shifted up 1 cell to avoid periodic-wrap pollution of y=0 vehicle cells
 #else
 	const float vehicle_y_target = 0.0f;                  // Halbdomain: Y-Center auf 0 → Vehicle wird vom Y_min sym-plane mittig durchschnitten
 #endif
@@ -284,11 +286,19 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const float3 vmin = vehicle->pmin, vmax = vehicle->pmax;
 	print_info("Vehicle BBox after translate: X["+to_string(vmin.x,1u)+", "+to_string(vmax.x,1u)+"] Y["+to_string(vmin.y,1u)+", "+to_string(vmax.y,1u)+"] Z["+to_string(vmin.z,1u)+", "+to_string(vmax.z,1u)+"]");
 #if CC6_MODE!=1
+#if CC6_MODE==5
+	if(vmin.y > 1.5f || vmax.y < 0.5f) {
+		print_info("FATAL: CC#9-V5 Vehicle should sit just above y=0! Aborting.");
+		std::fflush(nullptr); _exit(2);
+	}
+	print_info("CC#9-V5 OK: Vehicle Y-bbox shifted up by 1 cell, no vehicle cells at y=0");
+#else
 	if(vmin.y > 0.5f || vmax.y < -0.5f) {
 		print_info("FATAL: Half-domain Vehicle does not cross Y=0! Aborting before voxelization.");
 		std::fflush(nullptr); _exit(2);
 	}
 	print_info("Halbdomain-Check OK: Vehicle Y-bbox crosses Y=0");
+#endif
 #endif
 
 	lbm.voxelize_mesh_on_device(vehicle, TYPE_S|TYPE_X); // Vehicle: TYPE_S|TYPE_X für object_force-Filter

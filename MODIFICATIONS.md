@@ -129,6 +129,19 @@ Our D3Q19 case has NO space-diagonals (those exist only in D3Q27), so weight-mis
 
 **Production default reverted to CC6_MODE=1 (Volldomain reference, Fx = 2 219 N).** All seven failed approaches are documented and preserved as compile-time variants `CC6_MODE=0..5` in `setup.cpp` plus deprecated `#if 0` blocks in `kernel.cpp`. CC#9 post-stream kernel infrastructure (kernel_apply_freeslip_y in lbm.hpp/cpp + enqueue after stream_collide) is retained — it does no harm when CC6_MODE!=5 since the kernel early-returns when no TYPE_Y cells exist.
 
+### Final session 2026-05-11: CC#9-V3/V4/V5 closure
+
+Three more variants tested after CC#9-V1/V2:
+- **CC#9-V3:** apply_freeslip_y with ONLY pair (3,4) reflected (no edge-diagonal pairs). Result: Fx = 13 016 N at step 2500. Edge-pairs contribute ~5 % at most — the dominant reduction is from (3,4) which is axis-aligned and theoretically should have NO EP-Pull conflict.
+- **CC#9-V4 ("Ansatz A"):** bypass `load_f`/`store_f` entirely, do direct slot-level `fi[N1, slot_b] = fi[N1, slot_a]` at the fluid neighbor's storage, avoiding TYPE_E top-wall periodic-wrap pollution at the sym-plane cell's own slots. Result: Fx = 13 647 N at step 2500. Still 12× target.
+- **CC#9-V5:** Vehicle shifted +1 cell in Y to test periodic-wrap-pollution hypothesis at vehicle's y=0 cut-surface cells. Result: Fx = 13 446 N. Shift is too small to actually clear y=0 (vehicle bbox -87.6..+89.6 still extends below y=0 and clipped at voxelization). Hypothesis cannot be cleanly tested without restructuring vehicle placement.
+
+**Maximum drag reduction achievable across all 9 sym-plane variants tested: from CC#6-Half 16 177 N (plain TYPE_E) down to CC#9-V3 13 016 N = 19.5 %. Target reduction required: 93 % (down to ~1 110 N).**
+
+After 9 distinct variants spanning swap/assignment/Moving-Wall/ghost-mirror/post-stream-kernel/different-pair-subsets/direct-slot-copy/vehicle-shift, all results cluster in the 13.0-17.7 k range. The achievable reduction is consistently ~20 %, far from the ~93 % needed. The Esoteric-Pull layout in combination with FluidX3D's periodic-by-default neighbor function is a true architectural block for sym-plane in half-domain.
+
+**The only remaining path to true sym-plane**: modify FluidX3D's `neighbors()` function to NOT periodic-wrap at TYPE_Y cell faces — i.e., a virtual ghost-layer that returns "self" for the -y direction at sym-plane cells. This requires modifying `neighbors()`, `index_f()`, and the EP storage interpretation. Multi-day kernel rewrite (Ansatz B in the README roadmap). Not attempted in this session.
+
 **Recommendation for next steps:** the sym-plane work has hit a confirmed architectural wall. The 5× drag overshoot vs OpenFOAM RANS (Volldomain Fx = 2 219 N vs expected ~400-600 N) is now best addressed via:
 - **Werner-Wengle wall model** (Roadmap item #3 in README): impact 1.5-3× drag reduction, independent of sym-plane architecture, ~3-5 days implementation. **This is the recommended next step.**
 - **Rotating wheels** (Roadmap item #4): FluidX3D has the API built-in, ~1 hour implementation. Lift correction.
