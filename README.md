@@ -6,6 +6,18 @@ This is a fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX
 
 ---
 
+## Part of the Battlemage CFD Pioneer Series
+
+This is one of three repositories documenting CFD on Intel Arc Pro B70 (BMG-G31):
+
+1. **This repo — [FluidX3D-Intel-B70](https://github.com/heikogleu-dev/FluidX3D-Intel-B70)** — LBM via OpenCL. **99.5 % peak bandwidth, 5 464 MLUPS** (production-ready as iteration sandbox for vehicle aero).
+2. **[Openfoam13---GPU-Offloading-Intel-B70-Pro](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)** — FVM pressure solver via Ginkgo SYCL. **Hardware ready, software stack maturing** (FP64 96 %, kernel-launch CUDA-par, GPU 66 % idle waiting for plumbing).
+3. **[Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)** — PETSc-Kokkos-SYCL attempt. **Abandoned at GAMG path** — documents what doesn't work yet on this stack.
+
+Together: first publicly documented end-to-end CFD evaluation on Battlemage Xe2 (Intel Arc Pro B70).
+
+---
+
 ## Status
 
 | Aspect | Status |
@@ -242,6 +254,18 @@ waLBerla, TCLB, lbmpy-via-waLBerla, Palabos, Musubi all require **NVIDIA or AMD 
 - **Paraview / OSPRay / B70 ray-tracing** — [heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing)
 - **OpenFOAM v2512 + PETSc + Kokkos + SYCL** — [heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)
 - **OpenFOAM 13 GPU offloading (Ginkgo SYCL)** — [heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)
+
+## Related Pioneer Work on Intel Arc Pro B70
+
+Sister repository documenting the FP64 implicit-solver perspective on the same hardware:
+**[Openfoam13---GPU-Offloading-Intel-B70-Pro](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)** — OpenFOAM pressure solver via Ginkgo SYCL. Key complementary findings:
+- FP64 96 % efficiency, kernel-launch on CUDA level (5.6 µs sync / **1.5 µs async batched, 3.3× better than CUDA sync**)
+- Software stack (preconditioner maturity, GPU-aware MPI) is the real bottleneck, not hardware
+- Bandwidth-bound workloads (this repo's domain, LBM) reach 99.5 % peak; implicit FP64 workloads (sister repo's domain) blocked by Ginkgo 1.10 SYCL bugs
+
+Earlier abandoned attempt at the same workload via PETSc-Kokkos-SYCL stack: **[Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)** — GAMG family crashes in `MatProductSymbolic_SeqAIJKokkos`. Pioneer documentation of why this path was abandoned.
+
+Together — **[Battlemage CFD Pioneer Series](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro#part-of-the-battlemage-cfd-pioneer-series)** — first publicly documented end-to-end CFD evaluation on Battlemage Xe2.
 
 ## License & attribution
 
