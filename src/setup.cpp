@@ -233,6 +233,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
+#define PHASE_5B_COUPLE_MODE 1 // 0=no coupling (Near alone, uniform TYPE_E — verification), 1=one-way Far→Near (5 planes, PRODUCTION setting, +14.3% bias), 2=naive bidirectional Far↔Near (5 forward+5 back planes — UNSTABLE without proper Schwarz outer-loop, deferred as Phase 5b-Refined). Default 1.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -741,18 +742,45 @@ void main_setup_phase5b_dual() {
 	// Z_max: Far z=184, Near z=184 (last cell, full XY of Near)
 	const PlaneSpec src_zmax = mk(75u,  100u, 184u, 700u, 300u, 2u);  const PlaneSpec tgt_zmax = mk(0u,   0u,   184u, 700u, 300u, 2u);
 
+	// ===== Back-coupling planes (Near → Far): inner overlap band, 5 cells INSIDE Near's outer boundary =====
+	// Far targets are corresponding interior cells in Far (offset by Near origin + 5-cell band depth).
+	// Verified: none of these planes overlap Far's vehicle (vehicle BBox X[125,575] Y[156,343] Z[1,123]).
+	const uint band = 20u; // overlap-band thickness in cells (= 200 mm at 10mm/cell). Was 5; bumped 2026-05-13 to test if thicker Schwarz-overlap improves bidirectional coupling convergence.
+	// X_min back: Near x=5 → Far x=80
+	const PlaneSpec bk_src_xmin = mk(band,            0u,   1u, 300u, 184u, 0u);  const PlaneSpec bk_tgt_xmin = mk(75u+band,             100u, 1u, 300u, 184u, 0u);
+	// X_max back: Near x=694 → Far x=770
+	const PlaneSpec bk_src_xmax = mk(near_N.x-1u-band, 0u,   1u, 300u, 184u, 0u);  const PlaneSpec bk_tgt_xmax = mk(75u+near_N.x-1u-band,  100u, 1u, 300u, 184u, 0u);
+	// Y_min back: Near y=5 → Far y=105
+	const PlaneSpec bk_src_ymin = mk(0u,   band,            1u, 700u, 184u, 1u);  const PlaneSpec bk_tgt_ymin = mk(75u,  100u+band,             1u, 700u, 184u, 1u);
+	// Y_max back: Near y=294 → Far y=394
+	const PlaneSpec bk_src_ymax = mk(0u,   near_N.y-1u-band, 1u, 700u, 184u, 1u);  const PlaneSpec bk_tgt_ymax = mk(75u,  100u+near_N.y-1u-band,  1u, 700u, 184u, 1u);
+	// Z_max back: Near z=179 → Far z=179
+	const PlaneSpec bk_src_zmax = mk(0u,   0u,   near_N.z-1u-band, 700u, 300u, 2u);  const PlaneSpec bk_tgt_zmax = mk(75u,  100u, near_N.z-1u-band,   700u, 300u, 2u);
+
 	CouplingOptions opts;
 	opts.smooth_plane = false; // pipeline first, smoothing later
 	opts.export_csv   = false; // 5 planes × chunks = too many CSVs for first run
 
 	// ===== Run-Loop with Far → Near coupling each chunk =====
+#if PHASE_5B_COUPLE_MODE==0
+	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_nocoupling.csv";
+#elif PHASE_5B_COUPLE_MODE==2
+	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_bidirectional_band20.csv";
+#else
 	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_dual.csv";
+#endif
 	std::ofstream fcsv(force_csv_path);
 	fcsv << "step,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near\n";
 	fcsv << std::scientific;
 	const uint chunk = 100u;
 	const uint chunks_max = 150u; // 15000 steps — convergence expected ~12-15k per Phase 5b-pre baseline; std±9% on Far alone
-	print_info("Phase 5b Run: max "+to_string(chunks_max*chunk)+" steps | coupling Far→Near every "+to_string(chunk)+" steps (5 planes)");
+#if PHASE_5B_COUPLE_MODE==0
+	print_info("Phase 5b Run: max "+to_string(chunks_max*chunk)+" steps | MODE 0 = NO coupling (Near alone, verification)");
+#elif PHASE_5B_COUPLE_MODE==2
+	print_info("Phase 5b Run: max "+to_string(chunks_max*chunk)+" steps | MODE 2 = BIDIRECTIONAL Schwarz (Far↔Near, 5 planes each direction, band="+to_string(band)+" cells)");
+#else
+	print_info("Phase 5b Run: max "+to_string(chunks_max*chunk)+" steps | MODE 1 = one-way Far→Near (5 planes)");
+#endif
 	std::vector<float3> Fhist_far, Fhist_near;
 	Fhist_far.reserve(chunks_max); Fhist_near.reserve(chunks_max);
 
@@ -760,13 +788,23 @@ void main_setup_phase5b_dual() {
 		// 1. Run Far for chunk
 		lbm_far.run(chunk);
 		// 2. Couple Far → Near at 5 outer faces (interleaved with Far's run, before Near runs on new BC)
+#if PHASE_5B_COUPLE_MODE>=1
 		lbm_far.couple_fields(lbm_near, src_xmin, tgt_xmin, opts);
 		lbm_far.couple_fields(lbm_near, src_xmax, tgt_xmax, opts);
 		lbm_far.couple_fields(lbm_near, src_ymin, tgt_ymin, opts);
 		lbm_far.couple_fields(lbm_near, src_ymax, tgt_ymax, opts);
 		lbm_far.couple_fields(lbm_near, src_zmax, tgt_zmax, opts);
+#endif
 		// 3. Run Near for chunk
 		lbm_near.run(chunk);
+		// 3b. Back-couple Near → Far at inner overlap band (Option C / full Schwarz alternating)
+#if PHASE_5B_COUPLE_MODE>=2
+		lbm_near.couple_fields(lbm_far, bk_src_xmin, bk_tgt_xmin, opts);
+		lbm_near.couple_fields(lbm_far, bk_src_xmax, bk_tgt_xmax, opts);
+		lbm_near.couple_fields(lbm_far, bk_src_ymin, bk_tgt_ymin, opts);
+		lbm_near.couple_fields(lbm_far, bk_src_ymax, bk_tgt_ymax, opts);
+		lbm_near.couple_fields(lbm_far, bk_src_zmax, bk_tgt_zmax, opts);
+#endif
 		// 4. Measure drag in both
 		lbm_far.update_force_field();
 		const float3 F_far_lbm = lbm_far.object_force(TYPE_S|TYPE_X);
