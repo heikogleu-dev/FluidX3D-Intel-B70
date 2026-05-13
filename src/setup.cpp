@@ -417,6 +417,9 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 #endif
 	print_info(label+" Walls: floor=TYPE_S Moving-Wall (rolling road); rest=TYPE_E free-stream u_x=lbm_u");
 	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+#ifdef SPONGE_LAYER
+	// lbm.sponge_u_inlet = lbm_u; // Phase 5a Iron-Rule trigger 2026-05-13: sponge cuts off wake on full-domain (74% drag drop). Re-enable only for compact Multi-Res Mid-boxes where outlet is < ~3L from vehicle. See findings/PHASE_5A_SPONGE_IRON_RULE_TRIGGER_2026-05-13.md
+#endif
 
 	// ============== Vehicle: STL laden + positionieren ==============
 #if VEHICLE_GR_YARIS

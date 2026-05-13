@@ -141,6 +141,9 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 
 	kernel_apply_freeslip_y = Kernel(device, N, "apply_freeslip_y", fi, flags, t); // CC#9 post-stream sym-plane
+#ifdef SPONGE_LAYER
+	kernel_apply_sponge_layer = Kernel(device, N, "apply_sponge_layer", fi, flags, t, 0.0f); // Phase 5a: outlet damping
+#endif // SPONGE_LAYER
 #ifdef MOVING_BOUNDARIES
 	kernel_update_moving_boundaries = Kernel(device, N, "update_moving_boundaries", u, flags);
 #endif // MOVING_BOUNDARIES
@@ -188,6 +191,11 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 void LBM_Domain::enqueue_apply_freeslip_y() { // CC#9: post-stream specular reflection at TYPE_Y cells
 	kernel_apply_freeslip_y.set_parameters(2u, t).enqueue_run();
 }
+#ifdef SPONGE_LAYER
+void LBM_Domain::enqueue_apply_sponge_layer(float u_inlet) { // Phase 5a: outlet damping
+	kernel_apply_sponge_layer.set_parameters(2u, t).set_parameters(3u, u_inlet).enqueue_run();
+}
+#endif // SPONGE_LAYER
 #ifdef WALL_MODEL_VEHICLE
 void LBM_Domain::enqueue_apply_wall_model_vehicle() { // CC#10: Werner-Wengle wall model on vehicle cells
 	kernel_apply_wall_model_vehicle.enqueue_run();
@@ -452,6 +460,12 @@ string LBM_Domain::device_defines() const { return
 #ifdef WALL_MODEL_VEHICLE
 	"\n	#define WALL_MODEL_VEHICLE" // CC#10: Werner-Wengle wall model on vehicle cells
 #endif // WALL_MODEL_VEHICLE
+
+#ifdef SPONGE_LAYER
+	"\n	#define SPONGE_LAYER" // Phase 5a: non-reflecting outlet damping
+	"\n	#define SPONGE_DEPTH_CELLS "+to_string(SPONGE_DEPTH_CELLS)+""
+	"\n	#define SPONGE_STRENGTH "+to_string(SPONGE_STRENGTH)+"f"
+#endif // SPONGE_LAYER
 
 #ifdef EQUILIBRIUM_BOUNDARIES
 	"\n	#define EQUILIBRIUM_BOUNDARIES"
@@ -918,6 +932,11 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 #endif // WALL_MODEL_VEHICLE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
+#ifdef SPONGE_LAYER
+	if(sponge_u_inlet != 0.0f) { // Phase 5a: outlet damping (only when explicitly enabled by setup via lbm.sponge_u_inlet = u_inlet)
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_sponge_layer(sponge_u_inlet);
+	}
+#endif // SPONGE_LAYER
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS

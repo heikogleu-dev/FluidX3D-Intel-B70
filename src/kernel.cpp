@@ -1467,6 +1467,45 @@ string opencl_c_container() { return R( // ########################## begin of O
 } // apply_freeslip_y()
 
 
+// Phase 5a: Sponge layer — non-reflecting outlet damping for Multi-Resolution coupling.
+// DESIGN v3 (2026-05-13): Dampens f_neq (oscillation/perturbation part) toward zero,
+// preserving f_eq (local mean flow). This kills wake-reflections without forcing
+// global pull toward freestream u_inlet (which v1/v2 did, reducing drag 74%).
+//
+// Formula: f_new = f_eq_local + (1 - strength) × f_neq
+//        = f_eq_local + (1 - strength) × (f - f_eq_local)
+//        = (1 - strength) × f + strength × f_eq_local
+//
+// Where f_eq_local uses the LOCAL u (not freestream). Strength ramps 0→SPONGE_STRENGTH
+// linearly over SPONGE_DEPTH_CELLS at the +X outlet. u_inlet parameter retained for
+// compatibility but unused — kept to avoid kernel-signature breakage.
+// Skips solid (TYPE_S) and equilibrium (TYPE_E) cells.
+)+"#ifdef SPONGE_LAYER"+R(
+)+R(kernel void apply_sponge_layer(global fpxx* fi, const global uchar* flags, const ulong t, const float u_inlet) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N || is_halo(n)) return;
+	const uchar fn = flags[n];
+	if((fn & TYPE_BO) != 0u) return; // skip solid (TYPE_S) and equilibrium (TYPE_E) boundary cells
+	const uint3 xyz = coordinates(n);
+	const int x_sponge_start = (int)def_Nx - SPONGE_DEPTH_CELLS;
+	if((int)xyz.x < x_sponge_start) return; // outside sponge zone
+	const float depth = (float)((int)xyz.x - x_sponge_start);
+	const float strength = SPONGE_STRENGTH * depth / (float)SPONGE_DEPTH_CELLS;
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t);
+	float rho_local, ux, uy, uz;
+	calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz);
+	float feq[def_velocity_set];
+	calculate_f_eq(rho_local, ux, uy, uz, feq); // LOCAL equilibrium, preserves mean flow
+	for(uint i=0u; i<def_velocity_set; i++) {
+		fhn[i] = (1.0f - strength) * fhn[i] + strength * feq[i];
+	}
+	store_f(n, fhn, fi, j, t);
+} // apply_sponge_layer()
+)+"#endif"+R( // SPONGE_LAYER
+
 
 // CC#10: Werner-Wengle wall model for vehicle cells (TYPE_S|TYPE_X).
 // Runs BEFORE stream_collide each step. For each vehicle cell, averages u over fluid neighbors (u_2 proxy),

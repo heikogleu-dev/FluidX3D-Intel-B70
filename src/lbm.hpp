@@ -49,6 +49,9 @@ private:
 	Kernel kernel_update_moving_boundaries; // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 #endif // MOVING_BOUNDARIES
 	Kernel kernel_apply_freeslip_y; // CC#9: post-stream specular reflection for TYPE_Y sym-plane cells
+#ifdef SPONGE_LAYER
+	Kernel kernel_apply_sponge_layer; // Phase 5a: non-reflecting outlet damping
+#endif // SPONGE_LAYER
 #ifdef WALL_MODEL_VEHICLE
 	Kernel kernel_apply_wall_model_vehicle; // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 #endif // WALL_MODEL_VEHICLE
@@ -116,6 +119,9 @@ public:
 	void enqueue_update_moving_boundaries(); // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 #endif // MOVING_BOUNDARIES
 	void enqueue_apply_freeslip_y(); // CC#9: post-stream specular reflection at TYPE_Y cells
+#ifdef SPONGE_LAYER
+	void enqueue_apply_sponge_layer(float u_inlet); // Phase 5a: outlet damping
+#endif // SPONGE_LAYER
 #ifdef WALL_MODEL_VEHICLE
 	void enqueue_apply_wall_model_vehicle(); // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 #endif // WALL_MODEL_VEHICLE
@@ -244,6 +250,10 @@ private:
 #endif // PARTICLES
 
 public:
+#ifdef SPONGE_LAYER
+	float sponge_u_inlet = 0.0f; // Phase 5a: outlet damping target velocity (0 = disabled, set by setup before lbm.run())
+#endif // SPONGE_LAYER
+
 	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data
 	private:
 		ulong N = 0ull; // buffer length
