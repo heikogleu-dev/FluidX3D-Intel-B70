@@ -186,26 +186,93 @@ For aero-converged values: CC#4 with explicit symmetry-plane handling, 5-cell gr
 
 The **CC#10 Werner-Wengle wall model** is now the production-default (`#define WALL_MODEL_VEHICLE` in `defines.hpp`, active on top of `CC6_MODE=1`). Drag reduced **74 %** from 2 219 N (no wall model) to 579.8 N — squarely inside the OpenFOAM RANS expectation range of 400-600 N. See [findings/SESSION_2026-05-11_WW_RESULTS.md](findings/SESSION_2026-05-11_WW_RESULTS.md) and [findings/WALL_MODEL_RESEARCH.md](findings/WALL_MODEL_RESEARCH.md) for detail.
 
-### CC#X — Ahmed Body Wall-Model Validation (2026-05-11) — ❌ Phase 1 FAILED
+### CC#X — Simplified Ahmed Body Wall-Model Validation (2026-05-11) — ❌ FAIL (superseded by Phase 0 below)
 
-Per Opus-Plan a canonical Ahmed Body validation was attempted (simplified flat-front Ahmed at 25° slant, ERCOFTAC reference CD = 0.285):
+First attempt at canonical Ahmed Body validation using a **simplified 16-triangle flat-front Ahmed** (synthesised in Python rather than the ERCOFTAC-canonical rounded-front geometry):
 
 | Setup | Fx [N] | CD measured | vs Literatur CD=0.285 | Verdict |
 |---|---:|---:|---|---|
-| Ahmed 25° **with WW** | 11 457 N | **104** | **365× too high** | ❌ **FAIL** |
-| Ahmed 25° **without WW** (diagnostic) | 92 N | 0.84 | 3× (typical bounce-back overshoot) | ✓ baseline plausible |
+| Simplified Ahmed 25° **with WW** | 11 457 N | **104** | **365× too high** | ❌ FAIL |
+| Simplified Ahmed 25° **without WW** (diagnostic) | 92 N | 0.84 | 3× (typical bounce-back overshoot) | ✓ baseline plausible |
 
-**Diagnosis:** The Wall Model interacts pathologically with **flat-faced, sharp-edged geometry** (16-triangle simplified Ahmed), producing a 125× force-amplification artifact. The same WW works correctly on **smooth STL vehicles** (MR2: 580 N matches real 565 N target). Iron-Rule-Trigger fired at Phase 1.1 — no Phase 2 (sym-plane sweep) on Ahmed and no Phase 3 (real-vehicle re-application) until cause is identified. Full analysis: [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md).
+**Diagnosis (working hypothesis):** WW + flat-faced sharp-edged synthetic geometry → coherent flat-face slip-accumulation produces 125× force artifact. Same WW works correctly on smooth STL vehicles (MR2: 580 N matches real 565 N target). Full analysis: [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md).
 
-**Conclusion:** The CC#10 Werner-Wengle wall model is **production-valid for smooth STL vehicles** (Time-Attack MR2 use-case, where it was developed and validated). It is **NOT yet validated against canonical reference geometry** because the synthetic Ahmed test case revealed a previously-unsuspected geometry sensitivity. The wall model code remains unchanged (Iron Rule compliance) pending user decision on next direction (rounded-Ahmed STL, MR2-direct sym-plane sweep, or wall-model refinement).
+**Resolution path:** the Multi-Resolution Roadmap above replaces the failed CC#X with a properly-staged sequence — **Phase 0** uses the canonical ERCOFTAC Ahmed STLs (rounded front), **Phase 0c** quantifies the BB-pathology resolution-scaling, **Phase 1** addresses Bouzidi interpolated BB. The CC#10 WW code remains the production baseline unmodified (validated for smooth STL vehicles, Iron Rule).
 
 ## Roadmap & Findings
 
-The current absolute drag is ~2 200 N for the Volldomain reference, against an OpenFOAM RANS reference of ~400–600 N — i.e. **~5× too high**. The plan is to close this gap stepwise:
+The CC#10 Werner-Wengle wall model brought Volldomain drag from 2 219 N (baseline, no wall model) to 579.8 N (within OpenFOAM-RANS expectation range 400–600 N) for the Time-Attack MR2 use case. The Ahmed Body validation attempt revealed a geometry sensitivity in force computation that motivates the **Multi-Resolution Roadmap** below as the strategic successor to AMR (which is architecturally not feasible in FluidX3D's in-place streaming layout — confirmed by upstream maintainer in Discussion #58).
+
+### Multi-Resolution Roadmap (replaces AMR exploration)
+
+**Background:** Local AMR in FluidX3D not implementable without rewriting the in-place streaming scheme (Lehmann, Discussion #58). Iterative multi-resolution coupling (Schwarz alternating method) pursued as functional substitute.
+
+**Reference:** FluidX3D Discussion #58 confirms strategic direction:
+- *"Wall Model via local viscosity modification"* → our WW + Stress-Integration (Phases 2-3)
+- *"Interpolated bounce-back: might be difficult with in-place streaming"* → Phase 1 with explicit architecture study
+- *"AMR: not feasible near-future"* → replaced by Multi-Res box-system here
+
+**Diagnostic context:** Yaris validation produced negative Drag, indicating force-computation pathology on sharp-edged STLs. Phase 0 (Ahmed Body validation) isolates geometry vs solver effects before further methodological work.
+
+#### Sprint Plan
+
+| Phase | Topic | Aufwand | Pioneer Value | Status |
+|---|---|---|---|---|
+| **0** | Ahmed Body validation (ERCOFTAC: CD ≈ 0.285 / 0.378) — sign-check primary | 2-4 h | Baseline + sign-check for force computation | pending |
+| **0b** | Update-rate sweep (1 / 10 / 100 / 1000 steps) Stress-Int + F_solid Avg | 4-5 h | First public temporal-aliasing data for GPU-LBM force computation | pending |
+| **0c** | BB Resolution-Convergence Sweep on Ahmed (10 / 7 / 5 / 4 / 3 mm at 5 % blockage) | 1.5-2 h | Resolution-scaling of BB-pathology quantified | pending |
+| **1** | Bouzidi Interpolated BB — Architecture Study (STOPP-Gate) + Implementation | 7-15 d | Bouzidi compatible with Esoteric-Pull demonstrated (or documented negative result) | pending |
+| **2** | Stress-Integration as MEM alternative | 5-10 d | Stress-Integration in FluidX3D | pending |
+| **3** | WW spatial smoothing (Variante C) | 2-3 d | Robusteres WW gegen sharp-edge u_τ spikes | pending |
+| **4** | F_solid post-hoc averaging (Variante A → optional D) | 1-7 d | Force-spike safety net | pending |
+| **5a** | Sponge layer / non-reflecting outlet | 3-5 d | Prerequisite for iterative Multi-Res | pending |
+| **5b** | Double-Res iterative Schwarz coupling (Mid 10 mm + Far 20 mm) | 10-15 d | First 3D iterative Schwarz Multi-Res LBM on GPU for external aero | pending |
+| **5c** | Triple-Res Sweet-Spot (6 / 12 / 24 mm) — natural extension of 5b | 3-5 d after 5b convergence | Top-tier pioneer datapoint | pending |
+
+#### Adaptive Convergence Strategy (Phase 5b+)
+
+Outer-Loop Tolerance-Schedule:
+- Loop 1: 5 % Δ Fx (reduces inner steps to ~30 %)
+- Loop 2: 2 % Δ Fx (~60 %)
+- Loop 3: 1 % Δ Fx (100 %)
+
+Expected wall-time saving: ~36 % vs uniform tolerance.
+
+#### Design Choice: Box-System over Distance-Based Refinement
+
+This implementation uses explicit box-bounded Schwarz coupling rather than smooth distance-based refinement (PowerFLOW-VR-style octree):
+
+| Aspect | Distance-Based (PowerFLOW VR) | Box-System (this implementation) |
+|---|---|---|
+| Resolution transition | smooth, octree-graduated | hard at plane interfaces |
+| Coupling type | simultaneous within single run | iterative Schwarz, sequential runs |
+| Mass conservation audit | indirect | directly measurable at each interface |
+| Coupling-error diagnosis | blackbox | explicit per-interface diagnostics |
+| Implementation complexity | high (AMR architecture) | medium (Schwarz coupling planes) |
+| Suitability for methodology phase | mature, debug-opaque | debug-friendly, audit-trail-capable |
+| Sponge layer required | no | yes (Phase 5a) |
+
+**Rationale:** methodology-validation phase prioritizes debuggability over smooth transitions. Distance-based refinement deferred to future "production polish" once box-system coupling methodology is validated.
+
+#### Multi-Resolution Coupling Specification
+
+**Coupling-Faces:** 5 of 6 box-faces couple between resolutions:
+- Inlet (x_min), Outlet (x_max), Y_min, Y_max, Top (z_max): TYPE_E with source data
+- Floor (z_min): NO coupling — both domains identical TYPE_S moving wall
+- Sponge layer only at Outlet (Phase 5a)
+
+**Plane-Smoothing:** Tiered 2D image-processing approach
+- Stage 1: Source-plane read
+- Stage 2: 2D Plane-Smoothing of upsampled data (bilinear + optional Gauss 3×3)
+- Stage 3: Target-plane write as TYPE_E BC
+- Stage 4: After 1 solver-step, optional 2D smoothing of Layer 1 (1 cell deep)
+- All operations 2D image-processing, no 3D volume operations
+- Granular control via `couple_fields()` options
 
 ### Session detail logs
 
 - [findings/SESSION_2026-05-11_SUMMARY.md](findings/SESSION_2026-05-11_SUMMARY.md) — Full investigation of half-domain symmetry-plane: 11 variants tested, Esoteric-Pull architecture diagnosis, configuration audit, recommended path forward.
+- [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md) — Simplified Ahmed Body (16 tri, flat front) Phase 1 FAIL; motivates Phase 0 with proper rounded-front STL.
 
 ### Open work items (priority order, with feasibility verdicts)
 
@@ -215,7 +282,7 @@ The current absolute drag is ~2 200 N for the Volldomain reference, against an O
 | ~~**2**~~ | ~~Ghost-cell mirror at Y_min — alternative to #1: keep TYPE_E at Y_min but mirror u(y=1) into u(y=0) with u_y → -u_y.~~ | — | standard ghost-cell technique | 🚫 **ATTEMPTED 2026-05-11 (CC#8), FAILED.** Reduced Fx by 12 % vs plain TYPE_E (16.2k → 14.3k) but still 13× target. Root cause: equilibrium-projection at sym-plane is fundamentally a velocity-Dirichlet BC, it loses the higher-moment DDF shape that specular reflection should preserve. The cleaner equivalents (separate pre-stream kernel) would give the same physical limit since they all reduce to "force equilibrium consistent with mirror velocity field" — i.e., a Dirichlet pin, not a specular wall. |
 | ~~**3**~~ | ~~**Werner-Wengle wall model** — Two-Layer power-law wall function (`u+ = y+` for `y+ ≤ 11.81`, `u+ = 8.3·y+^(1/7)` else). Closed-form `u_τ = (u_t / [8.3·(y/ν)^(1/7)])^(7/8)`. Modifies the velocity used in `apply_moving_boundaries` from no-slip (u=0) to a slip-velocity approximating the unresolved viscous sublayer.~~ | — | [OpenLB `WallFunctionBoundaryProcessor3D`](https://github.com/openLB/openLB/blob/master/src/boundary/wallFunctionBoundaryPostProcessors3D.h) | ✅ **DONE 2026-05-11 (CC#10).** Implemented via Krüger Moving-Wall approach (Approach A): new kernel `apply_wall_model_vehicle` runs BEFORE `stream_collide` each step, sets `u[vehicle_cell] = u_slip × direction(u_avg)` per Werner-Wengle PowerLaw closed-form. `apply_moving_boundaries` (existing) transfers the slip into the fluid via the standard Krüger correction. **Drag 2 219 N → 579.8 N (−74 %)**, within OpenFOAM range 400-600 N. No per-cell storage needed (~40 lines kernel). See [MODIFICATIONS.md § CC#10](MODIFICATIONS.md) and [findings/SESSION_2026-05-11_WW_RESULTS.md](findings/SESSION_2026-05-11_WW_RESULTS.md). |
 | **4** | **Rotating wheels** — split `vehicle.stl` into body + front_wheels + rear_wheels in Blender (manual), then call `voxelize_mesh_on_device(wheel_stl, TYPE_S\|TYPE_X, axle_center, float3(0), float3(0, omega, 0))` per wheel pair. omega = lbm_u / r_wheel ≈ 0.075 / 34 = 2.2e-3 rad/step. | **30 min user (Blender) + 30 min code** | [F1 W14 example in `setup.cpp:1271`](https://github.com/ProjectPhysX/FluidX3D/blob/master/src/setup.cpp) (pattern: `voxelize_mesh_on_device(wheels, TYPE_S, center, 0, omega)`) | ✅ **Trivially feasible — built-in!** FluidX3D already has full rotating-mesh support: `void voxelize_mesh_on_device(const Mesh*, uchar flag=TYPE_S, const float3& rotation_center=0, const float3& linear_velocity=0, const float3& rotational_velocity=0)` (`lbm.hpp`). `update_moving_boundaries()` is called automatically when `rotational_velocity ≠ 0` and flag includes TYPE_S. **Zero code-changes needed**, only setup.cpp calls. |
-| **5** | **AMR (Adaptive Mesh Refinement)** — Multi-level grid with finer cells at vehicle surface only, coarser elsewhere. Per-level relaxation-time scaling (`τ' = τ / (2^L (1-τ/2) + τ/2)`), recursive nested timesteps (level L runs 2× per parent step), coarse-fine PDF interpolation at refinement interfaces. | **months — full architectural rewrite** | [waLBerla `BasicRecursiveTimeStep::timestep()`](https://github.com/lssfau/walberla/blob/master/src/lbm_generated/refinement/BasicRecursiveTimeStep.impl.h), `RefinementScaling.h`, NonUniformGridGPU benchmark; OpenLB also has refinement | 🚫 **NOT feasible without forking the entire FluidX3D architecture.** Maintainer ProjectPhysX in [issue #127](https://github.com/ProjectPhysX/FluidX3D/issues/127): *"FluidX3D cannot do adaptive grid refinement"* and in [issue #284](https://github.com/ProjectPhysX/FluidX3D/issues/284) the user case was explicitly rebuffed: *"For y+ < 1, you would need ~5 orders of magnitude spacial resolution, or ~10000³ cells. Today's high-end hardware can only get you ~4000³ cells."* FluidX3D's Esoteric-Pull and AA-pattern memory layouts are tightly coupled to a single uniform grid. Adding AMR would require multi-level pdfField management, per-level kernel launches, fine-coarse halo communication, and split timestepping. **A waLBerla-style implementation is essentially a new LBM solver, not a patch.** Recommend instead: scale to a larger-VRAM GPU (e.g. MI300X 192 GB → 4× cell budget) or accept that 10 mm uniform + wall model #3 is the resolution-quality sweet-spot for this fork. |
+| ~~**5**~~ | ~~**AMR (Adaptive Mesh Refinement)**~~ | — | — | 🚫 **NOT feasible** — confirmed by upstream maintainer in [Discussion #58](https://github.com/ProjectPhysX/FluidX3D/discussions/58) and [issue #127](https://github.com/ProjectPhysX/FluidX3D/issues/127). FluidX3D's in-place Esoteric-Pull streaming is tightly coupled to a single uniform grid. **Replaced by the [Multi-Resolution Roadmap](#multi-resolution-roadmap-replaces-amr-exploration) above** (Phase 5b iterative Schwarz coupling box-system), which is the functional substitute compatible with FluidX3D's architecture. |
 
 ### Investigations completed
 
