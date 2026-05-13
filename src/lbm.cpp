@@ -142,6 +142,11 @@ void LBM_Domain::allocate(Device& device) {
 
 	kernel_apply_freeslip_y = Kernel(device, N, "apply_freeslip_y", fi, flags, t); // CC#9 post-stream sym-plane
 	kernel_apply_bouzidi_z_walls = Kernel(device, N, "apply_bouzidi_z_walls", fi, flags, t, 0.5f); // Phase C-B Step 1: Bouzidi z-walls
+#ifdef BOUZIDI_Q_FIELD
+	bouzidi_q_field = Memory<float>(device, N, get_velocity_set()); // Phase C-B Step 2A: dense q-field (N × 19 floats)
+	kernel_init_bouzidi_q_sphere = Kernel(device, N, "init_bouzidi_q_sphere", flags, bouzidi_q_field, 0.0f, 0.0f, 0.0f, 0.0f); // params: cx, cy, cz, R
+	kernel_apply_bouzidi_general = Kernel(device, N, "apply_bouzidi_general", fi, flags, bouzidi_q_field, t); // Phase C-B Step 2A: generalized Bouzidi BB
+#endif // BOUZIDI_Q_FIELD
 #ifdef MOVING_BOUNDARIES
 	kernel_update_moving_boundaries = Kernel(device, N, "update_moving_boundaries", u, flags);
 #endif // MOVING_BOUNDARIES
@@ -194,6 +199,14 @@ void LBM_Domain::enqueue_apply_freeslip_y() { // CC#9: post-stream specular refl
 void LBM_Domain::enqueue_apply_bouzidi_z_walls(float q) { // Phase C-B Step 1: Bouzidi z-walls hardcoded q
 	kernel_apply_bouzidi_z_walls.set_parameters(2u, t).set_parameters(3u, q).enqueue_run();
 }
+#ifdef BOUZIDI_Q_FIELD
+void LBM_Domain::enqueue_init_bouzidi_q_sphere(float cx, float cy, float cz, float R) { // Phase C-B Step 2A: GPU-init analytical q for sphere
+	kernel_init_bouzidi_q_sphere.set_parameters(2u, cx).set_parameters(3u, cy).set_parameters(4u, cz).set_parameters(5u, R).enqueue_run();
+}
+void LBM_Domain::enqueue_apply_bouzidi_general() { // Phase C-B Step 2A: generalized Bouzidi BB
+	kernel_apply_bouzidi_general.set_parameters(3u, t).enqueue_run();
+}
+#endif // BOUZIDI_Q_FIELD
 #ifdef WALL_MODEL_VEHICLE
 void LBM_Domain::enqueue_apply_wall_model_vehicle() { // CC#10: Werner-Wengle wall model on vehicle cells
 	kernel_apply_wall_model_vehicle.enqueue_run();
@@ -466,6 +479,10 @@ string LBM_Domain::device_defines() const { return
 #ifdef WALL_MODEL_VEHICLE
 	"\n	#define WALL_MODEL_VEHICLE" // CC#10: Werner-Wengle wall model on vehicle cells
 #endif // WALL_MODEL_VEHICLE
+
+#ifdef BOUZIDI_Q_FIELD
+	"\n	#define BOUZIDI_Q_FIELD" // Phase C-B Step 2A: Bouzidi sub-grid BB q-field
+#endif // BOUZIDI_Q_FIELD
 
 #ifdef EQUILIBRIUM_BOUNDARIES
 	"\n	#define EQUILIBRIUM_BOUNDARIES"
@@ -940,6 +957,11 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 	if(bouzidi_q != 0.0f) { // Phase C-B Step 1: Bouzidi z-walls (only when explicitly enabled by setup)
 		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_bouzidi_z_walls(bouzidi_q);
 	}
+#ifdef BOUZIDI_Q_FIELD
+	if(bouzidi_general_enabled) { // Phase C-B Step 2A: generalized Bouzidi (reads q from q_field)
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_bouzidi_general();
+	}
+#endif // BOUZIDI_Q_FIELD
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS
@@ -1002,6 +1024,12 @@ void LBM::update_force_field() { // calculate forces from fluid on TYPE_S cells
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_update_force_field();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
 }
+#ifdef BOUZIDI_Q_FIELD
+void LBM::init_bouzidi_q_sphere(float cx, float cy, float cz, float R) { // Phase C-B Step 2A: init Bouzidi q-field analytically for sphere
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_init_bouzidi_q_sphere(cx, cy, cz, R);
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
+}
+#endif // BOUZIDI_Q_FIELD
 float3 LBM::object_center_of_mass(const uchar flag_marker) { // calculate center of mass of all cells flagged with flag_marker
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_object_center_of_mass(flag_marker);
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();

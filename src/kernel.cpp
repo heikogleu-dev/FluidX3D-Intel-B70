@@ -1522,6 +1522,111 @@ string opencl_c_container() { return R( // ########################## begin of O
 } // apply_bouzidi_z_walls()
 
 
+// Phase C-B Step 2A: GPU-side analytical q-field initialization for sphere geometry.
+// For each fluid cell with TYPE_S neighbor in direction c_i, compute q = ray-sphere
+// intersection distance / |c_i|. Writes to bouzidi_q_field at slot [n*velocity_set + i].
+// q stored in [0, 1] range (cell fraction). q=0.5 is default for cells not adjacent to wall.
+)+"#ifdef BOUZIDI_Q_FIELD"+R(
+)+R(kernel void init_bouzidi_q_sphere(const global uchar* flags, global float* q_field, const float cx, const float cy, const float cz, const float R) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N || is_halo(n)) return;
+	// Initialize all q slots to 0.5 (default = standard BB if used)
+	for(uint i=0u; i<def_velocity_set; i++) q_field[(ulong)i*(ulong)def_N + (ulong)n] = 0.5f;
+	if((flags[n] & TYPE_BO) == TYPE_S) return; // skip solid cells
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	const float3 p = position(coordinates(n));
+	const float3 sphere_center = (float3)(cx - 0.5f*(float)def_Nx, cy - 0.5f*(float)def_Ny, cz - 0.5f*(float)def_Nz);
+	// Loop over odd directions, check both i and i+1 paired neighbors
+	for(uint i=1u; i<def_velocity_set; i+=2u) {
+		// Direction i: check if j[i] is solid → wall in c_i direction
+		if((flags[j[i]] & TYPE_BO) == TYPE_S) {
+			const float3 ci = (float3)(c(i), c(def_velocity_set+i), c(2u*def_velocity_set+i));
+			const float3 diff = p - sphere_center;
+			const float a = dot(ci, ci);
+			const float b = 2.0f * dot(diff, ci);
+			const float cc = dot(diff, diff) - R*R;
+			const float disc = b*b - 4.0f*a*cc;
+			if(disc >= 0.0f) {
+				const float t1 = (-b - sqrt(disc)) / (2.0f*a);
+				const float t2 = (-b + sqrt(disc)) / (2.0f*a);
+				const float t_hit = (t1 > 0.0f && t1 < 1.0f) ? t1 : ((t2 > 0.0f && t2 < 1.0f) ? t2 : 0.5f);
+				q_field[(ulong)i*(ulong)def_N + (ulong)n] = clamp(t_hit, 0.01f, 0.99f);
+			}
+		}
+		// Direction i+1 (opp): check if j[i+1u] is solid → wall in c_(i+1) direction
+		if((flags[j[i+1u]] & TYPE_BO) == TYPE_S) {
+			const float3 ci = (float3)(c(i+1u), c(def_velocity_set+i+1u), c(2u*def_velocity_set+i+1u));
+			const float3 diff = p - sphere_center;
+			const float a = dot(ci, ci);
+			const float b = 2.0f * dot(diff, ci);
+			const float cc = dot(diff, diff) - R*R;
+			const float disc = b*b - 4.0f*a*cc;
+			if(disc >= 0.0f) {
+				const float t1 = (-b - sqrt(disc)) / (2.0f*a);
+				const float t2 = (-b + sqrt(disc)) / (2.0f*a);
+				const float t_hit = (t1 > 0.0f && t1 < 1.0f) ? t1 : ((t2 > 0.0f && t2 < 1.0f) ? t2 : 0.5f);
+				q_field[(ulong)(i+1u)*(ulong)def_N + (ulong)n] = clamp(t_hit, 0.01f, 0.99f);
+			}
+		}
+	}
+} // init_bouzidi_q_sphere()
+
+
+// Phase C-B Step 2A: generalized Bouzidi BB applied per-direction using q_field.
+// For each fluid cell, for each direction i where neighbor j[i] is TYPE_S:
+// apply Bouzidi formula with q = q_field[n*velocity_set + i].
+// Modifies fhn[opp_i] = (... q × f_i_self + ... × f_X_neighbor).
+)+R(kernel void apply_bouzidi_general(global fpxx* fi, const global uchar* flags, const global float* q_field, const ulong t) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N || is_halo(n)) return;
+	if((flags[n] & TYPE_BO) == TYPE_S) return; // skip solid
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	bool any_wall = false;
+	for(uint i=1u; i<def_velocity_set; i++) {
+		if((flags[j[i]] & TYPE_BO) == TYPE_S) { any_wall = true; break; }
+	}
+	if(!any_wall) return; // not wall-adjacent
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t);
+	// For each direction i (odd index), check both j[i] and j[i+1u] for wall
+	for(uint i=1u; i<def_velocity_set; i+=2u) {
+		const uint opp_i = i+1u;
+		// Wall in direction c_i (j[i] is solid)? → modify fhn[opp_i]
+		if((flags[j[i]] & TYPE_BO) == TYPE_S) {
+			const float q = q_field[(ulong)i*(ulong)def_N + (ulong)n];
+			const uxx n_nb = j[opp_i]; // neighbor away from wall (in direction c_opp_i)
+			uxx j_nb[def_velocity_set];
+			neighbors(n_nb, j_nb);
+			float fhn_nb[def_velocity_set];
+			load_f(n_nb, fhn_nb, fi, j_nb, t);
+			if(q < 0.5f) {
+				fhn[opp_i] = 2.0f*q * fhn[i] + (1.0f - 2.0f*q) * fhn_nb[i];
+			} else {
+				fhn[opp_i] = (0.5f/q) * fhn[i] + (1.0f - 0.5f/q) * fhn_nb[opp_i];
+			}
+		}
+		// Wall in direction c_opp_i (j[i+1u] is solid)? → modify fhn[i]
+		if((flags[j[opp_i]] & TYPE_BO) == TYPE_S) {
+			const float q = q_field[(ulong)opp_i*(ulong)def_N + (ulong)n];
+			const uxx n_nb = j[i]; // neighbor away from wall (in direction c_i)
+			uxx j_nb[def_velocity_set];
+			neighbors(n_nb, j_nb);
+			float fhn_nb[def_velocity_set];
+			load_f(n_nb, fhn_nb, fi, j_nb, t);
+			if(q < 0.5f) {
+				fhn[i] = 2.0f*q * fhn[opp_i] + (1.0f - 2.0f*q) * fhn_nb[opp_i];
+			} else {
+				fhn[i] = (0.5f/q) * fhn[opp_i] + (1.0f - 0.5f/q) * fhn_nb[i];
+			}
+		}
+	}
+	store_f(n, fhn, fi, j, t);
+} // apply_bouzidi_general()
+)+"#endif"+R( // BOUZIDI_Q_FIELD
+
+
 // CC#10: Werner-Wengle wall model for vehicle cells (TYPE_S|TYPE_X).
 // Runs BEFORE stream_collide each step. For each vehicle cell, averages u over fluid neighbors (u_2 proxy),
 // computes u_tau via WW PowerLaw closed form (no Newton-Raphson), derives u_slip at y_1=0.5lu, writes

@@ -23,6 +23,7 @@
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
 #define WALL_MODEL_VEHICLE // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells via Krueger Moving-Wall. Requires MOVING_BOUNDARIES.
+#define BOUZIDI_Q_FIELD // Phase C-B Step 2A: dense q-field buffer for general Bouzidi sub-grid BB (N × 19 floats per domain, ~1.2 GB at 16M cells). Disable for production large-domain runs.
 //#define SURFACE // enables free surface LBM: mark fluid cells with TYPE_F; at initialization the TYPE_I interface and TYPE_G gas domains will automatically be completed; allocates an extra 12 Bytes/cell
 //#define TEMPERATURE // enables temperature extension; set fixed-temperature cells with TYPE_T (similar to EQUILIBRIUM_BOUNDARIES); allocates an extra 32 (FP32) or 18 (FP16) Bytes/cell
 #define SUBGRID // enables Smagorinsky-Lilly subgrid turbulence LES model to keep simulations with very large Reynolds number stable

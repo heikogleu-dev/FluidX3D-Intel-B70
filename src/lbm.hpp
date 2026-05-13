@@ -50,6 +50,11 @@ private:
 #endif // MOVING_BOUNDARIES
 	Kernel kernel_apply_freeslip_y; // CC#9: post-stream specular reflection for TYPE_Y sym-plane cells
 	Kernel kernel_apply_bouzidi_z_walls; // Phase C-B Step 1: Bouzidi sub-grid BB for axis-aligned z-walls
+#ifdef BOUZIDI_Q_FIELD
+	Memory<float> bouzidi_q_field; // Phase C-B Step 2A: dense per-cell-per-direction q values (N × 19 floats)
+	Kernel kernel_init_bouzidi_q_sphere; // Phase C-B Step 2A: GPU-side analytical q-init for sphere
+	Kernel kernel_apply_bouzidi_general; // Phase C-B Step 2A: generalized Bouzidi BB reading q_field
+#endif // BOUZIDI_Q_FIELD
 #ifdef WALL_MODEL_VEHICLE
 	Kernel kernel_apply_wall_model_vehicle; // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 	Kernel kernel_compute_wall_model_artifact; // CC#11 Option 1: subtract Krueger Moving-Wall force artifact from F[n]
@@ -120,6 +125,10 @@ public:
 #endif // MOVING_BOUNDARIES
 	void enqueue_apply_freeslip_y(); // CC#9: post-stream specular reflection at TYPE_Y cells
 	void enqueue_apply_bouzidi_z_walls(float q); // Phase C-B Step 1: Bouzidi sub-grid BB for axis-aligned z-walls
+#ifdef BOUZIDI_Q_FIELD
+	void enqueue_init_bouzidi_q_sphere(float cx, float cy, float cz, float R); // Phase C-B Step 2A: init q-field for sphere
+	void enqueue_apply_bouzidi_general(); // Phase C-B Step 2A: generalized Bouzidi BB
+#endif // BOUZIDI_Q_FIELD
 #ifdef WALL_MODEL_VEHICLE
 	void enqueue_apply_wall_model_vehicle(); // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 	void enqueue_apply_wall_slip_to_fluid(); // CC#11 Option 2 Step 2: WFB injection at TYPE_MS fluid cells
@@ -557,6 +566,10 @@ public:
 	void voxelize_stl(const string& path, const float3x3& rotation, const float size=0.0f, const uchar flag=TYPE_S); // read and voxelize binary .stl file (place in box center)
 	void voxelize_stl(const string& path, const float3& center, const float size=0.0f, const uchar flag=TYPE_S); // read and voxelize binary .stl file (no rotation)
 	void voxelize_stl(const string& path, const float size=0.0f, const uchar flag=TYPE_S); // read and voxelize binary .stl file (place in box center, no rotation)
+#ifdef BOUZIDI_Q_FIELD
+	void init_bouzidi_q_sphere(float cx, float cy, float cz, float R); // Phase C-B Step 2A: init bouzidi_q_field analytically for sphere
+	bool bouzidi_general_enabled = false; // when true, do_time_step calls apply_bouzidi_general after stream_collide
+#endif // BOUZIDI_Q_FIELD
 
 #ifdef GRAPHICS
 	class Graphics {

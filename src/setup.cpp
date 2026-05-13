@@ -234,6 +234,97 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // Phase 0: 0 = Real Vehicle, 1 = Ahmed 25° canonical (Phase 0 FAILED), 2 = Ahmed 35°
 #define CUBE_VALIDATION 0   // Cube factor-6 cal: mean ~0 (baseline 1.4 N) but +-125 oscillation
 #define BOUZIDI_TEST 0      // Phase C-B Step 1 PASSED 2026-05-13 (L2 0.76-3.51% across q={0.1..0.9})
+#define BOUZIDI_SPHERE_TEST 1 // Phase C-B Step 2A: Sphere drag with general Bouzidi (analytical q from ray-sphere)
+
+#if BOUZIDI_SPHERE_TEST
+// ============================================================================
+// Phase C-B Step 2A — Sphere with general Bouzidi (Tier 2 Skalen-Ladder)
+// 16.8M cells (256³), sphere R=32 as TYPE_S, Re=5000, u=0.075
+// Reference: Sphere CD at Re=5000 ≈ 0.4 (Crowe 2011 / experimental)
+// Method: Init q_field analytically via ray-sphere intersection (no STL needed)
+// Validation: Compare drag with (a) standard BB, (b) Bouzidi
+// Expected: Bouzidi reduces overshoot from BB baseline
+// ============================================================================
+void main_setup_bouzidi_sphere() {
+	const float R = 32.0f;
+	const float Re = 5000.0f;
+	const float lbm_u = 0.075f;
+	const float lbm_nu = lbm_u * 2.0f * R / Re;
+	const uint L = (uint)(8.0f * R + 0.5f); // 256 = 8R
+	const float A_proj = 3.14159265f * R * R;
+	const float CD_ref = 0.4f;
+
+	print_info("=== BOUZIDI SPHERE Step 2A (Tier 2) ===");
+	print_info("R="+to_string(R, 1u)+", Box="+to_string(L)+"³, Re="+to_string(Re, 0u)+", target CD="+to_string(CD_ref, 2u));
+	print_info("Target F_lat = 0.5*ρ*u²*A*CD = "+to_string(0.5f*lbm_u*lbm_u*A_proj*CD_ref, 3u)+" lattice");
+
+	LBM lbm(uint3(L, L, L), 1u, 1u, 1u, lbm_nu);
+	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz();
+	const float3 center = float3(0.5f*(float)Nx, 0.5f*(float)Ny, 0.5f*(float)Nz);
+
+	parallel_for(lbm.get_N(), [&](ulong n) {
+		uint x=0, y=0, z=0;
+		lbm.coordinates(n, x, y, z);
+		const float dx = (float)x - center.x;
+		const float dy = (float)y - center.y;
+		const float dz = (float)z - center.z;
+		if(dx*dx + dy*dy + dz*dz <= R*R) {
+			lbm.flags[n] = TYPE_S | TYPE_X; // marker for force isolation
+			return;
+		}
+		if(x == 0u || x == Nx-1u || y == 0u || y == Ny-1u || z == 0u || z == Nz-1u) {
+			lbm.flags[n] = TYPE_E;
+		}
+		lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+	});
+
+	// Init Bouzidi q-field analytically for sphere geometry
+	print_info("Initializing Bouzidi q-field via analytical ray-sphere intersection...");
+	lbm.init_bouzidi_q_sphere(center.x, center.y, center.z, R);
+	lbm.bouzidi_general_enabled = true; // activate generalized Bouzidi BB
+
+	const string force_csv_path = get_exe_path() + "../bin/forces_sphere_bouzidi.csv";
+	std::ofstream fcsv(force_csv_path);
+	fcsv << "step,Fx_lat,Fy_lat,Fz_lat,CD\n";
+	fcsv << std::scientific;
+	const uint chunk = 100u;
+	const uint chunks_max = 100u;
+	const uint conv_window = 10u;
+	const uint conv_min_chunks = 20u;
+	const float conv_tol = 0.02f;
+	std::vector<float3> Fhist;
+	Fhist.reserve(chunks_max);
+	print_info("Run start: Bouzidi sphere drag, max "+to_string(chunks_max*chunk)+" steps");
+
+	for(uint c = 0u; c < chunks_max; c++) {
+		lbm.run(chunk);
+		lbm.update_force_field();
+		const float3 F = lbm.object_force(TYPE_S|TYPE_X);
+		Fhist.push_back(F);
+		const ulong step = (ulong)(c+1u) * chunk;
+		const float CD_meas = F.x / (0.5f * lbm_u * lbm_u * A_proj);
+		fcsv << step << "," << F.x << "," << F.y << "," << F.z << "," << CD_meas << "\n";
+		if((c+1u) % 10u == 0u) fcsv.flush();
+		if((c+1u) % 5u == 0u) {
+			print_info("step="+to_string(step)+" Fx_lat="+to_string(F.x, 4u)+" CD="+to_string(CD_meas, 3u)+" (ref "+to_string(CD_ref, 2u)+")");
+		}
+		if(c+1u >= conv_min_chunks) {
+			float3 recent_avg(0.0f), prev_avg(0.0f);
+			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist[Fhist.size()-1u-k];
+			for(uint k=0u; k<conv_window; k++) prev_avg   += Fhist[Fhist.size()-1u-conv_window-k];
+			recent_avg /= (float)conv_window;
+			prev_avg   /= (float)conv_window;
+			const float dx_drift = (recent_avg.x!=0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
+			if(dx_drift < conv_tol) {
+				const float CD_final = recent_avg.x / (0.5f * lbm_u * lbm_u * A_proj);
+				print_info("BOUZIDI SPHERE CONVERGED at step "+to_string(step)+": Fx="+to_string(recent_avg.x, 4u)+" lat, CD="+to_string(CD_final, 3u)+" (ref "+to_string(CD_ref, 2u)+")");
+				break;
+			}
+		}
+	}
+	fcsv.close();
+}
+#endif // BOUZIDI_SPHERE_TEST
 
 #if BOUZIDI_TEST
 // ============================================================================
@@ -563,6 +654,10 @@ void main_setup_ahmed() {
 #endif // AHMED_MODE>0
 
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
+#if BOUZIDI_SPHERE_TEST
+	main_setup_bouzidi_sphere();
+	return;
+#endif
 #if BOUZIDI_TEST
 	main_setup_bouzidi_poiseuille();
 	return;
