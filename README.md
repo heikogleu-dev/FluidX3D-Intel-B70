@@ -47,7 +47,7 @@ For raw clinfo / lspci snapshots see [MODIFICATIONS.md § Verified performance](
 
 Quick summary (full detail in [`MODIFICATIONS.md`](MODIFICATIONS.md)):
 
-- **`src/defines.hpp`** — enable `VOLUME_FORCE` + `FORCE_FIELD`
+- **`src/defines.hpp`** — enable `VOLUME_FORCE` + `FORCE_FIELD`. Phase 5a adds `SPONGE_LAYER` toggle + `SPONGE_DEPTH_CELLS` + `SPONGE_STRENGTH` (default off, opt-in for compact Multi-Res Mid-boxes). WW disabled (`// #define WALL_MODEL_VEHICLE`) on this branch per pivot.
 - **`src/graphics.hpp`** — `FONT_WIDTH 6→12`, `FONT_HEIGHT 11→22` (HiDPI)
 - **`src/graphics.cpp`** — auto-start (`key_P = true`), 2× pixel-doubled `draw_text()`, windowed-mode override with `FLUIDX3D_WINDOW=WxH`, decorated X11 window
 - **`src/setup.cpp`** — half-domain test grid 650×144×180 (16.85 M cells), `lbm.run(10000u)`, VTK + force-CSV export, `_exit(0)` workaround for xe-driver shutdown race
@@ -225,8 +225,8 @@ ist orthogonal zu WW** und kann mit Pure-BB validiert werden.
 | Phase | Topic | Aufwand | Status |
 |---|---|---|---|
 | **0** | Ahmed validation | niedrig | ✅ DONE — FAIL (WW-Bug enttarnt, motivates pivot) |
-| **5a** | Sponge layer / non-reflecting outlet | niedrig-mittel | 🟢 **Hauptpfad active** |
-| **5b-pre** | `couple_fields()` Modul-Architektur + Plane-Smoothing (self-coupling test) | mittel | 🟢 **Hauptpfad active** |
+| **5a** | Sponge layer / non-reflecting outlet | niedrig-mittel | ✅ **IMPLEMENTED, default off**. 3 sponge variants tested on full-domain Yaris: all reduced drag by 74% (Iron-Rule trigger). Root-cause: full-domain wake reaches sponge zone, gets cut off → pressure recovery killed. Conclusion: sponge IS code-ready but only needed for compact Multi-Res Mid-boxes; full-domain runs use TYPE_E only. See [`findings/PHASE_5A_SPONGE_IRON_RULE_TRIGGER_2026-05-13.md`](findings/PHASE_5A_SPONGE_IRON_RULE_TRIGGER_2026-05-13.md). |
+| **5b-pre** | `couple_fields()` Modul-Architektur + Plane-Smoothing (self-coupling test) | mittel | 🟢 **Hauptpfad active (next)** |
 | **5b** | Double-Res Schwarz Coupling mit Pure-BB (Ahmed + Yaris/MR2) | mittel-hoch | 🟢 **Hauptpfad active** |
 | **5c** | Triple-Res Extension (nach 5b-Konvergenz) | niedrig (nach 5b) | 🟢 Hauptpfad |
 | --- Side-Track (paused, branch erhalten) --- |

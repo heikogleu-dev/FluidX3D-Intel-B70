@@ -19,6 +19,8 @@ The license itself (see [`LICENSE.md`](LICENSE.md)) is **unchanged**. Non-commer
 
 - Uncommented `#define VOLUME_FORCE` (line 18). Required by `FORCE_FIELD`. Default volume force is `(0, 0, 0)` so behaviour is unchanged unless setup explicitly applies a force.
 - Uncommented `#define FORCE_FIELD` (line 19). Enables `lbm.update_force_field()` and per-cell `lbm.F`. Allocates extra 12 B/cell VRAM (~200 MB at 16.85 M cells, ~1.6 GB at 135 M cells).
+- **`WALL_MODEL_VEHICLE` commented out** (2026-05-13 pivot): CC#10/CC#11 deep-dive on `phase0-ahmed-validation` branch revealed Krüger Moving-Wall is architecturally unfit for stationary-wall WW (Three-Attractor non-linear bifurcation). Pure-BB baseline used for Multi-Resolution work. WW kernel code remains intact in source.
+- **NEW `SPONGE_LAYER` toggle** (Phase 5a): defines `SPONGE_LAYER`, `SPONGE_DEPTH_CELLS=50`, `SPONGE_STRENGTH=0.1f`. Activates non-reflecting outlet damping at last 50 X-cells. Default: opt-in (sponge code compiled but `lbm.sponge_u_inlet=0.0` keeps it inactive unless setup explicitly enables). 3-variant Iron-Rule test on full-domain Yaris found sponge cuts wake recirculation → 74% drag drop. Use only for compact Multi-Res Mid-boxes where outlet is < 3L behind vehicle.
 
 ## `src/graphics.hpp`
 
@@ -35,6 +37,15 @@ The license itself (see [`LICENSE.md`](LICENSE.md)) is **unchanged**. Non-commer
   - `FLUIDX3D_WINDOW=WxH` (e.g. `1920x1080`) → custom size, centred
   - `FLUIDX3D_WINDOW=fullscreen` → original full-monitor behaviour
 - **Motif-Hints decorations:** `0b0000000l → 0b1111111l`. The X11 window now has a title bar with close/minimise/maximise buttons; can be dragged and resized via the WM. Pre-fork the window was a chromeless full-monitor surface.
+
+## `src/kernel.cpp`
+
+- **NEW kernel `apply_sponge_layer`** (Phase 5a 2026-05-13): Post-stream DDF blending toward local equilibrium in last `SPONGE_DEPTH_CELLS` of +X domain. Formula: `fhn[i] = (1-strength) × fhn[i] + strength × f_eq(rho_local, u_local)`. Designed for compact Multi-Resolution Mid-boxes to dampen wake oscillations before TYPE_E outlet. Iron-Rule trigger on full-domain test (cuts wake) — code retained as opt-in feature. See `findings/PHASE_5A_SPONGE_IRON_RULE_TRIGGER_2026-05-13.md`.
+
+## `src/lbm.cpp` + `src/lbm.hpp`
+
+- **NEW `Kernel kernel_apply_sponge_layer`** allocation (Phase 5a). Enqueue method `enqueue_apply_sponge_layer(float u_inlet)`. Conditional call in `do_time_step()` after stream_collide (gated by `lbm.sponge_u_inlet != 0.0`).
+- **NEW public LBM member `float sponge_u_inlet = 0.0f`** (Phase 5a runtime toggle). Default 0 = disabled. Setup sets to `lbm_u` for activation.
 
 ## `src/setup.cpp`
 
