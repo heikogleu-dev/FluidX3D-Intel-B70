@@ -214,20 +214,56 @@ The CC#10 Werner-Wengle wall model brought Volldomain drag from 2 219 N (baselin
 
 **Diagnostic context:** Yaris validation produced negative Drag, indicating force-computation pathology on sharp-edged STLs. Phase 0 (Ahmed Body validation) isolates geometry vs solver effects before further methodological work.
 
-#### Sprint Plan
+#### Sprint Plan (Pivot 2026-05-13 — Multi-Resolution Hauptpfad)
 
-| Phase | Topic | Aufwand | Pioneer Value | Status |
-|---|---|---|---|---|
-| **0** | Ahmed Body validation (ERCOFTAC: CD ≈ 0.285 / 0.378) — sign-check primary | 2-4 h | Baseline + sign-check for force computation | pending |
-| **0b** | Update-rate sweep (1 / 10 / 100 / 1000 steps) Stress-Int + F_solid Avg | 4-5 h | First public temporal-aliasing data for GPU-LBM force computation | pending |
-| **0c** | BB Resolution-Convergence Sweep on Ahmed (10 / 7 / 5 / 4 / 3 mm at 5 % blockage) | 1.5-2 h | Resolution-scaling of BB-pathology quantified | pending |
-| **1** | Bouzidi Interpolated BB — Architecture Study (STOPP-Gate) + Implementation | 7-15 d | Bouzidi compatible with Esoteric-Pull demonstrated (or documented negative result) | pending |
-| **2** | Stress-Integration as MEM alternative | 5-10 d | Stress-Integration in FluidX3D | pending |
-| **3** | WW spatial smoothing (Variante C) | 2-3 d | Robusteres WW gegen sharp-edge u_τ spikes | pending |
-| **4** | F_solid post-hoc averaging (Variante A → optional D) | 1-7 d | Force-spike safety net | pending |
-| **5a** | Sponge layer / non-reflecting outlet | 3-5 d | Prerequisite for iterative Multi-Res | pending |
-| **5b** | Double-Res iterative Schwarz coupling (Mid 10 mm + Far 20 mm) | 10-15 d | First 3D iterative Schwarz Multi-Res LBM on GPU for external aero | pending |
-| **5c** | Triple-Res Sweet-Spot (6 / 12 / 24 mm) — natural extension of 5b | 3-5 d after 5b convergence | Top-tier pioneer datapoint | pending |
+WW-Reparatur-Versuche (CC#11 deep-dive auf `phase0-ahmed-validation` branch,
+Findings 25-37) zeigten: Krüger Moving-Wall ist architectural unfit als WW-
+Mechanismus (Three-Attractor non-linear bifurcation). Bouzidi-Versuche (Step 1
+Poiseuille PASSED, Step 2A Sphere paused) wurden zum Side-Track. **Multi-Res
+ist orthogonal zu WW** und kann mit Pure-BB validiert werden.
+
+| Phase | Topic | Aufwand | Status |
+|---|---|---|---|
+| **0** | Ahmed validation | niedrig | ✅ DONE — FAIL (WW-Bug enttarnt, motivates pivot) |
+| **5a** | Sponge layer / non-reflecting outlet | niedrig-mittel | 🟢 **Hauptpfad active** |
+| **5b-pre** | `couple_fields()` Modul-Architektur + Plane-Smoothing (self-coupling test) | mittel | 🟢 **Hauptpfad active** |
+| **5b** | Double-Res Schwarz Coupling mit Pure-BB (Ahmed + Yaris/MR2) | mittel-hoch | 🟢 **Hauptpfad active** |
+| **5c** | Triple-Res Extension (nach 5b-Konvergenz) | niedrig (nach 5b) | 🟢 Hauptpfad |
+| --- Side-Track (paused, branch erhalten) --- |
+| **1** | Bouzidi Sub-Grid BB | hoch | ⏸️ pausiert (Step 1 PASSED auf `phase0-ahmed-validation`, Step 2A WIP/untested) |
+| **2** | Stress-Integration als MEM-Alternative | mittel-hoch | ⏸️ pausierbar |
+| --- Archiviert (WW-abhängig, postponed bis WW gefixt) --- |
+| ~~0b~~ | ~~Update-rate sweep für Stress-Int + F_solid Avg~~ | — | 📦 archived (depends on WW) |
+| ~~0c~~ | ~~BB Resolution-Convergence Sweep on Ahmed~~ | — | 📦 archived (depends on WW) |
+| ~~3~~ | ~~WW spatial smoothing~~ | — | 📦 archived (depends on WW) |
+| ~~4~~ | ~~F_solid post-hoc averaging~~ | — | 📦 archived (depends on WW) |
+
+#### Pivot-Begründung
+
+Multi-Resolution-Coupling und Wall-Model adressieren **orthogonale** Probleme:
+- WW korrigiert **Force-Magnitude** (BB-overshoot Faktor 1.5–2×, oder ~3.2×
+  bei coarse Grid)
+- Multi-Res korrigiert **Spatial Resolution** + erlaubt Refinement-Studien
+
+Multi-Res kann mit Pure-BB validiert werden — Drag-Werte überschätzen um
+konstanten Faktor, aber **Coupling-Konvergenz ist davon unabhängig.**
+
+#### Erfolgs-Kriterium Multi-Res (NICHT absolute Drag-Match)
+
+- **Schwarz-Iteration konvergiert**: Δ Fx < 1 % nach 3-5 Outer-Loops
+- **Coupling-Plane-RMS-Drift** sinkt monoton (von Outer-Loop zu Outer-Loop)
+- **Mass-Imbalance < 1 %** per Outer-Loop per Coupling-Face
+- **VTK-Konsistenz** zwischen Mid- und Far-Sim an Coupling-Plane (qualitativ stetig)
+
+#### Pioneer-Wert
+
+**First documented 3D iterative Schwarz Multi-Resolution coupling for external
+automotive aero on consumer-GPU LBM.**
+
+(WW-Investigation auf `phase0-ahmed-validation` branch: 16 Findings 20-37
+dokumentieren architectural limits von Krüger Moving-Wall — pioneer-pattern
+für künftige WW-Repair-Approaches. Bouzidi Step 1 PASSED — Tier 1 Validation
+auf branch verfügbar für späteren Resume.)
 
 #### Adaptive Convergence Strategy (Phase 5b+)
 
