@@ -1525,6 +1525,50 @@ string opencl_c_container() { return R( // ########################## begin of O
 	u[2ul*def_N+(ulong)n] = scale * uz_avg;
 } // apply_wall_model_vehicle()
 
+// CC#11 Option 2 Step 2: post-stream WFB-injection at TYPE_MS fluid cells.
+// Reads u_slip from neighboring TYPE_S|TYPE_X wall cells (set by apply_wall_model_vehicle, carried
+// via u[wall_cell] without VRAM overhead). Applies Krueger-equivalent correction to OWN DDFs at
+// FLUID storage. Modified DDFs propagate via standard streaming in next step; never land in solid
+// storage -> no force-artifact. Mathematically equivalent to applying apply_moving_boundaries at
+// fluid cell, but the post-stream-collide timing + store_f-after-modification keeps the corrected
+// DDFs in fluid storage rather than letting them slot into solid cells via Esoteric-Pull.
+)+R(kernel void apply_wall_slip_to_fluid(global fpxx* fi, const global float* u, const global uchar* flags, const ulong t) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N||is_halo(n)) return;
+	const uchar fn = flags[n];
+	if((fn & TYPE_BO) != TYPE_MS) return; // only TYPE_MS fluid cells
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t);
+	// Find ONE TYPE_S|TYPE_X wall neighbor to get u_slip from. For multiple wall neighbors, average.
+	float u_slip_x = 0.0f, u_slip_y = 0.0f, u_slip_z = 0.0f;
+	uint n_walls = 0u;
+	for(uint i=1u; i<def_velocity_set; i++) {
+		const uchar fj = flags[j[i]];
+		if((fj & TYPE_BO)==TYPE_S && (fj & TYPE_X)) {
+			u_slip_x += u[             j[i]];
+			u_slip_y += u[def_N+(ulong)j[i]];
+			u_slip_z += u[2ul*def_N+(ulong)j[i]];
+			n_walls++;
+		}
+	}
+	if(n_walls == 0u) return; // not a WW-wall-adjacent cell
+	const float inv_nw = 1.0f/(float)n_walls;
+	u_slip_x *= inv_nw; u_slip_y *= inv_nw; u_slip_z *= inv_nw;
+	// CC#11 Option 2 Step 2c (OpenLB-pattern, simpler): equilibrium reset toward u_slip.
+	// Compute local rho from current DDFs, then OVERWRITE all 19 DDFs with f_eq(rho, u_slip).
+	// This forces the fluid cell near wall to relax to u_slip equilibrium (no Krueger involved,
+	// no fluid acceleration / deceleration mechanics, no artifact in solid cells via streaming).
+	// Loses f_neq (turbulence info) at TYPE_MS cells; full f_eq+f_neq reconstruction is Step 2d.
+	float rho_local, u_dummy_x, u_dummy_y, u_dummy_z;
+	calculate_rho_u(fhn, &rho_local, &u_dummy_x, &u_dummy_y, &u_dummy_z);
+	float feq[def_velocity_set];
+	calculate_f_eq(rho_local, u_slip_x, u_slip_y, u_slip_z, feq);
+	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = feq[i];
+	store_f(n, fhn, fi, j, t);
+} // apply_wall_slip_to_fluid()
+
 // Option 1 Fix (CC#11): subtract Krueger Moving-Wall force artifact from update_force_field result.
 // Mathematical derivation (D3Q19 isotropy): each Krueger-corrected DDF at a TYPE_S|TYPE_X cell
 // contributes 2 * c_i * Delta_f_i to the per-cell F, where Delta_f_i = -6 * w_i * (c_i . u_solid).

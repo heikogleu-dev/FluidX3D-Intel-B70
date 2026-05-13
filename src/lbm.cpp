@@ -147,6 +147,7 @@ void LBM_Domain::allocate(Device& device) {
 #ifdef WALL_MODEL_VEHICLE
 	kernel_apply_wall_model_vehicle = Kernel(device, N, "apply_wall_model_vehicle", u, flags); // CC#10 WW wall model
 	kernel_compute_wall_model_artifact = Kernel(device, N, "compute_wall_model_artifact", F, u, flags); // CC#11 Option 1 artifact subtract
+	kernel_apply_wall_slip_to_fluid = Kernel(device, N, "apply_wall_slip_to_fluid", fi, u, flags, t); // CC#11 Option 2 Step 2 WFB-injection
 #endif // WALL_MODEL_VEHICLE
 
 #ifdef SURFACE
@@ -192,6 +193,9 @@ void LBM_Domain::enqueue_apply_freeslip_y() { // CC#9: post-stream specular refl
 #ifdef WALL_MODEL_VEHICLE
 void LBM_Domain::enqueue_apply_wall_model_vehicle() { // CC#10: Werner-Wengle wall model on vehicle cells
 	kernel_apply_wall_model_vehicle.enqueue_run();
+}
+void LBM_Domain::enqueue_apply_wall_slip_to_fluid() { // CC#11 Option 2 Step 2: WFB injection at TYPE_MS fluid cells
+	kernel_apply_wall_slip_to_fluid.set_parameters(3u, t).enqueue_run();
 }
 #endif // WALL_MODEL_VEHICLE
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
@@ -923,6 +927,11 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 #endif // MOVING_BOUNDARIES
 #endif // WALL_MODEL_VEHICLE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
+	// CC#11 Option 2 Step 2 DISABLED: 3 attempts (Krueger+ -> CD=28.7, Krueger- -> CD=-43.9,
+	// f_eq reset -> CD=128.9) all failed on cube. Krueger-formula post-stream applied at fluid
+	// does not replicate proper WW behavior. Need full OpenLB-style f_eq+f_neq with Pi-tensor
+	// reconstruction (Step 2d, ~1-2 weeks work). See findings/23_step2_attempts.md.
+	// for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_slip_to_fluid();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering

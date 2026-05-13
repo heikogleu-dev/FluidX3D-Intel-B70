@@ -52,6 +52,7 @@ private:
 #ifdef WALL_MODEL_VEHICLE
 	Kernel kernel_apply_wall_model_vehicle; // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 	Kernel kernel_compute_wall_model_artifact; // CC#11 Option 1: subtract Krueger Moving-Wall force artifact from F[n]
+	Kernel kernel_apply_wall_slip_to_fluid; // CC#11 Option 2 Step 2: WFB injection at TYPE_MS fluid cells (post-stream)
 #endif // WALL_MODEL_VEHICLE
 #ifdef SURFACE
 	Kernel kernel_surface_0; // additional kernel for computing mass conservation and mass flux computation
@@ -119,6 +120,7 @@ public:
 	void enqueue_apply_freeslip_y(); // CC#9: post-stream specular reflection at TYPE_Y cells
 #ifdef WALL_MODEL_VEHICLE
 	void enqueue_apply_wall_model_vehicle(); // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
+	void enqueue_apply_wall_slip_to_fluid(); // CC#11 Option 2 Step 2: WFB injection at TYPE_MS fluid cells
 #endif // WALL_MODEL_VEHICLE
 #ifdef PARTICLES
 	void enqueue_integrate_particles(const uint time_step_multiplicator=1u); // intgegrates particles forward in time and couples particles to fluid

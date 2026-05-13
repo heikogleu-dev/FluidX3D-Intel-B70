@@ -232,7 +232,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define VEHICLE_GR_YARIS 0  // 1 = Yaris (vehicle-alt-bin.stl), 0 = MR2/default (see VEHICLE_MR2_BIN)
 #define VEHICLE_MR2_BIN    // MR2 Time-Attack (vehicle-mr2-bin.stl). Comment out to use scenes/vehicle.stl (requires CFD-EXC mount).
 #define AHMED_MODE 0        // Phase 0: 0 = Real Vehicle, 1 = Ahmed 25° canonical (Phase 0 FAILED), 2 = Ahmed 35°
-#define CUBE_VALIDATION 0   // Step 1b PASS (CD=1.103 with TYPE_X-exclusion, u_slip carried via u[wall_cell] without artifact)
+#define CUBE_VALIDATION 0   // Step 2 attempts all failed (see findings/23). Production default = Vehicle setup.
 
 #if CUBE_VALIDATION
 // ============================================================================
