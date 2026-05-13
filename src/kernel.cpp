@@ -1115,10 +1115,15 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef MOVING_BOUNDARIES"+R(
 )+R(void apply_moving_boundaries(float* fhn, const uxx* j, const global float* u, const global uchar* flags) { // apply Dirichlet velocity boundaries if necessary (Krueger p.180, rho_solid=1)
 	uxx ji; // reads velocities of only neighboring boundary cells, which do not change during simulation
+	// CC#11 Option 2 Step 1b: TYPE_X-Exclusion. Vehicle wall cells (TYPE_S|TYPE_X) are EXCLUDED from
+	// Krueger Moving-Wall correction. This prevents the force-artifact that occurs when WW kernel
+	// writes u[wall_cell]=u_slip. u[] of TYPE_X cells becomes a "data carrier" used only by the
+	// new fluid-side WFB injection kernel (Step 2). Standard TYPE_S walls (floor rolling-road,
+	// sym-plane TYPE_S|TYPE_Y) keep normal Krueger behavior.
 	for(uint i=1u; i<def_velocity_set; i+=2u) { // loop is entirely unrolled by compiler, no unnecessary memory access is happening
 		const float w6 = -6.0f*w(i); // w6 = -2*w_i*rho_wall/c^2, w(i) = w(i+1) if i is odd, rho_wall is assumed as rho_avg=1 (necessary choice to assure mass conservation)
-		ji = j[i+1u]; fhn[i   ] = (flags[ji]&TYPE_BO)==TYPE_S ? fma(w6, c(i+1u)*u[ji]+c(def_velocity_set+i+1u)*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i+1u)*u[2ul*def_N+(ulong)ji], fhn[i   ]) : fhn[i   ]; // boundary : regular
-		ji = j[i   ]; fhn[i+1u] = (flags[ji]&TYPE_BO)==TYPE_S ? fma(w6, c(i   )*u[ji]+c(def_velocity_set+i   )*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i   )*u[2ul*def_N+(ulong)ji], fhn[i+1u]) : fhn[i+1u];
+		ji = j[i+1u]; { const uchar fj=flags[ji]; const bool is_ww=(fj&TYPE_BO)==TYPE_S && (fj&TYPE_X); fhn[i   ] = ((fj&TYPE_BO)==TYPE_S && !is_ww) ? fma(w6, c(i+1u)*u[ji]+c(def_velocity_set+i+1u)*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i+1u)*u[2ul*def_N+(ulong)ji], fhn[i   ]) : fhn[i   ]; }
+		ji = j[i   ]; { const uchar fj=flags[ji]; const bool is_ww=(fj&TYPE_BO)==TYPE_S && (fj&TYPE_X); fhn[i+1u] = ((fj&TYPE_BO)==TYPE_S && !is_ww) ? fma(w6, c(i   )*u[ji]+c(def_velocity_set+i   )*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i   )*u[2ul*def_N+(ulong)ji], fhn[i+1u]) : fhn[i+1u];      }
 	}
 } // apply_moving_boundaries()
 )+"#endif"+R( // MOVING_BOUNDARIES
@@ -1511,18 +1516,13 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float u_slip_mag    = uplus_1 * u_tau;
 	if(u_slip_mag > 0.95f*u_t_mag) u_slip_mag = 0.95f*u_t_mag; // safety cap
 	const float scale = u_slip_mag / u_t_mag;
-	// CC#11 Option 2 Step 1: DO NOT write u_slip to u[wall_cell] anymore.
-	// Krueger-Moving-Wall approach was the root of the force artifact (cube CD=80 instead of 1.02,
-	// MR2 negative drag). Disabling the u_solid write makes apply_moving_boundaries Krueger
-	// correction term = -6*w*(c*0) = 0, restoring pure static bounce-back. This is the FIRST
-	// validation step before adding proper slip-injection at fluid cells (next sub-step).
-	// Computed u_slip values are intentionally discarded for now; will be re-introduced via
-	// fluid-DDF source-term in next step once this baseline is verified.
-	(void)scale; (void)ux_avg; (void)uy_avg; (void)uz_avg;
-	// Old code (disabled):
-	// u[              n] = scale * ux_avg;
-	// u[def_N+(ulong)n ] = scale * uy_avg;
-	// u[2ul*def_N+(ulong)n] = scale * uz_avg;
+	// CC#11 Option 2 Step 1b: re-enable u[wall_cell] write. With TYPE_X-Exclusion in
+	// apply_moving_boundaries (kernel.cpp ~1120), this no longer triggers the Krueger artifact.
+	// u[wall_cell] now serves as DATA CARRIER for the upcoming WFB-injection kernel (Step 2),
+	// which will read u_slip from here and inject into fluid TYPE_MS cells' DDFs at fluid storage.
+	u[              n] = scale * ux_avg;
+	u[def_N+(ulong)n ] = scale * uy_avg;
+	u[2ul*def_N+(ulong)n] = scale * uz_avg;
 } // apply_wall_model_vehicle()
 
 // Option 1 Fix (CC#11): subtract Krueger Moving-Wall force artifact from update_force_field result.
