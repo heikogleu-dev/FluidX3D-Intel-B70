@@ -46,6 +46,9 @@ The license itself (see [`LICENSE.md`](LICENSE.md)) is **unchanged**. Non-commer
 
 - **NEW `Kernel kernel_apply_sponge_layer`** allocation (Phase 5a). Enqueue method `enqueue_apply_sponge_layer(float u_inlet)`. Conditional call in `do_time_step()` after stream_collide (gated by `lbm.sponge_u_inlet != 0.0`).
 - **NEW public LBM member `float sponge_u_inlet = 0.0f`** (Phase 5a runtime toggle). Default 0 = disabled. Setup sets to `lbm_u` for activation.
+- **NEW `struct PlaneSpec`** (Phase 5b-pre 2026-05-13): describes a coupling plane with `origin` (uint3 cell-index lower corner), `extent_a`/`extent_b` (plane width/height in cells perpendicular to axis), `axis` (0=X-normal, 1=Y-normal, 2=Z-normal), and `cell_size` (SI cell-spacing for resolution-ratio in Phase 5b).
+- **NEW `struct CouplingOptions`** (Phase 5b-pre): runtime toggles for 2D Gauss smoothing (`smooth_plane`, `smoothing_kernel_size`), CSV diagnostics (`export_csv`), VTK plane export (`export_vtk`).
+- **NEW `LBM::couple_fields()` method** (~95 lines in lbm.cpp): Schwarz Multi-Resolution coupling. Reads source-plane field data (u, rho) from one LBM instance, optionally applies 2D Gauss smoothing, writes to target-plane as TYPE_E boundary cells on another (or same) instance. Same-resolution only in 5b-pre; bilinear upsampling for resolution-ratio deferred to Phase 5b. Inline `couple_fields_self()` overload for single-domain pipeline validation. **Self-coupling invariance test PASSED 2026-05-13:** MR2 Pure-BB full-domain baseline +1651 N vs self-coupled +1625 N (Δ -1.6%, within statistical noise std ±134-143). See `findings/PHASE_5B_PRE_SELF_COUPLING_PASSED_2026-05-13.md`.
 
 ## `src/setup.cpp`
 

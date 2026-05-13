@@ -1155,6 +1155,120 @@ void LBM::voxelize_stl(const string& path, const float size, const uchar flag) {
 	voxelize_stl(path, center(), float3x3(1.0f), size, flag);
 }
 
+// Phase 5b-pre: Schwarz Multi-Resolution coupling — extract source-plane (u, rho), optionally
+// smooth, apply at target-plane as TYPE_E BC. Same-resolution only in 5b-pre (src.cell_size==tgt.cell_size).
+// Self-coupling (src == tgt, same plane) is the validation test — should be no-op invariant.
+void LBM::couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpec& tgt_plane, const CouplingOptions& opts) {
+	if(src_plane.axis != tgt_plane.axis) { print_error("couple_fields: src and tgt plane axes differ"); return; }
+	if(src_plane.extent_a != tgt_plane.extent_a || src_plane.extent_b != tgt_plane.extent_b) {
+		print_warning("couple_fields: src and tgt extents differ — same-res 5b-pre requires identical (resolution-ratio in Phase 5b)");
+	}
+	const uint axis = src_plane.axis;
+	const uint a = src_plane.extent_a; // width
+	const uint b = src_plane.extent_b; // height
+	const ulong n_plane = (ulong)a * (ulong)b;
+
+	// Step 1: Sync src→host (triggers update_fields if UPDATE_FIELDS is not auto)
+	u.read_from_device();
+	rho.read_from_device();
+
+	// Step 2: Extract plane data (u_x, u_y, u_z, rho per cell)
+	std::vector<float> plane_ux(n_plane), plane_uy(n_plane), plane_uz(n_plane), plane_rho(n_plane);
+	const uint sx = src_plane.origin.x, sy = src_plane.origin.y, sz = src_plane.origin.z;
+	for(uint i=0u; i<a; i++) {
+		for(uint j=0u; j<b; j++) {
+			uint cx = sx, cy = sy, cz = sz;
+			if(axis == 0u) { cy = sy + i; cz = sz + j; }
+			else if(axis == 1u) { cx = sx + i; cz = sz + j; }
+			else /* axis == 2u */ { cx = sx + i; cy = sy + j; }
+			const ulong n = (ulong)cx + (ulong)cy * (ulong)Nx + (ulong)cz * (ulong)Nx * (ulong)Ny;
+			const ulong idx = (ulong)i + (ulong)j * (ulong)a;
+			plane_ux[idx]  = u.x[n];
+			plane_uy[idx]  = u.y[n];
+			plane_uz[idx]  = u.z[n];
+			plane_rho[idx] = rho[n];
+		}
+	}
+
+	// Step 3: Optional 2D Gauss smoothing (3x3 or 5x5)
+	if(opts.smooth_plane) {
+		const int k = opts.smoothing_kernel_size; // 3 or 5
+		const int hk = k / 2;
+		std::vector<float> smooth_ux(n_plane), smooth_uy(n_plane), smooth_uz(n_plane), smooth_rho(n_plane);
+		for(int i=0; i<(int)a; i++) {
+			for(int j=0; j<(int)b; j++) {
+				float wsum = 0.0f, ux_s=0.0f, uy_s=0.0f, uz_s=0.0f, rho_s=0.0f;
+				for(int di=-hk; di<=hk; di++) {
+					for(int dj=-hk; dj<=hk; dj++) {
+						const int ii = i+di, jj = j+dj;
+						if(ii<0 || ii>=(int)a || jj<0 || jj>=(int)b) continue;
+						// Gauss weight: exp(-(di² + dj²) / (2 * (hk/2)²))
+						const float r2 = (float)(di*di + dj*dj);
+						const float sigma2 = 0.5f * (float)(hk * hk + 1);
+						const float w = expf(-r2 / (2.0f * sigma2));
+						const ulong nidx = (ulong)ii + (ulong)jj * (ulong)a;
+						ux_s += w * plane_ux[nidx];
+						uy_s += w * plane_uy[nidx];
+						uz_s += w * plane_uz[nidx];
+						rho_s += w * plane_rho[nidx];
+						wsum += w;
+					}
+				}
+				const ulong idx = (ulong)i + (ulong)j * (ulong)a;
+				smooth_ux[idx] = ux_s / wsum;
+				smooth_uy[idx] = uy_s / wsum;
+				smooth_uz[idx] = uz_s / wsum;
+				smooth_rho[idx] = rho_s / wsum;
+			}
+		}
+		plane_ux  = std::move(smooth_ux);
+		plane_uy  = std::move(smooth_uy);
+		plane_uz  = std::move(smooth_uz);
+		plane_rho = std::move(smooth_rho);
+	}
+
+	// Step 4: Sync tgt flags→host (read once; minimal cost)
+	tgt_sim.flags.read_from_device();
+
+	// Step 5: Write plane data to target as TYPE_E (only modifies plane cells)
+	const uint tx = tgt_plane.origin.x, ty = tgt_plane.origin.y, tz = tgt_plane.origin.z;
+	for(uint i=0u; i<a; i++) {
+		for(uint j=0u; j<b; j++) {
+			uint cx = tx, cy = ty, cz = tz;
+			if(axis == 0u) { cy = ty + i; cz = tz + j; }
+			else if(axis == 1u) { cx = tx + i; cz = tz + j; }
+			else /* axis == 2u */ { cx = tx + i; cy = ty + j; }
+			const ulong n = (ulong)cx + (ulong)cy * (ulong)tgt_sim.Nx + (ulong)cz * (ulong)tgt_sim.Nx * (ulong)tgt_sim.Ny;
+			const ulong idx = (ulong)i + (ulong)j * (ulong)a;
+			tgt_sim.flags[n]  = TYPE_E;
+			tgt_sim.u.x[n]    = plane_ux[idx];
+			tgt_sim.u.y[n]    = plane_uy[idx];
+			tgt_sim.u.z[n]    = plane_uz[idx];
+			tgt_sim.rho[n]    = plane_rho[idx];
+		}
+	}
+
+	// Step 6: Sync host→target
+	tgt_sim.flags.write_to_device();
+	tgt_sim.u.write_to_device();
+	tgt_sim.rho.write_to_device();
+
+	// Step 7: Optional diagnostics
+	if(opts.export_csv) {
+		float ux_min = plane_ux[0], ux_max = plane_ux[0], ux_sum = 0.0f;
+		float rho_min = plane_rho[0], rho_max = plane_rho[0], rho_sum = 0.0f;
+		for(ulong k=0; k<n_plane; k++) {
+			ux_min = fminf(ux_min, plane_ux[k]); ux_max = fmaxf(ux_max, plane_ux[k]); ux_sum += plane_ux[k];
+			rho_min = fminf(rho_min, plane_rho[k]); rho_max = fmaxf(rho_max, plane_rho[k]); rho_sum += plane_rho[k];
+		}
+		const string csv_path = get_exe_path() + "../bin/coupling_plane_t" + to_string(get_t()) + ".csv";
+		std::ofstream f(csv_path, std::ios::app);
+		if(f.tellp() == 0) f << "t,n_cells,ux_mean,ux_min,ux_max,rho_mean,rho_min,rho_max\n";
+		f << get_t() << "," << n_plane << "," << (ux_sum/n_plane) << "," << ux_min << "," << ux_max << "," << (rho_sum/n_plane) << "," << rho_min << "," << rho_max << "\n";
+		f.close();
+	}
+}
+
 #ifdef GRAPHICS
 int* LBM::Graphics::draw_frame() {
 #ifndef UPDATE_FIELDS

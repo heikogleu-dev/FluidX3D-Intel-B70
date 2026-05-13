@@ -229,8 +229,9 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
-#define VEHICLE_GR_YARIS 1  // CC#10-VAL: 1 = Toyota GR Yaris MY21 Stock (vehicle-alt.stl, L=3.995m), 0 = default vehicle.stl (L=4.5m)
+#define VEHICLE_GR_YARIS 0  // 1 = Toyota GR Yaris (vehicle-alt-bin.stl). 0 = scenes/vehicle.stl (canonical MR2 — used for smoke tests per user direction 2026-05-13)
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
+#define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -564,9 +565,28 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	std::vector<float3> Fhist;
 	Fhist.reserve(chunks_max);
 	print_info(label+" Run start: max "+to_string(chunks_max*chunk)+" Steps; Auto-Stop bei |dFx/Fx| < 2% über 5000 Steps (frühester Exit nach 10000 Steps)");
+#if SELF_COUPLING_TEST
+	// Phase 5b-pre: self-coupling at x=200 mid-domain plane (away from vehicle x=400-800)
+	// If invariant: pipeline works → Phase 5b can proceed with confidence
+	PlaneSpec self_plane;
+	self_plane.origin = uint3(200u, 0u, 0u);
+	self_plane.extent_a = lbm.get_Ny();
+	self_plane.extent_b = lbm.get_Nz();
+	self_plane.axis = 0u; // X-normal plane
+	self_plane.cell_size = (float)(si_length / (float)lbm_length);
+	CouplingOptions self_opts;
+	self_opts.smooth_plane = false; // no smoothing for self-coupling (test pipeline only)
+	self_opts.export_csv = true;
+	print_info("SELF_COUPLING_TEST ACTIVE: plane x=200, YZ-extent "+to_string(self_plane.extent_a)+"x"+to_string(self_plane.extent_b)+", every 5 chunks");
+#endif
 	uint final_chunks = chunks_max;
 	for(uint c = 0u; c < chunks_max; c++) {
 		lbm.run(chunk);
+#if SELF_COUPLING_TEST
+		if((c+1u) % 5u == 0u) { // every 500 steps
+			lbm.couple_fields_self(self_plane, self_opts);
+		}
+#endif
 		lbm.update_force_field();
 		const float3 F_lbm = lbm.object_force(TYPE_S|TYPE_X);
 		const float3 F_si  = float3(units.si_F(F_lbm.x), units.si_F(F_lbm.y), units.si_F(F_lbm.z));

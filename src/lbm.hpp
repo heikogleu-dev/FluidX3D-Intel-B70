@@ -219,6 +219,24 @@ public:
 
 
 
+// Phase 5b-pre: Multi-Resolution Schwarz coupling module structs
+struct PlaneSpec {
+	uint3 origin;       // cell-index of plane lower corner
+	uint extent_a;      // plane "width" in cells (1st dimension perpendicular to axis: Y for axis=0/2, X for axis=1)
+	uint extent_b;      // plane "height" in cells (2nd dimension perpendicular to axis: Z for axis=0/1, Y for axis=2)
+	uint axis;          // 0=X-normal (YZ plane), 1=Y-normal (XZ plane), 2=Z-normal (XY plane)
+	float cell_size;    // SI cell-spacing (for resolution-ratio in Phase 5b; same-res 5b-pre uses src.cell_size==tgt.cell_size)
+};
+
+struct CouplingOptions {
+	bool smooth_plane = false;          // apply 2D Gauss smoothing
+	int smoothing_kernel_size = 3;      // 3 or 5
+	bool export_csv = false;            // diagnostic CSV: plane_t{step}_stats.csv
+	bool export_vtk = false;            // diagnostic VTK: plane_t{step}.vtk
+};
+
+
+
 class LBM {
 private:
 	uint Nx=1u, Ny=1u, Nz=1u; // (global) lattice dimensions
@@ -560,6 +578,11 @@ public:
 	void voxelize_stl(const string& path, const float3x3& rotation, const float size=0.0f, const uchar flag=TYPE_S); // read and voxelize binary .stl file (place in box center)
 	void voxelize_stl(const string& path, const float3& center, const float size=0.0f, const uchar flag=TYPE_S); // read and voxelize binary .stl file (no rotation)
 	void voxelize_stl(const string& path, const float size=0.0f, const uchar flag=TYPE_S); // read and voxelize binary .stl file (place in box center, no rotation)
+
+	// Phase 5b-pre: Schwarz Multi-Resolution coupling. Read source-plane field data (u, rho)
+	// and apply at target-plane as TYPE_E boundary cells. Same-resolution only in 5b-pre.
+	void couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpec& tgt_plane, const CouplingOptions& opts);
+	void couple_fields_self(const PlaneSpec& plane, const CouplingOptions& opts) { couple_fields(*this, plane, plane, opts); } // self-coupling for pipeline validation
 
 #ifdef GRAPHICS
 	class Graphics {

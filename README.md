@@ -226,8 +226,8 @@ ist orthogonal zu WW** und kann mit Pure-BB validiert werden.
 |---|---|---|---|
 | **0** | Ahmed validation | niedrig | ✅ DONE — FAIL (WW-Bug enttarnt, motivates pivot) |
 | **5a** | Sponge layer / non-reflecting outlet | niedrig-mittel | ✅ **IMPLEMENTED, default off**. 3 sponge variants tested on full-domain Yaris: all reduced drag by 74% (Iron-Rule trigger). Root-cause: full-domain wake reaches sponge zone, gets cut off → pressure recovery killed. Conclusion: sponge IS code-ready but only needed for compact Multi-Res Mid-boxes; full-domain runs use TYPE_E only. See [`findings/PHASE_5A_SPONGE_IRON_RULE_TRIGGER_2026-05-13.md`](findings/PHASE_5A_SPONGE_IRON_RULE_TRIGGER_2026-05-13.md). |
-| **5b-pre** | `couple_fields()` Modul-Architektur + Plane-Smoothing (self-coupling test) | mittel | 🟢 **Hauptpfad active (next)** |
-| **5b** | Double-Res Schwarz Coupling mit Pure-BB (Ahmed + Yaris/MR2) | mittel-hoch | 🟢 **Hauptpfad active** |
+| **5b-pre** | `couple_fields()` Modul-Architektur + Plane-Smoothing (self-coupling test) | mittel | ✅ **PASSED 2026-05-13**. Self-coupling apples-to-apples on MR2 Pure-BB full domain: 1625 N vs 1651 N baseline (Δ -1.6%, within both runs' std ±134-143). Pipeline (read u/rho, write TYPE_E plane, runtime diagnostics) validated. See [`findings/PHASE_5B_PRE_SELF_COUPLING_PASSED_2026-05-13.md`](findings/PHASE_5B_PRE_SELF_COUPLING_PASSED_2026-05-13.md). |
+| **5b** | Double-Res Schwarz Coupling mit Pure-BB (Ahmed + Yaris/MR2) | mittel-hoch | 🟢 **Hauptpfad active (next)** |
 | **5c** | Triple-Res Extension (nach 5b-Konvergenz) | niedrig (nach 5b) | 🟢 Hauptpfad |
 | --- Side-Track (paused, branch erhalten) --- |
 | **1** | Bouzidi Sub-Grid BB | hoch | ⏸️ pausiert (Step 1 PASSED auf `phase0-ahmed-validation`, Step 2A WIP/untested) |
