@@ -229,26 +229,29 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define CC6_MODE 1
 #define CC7_DIAGNOSE 0  // 1 = print TYPE_Y cell count + abort after few steps
 #define CC7_DIAG_MAXSTEPS 1000u
-#define VEHICLE_GR_YARIS 1  // CC#10-VAL: 1 = Toyota GR Yaris MY21 Stock (vehicle-alt.stl, L=3.995m), 0 = default vehicle.stl (L=4.5m)
-#define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
+#define VEHICLE_GR_YARIS 0  // 1 = Yaris (vehicle-alt-bin.stl), 0 = MR2/default (see VEHICLE_MR2_BIN)
+#define VEHICLE_MR2_BIN    // MR2 Time-Attack (vehicle-mr2-bin.stl). Comment out to use scenes/vehicle.stl (requires CFD-EXC mount).
+#define AHMED_MODE 0        // Phase 0: 0 = Real Vehicle, 1 = Ahmed 25° canonical (Phase 0 FAILED), 2 = Ahmed 35°
 
 #if AHMED_MODE>0
 // ============================================================================
-// CC#X Phase 1 — Ahmed Body Wall-Model Validation (Volldomain, simplified flat-front Ahmed)
+// Phase 0 — Ahmed Body Wall-Model Validation (Volldomain, CANONICAL ERCOFTAC Ahmed STL)
 // Reference: Lienhart & Stoots 2003. CD literature: 0.285 (25°) / 0.378 (35°)
-// Domain: 8L × 2L × 2L at 5 mm cells → 1672 × 416 × 416 = 289 M cells
-// u_∞ = 40 m/s, ν = 1.5e-5, Re_L = 2.78e6
+// STL: nathanrooy/ahmed-bluff-body-cfd (rounded nose, 4 struts, 28k-33k triangles, perfectly watertight)
+// Domain: 8L × 4L × 2L at 6 mm cells → 1392 × 696 × 348 = 337 M cells
+// u_∞ = 40 m/s, ν = 1.5e-5, Re_L = 2.78e6, Frontal Area = 0.1124 m²
+// VRAM-Budget (B70 28.6 GB): 337M × 67 B = 22.6 GB → fits. 5mm fallback would be 39 GB → OOM.
 // ============================================================================
 void main_setup_ahmed() {
 #if AHMED_MODE==1
 	const int slant_deg = 25;
-	const string ahmed_stl = "../ahmed_25.stl";
+	const string ahmed_stl = "../ahmed_stl/ahmed_25deg_m_bin.stl";
 	const string csv_name = "forces_ahmed_25.csv";
 	const float CD_lit = 0.285f;
 	const float CL_lit = +0.345f;
 #elif AHMED_MODE==2
 	const int slant_deg = 35;
-	const string ahmed_stl = "../ahmed_35.stl";
+	const string ahmed_stl = "../ahmed_stl/ahmed_35deg_m_bin.stl";
 	const string csv_name = "forces_ahmed_35.csv";
 	const float CD_lit = 0.378f;
 	const float CL_lit = -0.105f;
@@ -256,16 +259,16 @@ void main_setup_ahmed() {
 	const float si_L = 1.044f;        // Ahmed body length [m]
 	const float si_W = 0.389f;        // Ahmed body width  [m]
 	const float si_H = 0.288f;        // Ahmed body height [m]
-	const float si_A = 0.1124f;       // frontal area [m²]
+	const float si_A = 0.1124f;       // frontal area [m²] = W × H (without struts)
 	const float lbm_u = 0.075f;
 	const float si_u = 40.0f;
-	const float cell_size = 0.010f;   // CC#X retry: 10 mm (use proven MR2 domain, smaller blockage)
-	const float lbm_length = si_L / cell_size; // 104.4 cells per body length
+	const float cell_size = 0.006f;   // Phase 0: 6 mm (174 cells per body length, 337 M cells in 8L×4L×2L domain, fits VRAM)
+	const float lbm_length = si_L / cell_size; // 174 cells per body length
 	const float si_nu = 1.5E-5f, si_rho = 1.225f;
-	// Domain: 15m × 5m × 4.5m (proven MR2 domain → 7.8% Y-blockage, 6.4% Z-blockage for Ahmed)
-	const uint Nx = 1500u;
-	const uint Ny = 500u;
-	const uint Nz = 450u;
+	// Domain: 8L × 4L × 2L (per Opus Phase 0 spec). Blockage Y = W/(4L) = 4.7%, Z = H/(2L) = 13.8%.
+	const uint Nx = (uint)(8.0f * lbm_length + 0.5f); // 1392 cells = 8.352 m
+	const uint Ny = (uint)(4.0f * lbm_length + 0.5f); // 696 cells = 4.176 m
+	const uint Nz = (uint)(2.0f * lbm_length + 0.5f); // 348 cells = 2.088 m
 	const uint3 lbm_N = uint3(Nx, Ny, Nz);
 	const string label = "CC#X-AHMED-" + to_string(slant_deg) + "deg";
 	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_L, si_u, si_rho);
@@ -281,13 +284,14 @@ void main_setup_ahmed() {
 	vehicle->scale(lbm_length / bbox_orig.x); // scale STL to lbm_length cells in X
 	const float3 vbbox = vehicle->get_bounding_box_size();
 	const float3 vctr  = vehicle->get_bounding_box_center();
-	// Body placement: X-center @ cell 400 (= 4m from inlet, 11m wake — same as MR2), Y-center, Z-min at clearance (baked into STL)
-	const float x_target = 400.0f;
+	// Body placement per Opus Phase 0 spec: X-Center @ 2L (= cell 348), Y-Center @ 2L (= cell 348), Z-Min @ 0 (struts on floor, STL has clearance baked in)
+	const float x_target = 2.0f * lbm_length;
 	const float y_target = (float)(Ny / 2u);
+	const float z_min_stl = vctr.z - vbbox.z * 0.5f; // STL z_min in scaled cells (should be ~0)
 	vehicle->translate(float3(
 		x_target - vctr.x,
 		y_target - vctr.y,
-		0.0f                              // STL already has z_bot=clearance baked in → no Z-shift needed
+		0.0f - z_min_stl                  // place STL z_min at domain z=0 (struts touch floor)
 	));
 	const float3 vmin = vehicle->pmin, vmax = vehicle->pmax;
 	print_info(label+" Ahmed BBox in cells: X["+to_string(vmin.x,1u)+", "+to_string(vmax.x,1u)+"] Y["+to_string(vmin.y,1u)+", "+to_string(vmax.y,1u)+"] Z["+to_string(vmin.z,1u)+", "+to_string(vmax.z,1u)+"]");
@@ -395,6 +399,8 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	const float si_u = 30.0f;                      // 30 m/s Wind
 #if VEHICLE_GR_YARIS
 	const float si_length = 3.995f;                // Toyota GR Yaris MY21 length [m]
+#elif defined(VEHICLE_MR2_BIN)
+	const float si_length = 4.44f;                 // MR2 Time-Attack length [m] (BBox X-extent 4.4364m)
 #else
 	const float si_length = 4.5f;                  // default vehicle length [m]
 #endif
@@ -421,8 +427,10 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	// ============== Vehicle: STL laden + positionieren ==============
 #if VEHICLE_GR_YARIS
 	Mesh* vehicle = read_stl(get_exe_path()+"../vehicle-alt-bin.stl"); // Toyota GR Yaris MY21 Stock (5.34M tri, 99.985% watertight, binary STL, units=meters)
+#elif VEHICLE_GR_YARIS==0 && defined(VEHICLE_MR2_BIN)
+	Mesh* vehicle = read_stl(get_exe_path()+"../vehicle-mr2-bin.stl"); // MR2 Time-Attack (991k tri, watertight, target Fx=565.4 N, Fz=-1337.2 N)
 #else
-	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	Mesh* vehicle = read_stl(get_exe_path()+"../scenes/vehicle.stl"); // requires CFD-EXC mount
 #endif
 	const float3 bbox_orig = vehicle->get_bounding_box_size();
 	vehicle->scale(lbm_length / bbox_orig.x); // X-Achse auf 450 cells (4.5 m / 10 mm)
