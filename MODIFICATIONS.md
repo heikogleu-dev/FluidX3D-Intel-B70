@@ -291,10 +291,53 @@ The TYPE_Y kernel patch, the CC6_MODE=2 setup branch, and the diagnostic counter
 - `findings/20_*.md` through `findings/36_*.md` — 16 findings documenting the investigation
 - VTK exports preserved in `export/`: `u-000005000.vtk` (halved -3), `u-000006900.vtk` (full -6), `u-000012900.vtk` (WW off)
 
-**Next phase decision (open):**
-- **Phase C-A: OpenLB Pi-Tensor f_neq Reconstruction** (1-2 weeks) — replace Krüger with fluid-side post-stream DDF reconstruction. Architecturally clean, literature-validated.
-- **Phase C-B: Bouzidi Sub-Grid Bounce-Back** (3-5 days) — interpolated BB with sub-cell wall-distance. Complementary to WW, reduces BB over-prediction.
-- Accept Step-1b Safe-State as known limitation (Lehmann documented 1.3-2.0× upper bound).
+**Next phase decision (resolved 2026-05-13):** Phase C-B Bouzidi selected as primary
+track. Phase C-A OpenLB Pi-Tensor reserved as later stack-up.
+
+### Phase C-B (2026-05-13) — Bouzidi Sub-Grid Bounce-Back, Step 1 PASSED
+
+**Goal:** Reduce BB ½-cell discretization error via Bouzidi 2001 linear interpolation.
+Address BB over-prediction independently of WW physics. Stack with OpenLB Pi-Tensor
+(Phase C-A) later for full WW + sub-grid BB combination.
+
+**Step 1 — Tier 1 Poiseuille Validation (2026-05-13, PASSED on 1st attempt):**
+
+Code additions (preserved in repo for Step 2+ reuse):
+- `kernel.cpp`: NEW kernel `apply_bouzidi_z_walls` (axis-aligned z-walls, hardcoded q
+  via kernel parameter). Reads current + neighbor cell DDFs via `load_f`. Applies
+  Bouzidi linear formula at fluid cells adjacent to TYPE_S in z-direction.
+- `lbm.cpp`: Kernel allocation + `enqueue_apply_bouzidi_z_walls(float q)` method.
+  Conditional call in `do_time_step` (only fires when `lbm.bouzidi_q != 0`).
+- `lbm.hpp`: Kernel + method declarations. NEW public LBM member `float bouzidi_q`
+  (runtime control, 0 = disabled).
+- `setup.cpp`: NEW `main_setup_bouzidi_poiseuille()` function with 5-q sweep.
+- `BOUZIDI_TEST` define toggle in dispatcher (default 0 post-test, set 1 to re-run).
+
+Test: 128×4×64 channel, periodic X/Y, TYPE_S walls Z=0/Nz-1, u_max=0.05, ν=0.01,
+5000 steps per q, volume force calibrated per q via Hagen-Poiseuille `f = 2νu_max/h²`.
+
+**Results (Tier 1 Skalen-Ladder validation):**
+
+| q   | L2-Error vs Analytical |
+|-----|-----------------------:|
+| 0.10| 0.760%                 |
+| 0.30| 1.475%                 |
+| 0.50| 2.153% (BB-equiv baseline, FP16C noise floor) |
+| 0.70| 2.778%                 |
+| 0.90| 3.508%                 |
+
+All 5 q-values < 5% pass criterion. Bouzidi @ q=0.5 reproduces standard BB.
+Parabolic profile shape preserved. u_max=0.0500 matches target 0.05 at channel center.
+
+**Files generated:** `bin/bouzidi_poiseuille_q{10,30,50,70,90}.csv` (excluded from
+git per .gitignore, available locally).
+
+**Step 2 next:** Per-cell q from STL voxelization. Extend `voxelize_mesh_on_device`
+with `Memory<float>* bouzidi_q = nullptr` output parameter. Sparse storage architecture.
+Generalize kernel from axis-aligned z-walls to all 18 D3Q19 directions.
+
+**Step 3+ planned:** Tier 2 Sphere drag (q from voxelization) → Tier 3 Ahmed →
+Tier 4 MR2 (OpenFOAM target Fx=565 N).
 
 ### CC#6 (deactivated, reference baseline) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
 
