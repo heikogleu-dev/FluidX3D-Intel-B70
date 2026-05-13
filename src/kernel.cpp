@@ -1511,9 +1511,18 @@ string opencl_c_container() { return R( // ########################## begin of O
 	float u_slip_mag    = uplus_1 * u_tau;
 	if(u_slip_mag > 0.95f*u_t_mag) u_slip_mag = 0.95f*u_t_mag; // safety cap
 	const float scale = u_slip_mag / u_t_mag;
-	u[              n] = scale * ux_avg;
-	u[def_N+(ulong)n ] = scale * uy_avg;
-	u[2ul*def_N+(ulong)n] = scale * uz_avg;
+	// CC#11 Option 2 Step 1: DO NOT write u_slip to u[wall_cell] anymore.
+	// Krueger-Moving-Wall approach was the root of the force artifact (cube CD=80 instead of 1.02,
+	// MR2 negative drag). Disabling the u_solid write makes apply_moving_boundaries Krueger
+	// correction term = -6*w*(c*0) = 0, restoring pure static bounce-back. This is the FIRST
+	// validation step before adding proper slip-injection at fluid cells (next sub-step).
+	// Computed u_slip values are intentionally discarded for now; will be re-introduced via
+	// fluid-DDF source-term in next step once this baseline is verified.
+	(void)scale; (void)ux_avg; (void)uy_avg; (void)uz_avg;
+	// Old code (disabled):
+	// u[              n] = scale * ux_avg;
+	// u[def_N+(ulong)n ] = scale * uy_avg;
+	// u[2ul*def_N+(ulong)n] = scale * uz_avg;
 } // apply_wall_model_vehicle()
 
 // Option 1 Fix (CC#11): subtract Krueger Moving-Wall force artifact from update_force_field result.
