@@ -146,6 +146,7 @@ void LBM_Domain::allocate(Device& device) {
 #endif // MOVING_BOUNDARIES
 #ifdef WALL_MODEL_VEHICLE
 	kernel_apply_wall_model_vehicle = Kernel(device, N, "apply_wall_model_vehicle", u, flags); // CC#10 WW wall model
+	kernel_compute_wall_model_artifact = Kernel(device, N, "compute_wall_model_artifact", F, u, flags); // CC#11 Option 1 artifact subtract
 #endif // WALL_MODEL_VEHICLE
 
 #ifdef SURFACE
@@ -219,6 +220,11 @@ void LBM_Domain::enqueue_surface_3() {
 void LBM_Domain::enqueue_update_force_field() { // calculate forces from fluid on TYPE_S cells
 	if(t!=t_last_force_field) { // only run kernel_update_force_field if the time step has changed since last update
 		kernel_update_force_field.set_parameters(2u, t).enqueue_run();
+		// CC#11 Option 1 disabled: empirical test showed Option 1 (analytical Krueger artifact
+		// subtraction) does NOT fix WW pathology. Two sign-flipped formula variants gave
+		// bit-identical results -> pathology is in flow dynamics, not separable DDF artifact.
+		// Path forward: Option 2 (OpenLB-style f_eq+f_neq reconstruction at fluid boundary cells).
+		// Kernel kept in source for documentation / reproducibility.
 		t_last_force_field = t;
 	}
 }

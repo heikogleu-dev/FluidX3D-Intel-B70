@@ -1515,6 +1515,59 @@ string opencl_c_container() { return R( // ########################## begin of O
 	u[def_N+(ulong)n ] = scale * uy_avg;
 	u[2ul*def_N+(ulong)n] = scale * uz_avg;
 } // apply_wall_model_vehicle()
+
+// Option 1 Fix (CC#11): subtract Krueger Moving-Wall force artifact from update_force_field result.
+// Mathematical derivation (D3Q19 isotropy): each Krueger-corrected DDF at a TYPE_S|TYPE_X cell
+// contributes 2 * c_i * Delta_f_i to the per-cell F, where Delta_f_i = -6 * w_i * (c_i . u_solid).
+// Summed over corrected DDFs (those whose source-fluid neighbor was in direction -c_i and is fluid):
+//   Delta_F_x = 2 * Sum_i c_i_x * Delta_f_i = -12 * Sum_(corrected) w_i * c_i_x * (c_i . u_solid)
+// For fully enclosed cells (all 18 DDFs corrected): Delta_F = -4 * u_solid per D3Q19 isotropy.
+// Surface cells get a partial contribution. This kernel computes exact per-cell artifact and
+// subtracts it from F[n] in-place, so subsequent object_force returns the physical drag.
+)+R(kernel void compute_wall_model_artifact(global float* F, const global float* u, const global uchar* flags) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N||is_halo(n)) return;
+	const uchar fn = flags[n];
+	if((fn & (TYPE_S|TYPE_X)) != (TYPE_S|TYPE_X)) return; // only WW-applied vehicle cells
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	const float u_sx = u[              n];
+	const float u_sy = u[def_N+(ulong)n];
+	const float u_sz = u[2ul*def_N+(ulong)n];
+	float dF_x = 0.0f, dF_y = 0.0f, dF_z = 0.0f;
+	// For each DDF direction i at this solid cell: it carries the Krueger-correction
+	// if its SOURCE was a fluid cell, i.e. if neighbor in direction -c_i is fluid.
+	// In D3Q19 pair convention (1,2), (3,4), ... we have c(i+1) = -c(i), so source neighbor index = j[opp(i)].
+	for(uint i=1u; i<def_velocity_set; i++) {
+		const uint opp_i = (i & 1u) ? i+1u : i-1u; // pair partner index
+		const uchar fj = flags[j[opp_i]]; // neighbor in direction -c_i
+		if(!(fj & (TYPE_S|TYPE_E|TYPE_T))) { // fluid neighbor in -c_i direction
+			const float cx_i = c(i);
+			const float cy_i = c(def_velocity_set + i);
+			const float cz_i = c(2u*def_velocity_set + i);
+			const float w_i = w(i);
+			const float c_dot_u = cx_i*u_sx + cy_i*u_sy + cz_i*u_sz;
+			// Krueger Eq 5.27 effective: Delta_f_i = +6 w_i (c_i . u_solid) at solid cell after EP streaming.
+			// Per-DDF force contribution: 2 * c_i * Delta_f_i = +12 * w_i * c_i * (c_i . u_solid)
+			// Sign-empirical: cube without WW gives CD=1.02, with WW CD=79, so artifact is POSITIVE-additive.
+			const float two_df = +12.0f * w_i * c_dot_u;
+			dF_x += cx_i * two_df;
+			dF_y += cy_i * two_df;
+			dF_z += cz_i * two_df;
+		}
+	}
+	// Subtract artifact in-place (theoretical formula, see CC#11 Option 1 analysis).
+	// EMPIRICAL FINDING 2026-05-13: this naive subtraction does NOT fix the WW pathology.
+	// Both sign-flipped versions of dF give bit-identical cube results -> the WW pathology
+	// is not a separable DDF-level artifact at TYPE_S cells, but rather an INDIRECT effect:
+	// Krueger correction modifies fluid DDFs at TYPE_MS cells (not solid), which alters the
+	// flow pattern -> different pressure distribution -> different force. No single per-cell
+	// subtraction can untangle this. Option 2 (OpenLB-style DDF reconstruction at fluid
+	// boundary cells, replacing the Krueger trick entirely) is the correct path.
+	F[              n] -= dF_x;
+	F[def_N+(ulong)n] -= dF_y;
+	F[2ul*def_N+(ulong)n] -= dF_z;
+} // compute_wall_model_artifact()
 )+"#endif"+R( // WALL_MODEL_VEHICLE
 
 
