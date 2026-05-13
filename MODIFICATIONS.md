@@ -262,6 +262,40 @@ The TYPE_Y kernel patch, the CC6_MODE=2 setup branch, and the diagnostic counter
 
 `AHMED_MODE = 0` (safe default) — running `./bin/FluidX3D` resumes prior MR2/Yaris setup without modification.
 
+### CC#11 (2026-05-13) — Wall-Model Deep Dive: Krüger Three-Attractor pathology confirmed
+
+**Motivation:** CC#X (Ahmed Phase 1 FAIL) and subsequent re-tests on the more detailed `vehicle-mr2-bin.stl` revealed CC#10's "+580 N" success was on a different (less detailed) STL. On current MR2 STL the same Full Krüger -6 logic produces -610 N (negative drag). Phase 0d Bug-Verification (Findings 20-24) confirmed Krüger force-artifact at TYPE_S|TYPE_X cells as the root cause. CC#11 spans the complete investigation: per-cell mathematics, single-cell isolation, parameter-space scan, and architectural conclusion.
+
+**Phases:**
+1. **Phase 0d** (Findings 20-24) — Code-Audit + Data-Flow + 3-path Verification + Option 1 analytical subtraction (Cube CD=40 calibrated factor 6, MR2 catastrophic -293,880 N → Iron-Rule)
+2. **Phase A — Foundation Validation** (Findings 29-32) — Re/y+ matrix, Poiseuille sketch, Diagnostic kernel sketch, object_force code-audit with BEWIESEN/HYPOTHESE/OFFEN markers
+3. **Phase B Sub-Task 1** (Finding 33) — Single-cell Krüger isolation test confirms Hypothesis B (per-cell factor 6 lands directly in F result, no EP-doubling). Cube TYPE_X|S + halved Krüger predicted CD=40 → measured CD=40 ✓
+4. **Phase B Sub-Task 2** (Finding 34) — Halved Krüger -3 universal test FAILED: Cube CD=40 (per-cell OK but 40× target), Ahmed Cd=75 (264× target), MR2 +163,000 N (290× target). Iron-Rule trigger after MR2.
+5. **Phase B Sub-Task 2.5** (Findings 35-36) — Reverse-validation (WW off → +1,643 N BB-confirmed), Full Krüger -6 on current MR2 STL (-610 N matches Finding 25 exactly), VTK exports from all 3 states for OpenFOAM-vergleich.
+
+**Architectural conclusion:** Three stable LBM attractors exist in Krüger-coupling-strength parameter space — 0% (WW off): +1820 N (BB baseline), 50% (halved): +163,000 N (broken transient-stuck state), 100% (full): -610 N (over-corrected). **Linear interpolation predicts +517 N at midpoint, actual is +163,000 N (315× off)** — proves self-referential WW-kernel ↔ Krüger coupling is fundamentally non-linear bifurcation. No coupling-strength tuning yields physically correct results.
+
+**Per-geometry pattern:** Halved Krüger fails universally on BL-resolved geometries (Ahmed 264×, MR2 290×). Works only on sharp-edged Cube (CD=40, still 40× off but follows linear per-cell math). **Krüger Moving-Wall is fundamentally unfit as WW transport mechanism** for stationary walls.
+
+**Production state after CC#11 (commit `741a974`):** Step-1b Safe-State as default. `apply_moving_boundaries` has TYPE_X-Exclusion filter active — vehicle cells (TYPE_S|TYPE_X) receive NO Krüger correction. Floor (TYPE_S only) keeps standard -6 Krüger. WW kernel still runs and writes u_slip to vehicle u-field, but those values are "dead data" (not transported by Krüger). Net effect: **pure bounce-back at vehicle = BB-baseline +1820 N** (3.2× over OpenFOAM target +565 N).
+
+**17 deviations from upstream FluidX3D documented in `findings/35_deviations_from_upstream.md`:**
+- LBM-Core (kernel.cpp): apply_moving_boundaries Step-1b filter; NEW kernels apply_freeslip_y (CC#9), apply_wall_model_vehicle (CC#10), apply_wall_slip_to_fluid (CC#11 disabled), compute_wall_model_artifact (CC#11 disabled), update_moving_boundaries per-step; stream_collide TYPE_E+TYPE_Y mirror branch (CC#8, inactive for CC6_MODE=1)
+- LBM-Wrapper (lbm.cpp): kernel allocations, enqueue methods, WW chain in do_time_step, def_nu device define
+- Config (defines.hpp): WALL_MODEL_VEHICLE define
+
+**Files added/modified in CC#11:**
+- `src/kernel.cpp` — `apply_moving_boundaries` Step-1b TYPE_X-Exclusion (re-enabled 2026-05-13 after halved Krüger MR2 failure)
+- `src/lbm.cpp` — comments documenting Option 1/2 disabled state
+- `CLAUDE.md` — NEW engineering methodology rules (Skalen-Ladder, Smoke-Test, Root-Cause-vor-Pivot)
+- `findings/20_*.md` through `findings/36_*.md` — 16 findings documenting the investigation
+- VTK exports preserved in `export/`: `u-000005000.vtk` (halved -3), `u-000006900.vtk` (full -6), `u-000012900.vtk` (WW off)
+
+**Next phase decision (open):**
+- **Phase C-A: OpenLB Pi-Tensor f_neq Reconstruction** (1-2 weeks) — replace Krüger with fluid-side post-stream DDF reconstruction. Architecturally clean, literature-validated.
+- **Phase C-B: Bouzidi Sub-Grid Bounce-Back** (3-5 days) — interpolated BB with sub-cell wall-distance. Complementary to WW, reduces BB over-prediction.
+- Accept Step-1b Safe-State as known limitation (Lehmann documented 1.3-2.0× upper bound).
+
 ### CC#6 (deactivated, reference baseline) — Aero-Box 10 mm, 168.75 M / 337.5 M cells, Auto-Stop on <1% force-drift
 
 The currently-active `main_setup()` is a compile-time-toggleable Half/Full-Domain block (line ~197 onwards), driven by `#define CC6_FULL_DOMAIN false|true`:

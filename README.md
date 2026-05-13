@@ -26,7 +26,7 @@ Together: first publicly documented end-to-end CFD evaluation on Battlemage Xe2 
 | Allocation / memory layout | ✅ 56.6 B/cell empirical (D3Q19 + FP16C), matches theory; max ~449 M cells fit in B70's 28.6 GB |
 | FP16C precision (DDFs) | ✅ stable, no observed divergence over 10 000 steps |
 | `FORCE_FIELD` extension | ✅ enabled, force-field on TYPE_S boundaries written as VTK + CSV |
-| `WALL_MODEL_VEHICLE` (CC#10) | ✅ **Werner-Wengle PowerLaw via Krüger Moving-Wall — production-valid for smooth STL vehicles** (MR2: 580 N nahe real 565 N, drag in OpenFOAM range). ⚠️ NOT validated against canonical Ahmed Body (Phase 1 FAILED, 125× force-amplification on flat-faced geometry — see CC#X section below) |
+| `WALL_MODEL_VEHICLE` (CC#10) | ⚠️ **Code compiled but disabled at vehicle cells in current Step-1b Safe-State default.** Phase B 2.5 diagnostic complete (2026-05-13): WW Krüger has **three stable attractors** (BB +1820 N, halved +163k N, full -610 N), none physically correct. Krüger Moving-Wall pattern fundamentally unfit for stationary wall WW. See [`findings/36_phaseB_diagnostic_complete.md`](findings/36_phaseB_diagnostic_complete.md). Next: Phase C (OpenLB Pi-Tensor) or Refinement (Bouzidi BB). |
 | Build (Linux + X11 + OpenCL ICD) | ✅ clean compile in 10 s with GCC 15.2 |
 | Linux x11 windowed mode | ✅ default 2560×1440, env-var configurable |
 | Linux xe-driver clean shutdown | ⚠️ requires `_exit(0)` workaround (see below) |
@@ -45,12 +45,16 @@ For raw clinfo / lspci snapshots see [MODIFICATIONS.md § Verified performance](
 
 ## What's modified vs upstream
 
-Quick summary (full detail in [`MODIFICATIONS.md`](MODIFICATIONS.md)):
+Quick summary (full detail in [`MODIFICATIONS.md`](MODIFICATIONS.md), comprehensive line-by-line audit in [`findings/35_deviations_from_upstream.md`](findings/35_deviations_from_upstream.md)):
 
-- **`src/defines.hpp`** — enable `VOLUME_FORCE` + `FORCE_FIELD`
+- **`src/defines.hpp`** — enable `VOLUME_FORCE` + `FORCE_FIELD` + `WALL_MODEL_VEHICLE` + `MOVING_BOUNDARIES` + `SUBGRID`
 - **`src/graphics.hpp`** — `FONT_WIDTH 6→12`, `FONT_HEIGHT 11→22` (HiDPI)
 - **`src/graphics.cpp`** — auto-start (`key_P = true`), 2× pixel-doubled `draw_text()`, windowed-mode override with `FLUIDX3D_WINDOW=WxH`, decorated X11 window
-- **`src/setup.cpp`** — half-domain test grid 650×144×180 (16.85 M cells), `lbm.run(10000u)`, VTK + force-CSV export, `_exit(0)` workaround for xe-driver shutdown race
+- **`src/setup.cpp`** — vehicle-aero half/full-domain setups (CC#1-CC#11), `_exit(0)` workaround for xe-driver shutdown race, MR2/Yaris binary STL handling, `CUBE_VALIDATION` + `AHMED_MODE` compile-toggles
+- **`src/kernel.cpp`** — LBM-Core deviations (17 documented in Finding 35): `apply_moving_boundaries` Step-1b TYPE_X-Exclusion, NEW kernels `apply_freeslip_y` (CC#9, sym-plane), `apply_wall_model_vehicle` (CC#10, Werner-Wengle), `apply_wall_slip_to_fluid` + `compute_wall_model_artifact` (CC#11 experiments, allocated but call-disabled), `update_moving_boundaries` per-step refresh, `stream_collide` TYPE_E+TYPE_Y ghost-mirror branch
+- **`src/lbm.cpp`** — kernel allocations, enqueue methods, do_time_step WW chain, `def_nu` + `WALL_MODEL_VEHICLE` device defines
+- **`src/lbm.hpp`** — kernel declarations + method declarations for above
+- **`CLAUDE.md`** — engineering methodology rules (Skalen-Ladder, Smoke-Test, Root-Cause-vor-Pivot) — autonomous session governance
 - **`README.md`** → renamed to `README_UPSTREAM.md`; this file replaces it.
 
 Per-file: top-of-file marker comment points at `MODIFICATIONS.md`. Per-feature: separate commits on `master`.
@@ -184,49 +188,85 @@ For aero-converged values: CC#4 with explicit symmetry-plane handling, 5-cell gr
 | **CC#9-V7 = Mode 5 + V6** | 168.75 M | 5 000 | 13 046 N | -43 N | ~ 3 min | best half-domain achievable: 22% reduction (still 12× target) |
 | **CC#10 Werner-Wengle Wall Model** | **337.5 M** | **11 300 (auto-stop @ 0.08 %)** | **579.8 N** | **+1 045 N** | **~ 7 min** | ✅ **WORKING — within OpenFOAM range** (Krüger Moving-Wall + WW PowerLaw) |
 
-The **CC#10 Werner-Wengle wall model** is now the production-default (`#define WALL_MODEL_VEHICLE` in `defines.hpp`, active on top of `CC6_MODE=1`). Drag reduced **74 %** from 2 219 N (no wall model) to 579.8 N — squarely inside the OpenFOAM RANS expectation range of 400-600 N. See [findings/SESSION_2026-05-11_WW_RESULTS.md](findings/SESSION_2026-05-11_WW_RESULTS.md) and [findings/WALL_MODEL_RESEARCH.md](findings/WALL_MODEL_RESEARCH.md) for detail.
+The **CC#10 Werner-Wengle wall model** was originally documented as production-default with MR2 Fx=580 N (matching real 565 N target). However Phase B 2.5 diagnostic (2026-05-13) revealed that result was on a DIFFERENT (less detailed) vehicle STL. On the current MR2 STL the same Full Krüger -6 logic gives **-610 N (negative drag, over-corrected)** — see CC#11 Wall-Model Deep Dive below.
 
-### CC#X — Ahmed Body Wall-Model Validation (2026-05-11) — ❌ Phase 1 FAILED
+### CC#11 — Wall-Model Deep Dive (2026-05-13) — Three Attractors, none physically correct
 
-Per Opus-Plan a canonical Ahmed Body validation was attempted (simplified flat-front Ahmed at 25° slant, ERCOFTAC reference CD = 0.285):
+After CC#X Ahmed-Body Phase 1 failure (Cd=104 with WW vs literature 0.285), Phase 0d Bug-Verification confirmed Krüger Moving-Wall force-artifact is the root cause of unphysical results. Subsequent Phase B Sub-Task work mapped the complete Krüger-coupling-strength parameter space.
 
-| Setup | Fx [N] | CD measured | vs Literatur CD=0.285 | Verdict |
-|---|---:|---:|---|---|
-| Ahmed 25° **with WW** | 11 457 N | **104** | **365× too high** | ❌ **FAIL** |
-| Ahmed 25° **without WW** (diagnostic) | 92 N | 0.84 | 3× (typical bounce-back overshoot) | ✓ baseline plausible |
+**Three stable LBM attractors on MR2** (337M cell full-domain, 30 m/s):
 
-**Diagnosis:** The Wall Model interacts pathologically with **flat-faced, sharp-edged geometry** (16-triangle simplified Ahmed), producing a 125× force-amplification artifact. The same WW works correctly on **smooth STL vehicles** (MR2: 580 N matches real 565 N target). Iron-Rule-Trigger fired at Phase 1.1 — no Phase 2 (sym-plane sweep) on Ahmed and no Phase 3 (real-vehicle re-application) until cause is identified. Full analysis: [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md).
+| Krüger coupling | MR2 Fx [N] | CD-equivalent | Verdict |
+|---|---:|---:|---|
+| **0%** (WW kernel disabled) | +1,643 N (~+1820 N Step-1b) | 2.4-2.9 | ❌ BB over-prediction (Lehmann 1.3-2.0× range) |
+| **50%** (halved -3) | +163,000 N | ~200 | ❌ catastrophic, BL-cancellation collapsed |
+| **100%** (full -6, CC#10 logic) | -610 N | -0.9 | ❌ negative drag, WW over-corrected |
+| **Target** (OpenFOAM-RANS reference) | +565 N | 0.83 | (reference) |
 
-**Conclusion:** The CC#10 Werner-Wengle wall model is **production-valid for smooth STL vehicles** (Time-Attack MR2 use-case, where it was developed and validated). It is **NOT yet validated against canonical reference geometry** because the synthetic Ahmed test case revealed a previously-unsuspected geometry sensitivity. The wall model code remains unchanged (Iron Rule compliance) pending user decision on next direction (rounded-Ahmed STL, MR2-direct sym-plane sweep, or wall-model refinement).
+**Key insight:** Linear interpolation between BB-baseline (0%) and Full-Krüger (100%) predicts midpoint at ~+517 N. Actual halved result is +163,000 N — **315× off linear prediction**. The Krüger-coupling response is fundamentally non-linear (self-referential WW↔BL feedback). Halved Krüger gets stuck in the Full-Krüger transient path (+342k transient peak before -610 N attractor).
+
+**Cross-geometry validation:**
+
+| Geometry | Halved Krüger Result | Target | Pathology |
+|---|---:|---:|---|
+| Cube (sharp-edged) | CD=40 | 1.05 | matches Finding 33 per-cell prediction ✓ |
+| Ahmed 25° (BL-resolved) | Cd=75 | 0.285 | 264× too high ❌ |
+| MR2 (BL-resolved, smooth) | Fx=+163k N | 565 N | 290× too high ❌ |
+
+Per-cell formula (Finding 33, single-cell isolation test) is mathematically correct. Integration over BL-resolved geometries breaks cancellation properties — halved Krüger fails universally on real vehicles.
+
+**Production verdict:** Code defaults to Step-1b Safe-State (TYPE_X-Exclusion at vehicle cells in `apply_moving_boundaries`). This gives **pure bounce-back baseline** at the vehicle, no Krüger artifact, no negative drag, no unphysical magnitudes — but inherits Lehmann's documented 1.3-2.0× BB over-prediction.
+
+**Full findings sequence (CC#11):**
+- [findings/20_ww_audit.md](findings/20_ww_audit.md) — Code-Audit + Data-Flow + analytical Krüger-artifact derivation
+- [findings/21_phase0d_final.md](findings/21_phase0d_final.md) — Phase 0d Bug-Verification (3 paths)
+- [findings/22_option1_negative_result.md](findings/22_option1_negative_result.md) — Option 1 first failure
+- [findings/23_step2_attempts.md](findings/23_step2_attempts.md) — Option 2 three sign-variants failed
+- [findings/24_option1_calibration_failure.md](findings/24_option1_calibration_failure.md) — Iron-Rule-Trigger after 3 calibrations
+- [findings/25_ww_six_failed_attempts.md](findings/25_ww_six_failed_attempts.md) — Six-attempt journey, Lehmann reference
+- [findings/26_ep_storage_boundary_pattern.md](findings/26_ep_storage_boundary_pattern.md) — EP-Storage pattern explains both Sym-Plane and WW artifacts
+- [findings/27_typex_force_isolation.md](findings/27_typex_force_isolation.md) — TYPE_S\|TYPE_X marker isolation pattern
+- [findings/29_geometry_re_yplus_matrix.md](findings/29_geometry_re_yplus_matrix.md) — y+ matrix per geometry (Cube 68, Ahmed/MR2/Yaris ~300)
+- [findings/30_poiseuille_ww_validation_setup.md](findings/30_poiseuille_ww_validation_setup.md) — Canonical channel validation sketch (3-variant)
+- [findings/31_diagnostic_kernel_sketch.md](findings/31_diagnostic_kernel_sketch.md) — DIAGNOSTIC_WW VTK export design
+- [findings/32_force_code_audit.md](findings/32_force_code_audit.md) — object_force() code-pfad-audit, BEWIESEN/HYPOTHESE/OFFEN markers
+- [findings/33_single_cell_krueger_test.md](findings/33_single_cell_krueger_test.md) — Single-cell test confirms Hypothesis B (factor 6 direct, no EP doubling)
+- [findings/34_halved_krueger_negative.md](findings/34_halved_krueger_negative.md) — Phase B 2.0 initial halved-Krüger failure
+- [findings/35_deviations_from_upstream.md](findings/35_deviations_from_upstream.md) — 17-deviation Code-State audit vs upstream
+- [findings/36_phaseB_diagnostic_complete.md](findings/36_phaseB_diagnostic_complete.md) — **Three-Attractor synthesis (this finding set)**
+
+### CC#X — Ahmed Body Wall-Model Validation (2026-05-11) — ❌ Phase 1 FAILED (subsumed by CC#11)
+
+Initial canonical Ahmed validation (simplified flat-front, 25° slant, ERCOFTAC ref CD=0.285) gave Cd=104 with CC#10 Full Krüger — 365× over target. This single datapoint triggered the Phase 0d Bug-Verification investigation that culminated in CC#11's Three-Attractor finding. Original analysis preserved at [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md).
 
 ## Roadmap & Findings
 
-The current absolute drag is ~2 200 N for the Volldomain reference, against an OpenFOAM RANS reference of ~400–600 N — i.e. **~5× too high**. The plan is to close this gap stepwise:
+**Current state (2026-05-13):** Step-1b Safe-State (commit `741a974`). MR2 baseline +1820 N (3.2× over OpenFOAM target +565 N), no WW reduction, no artifacts. All CC#11 Wall-Model experiments documented (Findings 20-36) and converged to the architectural conclusion: Krüger Moving-Wall pattern is fundamentally unfit for stationary-wall WW transport (Three-Attractor non-linear bifurcation).
+
+**Decision points open:**
+- **Phase C-A: OpenLB Pi-Tensor f_neq Reconstruction** — replace Krüger transport with fluid-side post-stream DDF reconstruction (literature-validated, geometry-agnostic). 1-2 weeks implementation.
+- **Phase C-B: Bouzidi Sub-Grid Bounce-Back** — interpolated BB with sub-cell wall-distance, complementary to (not replacement for) WW. Reduces BB over-prediction without WW physics. 3-5 days implementation.
+- **Accept current Step-1b Safe-State** — 3.2× drag over-prediction is acknowledged limitation; consistent with Lehmann's documented 1.3-2.0× upper bound.
 
 ### Session detail logs
 
 - [findings/SESSION_2026-05-11_SUMMARY.md](findings/SESSION_2026-05-11_SUMMARY.md) — Full investigation of half-domain symmetry-plane: 11 variants tested, Esoteric-Pull architecture diagnosis, configuration audit, recommended path forward.
 
-#### CC#11 Wall-Model deep dive (2026-05-13) — six failed attempts, methodical restart
+#### CC#11 Wall-Model deep dive (2026-05-13) — complete
 
-- [findings/20_ww_audit.md](findings/20_ww_audit.md) — Code-Audit + Data-Flow-Diagram + analytical formula derivation of the Krüger force artifact.
-- [findings/21_phase0d_final.md](findings/21_phase0d_final.md) — Phase 0d Bug-Verification consolidated report (3 paths verified).
-- [findings/22_option1_negative_result.md](findings/22_option1_negative_result.md) — Option 1 analytical subtraction first failure analysis.
-- [findings/23_step2_attempts.md](findings/23_step2_attempts.md) — Option 2 three sign-variant failures documented.
-- [findings/24_option1_calibration_failure.md](findings/24_option1_calibration_failure.md) — Iron-Rule-Trigger after 3 Option-1 calibrations + path-forward proposals.
-- [findings/25_ww_six_failed_attempts.md](findings/25_ww_six_failed_attempts.md) — Six-attempt journey with Lehmann's documented 1.3-2.0× overprediction reference; per-cell analytical subtraction doesn't generalize across geometries.
-- [findings/26_ep_storage_boundary_pattern.md](findings/26_ep_storage_boundary_pattern.md) — EP-Storage interaction pattern explains both Sym-Plane and WW artifact failures: modify DDFs at fluid cells, not u at solid cells.
-- [findings/27_typex_force_isolation.md](findings/27_typex_force_isolation.md) — TYPE_S\|TYPE_X marker isolation as practical workaround for clean force measurement on multi-component setups; verified in cube test.
+See "CC#11 — Wall-Model Deep Dive" section above for the full findings sequence (Findings 20-36) and Three-Attractor conclusion. Repo state after CC#11: Step-1b Safe-State as production default.
 
 ### Open work items (priority order, with feasibility verdicts)
 
-| # | Task | Effort in FluidX3D | Reference impl | Feasibility |
+| # | Task | Effort | Reference impl | Feasibility |
 |---|---|---|---|---|
-| ~~**1**~~ | ~~True symmetry plane (specular reflection) — separate post-stream-collide OpenCL kernel that reads/writes PDFs in fluid neighbors of TYPE_Y cells, bypassing Esoteric-Pull.~~ | — | [waLBerla FreeSlip](https://github.com/lssfau/walberla/blob/master/src/lbm/boundary/FreeSlip.h) | 🚫 **ATTEMPTED 2026-05-10/11, ALL APPROACHES FAILED.** Five different approaches tested (CC#7-V1/V2/Alt1, CC#8), all produce Fx in 14-18k range vs reference 2.2k. Inline DDF modification fails due to Esoteric-Pull storage layout (load_f/store_f roundtrip cancels modification). Architecturally requires rewriting the EP storage layer or adding a separate kernel pass with parity-aware slot access — both are essentially rewriting FluidX3D's core. See MODIFICATIONS.md for full analysis. **Status: blocked architecturally**, matching upstream maintainer's own statement in issue #288. |
-| ~~**2**~~ | ~~Ghost-cell mirror at Y_min — alternative to #1: keep TYPE_E at Y_min but mirror u(y=1) into u(y=0) with u_y → -u_y.~~ | — | standard ghost-cell technique | 🚫 **ATTEMPTED 2026-05-11 (CC#8), FAILED.** Reduced Fx by 12 % vs plain TYPE_E (16.2k → 14.3k) but still 13× target. Root cause: equilibrium-projection at sym-plane is fundamentally a velocity-Dirichlet BC, it loses the higher-moment DDF shape that specular reflection should preserve. The cleaner equivalents (separate pre-stream kernel) would give the same physical limit since they all reduce to "force equilibrium consistent with mirror velocity field" — i.e., a Dirichlet pin, not a specular wall. |
-| ~~**3**~~ | ~~**Werner-Wengle wall model** — Two-Layer power-law wall function (`u+ = y+` for `y+ ≤ 11.81`, `u+ = 8.3·y+^(1/7)` else). Closed-form `u_τ = (u_t / [8.3·(y/ν)^(1/7)])^(7/8)`. Modifies the velocity used in `apply_moving_boundaries` from no-slip (u=0) to a slip-velocity approximating the unresolved viscous sublayer.~~ | — | [OpenLB `WallFunctionBoundaryProcessor3D`](https://github.com/openLB/openLB/blob/master/src/boundary/wallFunctionBoundaryPostProcessors3D.h) | ✅ **DONE 2026-05-11 (CC#10).** Implemented via Krüger Moving-Wall approach (Approach A): new kernel `apply_wall_model_vehicle` runs BEFORE `stream_collide` each step, sets `u[vehicle_cell] = u_slip × direction(u_avg)` per Werner-Wengle PowerLaw closed-form. `apply_moving_boundaries` (existing) transfers the slip into the fluid via the standard Krüger correction. **Drag 2 219 N → 579.8 N (−74 %)**, within OpenFOAM range 400-600 N. No per-cell storage needed (~40 lines kernel). See [MODIFICATIONS.md § CC#10](MODIFICATIONS.md) and [findings/SESSION_2026-05-11_WW_RESULTS.md](findings/SESSION_2026-05-11_WW_RESULTS.md). |
-| **4** | **Rotating wheels** — split `vehicle.stl` into body + front_wheels + rear_wheels in Blender (manual), then call `voxelize_mesh_on_device(wheel_stl, TYPE_S\|TYPE_X, axle_center, float3(0), float3(0, omega, 0))` per wheel pair. omega = lbm_u / r_wheel ≈ 0.075 / 34 = 2.2e-3 rad/step. | **30 min user (Blender) + 30 min code** | [F1 W14 example in `setup.cpp:1271`](https://github.com/ProjectPhysX/FluidX3D/blob/master/src/setup.cpp) (pattern: `voxelize_mesh_on_device(wheels, TYPE_S, center, 0, omega)`) | ✅ **Trivially feasible — built-in!** FluidX3D already has full rotating-mesh support: `void voxelize_mesh_on_device(const Mesh*, uchar flag=TYPE_S, const float3& rotation_center=0, const float3& linear_velocity=0, const float3& rotational_velocity=0)` (`lbm.hpp`). `update_moving_boundaries()` is called automatically when `rotational_velocity ≠ 0` and flag includes TYPE_S. **Zero code-changes needed**, only setup.cpp calls. |
-| **5** | **AMR (Adaptive Mesh Refinement)** — Multi-level grid with finer cells at vehicle surface only, coarser elsewhere. Per-level relaxation-time scaling (`τ' = τ / (2^L (1-τ/2) + τ/2)`), recursive nested timesteps (level L runs 2× per parent step), coarse-fine PDF interpolation at refinement interfaces. | **months — full architectural rewrite** | [waLBerla `BasicRecursiveTimeStep::timestep()`](https://github.com/lssfau/walberla/blob/master/src/lbm_generated/refinement/BasicRecursiveTimeStep.impl.h), `RefinementScaling.h`, NonUniformGridGPU benchmark; OpenLB also has refinement | 🚫 **NOT feasible without forking the entire FluidX3D architecture.** Maintainer ProjectPhysX in [issue #127](https://github.com/ProjectPhysX/FluidX3D/issues/127): *"FluidX3D cannot do adaptive grid refinement"* and in [issue #284](https://github.com/ProjectPhysX/FluidX3D/issues/284) the user case was explicitly rebuffed: *"For y+ < 1, you would need ~5 orders of magnitude spacial resolution, or ~10000³ cells. Today's high-end hardware can only get you ~4000³ cells."* FluidX3D's Esoteric-Pull and AA-pattern memory layouts are tightly coupled to a single uniform grid. Adding AMR would require multi-level pdfField management, per-level kernel launches, fine-coarse halo communication, and split timestepping. **A waLBerla-style implementation is essentially a new LBM solver, not a patch.** Recommend instead: scale to a larger-VRAM GPU (e.g. MI300X 192 GB → 4× cell budget) or accept that 10 mm uniform + wall model #3 is the resolution-quality sweet-spot for this fork. |
+| **1** | **OpenLB Pi-Tensor f_neq Reconstruction (Phase C-A)** — replace Krüger Moving-Wall transport with fluid-side post-stream DDF reconstruction at TYPE_MS cells. Uses local stress tensor (Π = Σ c_i c_i f_neq_i) and Werner-Wengle u_τ. Modifies fluid DDFs directly, never lands in solid cells → no force artifact, no Krüger Three-Attractor pathology. | **1-2 weeks** | [OpenLB `WallFunctionBoundaryProcessor3D`](https://github.com/openLB/openLB/blob/master/src/boundary/wallFunctionBoundaryPostProcessors3D.h) — uses `WallFunctionForcedD3Q19Descriptor` with per-cell `AV_SHEAR, TAU_W, TAU_EFF, FORCE, V12` storage | ✅ **Recommended primary track.** Architecturally clean (modify fluid not solid). Validated by OpenLB. Sketch in [findings/30_poiseuille_ww_validation_setup.md](findings/30_poiseuille_ww_validation_setup.md). Per-cell storage cost ~100 MB at vehicle surface. |
+| **2** | **Bouzidi Sub-Grid Bounce-Back (Phase C-B)** — interpolated BB using sub-cell wall-distance q ∈ [0, 1]. Reduces ½-cell-discretization error of standard BB. Complementary to (not replacement for) WW: addresses BB over-prediction, not BL physics. Sub-grid distance precomputed via Walberla-style ray-cast through STL. | **3-5 days** | Bouzidi 2001 paper, [OpenLB `BouzidiVelocity`](https://gitlab.com/openlb/release/-/blob/master/src/boundary/bouzidiBoundary.h) | ✅ **Recommended alternative track.** Lower complexity than Phase C-A. Reduces BB over-prediction from 3.2× to ~1.5-2× (closer to Lehmann's upper bound). Doesn't require WW physics. Can stack with Phase C-A later. |
+| ~~**3**~~ | ~~**Werner-Wengle wall model via Krüger Moving-Wall (CC#10 approach)**~~ | — | [OpenLB `WallFunctionBoundaryProcessor3D`](https://github.com/openLB/openLB/blob/master/src/boundary/wallFunctionBoundaryPostProcessors3D.h) | 🚫 **ATTEMPTED CC#10/CC#11 2026-05-11 → 2026-05-13, ARCHITECTURALLY UNFIT.** Krüger Moving-Wall is intended for ACTUAL moving solids (floors, wheels). Applied as WW transport at stationary vehicle surface, it produces three stable non-linear attractors (BB +1820 N, halved +163k N, full -610 N) — no linear interpolation, no physical state. Phase B 2.5 diagnostic exhausted all coupling strengths. **Status: blocked architecturally.** Findings 25-36 document the full investigation. |
+| ~~**4**~~ | ~~True symmetry plane (specular reflection)~~ | — | [waLBerla FreeSlip](https://github.com/lssfau/walberla/blob/master/src/lbm/boundary/FreeSlip.h) | 🚫 **ATTEMPTED 2026-05-10/11 (CC#7/CC#8/CC#9), ALL FAILED.** EP-Storage prevents inline DDF modification at sym-plane cells. Five approaches tested, all produce Fx 14-18k vs reference. Matches upstream issue #288. |
+| ~~**5**~~ | ~~Ghost-cell mirror at Y_min (CC#8)~~ | — | standard ghost-cell | 🚫 **ATTEMPTED 2026-05-11, FAILED.** Equilibrium-projection at sym-plane is velocity-Dirichlet, loses specular reflection's higher-moment DDF shape. |
+| **6** | **Rotating wheels** — split `vehicle.stl` into body + front_wheels + rear_wheels in Blender (manual), then call `voxelize_mesh_on_device(wheel_stl, TYPE_S, axle_center, float3(0), float3(0, omega, 0))` per wheel pair. **Marker convention:** Body as TYPE_S\|TYPE_X (measured), wheels as TYPE_S only (in flow but force-isolated, per Finding 27). | **30 min user (Blender) + 30 min code** | [F1 W14 example in upstream `setup.cpp`](https://github.com/ProjectPhysX/FluidX3D/blob/master/src/setup.cpp) | ✅ **Trivially feasible — built-in!** FluidX3D already has full rotating-mesh support via `voxelize_mesh_on_device` with rotational_velocity parameter. **Deferred to last priority** per current Phase C work focus: wall-model physics fix is more impactful than rotating-wheels detail. |
+| **7** | **AMR (Adaptive Mesh Refinement)** — Multi-level grid with finer cells at vehicle surface only. | **months — full architectural rewrite** | [waLBerla `BasicRecursiveTimeStep`](https://github.com/lssfau/walberla/blob/master/src/lbm_generated/refinement/BasicRecursiveTimeStep.impl.h) | 🚫 **NOT feasible without forking entire FluidX3D architecture.** Maintainer ProjectPhysX explicitly rebuffed in [issue #284](https://github.com/ProjectPhysX/FluidX3D/issues/284). FluidX3D's Esoteric-Pull and AA-pattern tightly coupled to uniform grid. **Alternative: scale to larger-VRAM GPU** or accept 10mm uniform + Phase C-A/B as quality sweet-spot. |
 
 ### Investigations completed
 
@@ -246,7 +286,7 @@ The current absolute drag is ~2 200 N for the Volldomain reference, against an O
 
 ### Goal
 
-Close the gap to **OpenFOAM-RANS-equivalent forces** (Cd ≈ 0.35–0.5, Fx ≈ 400–600 N for our vehicle at 30 m/s). FluidX3D delivers **5 464 MLUPS at 96–100 % of B70 spec bandwidth** even for 337 M cells — the throughput is excellent. The current bottleneck is purely physical fidelity (wall model, true symmetry plane, rotating wheels), not GPU performance.
+Close the gap to **OpenFOAM-RANS-equivalent forces** (Cd ≈ 0.35–0.5, Fx ≈ 400–600 N for our 30 m/s vehicle). FluidX3D delivers **5 464 MLUPS at 96–100 % of B70 spec bandwidth** even for 337 M cells — the throughput is excellent. The current bottleneck is purely **physical fidelity at the wall** (BB over-prediction inherits Lehmann's documented 1.3-2.0× factor; CC#11 confirmed Krüger Moving-Wall WW is architecturally unfit). Phase C (OpenLB Pi-Tensor OR Bouzidi sub-grid BB) is the next quality milestone.
 
 ### B70 Pro hardware verdict
 
@@ -282,7 +322,7 @@ waLBerla, TCLB, lbmpy-via-waLBerla, Palabos, Musubi all require **NVIDIA or AMD 
 
 ### Strategic conclusion
 
-**FluidX3D + the custom patches in this fork is the right choice for the B70.** The 5× drag overshoot vs. OpenFOAM-RANS is fundamentally a **boundary-condition fidelity gap (sym-plane, wall model, rotating wheels)**, not a solver-quality gap. FluidX3D's compute throughput is class-leading for our hardware. Closing the BC gap via the [Roadmap](#roadmap--findings) work items #1, #3, #4 is much cheaper than porting to another solver — and porting to waLBerla/TCLB would also require leaving the B70 platform behind. **OpenLB-SYCL is the only real "Plan B" if Intel improves its SYCL stack and OpenLB's GPU support matures, but until then FluidX3D wins on every concrete metric that matters here.**
+**FluidX3D + the custom patches in this fork is the right choice for the B70.** The 3.2× drag overshoot in Step-1b Safe-State is fundamentally a **wall-boundary-condition fidelity gap (BB ½-cell discretization + missing WW physics)**, not a solver-quality gap. FluidX3D's compute throughput is class-leading for our hardware. **The CC#11 deep dive (Findings 25-36) ruled out the Krüger Moving-Wall WW approach** — Phase C transition to OpenLB Pi-Tensor reconstruction (item #1) or Bouzidi sub-grid BB (item #2) is the actionable next step. Porting to waLBerla/TCLB would require leaving B70 behind; **OpenLB-SYCL remains the long-term Plan B** if Intel's SYCL stack and OpenLB's GPU support mature.
 
 ## Companion repos
 
