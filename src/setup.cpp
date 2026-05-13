@@ -232,6 +232,110 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define VEHICLE_GR_YARIS 0  // 1 = Yaris (vehicle-alt-bin.stl), 0 = MR2/default (see VEHICLE_MR2_BIN)
 #define VEHICLE_MR2_BIN    // MR2 Time-Attack (vehicle-mr2-bin.stl). Comment out to use scenes/vehicle.stl (requires CFD-EXC mount).
 #define AHMED_MODE 0        // Phase 0: 0 = Real Vehicle, 1 = Ahmed 25° canonical (Phase 0 FAILED), 2 = Ahmed 35°
+#define CUBE_VALIDATION 0   // Phase 0d-B: 0 = off (default, runs Vehicle/Ahmed), 1 = 1m cube at Re=10^5 for WW-artifact diagnostic
+
+#if CUBE_VALIDATION
+// ============================================================================
+// Phase 0d-B — Cube Wall-Model Artifact Minimal-Reproduce
+// 1m × 1m × 1m cube at Re = 10^5, free-stream walls (no rolling road, no slant)
+// Reference: CD_cube ≈ 1.05 (Hoerner, Re-independent in turbulent regime)
+// Goal: isolate WW Krüger-moving-wall force artifact vs bounce-back baseline
+// ============================================================================
+void main_setup_cube() {
+	const float si_L = 1.0f;          // 1 m cube side
+	const float si_A = si_L * si_L;   // 1.0 m² frontal area
+	const float si_u = 1.5f;          // 1.5 m/s → Re = 10^5 with nu_air
+	const float si_nu = 1.5E-5f, si_rho = 1.225f;
+	const float lbm_u = 0.075f;
+	const float cell_size = 0.025f;   // 25 mm → 40 cells per body length, ~50M total cells for 12.5% blockage domain
+	const float lbm_length = si_L / cell_size; // 40 cells
+	// Domain: 16L × 8L × 8L → 12.5% Y/Z blockage (Heiko's caveat: 25% was too tight)
+	// 16m × 8m × 8m = 640 × 320 × 320 = 65M cells, 4L upstream + 12L wake
+	const uint Nx = (uint)(16.0f * lbm_length + 0.5f); // 640 cells = 16 m
+	const uint Ny = (uint)( 8.0f * lbm_length + 0.5f); // 320 cells = 8 m
+	const uint Nz = (uint)( 8.0f * lbm_length + 0.5f); // 320 cells = 8 m
+	const uint3 lbm_N = uint3(Nx, Ny, Nz);
+	const string label = "CC#X-CUBE";
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_L, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+	const float F_target = 0.5f * si_rho * si_u * si_u * si_A * 1.05f;
+	print_info(label+" Re="+to_string(to_uint(units.si_Re(si_L, si_u, si_nu))));
+	print_info(label+" Cells: "+to_string(Nx)+" x "+to_string(Ny)+" x "+to_string(Nz)+" = "+to_string((ulong)Nx*Ny*Nz));
+	print_info(label+" Target Fx ~ "+to_string(F_target,3u)+" N (CD=1.05, Hoerner reference)");
+	LBM lbm(lbm_N, 1u, 1u, 1u, lbm_nu);
+
+	// Define cube via explicit voxelization (no STL needed, just flag cells)
+	// Cube X-center @ 4L (= cell 160), Y-center @ Ny/2, Z-center @ Nz/2 (free-suspended cube, no wall interactions)
+	const uint cube_x0 = (uint)(3.5f*lbm_length), cube_x1 = cube_x0 + (uint)lbm_length;
+	const uint cube_y0 = (Ny - (uint)lbm_length)/2u, cube_y1 = cube_y0 + (uint)lbm_length;
+	const uint cube_z0 = (Nz - (uint)lbm_length)/2u, cube_z1 = cube_z0 + (uint)lbm_length;
+	print_info(label+" Cube voxels: X["+to_string(cube_x0)+","+to_string(cube_x1)+"] Y["+to_string(cube_y0)+","+to_string(cube_y1)+"] Z["+to_string(cube_z0)+","+to_string(cube_z1)+"]");
+
+	parallel_for(lbm.get_N(), [&](ulong n) {
+		uint x=0, y=0, z=0;
+		lbm.coordinates(n, x, y, z);
+		// Cube interior + surface as TYPE_S|TYPE_X
+		if(x>=cube_x0 && x<cube_x1 && y>=cube_y0 && y<cube_y1 && z>=cube_z0 && z<cube_z1) {
+			lbm.flags[n] = TYPE_S | TYPE_X;
+			lbm.u.x[n] = 0.0f; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+			return;
+		}
+		// All outer boundaries as TYPE_E free-stream u_x=lbm_u (no rolling road; cube in open flow)
+		if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==0u || z==Nz-1u) {
+			lbm.flags[n] = TYPE_E;
+		}
+		lbm.u.x[n] = lbm_u; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+	});
+
+	// Run-Loop mit Auto-Stop
+	const string force_csv_path = get_exe_path() + "../bin/forces_cube_val.csv";
+	std::ofstream fcsv(force_csv_path);
+	fcsv << "step,t_si,Fx_si,Fy_si,Fz_si\n";
+	fcsv << std::scientific;
+	const uint chunk = 100u;
+	const uint chunks_max = 200u;
+	const uint conv_window = 25u;
+	const uint conv_min_chunks = 50u;
+	const float conv_tol = 0.02f;
+	std::vector<float3> Fhist;
+	Fhist.reserve(chunks_max);
+	print_info(label+" Run start: max "+to_string(chunks_max*chunk)+" Steps; Auto-Stop |dFx/Fx|<2% over 2500 Steps (earliest @5000)");
+	uint final_chunks = chunks_max;
+	for(uint c = 0u; c < chunks_max; c++) {
+		lbm.run(chunk);
+		lbm.update_force_field();
+		const float3 F_lbm = lbm.object_force(TYPE_S|TYPE_X);
+		const float3 F_si  = float3(units.si_F(F_lbm.x), units.si_F(F_lbm.y), units.si_F(F_lbm.z));
+		Fhist.push_back(F_si);
+		const ulong step = (ulong)(c+1u) * chunk;
+		const float t_si = units.si_t(step);
+		fcsv << step << "," << t_si << "," << F_si.x << "," << F_si.y << "," << F_si.z << "\n";
+		if((c+1u) % 10u == 0u) fcsv.flush();
+		if((c+1u) % 25u == 0u) {
+			const float CD = F_si.x / (0.5f * si_rho * si_A * si_u * si_u);
+			print_info("step="+to_string(step)+" t="+to_string(t_si,3u)+"s Fx="+to_string(F_si.x,3u)+"N Fy="+to_string(F_si.y,3u)+"N Fz="+to_string(F_si.z,3u)+"N | CD="+to_string(CD,3u)+" (target 1.05)");
+		}
+		if(c+1u >= conv_min_chunks) {
+			float3 recent_avg(0.0f), prev_avg(0.0f);
+			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist[Fhist.size()-1u-k];
+			for(uint k=0u; k<conv_window; k++) prev_avg   += Fhist[Fhist.size()-1u-conv_window-k];
+			recent_avg /= (float)conv_window;
+			prev_avg   /= (float)conv_window;
+			const float dx = (recent_avg.x!=0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
+			if(dx < conv_tol) {
+				const float CD_final = recent_avg.x / (0.5f * si_rho * si_A * si_u * si_u);
+				print_info(label+" CONVERGED at step "+to_string(step)+": Fx="+to_string(recent_avg.x,3u)+"N (CD="+to_string(CD_final,3u)+", target 1.05)  Fy="+to_string(recent_avg.y,3u)+"N Fz="+to_string(recent_avg.z,3u)+"N");
+				final_chunks = c+1u;
+				break;
+			}
+		}
+	}
+	fcsv.close();
+	print_info(label+" done after "+to_string(final_chunks)+" chunks ("+to_string(final_chunks*chunk)+" steps).");
+	std::fflush(nullptr);
+	_exit(0);
+}
+#endif // CUBE_VALIDATION
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -371,6 +475,10 @@ void main_setup_ahmed() {
 #endif // AHMED_MODE>0
 
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
+#if CUBE_VALIDATION
+	main_setup_cube();
+	return;
+#endif
 #if AHMED_MODE>0
 	main_setup_ahmed();
 	return;
