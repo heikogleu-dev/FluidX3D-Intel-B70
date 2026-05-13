@@ -207,6 +207,17 @@ The current absolute drag is ~2 200 N for the Volldomain reference, against an O
 
 - [findings/SESSION_2026-05-11_SUMMARY.md](findings/SESSION_2026-05-11_SUMMARY.md) — Full investigation of half-domain symmetry-plane: 11 variants tested, Esoteric-Pull architecture diagnosis, configuration audit, recommended path forward.
 
+#### CC#11 Wall-Model deep dive (2026-05-13) — six failed attempts, methodical restart
+
+- [findings/20_ww_audit.md](findings/20_ww_audit.md) — Code-Audit + Data-Flow-Diagram + analytical formula derivation of the Krüger force artifact.
+- [findings/21_phase0d_final.md](findings/21_phase0d_final.md) — Phase 0d Bug-Verification consolidated report (3 paths verified).
+- [findings/22_option1_negative_result.md](findings/22_option1_negative_result.md) — Option 1 analytical subtraction first failure analysis.
+- [findings/23_step2_attempts.md](findings/23_step2_attempts.md) — Option 2 three sign-variant failures documented.
+- [findings/24_option1_calibration_failure.md](findings/24_option1_calibration_failure.md) — Iron-Rule-Trigger after 3 Option-1 calibrations + path-forward proposals.
+- [findings/25_ww_six_failed_attempts.md](findings/25_ww_six_failed_attempts.md) — Six-attempt journey with Lehmann's documented 1.3-2.0× overprediction reference; per-cell analytical subtraction doesn't generalize across geometries.
+- [findings/26_ep_storage_boundary_pattern.md](findings/26_ep_storage_boundary_pattern.md) — EP-Storage interaction pattern explains both Sym-Plane and WW artifact failures: modify DDFs at fluid cells, not u at solid cells.
+- [findings/27_typex_force_isolation.md](findings/27_typex_force_isolation.md) — TYPE_S\|TYPE_X marker isolation as practical workaround for clean force measurement on multi-component setups; verified in cube test.
+
 ### Open work items (priority order, with feasibility verdicts)
 
 | # | Task | Effort in FluidX3D | Reference impl | Feasibility |
