@@ -232,6 +232,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define VEHICLE_GR_YARIS 0  // 1 = Toyota GR Yaris (vehicle-alt-bin.stl). 0 = scenes/vehicle.stl (canonical MR2 — used for smoke tests per user direction 2026-05-13)
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
+#define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -367,9 +368,17 @@ void main_setup_ahmed() {
 }
 #endif // AHMED_MODE>0
 
+#if PHASE_5B_DUAL_DOMAIN
+void main_setup_phase5b_dual(); // forward decl
+#endif
+
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
 #if AHMED_MODE>0
 	main_setup_ahmed();
+	return;
+#endif
+#if PHASE_5B_DUAL_DOMAIN
+	main_setup_phase5b_dual();
 	return;
 #endif
 	// ============== Domain Setup ==============
@@ -633,6 +642,154 @@ void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. R
 	std::fflush(nullptr);
 	_exit(0); // umgehe xe-driver Cleanup-Race
 } // CC#6 BLOCK END
+
+#if PHASE_5B_DUAL_DOMAIN
+// ============================================================================
+// Phase 5b: Dual-Domain Same-Resolution Schwarz Coupling — 2026-05-13
+// Two LBM instances on single GPU:
+//   Far:  1000 × 500 × 450 = 225 M cells (10m × 5m × 4.5m @ 10mm, shrunk per user)
+//   Near:  700 × 300 × 185 = 38.85 M cells (compact, 0.5m vor/sides/oben + 2m hinter vehicle)
+// Near origin in Far coords: (75, 100, 0)
+// Vehicle: Far cell (350, 250, ~70) | Near cell (275, 150, ~70) — same physical position
+// Coupling: Far → Near at 5 outer faces every chunk (no back-coupling in 5b-A)
+// Blockage: 2.0/22.5 = 8.9% ✓
+// ============================================================================
+void main_setup_phase5b_dual() {
+	// ===== Common physics =====
+	const float lbm_u    = 0.075f;
+	const float si_u     = 30.0f;
+	const float si_length= 4.5f;     // vehicle length (m), scales STL to lbm_length
+	const float cell_size= 0.010f;   // 10 mm uniform — SAME for Far and Near (5b same-res)
+	const float lbm_length = si_length / cell_size; // 450 cells per vehicle length
+	const float si_nu = 1.48E-5f, si_rho = 1.225f;
+	units.set_m_kg_s(lbm_length, lbm_u, 1.0f, si_length, si_u, si_rho);
+	const float lbm_nu = units.nu(si_nu);
+
+	print_info("==================== PHASE 5b: DUAL-DOMAIN SAME-RES SCHWARZ ====================");
+	print_info("Re(L) = "+to_string(to_uint(units.si_Re(si_length, si_u, si_nu))));
+
+	// ===== Far Domain (shrunk for faster runs) =====
+	const uint3 far_N = uint3(1000u, 500u, 450u);  // 225 M cells | 10m × 5m × 4.5m
+	const uint far_vehicle_x = 350u;               // Vehicle X-center | anlauf 125 cells (1.25m), wake 425 cells (4.25m)
+	print_info("Far: "+to_string(far_N.x)+"x"+to_string(far_N.y)+"x"+to_string(far_N.z)+" = "+to_string((ulong)far_N.x*far_N.y*far_N.z)+" cells | Vehicle X-center @ cell "+to_string(far_vehicle_x));
+	LBM lbm_far(far_N, 1u, 1u, 1u, lbm_nu);
+
+	// ===== Near Domain (compact per user spec 2026-05-13) =====
+	const uint3 near_N = uint3(700u, 300u, 185u);  // 38.85 M cells | 7m × 3m × 1.85m
+	const uint3 near_origin = uint3(75u, 100u, 0u); // Near (0,0,0) = Far (75, 100, 0)
+	const uint near_vehicle_x = far_vehicle_x - near_origin.x; // 275
+	print_info("Near: "+to_string(near_N.x)+"x"+to_string(near_N.y)+"x"+to_string(near_N.z)+" = "+to_string((ulong)near_N.x*near_N.y*near_N.z)+" cells | Origin in Far: ("+to_string(near_origin.x)+","+to_string(near_origin.y)+","+to_string(near_origin.z)+") | Vehicle X-center @ Near cell "+to_string(near_vehicle_x));
+	print_info("Total Far+Near = "+to_string((ulong)far_N.x*far_N.y*far_N.z + (ulong)near_N.x*near_N.y*near_N.z)+" cells | FP16C ~67 bytes/cell");
+	LBM lbm_near(near_N, 1u, 1u, 1u, lbm_nu);
+
+	// ===== Vehicle: voxelize in both domains =====
+	Mesh* vehicle_far = read_stl(get_exe_path()+"../scenes/vehicle.stl"); // canonical MR2 binary
+	const float3 bbox_orig = vehicle_far->get_bounding_box_size();
+	vehicle_far->scale(lbm_length / bbox_orig.x); // scale STL X-axis to 450 cells = 4.5m
+	const float3 vbbox = vehicle_far->get_bounding_box_size();
+	const float3 vctr  = vehicle_far->get_bounding_box_center();
+	vehicle_far->translate(float3(
+		(float)far_vehicle_x         - vctr.x,         // X-center @ cell 350
+		(float)(far_N.y/2u)          - vctr.y,         // Y-center @ cell 250
+		1.0f - (vctr.z - vbbox.z * 0.5f)));            // Z-min @ cell 1 (wheels on floor)
+	const float3 vmin_f = vehicle_far->pmin, vmax_f = vehicle_far->pmax;
+	print_info("Far Vehicle BBox: X["+to_string(vmin_f.x,1u)+","+to_string(vmax_f.x,1u)+"] Y["+to_string(vmin_f.y,1u)+","+to_string(vmax_f.y,1u)+"] Z["+to_string(vmin_f.z,1u)+","+to_string(vmax_f.z,1u)+"]");
+	lbm_far.voxelize_mesh_on_device(vehicle_far, TYPE_S|TYPE_X);
+
+	Mesh* vehicle_near = read_stl(get_exe_path()+"../scenes/vehicle.stl"); // separate Mesh* for Near
+	vehicle_near->scale(lbm_length / bbox_orig.x);
+	const float3 vctr2  = vehicle_near->get_bounding_box_center();
+	const float3 vbbox2 = vehicle_near->get_bounding_box_size();
+	vehicle_near->translate(float3(
+		(float)near_vehicle_x        - vctr2.x,        // X-center @ Near cell 275
+		(float)(near_N.y/2u)         - vctr2.y,        // Y-center @ Near cell 150
+		1.0f - (vctr2.z - vbbox2.z * 0.5f)));          // Z-min @ Near cell 1
+	const float3 vmin_n = vehicle_near->pmin, vmax_n = vehicle_near->pmax;
+	print_info("Near Vehicle BBox: X["+to_string(vmin_n.x,1u)+","+to_string(vmax_n.x,1u)+"] Y["+to_string(vmin_n.y,1u)+","+to_string(vmax_n.y,1u)+"] Z["+to_string(vmin_n.z,1u)+","+to_string(vmax_n.z,1u)+"]");
+	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
+
+	// ===== Boundaries: Far (CC#6-Full pattern) =====
+	const uint NxF = lbm_far.get_Nx(), NyF = lbm_far.get_Ny(), NzF = lbm_far.get_Nz();
+	parallel_for(lbm_far.get_N(), [&](ulong n) { uint x=0u,y=0u,z=0u; lbm_far.coordinates(n,x,y,z);
+		if((lbm_far.flags[n] & TYPE_X) != 0u) return;
+		if(z==0u) { lbm_far.flags[n] = TYPE_S; lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }     // rolling road
+		else if(x==0u || x==NxF-1u || y==0u || y==NyF-1u || z==NzF-1u) { lbm_far.flags[n]=TYPE_E; lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }
+		else { lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }
+	});
+
+	// ===== Boundaries: Near — Floor TYPE_S, outer faces TYPE_E (will be overwritten by Far→Near coupling each chunk) =====
+	const uint NxN = lbm_near.get_Nx(), NyN = lbm_near.get_Ny(), NzN = lbm_near.get_Nz();
+	parallel_for(lbm_near.get_N(), [&](ulong n) { uint x=0u,y=0u,z=0u; lbm_near.coordinates(n,x,y,z);
+		if((lbm_near.flags[n] & TYPE_X) != 0u) return;
+		if(z==0u) { lbm_near.flags[n] = TYPE_S; lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }   // SAME floor as Far
+		else if(x==0u || x==NxN-1u || y==0u || y==NyN-1u || z==NzN-1u) { lbm_near.flags[n]=TYPE_E; lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
+		else { lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
+	});
+
+	// ===== 5 Coupling Planes Far → Near (skip Z=0 row to preserve floor TYPE_S in Near) =====
+	// axis: 0=YZ plane (X-normal), 1=XZ plane (Y-normal), 2=XY plane (Z-normal)
+	// extent_a/extent_b run over the two non-axis dimensions in order (Y,Z) | (X,Z) | (X,Y)
+	auto mk = [&](uint ox,uint oy,uint oz, uint ea,uint eb, uint ax){ PlaneSpec p; p.origin=uint3(ox,oy,oz); p.extent_a=ea; p.extent_b=eb; p.axis=ax; p.cell_size=cell_size; return p; };
+	// X_min: Far x=75, Near x=0   | Y over [100..399] in Far / [0..299] in Near | Z over [1..184]
+	const PlaneSpec src_xmin = mk(75u,  100u, 1u,   300u, 184u, 0u);  const PlaneSpec tgt_xmin = mk(0u,   0u,   1u, 300u, 184u, 0u);
+	// X_max: Far x=775, Near x=699 (last interior cell)
+	const PlaneSpec src_xmax = mk(775u, 100u, 1u,   300u, 184u, 0u);  const PlaneSpec tgt_xmax = mk(699u, 0u,   1u, 300u, 184u, 0u);
+	// Y_min: Far y=100, Near y=0
+	const PlaneSpec src_ymin = mk(75u,  100u, 1u,   700u, 184u, 1u);  const PlaneSpec tgt_ymin = mk(0u,   0u,   1u, 700u, 184u, 1u);
+	// Y_max: Far y=400, Near y=299
+	const PlaneSpec src_ymax = mk(75u,  400u, 1u,   700u, 184u, 1u);  const PlaneSpec tgt_ymax = mk(0u,   299u, 1u, 700u, 184u, 1u);
+	// Z_max: Far z=184, Near z=184 (last cell, full XY of Near)
+	const PlaneSpec src_zmax = mk(75u,  100u, 184u, 700u, 300u, 2u);  const PlaneSpec tgt_zmax = mk(0u,   0u,   184u, 700u, 300u, 2u);
+
+	CouplingOptions opts;
+	opts.smooth_plane = false; // pipeline first, smoothing later
+	opts.export_csv   = false; // 5 planes × chunks = too many CSVs for first run
+
+	// ===== Run-Loop with Far → Near coupling each chunk =====
+	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_dual.csv";
+	std::ofstream fcsv(force_csv_path);
+	fcsv << "step,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near\n";
+	fcsv << std::scientific;
+	const uint chunk = 100u;
+	const uint chunks_max = 150u; // 15000 steps — convergence expected ~12-15k per Phase 5b-pre baseline; std±9% on Far alone
+	print_info("Phase 5b Run: max "+to_string(chunks_max*chunk)+" steps | coupling Far→Near every "+to_string(chunk)+" steps (5 planes)");
+	std::vector<float3> Fhist_far, Fhist_near;
+	Fhist_far.reserve(chunks_max); Fhist_near.reserve(chunks_max);
+
+	for(uint c = 0u; c < chunks_max; c++) {
+		// 1. Run Far for chunk
+		lbm_far.run(chunk);
+		// 2. Couple Far → Near at 5 outer faces (interleaved with Far's run, before Near runs on new BC)
+		lbm_far.couple_fields(lbm_near, src_xmin, tgt_xmin, opts);
+		lbm_far.couple_fields(lbm_near, src_xmax, tgt_xmax, opts);
+		lbm_far.couple_fields(lbm_near, src_ymin, tgt_ymin, opts);
+		lbm_far.couple_fields(lbm_near, src_ymax, tgt_ymax, opts);
+		lbm_far.couple_fields(lbm_near, src_zmax, tgt_zmax, opts);
+		// 3. Run Near for chunk
+		lbm_near.run(chunk);
+		// 4. Measure drag in both
+		lbm_far.update_force_field();
+		const float3 F_far_lbm = lbm_far.object_force(TYPE_S|TYPE_X);
+		const float3 F_far_si  = float3(units.si_F(F_far_lbm.x), units.si_F(F_far_lbm.y), units.si_F(F_far_lbm.z));
+		Fhist_far.push_back(F_far_si);
+		lbm_near.update_force_field();
+		const float3 F_near_lbm = lbm_near.object_force(TYPE_S|TYPE_X);
+		const float3 F_near_si  = float3(units.si_F(F_near_lbm.x), units.si_F(F_near_lbm.y), units.si_F(F_near_lbm.z));
+		Fhist_near.push_back(F_near_si);
+		const ulong step = (ulong)(c+1u) * chunk;
+		const float t_si = units.si_t(step);
+		fcsv << step << "," << t_si << "," << F_far_si.x << "," << F_far_si.y << "," << F_far_si.z << "," << F_near_si.x << "," << F_near_si.y << "," << F_near_si.z << "\n";
+		if((c+1u) % 10u == 0u) fcsv.flush();
+		if((c+1u) % 25u == 0u) {
+			print_info("step="+to_string(step)+"  Fx_far="+to_string(F_far_si.x,1u)+"N  Fx_near="+to_string(F_near_si.x,1u)+"N  delta="+to_string(F_near_si.x-F_far_si.x,1u)+"N");
+		}
+	}
+	fcsv.close();
+	print_info("Phase 5b done. Force-CSV: "+force_csv_path);
+	std::fflush(nullptr);
+	_exit(0); // xe-driver cleanup-race workaround
+}
+#endif // PHASE_5B_DUAL_DOMAIN
 
 #if 0 // ===== OLD CC#1/CC#3 main_setup (10000 step test, 16.85M cells), deactivated 2026-05-10 for CC#2 (50000 step Aero-Box) =====
 void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + force-field export. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS, VOLUME_FORCE, FORCE_FIELD
