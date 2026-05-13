@@ -224,11 +224,11 @@ void LBM_Domain::enqueue_surface_3() {
 void LBM_Domain::enqueue_update_force_field() { // calculate forces from fluid on TYPE_S cells
 	if(t!=t_last_force_field) { // only run kernel_update_force_field if the time step has changed since last update
 		kernel_update_force_field.set_parameters(2u, t).enqueue_run();
-		// CC#11 Option 1 disabled: empirical test showed Option 1 (analytical Krueger artifact
-		// subtraction) does NOT fix WW pathology. Two sign-flipped formula variants gave
-		// bit-identical results -> pathology is in flow dynamics, not separable DDF artifact.
-		// Path forward: Option 2 (OpenLB-style f_eq+f_neq reconstruction at fluid boundary cells).
-		// Kernel kept in source for documentation / reproducibility.
+		// CC#11 Option 1 DISABLED again: analytical per-cell formula doesn't generalize.
+		// Cube test (factor 6): mean correct but +-125 N oscillation around mean.
+		// MR2 test (factor 6): catastrophic -293k N (per-cell formula doesn't scale to complex
+		// geometry with varied u_slip directions). 3 attempts exhausted (initial, TYPE_MS bug fix,
+		// factor calibration). Iron Rule -> move to Option 2d (full OpenLB reconstruction).
 		t_last_force_field = t;
 	}
 }

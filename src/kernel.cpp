@@ -1115,11 +1115,11 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef MOVING_BOUNDARIES"+R(
 )+R(void apply_moving_boundaries(float* fhn, const uxx* j, const global float* u, const global uchar* flags) { // apply Dirichlet velocity boundaries if necessary (Krueger p.180, rho_solid=1)
 	uxx ji; // reads velocities of only neighboring boundary cells, which do not change during simulation
-	// CC#11 Option 2 Step 1b: TYPE_X-Exclusion. Vehicle wall cells (TYPE_S|TYPE_X) are EXCLUDED from
-	// Krueger Moving-Wall correction. This prevents the force-artifact that occurs when WW kernel
-	// writes u[wall_cell]=u_slip. u[] of TYPE_X cells becomes a "data carrier" used only by the
-	// new fluid-side WFB injection kernel (Step 2). Standard TYPE_S walls (floor rolling-road,
-	// sym-plane TYPE_S|TYPE_Y) keep normal Krueger behavior.
+	// CC#11 Option 2 Step 1b: TYPE_X-Exclusion ACTIVE (re-enabled 2026-05-13 after Option 1 failure on MR2).
+	// Vehicle WW-cells (TYPE_S|TYPE_X) are EXCLUDED from Krueger correction to avoid force artifact.
+	// Floor (TYPE_S without TYPE_X) and sym-plane (TYPE_S|TYPE_Y) keep normal Krueger behavior.
+	// Trade-off: no WW slip effect on flow, but no artifact in force computation either.
+	// Net: pure bounce-back at vehicle = baseline drag (over-predicted by factor ~3-4 for coarse-grid LBM).
 	for(uint i=1u; i<def_velocity_set; i+=2u) { // loop is entirely unrolled by compiler, no unnecessary memory access is happening
 		const float w6 = -6.0f*w(i); // w6 = -2*w_i*rho_wall/c^2, w(i) = w(i+1) if i is odd, rho_wall is assumed as rho_avg=1 (necessary choice to assure mass conservation)
 		ji = j[i+1u]; { const uchar fj=flags[ji]; const bool is_ww=(fj&TYPE_BO)==TYPE_S && (fj&TYPE_X); fhn[i   ] = ((fj&TYPE_BO)==TYPE_S && !is_ww) ? fma(w6, c(i+1u)*u[ji]+c(def_velocity_set+i+1u)*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i+1u)*u[2ul*def_N+(ulong)ji], fhn[i   ]) : fhn[i   ]; }
@@ -1589,21 +1589,27 @@ string opencl_c_container() { return R( // ########################## begin of O
 	const float u_sz = u[2ul*def_N+(ulong)n];
 	float dF_x = 0.0f, dF_y = 0.0f, dF_z = 0.0f;
 	// For each DDF direction i at this solid cell: it carries the Krueger-correction
-	// if its SOURCE was a fluid cell, i.e. if neighbor in direction -c_i is fluid.
+	// if its SOURCE was a fluid cell (including TYPE_MS = "fluid adjacent to moving wall").
 	// In D3Q19 pair convention (1,2), (3,4), ... we have c(i+1) = -c(i), so source neighbor index = j[opp(i)].
+	// CC#11 bugfix 2026-05-13: original check !(fj & (TYPE_S|TYPE_E|TYPE_T)) WRONGLY excluded TYPE_MS
+	// cells (which have TYPE_S|TYPE_E bits = 0x03) — these are exactly the cells where Krueger fires.
+	// Correct check: neighbor is NOT a pure-TYPE_S wall (i.e., not other vehicle cells nor floor),
+	// and NOT a TYPE_E inlet/outlet wall. Catches pure fluid (BO=0) AND TYPE_MS fluid (BO=0x03).
 	for(uint i=1u; i<def_velocity_set; i++) {
 		const uint opp_i = (i & 1u) ? i+1u : i-1u; // pair partner index
 		const uchar fj = flags[j[opp_i]]; // neighbor in direction -c_i
-		if(!(fj & (TYPE_S|TYPE_E|TYPE_T))) { // fluid neighbor in -c_i direction
+		const uchar fj_bo = fj & TYPE_BO;
+		if(fj_bo != TYPE_S && fj_bo != TYPE_E) { // fluid (BO=0) or TYPE_MS (BO=0x03), but not pure wall
 			const float cx_i = c(i);
 			const float cy_i = c(def_velocity_set + i);
 			const float cz_i = c(2u*def_velocity_set + i);
 			const float w_i = w(i);
 			const float c_dot_u = cx_i*u_sx + cy_i*u_sy + cz_i*u_sz;
-			// Krueger Eq 5.27 effective: Delta_f_i = +6 w_i (c_i . u_solid) at solid cell after EP streaming.
-			// Per-DDF force contribution: 2 * c_i * Delta_f_i = +12 * w_i * c_i * (c_i . u_solid)
-			// Sign-empirical: cube without WW gives CD=1.02, with WW CD=79, so artifact is POSITIVE-additive.
-			const float two_df = +12.0f * w_i * c_dot_u;
+			// CC#11 calibration 2026-05-13: factor 12 gave 2x over-subtraction (artifact +110 N
+			// at cube, subtract was 220 N, ended at -109 N). Factor 6 should land exactly on baseline.
+			// Possibly because FluidX3D's update_force_field already incorporates a 2x BB factor that
+			// applies to f at solid, and my derivation double-counted. Empirically test factor 6.
+			const float two_df = +6.0f * w_i * c_dot_u;
 			dF_x += cx_i * two_df;
 			dF_y += cy_i * two_df;
 			dF_z += cz_i * two_df;
