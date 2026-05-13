@@ -1472,6 +1472,55 @@ string opencl_c_container() { return R( // ########################## begin of O
 } // apply_freeslip_y()
 
 
+// Phase C-B Step 1: Bouzidi linear sub-grid bounce-back for axis-aligned z-walls.
+// Hardcoded q value (kernel parameter). Validates Bouzidi mechanism on 2D Poiseuille.
+// Bouzidi 2001 linear interpolation:
+//   if q < 0.5: f_(opp_i)_new = 2q*f_i_self + (1-2q)*f_i_neighbor
+//   if q >= 0.5: f_(opp_i)_new = (1/(2q))*f_i_self + (1-1/(2q))*f_(opp_i)_neighbor
+// where "neighbor" = 1 cell further from wall, "self" = current cell adjacent to wall.
+// At q=0.5: reproduces standard BB exactly.
+)+R(kernel void apply_bouzidi_z_walls(global fpxx* fi, const global uchar* flags, const ulong t, const float q) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N || is_halo(n)) return;
+	if((flags[n] & TYPE_BO) == TYPE_S) return; // skip solid cells
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	const bool bottom_wall_adj = (flags[j[6]] & TYPE_BO) == TYPE_S; // -z neighbor is solid (bottom wall)
+	const bool top_wall_adj    = (flags[j[5]] & TYPE_BO) == TYPE_S; // +z neighbor is solid (top wall)
+	if(!bottom_wall_adj && !top_wall_adj) return;
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t);
+	if(bottom_wall_adj) {
+		// Wall in -z direction. DDF coming from wall = f_5 (post-BB at fluid cell).
+		// DDF reflected to wall direction = f_6. Apply Bouzidi to compute new f_6.
+		// Neighbor = j[5] (cell 1 step further away from wall, at z+1).
+		const uxx n_nb = j[5];
+		uxx j_nb[def_velocity_set];
+		neighbors(n_nb, j_nb);
+		float fhn_nb[def_velocity_set];
+		load_f(n_nb, fhn_nb, fi, j_nb, t);
+		if(q < 0.5f) {
+			fhn[6] = 2.0f*q * fhn[5] + (1.0f - 2.0f*q) * fhn_nb[5];
+		} else {
+			fhn[6] = (0.5f/q) * fhn[5] + (1.0f - 0.5f/q) * fhn_nb[6];
+		}
+	}
+	if(top_wall_adj) {
+		// Wall in +z direction. Symmetric: swap roles of 5 and 6.
+		const uxx n_nb = j[6];
+		uxx j_nb[def_velocity_set];
+		neighbors(n_nb, j_nb);
+		float fhn_nb[def_velocity_set];
+		load_f(n_nb, fhn_nb, fi, j_nb, t);
+		if(q < 0.5f) {
+			fhn[5] = 2.0f*q * fhn[6] + (1.0f - 2.0f*q) * fhn_nb[6];
+		} else {
+			fhn[5] = (0.5f/q) * fhn[6] + (1.0f - 0.5f/q) * fhn_nb[5];
+		}
+	}
+	store_f(n, fhn, fi, j, t);
+} // apply_bouzidi_z_walls()
+
 
 // CC#10: Werner-Wengle wall model for vehicle cells (TYPE_S|TYPE_X).
 // Runs BEFORE stream_collide each step. For each vehicle cell, averages u over fluid neighbors (u_2 proxy),

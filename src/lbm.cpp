@@ -141,6 +141,7 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 
 	kernel_apply_freeslip_y = Kernel(device, N, "apply_freeslip_y", fi, flags, t); // CC#9 post-stream sym-plane
+	kernel_apply_bouzidi_z_walls = Kernel(device, N, "apply_bouzidi_z_walls", fi, flags, t, 0.5f); // Phase C-B Step 1: Bouzidi z-walls
 #ifdef MOVING_BOUNDARIES
 	kernel_update_moving_boundaries = Kernel(device, N, "update_moving_boundaries", u, flags);
 #endif // MOVING_BOUNDARIES
@@ -189,6 +190,9 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 }
 void LBM_Domain::enqueue_apply_freeslip_y() { // CC#9: post-stream specular reflection at TYPE_Y cells
 	kernel_apply_freeslip_y.set_parameters(2u, t).enqueue_run();
+}
+void LBM_Domain::enqueue_apply_bouzidi_z_walls(float q) { // Phase C-B Step 1: Bouzidi z-walls hardcoded q
+	kernel_apply_bouzidi_z_walls.set_parameters(2u, t).set_parameters(3u, q).enqueue_run();
 }
 #ifdef WALL_MODEL_VEHICLE
 void LBM_Domain::enqueue_apply_wall_model_vehicle() { // CC#10: Werner-Wengle wall model on vehicle cells
@@ -933,6 +937,9 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 	// reconstruction (Step 2d, ~1-2 weeks work). See findings/23_step2_attempts.md.
 	// for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_slip_to_fluid();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
+	if(bouzidi_q != 0.0f) { // Phase C-B Step 1: Bouzidi z-walls (only when explicitly enabled by setup)
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_bouzidi_z_walls(bouzidi_q);
+	}
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS

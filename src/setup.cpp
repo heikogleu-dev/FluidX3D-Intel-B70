@@ -233,6 +233,94 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define VEHICLE_MR2_BIN    // MR2 Time-Attack (vehicle-mr2-bin.stl). Comment out to use scenes/vehicle.stl (requires CFD-EXC mount).
 #define AHMED_MODE 0        // Phase 0: 0 = Real Vehicle, 1 = Ahmed 25° canonical (Phase 0 FAILED), 2 = Ahmed 35°
 #define CUBE_VALIDATION 0   // Cube factor-6 cal: mean ~0 (baseline 1.4 N) but +-125 oscillation
+#define BOUZIDI_TEST 0      // Phase C-B Step 1 PASSED 2026-05-13 (L2 0.76-3.51% across q={0.1..0.9})
+
+#if BOUZIDI_TEST
+// ============================================================================
+// Phase C-B Step 1 — Bouzidi 2D Poiseuille validation (Tier 1 Skalen-Ladder)
+// Channel: Nx × Ny × Nz = 128 × 4 × 64 (periodic X,Y; walls Z=0/Nz-1 TYPE_S)
+// Volume force drives flow in +X. Analytical: u(z) = u_max × (1 - ((z-z_c)/h)²)
+// Wall position from cell-center: bottom at z = 1 - q, top at z = Nz-2 + q
+// Iterates q ∈ {0.1, 0.3, 0.5, 0.7, 0.9}, each fresh LBM init.
+// ============================================================================
+void main_setup_bouzidi_poiseuille() {
+	const float q_values[5] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+	const uint Nx = 128u, Ny = 4u, Nz = 64u;
+	const float lbm_u_max_target = 0.05f;
+	const float lbm_nu = 0.01f;
+
+	for(int iq = 0; iq < 5; iq++) {
+		const float q = q_values[iq];
+		const float z_wall_bot = 1.0f - q;
+		const float z_wall_top = (float)(Nz - 2) + q;
+		const float h = 0.5f * (z_wall_top - z_wall_bot);
+		const float z_center = 0.5f * (z_wall_top + z_wall_bot);
+		const float lbm_fx = lbm_u_max_target * 2.0f * lbm_nu / (h * h);
+
+		print_info("=== BOUZIDI Step 1 — q="+to_string(q, 2u)+" ===");
+		print_info("Wall positions: z_bot="+to_string(z_wall_bot, 2u)+" z_top="+to_string(z_wall_top, 2u)+" h="+to_string(h, 2u));
+		print_info("Volume force f_x="+to_string(lbm_fx, 6u)+" target u_max="+to_string(lbm_u_max_target, 4u));
+
+		LBM lbm(uint3(Nx, Ny, Nz), 1u, 1u, 1u, lbm_nu, lbm_fx, 0.0f, 0.0f);
+
+		parallel_for(lbm.get_N(), [&](ulong n) {
+			uint x=0, y=0, z=0;
+			lbm.coordinates(n, x, y, z);
+			if(z == 0u || z == Nz-1u) {
+				lbm.flags[n] = TYPE_S;
+				return;
+			}
+			const float z_f = (float)z;
+			const float rel = (z_f - z_center) / h;
+			const float u_init = lbm_u_max_target * (1.0f - rel*rel);
+			lbm.u.x[n] = u_init > 0.0f ? u_init : 0.0f;
+			lbm.u.y[n] = 0.0f;
+			lbm.u.z[n] = 0.0f;
+		});
+
+		lbm.bouzidi_q = q;
+
+		const uint total_steps = 5000u;
+		const uint chunk = 500u;
+		for(uint c = 0u; c < total_steps / chunk; c++) {
+			lbm.run(chunk);
+		}
+
+		lbm.u.read_from_device();
+
+		const string csv_path = get_exe_path() + "../bin/bouzidi_poiseuille_q" + to_string((int)(q*100.0f+0.5f)) + ".csv";
+		std::ofstream csv(csv_path);
+		csv << "z,u_x_simulated,u_x_analytical,abs_error,rel_error\n";
+		csv << std::scientific;
+		double l2_num = 0.0, l2_den = 0.0;
+		for(uint z = 1u; z < Nz-1u; z++) {
+			double u_sum = 0.0;
+			uint count = 0u;
+			for(uint x = 0u; x < Nx; x++) {
+				for(uint y = 0u; y < Ny; y++) {
+					const ulong n = (ulong)x + (ulong)y * (ulong)Nx + (ulong)z * (ulong)Nx * (ulong)Ny;
+					u_sum += (double)lbm.u.x[n];
+					count++;
+				}
+			}
+			const double u_sim = u_sum / (double)count;
+			const double rel_z = ((double)z - (double)z_center) / (double)h;
+			const double u_ana = (double)lbm_u_max_target * (1.0 - rel_z*rel_z);
+			const double abs_err = u_sim - u_ana;
+			const double rel_err = (u_ana != 0.0) ? abs_err / u_ana : 0.0;
+			csv << z << "," << u_sim << "," << u_ana << "," << abs_err << "," << rel_err << "\n";
+			l2_num += abs_err * abs_err;
+			l2_den += u_ana * u_ana;
+		}
+		csv.close();
+		const double l2_error = sqrt(l2_num / l2_den) * 100.0;
+		print_info("Bouzidi q="+to_string(q, 2u)+" L2-Error = "+to_string((float)l2_error, 3u)+"%");
+		print_info("CSV: "+csv_path);
+	}
+
+	print_info("=== Bouzidi Step 1 sweep COMPLETE: 5 q values tested ===");
+}
+#endif // BOUZIDI_TEST
 
 #if CUBE_VALIDATION
 // ============================================================================
@@ -475,6 +563,10 @@ void main_setup_ahmed() {
 #endif // AHMED_MODE>0
 
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
+#if BOUZIDI_TEST
+	main_setup_bouzidi_poiseuille();
+	return;
+#endif
 #if CUBE_VALIDATION
 	main_setup_cube();
 	return;

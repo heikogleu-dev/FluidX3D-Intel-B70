@@ -49,6 +49,7 @@ private:
 	Kernel kernel_update_moving_boundaries; // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 #endif // MOVING_BOUNDARIES
 	Kernel kernel_apply_freeslip_y; // CC#9: post-stream specular reflection for TYPE_Y sym-plane cells
+	Kernel kernel_apply_bouzidi_z_walls; // Phase C-B Step 1: Bouzidi sub-grid BB for axis-aligned z-walls
 #ifdef WALL_MODEL_VEHICLE
 	Kernel kernel_apply_wall_model_vehicle; // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 	Kernel kernel_compute_wall_model_artifact; // CC#11 Option 1: subtract Krueger Moving-Wall force artifact from F[n]
@@ -118,6 +119,7 @@ public:
 	void enqueue_update_moving_boundaries(); // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 #endif // MOVING_BOUNDARIES
 	void enqueue_apply_freeslip_y(); // CC#9: post-stream specular reflection at TYPE_Y cells
+	void enqueue_apply_bouzidi_z_walls(float q); // Phase C-B Step 1: Bouzidi sub-grid BB for axis-aligned z-walls
 #ifdef WALL_MODEL_VEHICLE
 	void enqueue_apply_wall_model_vehicle(); // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 	void enqueue_apply_wall_slip_to_fluid(); // CC#11 Option 2 Step 2: WFB injection at TYPE_MS fluid cells
@@ -247,6 +249,8 @@ private:
 #endif // PARTICLES
 
 public:
+	float bouzidi_q = 0.0f; // Phase C-B Step 1: Bouzidi z-walls hardcoded q (0 = disabled, otherwise q ∈ (0, 1))
+
 	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data
 	private:
 		ulong N = 0ull; // buffer length
