@@ -1242,28 +1242,29 @@ void LBM::couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpe
 		tgt_ux.resize(n_tgt); tgt_uy.resize(n_tgt); tgt_uz.resize(n_tgt); tgt_rho.resize(n_tgt);
 		const float scale_a = (ta > 1u) ? (float)(a - 1u) / (float)(ta - 1u) : 0.0f;
 		const float scale_b = (tb > 1u) ? (float)(b - 1u) / (float)(tb - 1u) : 0.0f;
-		for(uint it = 0u; it < ta; it++) {
-			for(uint jt = 0u; jt < tb; jt++) {
-				const float xs = (float)it * scale_a;
-				const float ys = (float)jt * scale_b;
-				const uint i0 = (uint)floorf(xs);
-				const uint j0 = (uint)floorf(ys);
-				const uint i1 = (i0 + 1u < a) ? i0 + 1u : a - 1u;
-				const uint j1 = (j0 + 1u < b) ? j0 + 1u : b - 1u;
-				const float wx = xs - (float)i0;
-				const float wy = ys - (float)j0;
-				const ulong i00 = (ulong)i0 + (ulong)j0 * (ulong)a;
-				const ulong i10 = (ulong)i1 + (ulong)j0 * (ulong)a;
-				const ulong i01 = (ulong)i0 + (ulong)j1 * (ulong)a;
-				const ulong i11 = (ulong)i1 + (ulong)j1 * (ulong)a;
-				const ulong it_ = (ulong)it + (ulong)jt * (ulong)ta;
-				const float w00 = (1.0f-wx)*(1.0f-wy), w10 = wx*(1.0f-wy), w01 = (1.0f-wx)*wy, w11 = wx*wy;
-				tgt_ux[it_]  = w00*plane_ux[i00]  + w10*plane_ux[i10]  + w01*plane_ux[i01]  + w11*plane_ux[i11];
-				tgt_uy[it_]  = w00*plane_uy[i00]  + w10*plane_uy[i10]  + w01*plane_uy[i01]  + w11*plane_uy[i11];
-				tgt_uz[it_]  = w00*plane_uz[i00]  + w10*plane_uz[i10]  + w01*plane_uz[i01]  + w11*plane_uz[i11];
-				tgt_rho[it_] = w00*plane_rho[i00] + w10*plane_rho[i10] + w01*plane_rho[i01] + w11*plane_rho[i11];
-			}
-		}
+		// PERF-F (parallel bilinear 2026-05-14 evening): parallelize over n_tgt with parallel_for (OpenMP-like).
+		// Each tgt cell is independent — thread-safe writes to distinct array indices.
+		parallel_for(n_tgt, [&](ulong it_) {
+			const uint it = (uint)(it_ % (ulong)ta);
+			const uint jt = (uint)(it_ / (ulong)ta);
+			const float xs = (float)it * scale_a;
+			const float ys = (float)jt * scale_b;
+			const uint i0 = (uint)floorf(xs);
+			const uint j0 = (uint)floorf(ys);
+			const uint i1 = (i0 + 1u < a) ? i0 + 1u : a - 1u;
+			const uint j1 = (j0 + 1u < b) ? j0 + 1u : b - 1u;
+			const float wx = xs - (float)i0;
+			const float wy = ys - (float)j0;
+			const ulong i00 = (ulong)i0 + (ulong)j0 * (ulong)a;
+			const ulong i10 = (ulong)i1 + (ulong)j0 * (ulong)a;
+			const ulong i01 = (ulong)i0 + (ulong)j1 * (ulong)a;
+			const ulong i11 = (ulong)i1 + (ulong)j1 * (ulong)a;
+			const float w00 = (1.0f-wx)*(1.0f-wy), w10 = wx*(1.0f-wy), w01 = (1.0f-wx)*wy, w11 = wx*wy;
+			tgt_ux[it_]  = w00*plane_ux[i00]  + w10*plane_ux[i10]  + w01*plane_ux[i01]  + w11*plane_ux[i11];
+			tgt_uy[it_]  = w00*plane_uy[i00]  + w10*plane_uy[i10]  + w01*plane_uy[i01]  + w11*plane_uy[i11];
+			tgt_uz[it_]  = w00*plane_uz[i00]  + w10*plane_uz[i10]  + w01*plane_uz[i01]  + w11*plane_uz[i11];
+			tgt_rho[it_] = w00*plane_rho[i00] + w10*plane_rho[i10] + w01*plane_rho[i01] + w11*plane_rho[i11];
+		});
 	}
 
 	// Step 4: Sync tgt flags→host (read once; minimal cost). PERF-D: skip if caller pre-synced.
@@ -1276,30 +1277,30 @@ void LBM::couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpe
 		tgt_sim.rho.read_from_device();
 	}
 
-	// Step 5: Write resampled plane data to target as TYPE_E (uses tgt extents, indexed against tgt grid)
+	// Step 5: Write resampled plane data to target as TYPE_E (uses tgt extents, indexed against tgt grid).
+	// PERF-F: parallelize over n_tgt — independent writes to distinct cell indices, thread-safe.
 	const uint tx = tgt_plane.origin.x, ty = tgt_plane.origin.y, tz = tgt_plane.origin.z;
-	for(uint i=0u; i<ta; i++) {
-		for(uint j=0u; j<tb; j++) {
-			uint cx = tx, cy = ty, cz = tz;
-			if(axis == 0u) { cy = ty + i; cz = tz + j; }
-			else if(axis == 1u) { cx = tx + i; cz = tz + j; }
-			else /* axis == 2u */ { cx = tx + i; cy = ty + j; }
-			const ulong n = (ulong)cx + (ulong)cy * (ulong)tgt_sim.Nx + (ulong)cz * (ulong)tgt_sim.Nx * (ulong)tgt_sim.Ny;
-			const ulong idx = (ulong)i + (ulong)j * (ulong)ta;
-			tgt_sim.flags[n]  = TYPE_E;
-			if(soft_blend) {
-				tgt_sim.u.x[n]  = (1.0f-alpha) * tgt_sim.u.x[n]  + alpha * tgt_ux[idx];
-				tgt_sim.u.y[n]  = (1.0f-alpha) * tgt_sim.u.y[n]  + alpha * tgt_uy[idx];
-				tgt_sim.u.z[n]  = (1.0f-alpha) * tgt_sim.u.z[n]  + alpha * tgt_uz[idx];
-				tgt_sim.rho[n]  = (1.0f-alpha) * tgt_sim.rho[n]  + alpha * tgt_rho[idx];
-			} else {
-				tgt_sim.u.x[n]    = tgt_ux[idx];
-				tgt_sim.u.y[n]    = tgt_uy[idx];
-				tgt_sim.u.z[n]    = tgt_uz[idx];
-				tgt_sim.rho[n]    = tgt_rho[idx];
-			}
+	parallel_for(n_tgt, [&](ulong idx_flat) {
+		const uint i = (uint)(idx_flat % (ulong)ta);
+		const uint j = (uint)(idx_flat / (ulong)ta);
+		uint cx = tx, cy = ty, cz = tz;
+		if(axis == 0u) { cy = ty + i; cz = tz + j; }
+		else if(axis == 1u) { cx = tx + i; cz = tz + j; }
+		else /* axis == 2u */ { cx = tx + i; cy = ty + j; }
+		const ulong n = (ulong)cx + (ulong)cy * (ulong)tgt_sim.Nx + (ulong)cz * (ulong)tgt_sim.Nx * (ulong)tgt_sim.Ny;
+		tgt_sim.flags[n]  = TYPE_E;
+		if(soft_blend) {
+			tgt_sim.u.x[n]  = (1.0f-alpha) * tgt_sim.u.x[n]  + alpha * tgt_ux[idx_flat];
+			tgt_sim.u.y[n]  = (1.0f-alpha) * tgt_sim.u.y[n]  + alpha * tgt_uy[idx_flat];
+			tgt_sim.u.z[n]  = (1.0f-alpha) * tgt_sim.u.z[n]  + alpha * tgt_uz[idx_flat];
+			tgt_sim.rho[n]  = (1.0f-alpha) * tgt_sim.rho[n]  + alpha * tgt_rho[idx_flat];
+		} else {
+			tgt_sim.u.x[n]    = tgt_ux[idx_flat];
+			tgt_sim.u.y[n]    = tgt_uy[idx_flat];
+			tgt_sim.u.z[n]    = tgt_uz[idx_flat];
+			tgt_sim.rho[n]    = tgt_rho[idx_flat];
 		}
-	}
+	});
 
 	// Step 6: Sync host→target. PERF-D: skip if caller will write back after batch.
 	if(opts.sync_pcie) {

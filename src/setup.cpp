@@ -234,7 +234,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
 #define PHASE_5B_COUPLE_MODE 1 // GPU-perf test: Mode 1 (one-way) for cleanest baseline measurement
-#define PHASE_5B_DR 0          // Phase 5b-DR 2026-05-14: Double-Resolution Schwarz coupling (Pfad A: Far 16×8×5m @ 15mm = 190M cells, Near 6.6×2.7×1.695m @ 5mm = 242M cells, 3:1 ratio). Set 1 to activate; takes priority over PHASE_5B_DUAL_DOMAIN. Default 0.
+#define PHASE_5B_DR 0          // Phase 5b-DR 2026-05-14: Double-Resolution Schwarz coupling (Pfad A: Far 16×8×5m @ 15mm = 190M cells, Near 6.6×2.7×1.695m @ 5mm = 242M cells, 3:1 ratio). Set 1 to activate. Default 0.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -910,7 +910,7 @@ void main_setup_phase5b_dr() {
 	vehicle_far->translate(float3(
 		far_vehicle_x_center_cell - vctr_f.x,
 		far_vehicle_y_center_cell - vctr_f.y,
-		0.0f - (vctr_f.z - vbbox_f.z * 0.5f)));     // Z-min at Far cell 0 = Räder berühren Boden (STL hat Wheels modelliert per user 2026-05-14)
+		1.0f - (vctr_f.z - vbbox_f.z * 0.5f)));     // Z-min at Far cell 1 = 15mm Clearance (per user 2026-05-14 evening: vermeidet Voxelisierungs-Seal der Wheel-Bottom bei 15mm coarse Far)
 	const float3 vmin_f = vehicle_far->pmin, vmax_f = vehicle_far->pmax;
 	print_info("Far Vehicle BBox: X["+to_string(vmin_f.x,1u)+","+to_string(vmax_f.x,1u)+"] Y["+to_string(vmin_f.y,1u)+","+to_string(vmax_f.y,1u)+"] Z["+to_string(vmin_f.z,1u)+","+to_string(vmax_f.z,1u)+"] (Far cells)");
 	lbm_far.voxelize_mesh_on_device(vehicle_far, TYPE_S|TYPE_X);
@@ -927,7 +927,7 @@ void main_setup_phase5b_dr() {
 	vehicle_near->translate(float3(
 		near_vehicle_x_center_cell - vctr_n.x,
 		near_vehicle_y_center_cell - vctr_n.y,
-		0.0f - (vctr_n.z - vbbox_n.z * 0.5f)));  // Z-min at Near cell 0 = Räder berühren Boden (STL hat Wheels per user 2026-05-14)
+		3.0f - (vctr_n.z - vbbox_n.z * 0.5f)));  // Z-min at Near cell 3 = 15mm Clearance (matches Far's cell 1 × 15mm = Near cell 3 × 5mm = 15mm)
 	const float3 vmin_n = vehicle_near->pmin, vmax_n = vehicle_near->pmax;
 	print_info("Near Vehicle BBox: X["+to_string(vmin_n.x,1u)+","+to_string(vmax_n.x,1u)+"] Y["+to_string(vmin_n.y,1u)+","+to_string(vmax_n.y,1u)+"] Z["+to_string(vmin_n.z,1u)+","+to_string(vmax_n.z,1u)+"] (Near cells)");
 	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
