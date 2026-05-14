@@ -125,6 +125,24 @@ Bei chunk=100: nur ~6 min Coupling-Overhead → 24 min total.
 
 Total VTK output: 12.2 GB (für ParaView Visualisierung)
 
+## Open Question: GPU Utilization Reality-Check (next session)
+
+User-Beobachtung 2026-05-14 evening: das 99% Snapshot in nvtop war nur ein Schnappschuss. Tatsächliche Auslastung über Zeit könnte deutlich niedriger sein. Brauche echtes Power-over-time Logging.
+
+**Tool-Discovery 2026-05-14:**
+- `intel_gpu_top` funktioniert **nicht** für Battlemage (xe driver, intel_gpu_top ist i915-only)
+- `xpu-smi` nicht installiert
+- **`/sys/class/drm/card0/device/hwmon/hwmon7/energy1_input`** funktioniert (als User lesbar): Energy counter in µJ, kann zu Power umgerechnet werden
+- Plus: `temp2_input` (pkg temp), `fan1_input` (RPM), `temp3_input` (vram), `power1_cap` (TDP)
+- Live test idle: 48.6 W power (= 24.3 mJ / 0.5s). At full load TDP 275 W.
+
+**Plan für nächste Session:**
+1. Bash-Script: log `energy1_input + temp + fan` every 500ms während kleinem DR-Run
+2. Compute Power-over-time: `P_W = (E2 - E1) µJ / (t2 - t1) s / 1e6`
+3. Quantify: was ist die tatsächliche Average-Power über einen 5-min Run? GPU-Auslastung = average_power / TDP × 100%
+4. Identifizieren WO die Idle-Phasen sind (host-side bilinear? Inter-domain switch? Kernel JIT?)
+5. Eventuell PERF-F (async coupling via cl::Event) wenn Auslastung wirklich < 90%
+
 ## Path Forward
 
 ### Was funktioniert: DR Mode 1 (one-way)
@@ -137,6 +155,14 @@ Total VTK output: 12.2 GB (für ParaView Visualisierung)
   - chunk=100 + α=0.05-0.1 (sehr kleines α für langsame Konvergenz)
   - Mass-flux-correction für Schwarz-Stabilität
   - Proper outer-loop iteration
+
+### TODOs für nächste Session (2026-05-14 evening pause)
+
+1. **GPU-Utilization Reality-Check** (siehe Open Question oben): echtes Power-Logging via hwmon7/energy1_input während Test-DR-Run. Quantifizieren ob 99% Schnappschuss-Wert realistic mean ist oder die Dips signifikant mehr Zeit kosten.
+2. **VTK-Analyse Mode 1 DR** in ParaView: User schaut sich Far+Near Strömungsbilder an. Visual sanity-check ob Multi-Res-Overlay physikalisch sinnvoll aussieht (Wake-Strukturen, Near's feinere Auflösung der Vehicle-Wake).
+3. **Optional Mode 2 retry mit α=0.05** (statt 0.2) bei chunk=100 — testen ob mildere Back-Coupling stabil bleibt.
+4. **Phase 5c Triple-Res Planung** (siehe unten), falls DR Mode 1 visuell überzeugt.
+5. **2-GPU Hardware-Entscheidung**: anschaffen oder Methodology-Phase auf Single B70 bleiben?
 
 ### Empfehlung: Phase 5c Triple-Res
 
