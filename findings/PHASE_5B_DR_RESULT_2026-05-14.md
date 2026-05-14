@@ -125,23 +125,42 @@ Bei chunk=100: nur ~6 min Coupling-Overhead → 24 min total.
 
 Total VTK output: 12.2 GB (für ParaView Visualisierung)
 
-## Open Question: GPU Utilization Reality-Check (next session)
+## GPU Utilization Reality-Check — ANALYZED 2026-05-14 evening
 
-User-Beobachtung 2026-05-14 evening: das 99% Snapshot in nvtop war nur ein Schnappschuss. Tatsächliche Auslastung über Zeit könnte deutlich niedriger sein. Brauche echtes Power-over-time Logging.
+User-Skepsis berechtigt: 99% nvtop-Snapshot ≠ Time-Averaged Utilization. Echtes Power-Logging zeigt:
 
-**Tool-Discovery 2026-05-14:**
-- `intel_gpu_top` funktioniert **nicht** für Battlemage (xe driver, intel_gpu_top ist i915-only)
-- `xpu-smi` nicht installiert
-- **`/sys/class/drm/card0/device/hwmon/hwmon7/energy1_input`** funktioniert (als User lesbar): Energy counter in µJ, kann zu Power umgerechnet werden
-- Plus: `temp2_input` (pkg temp), `fan1_input` (RPM), `temp3_input` (vram), `power1_cap` (TDP)
-- Live test idle: 48.6 W power (= 24.3 mJ / 0.5s). At full load TDP 275 W.
+**Setup:** DR Mode 1 PHASE_5B_DR=1, chunks_max=10, chunk_far=100, ~150 sec wallclock. Logger samples every 500ms via `/sys/class/drm/card0/device/hwmon/hwmon7/energy1_input` + `tile0/gt0/freq0/act_freq` + `tile0/gt0/gtidle/idle_residency_ms`.
 
-**Plan für nächste Session:**
-1. Bash-Script: log `energy1_input + temp + fan` every 500ms während kleinem DR-Run
-2. Compute Power-over-time: `P_W = (E2 - E1) µJ / (t2 - t1) s / 1e6`
-3. Quantify: was ist die tatsächliche Average-Power über einen 5-min Run? GPU-Auslastung = average_power / TDP × 100%
-4. Identifizieren WO die Idle-Phasen sind (host-side bilinear? Inter-domain switch? Kernel JIT?)
-5. Eventuell PERF-F (async coupling via cl::Event) wenn Auslastung wirklich < 90%
+**Tools used:**
+- `findings/gpu_power_log.sh` — bash logger
+- `findings/analyze_gpu_log.py` — Python analyzer (energy → power, idle-residency delta)
+
+**Ergebnis (270 Samples, Compute-Window 5..144s, Startup + End-Idle trimmed):**
+
+| Metric | Wert |
+|---|---:|
+| **Mean Power** | **261.2 W** (95.0% of TDP 275W) |
+| Max Power | 285 W (slight boost above TDP) |
+| Min Power | 59 W (between-chunk coupling pause) |
+| **Idle Residency Fraction** | **4.2%** |
+| **Compute Fraction** | **95.8%** |
+| Mean act_freq | 2386 MHz (85% of max 2800) |
+| ≥1 GHz samples | 95.9% |
+| ≥2.5 GHz boost | 26.7% |
+
+**Power-Histogram zeigt bimodale Verteilung:**
+- 243/270 samples (90%) bei 263-285 W → echte Compute at TDP
+- 8 samples bei 59-82 W → Coupling-Pausen (Host-side bilinear, ~0.5-1 sec each)
+- ~5 samples in Transitions
+
+**Per Chunk (~17 sec):**
+- ~16 sec sustained compute @ 275 W
+- ~0.5-1 sec host coupling @ ~60 W
+- → ~3-6% idle per chunk = matches 4.2% mean
+
+**Conclusion:** PERF-D batched sync war erfolgreich (95% sustained ist klar gut), aber die letzten 4-5% kommen von der **Host-Side-Coupling-Phase** (CPU macht bilinear/extract/write während GPU idle). Diese Phase ist unvermeidbar ohne **PERF-F (Async Coupling)** mit cl::Event-Tracking — Aufwand 2-3 Tage, Gewinn nur ~4%. **Niedriger ROI in Methodology-Phase.**
+
+**For Production (after methodology complete):** PERF-F könnte sinnvoll werden, plus consider Mode 2 with much smaller α (0.05) at chunk=100 für stabile Bidirectional.
 
 ## Path Forward
 

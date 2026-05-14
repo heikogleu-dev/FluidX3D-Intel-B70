@@ -233,7 +233,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
-#define PHASE_5B_COUPLE_MODE 1 // 0=no coupling (Near alone, uniform TYPE_E — verification), 1=one-way Far→Near (5 planes, PRODUCTION setting), 2=bidirectional Far↔Near with band+α-blend (Mode 2, requires careful α/chunk tuning). Default 1.
+#define PHASE_5B_COUPLE_MODE 1 // GPU-perf test: Mode 1 (one-way) for cleanest baseline measurement
 #define PHASE_5B_DR 0          // Phase 5b-DR 2026-05-14: Double-Resolution Schwarz coupling (Pfad A: Far 16×8×5m @ 15mm = 190M cells, Near 6.6×2.7×1.695m @ 5mm = 242M cells, 3:1 ratio). Set 1 to activate; takes priority over PHASE_5B_DUAL_DOMAIN. Default 0.
 
 #if AHMED_MODE>0
@@ -1007,9 +1007,9 @@ void main_setup_phase5b_dr() {
 	std::ofstream fcsv(force_csv_path);
 	fcsv << "step_far,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near\n";
 	fcsv << std::scientific;
-	const uint chunk_far  = 25u;            // Per user 2026-05-14 evening: 4× häufigeres Coupling (war 100) — bessere Vortex-shedding capture + Near-Wand Aktualität
+	const uint chunk_far  = 100u;           // Default Mode 1 baseline (Mode 2 needs careful α/chunk tuning, see findings)
 	const uint chunk_near = chunk_far * 3u; // dt_near = dt_far / 3 → Near needs 3× steps for same SI time at Pfad A 3:1 ratio
-	const uint chunks_max = 600u;           // 15000 Far-steps = 45000 Near-steps total (war 150 chunks, jetzt 600 weil chunk_far ÷4)
+	const uint chunks_max = 150u;           // 15000 Far-steps = 45000 Near-steps total
 	print_info("Phase 5b-DR Run: max "+to_string(chunks_max*chunk_far)+" Far-steps = "+to_string(chunks_max*chunk_near)+" Near-steps");
 
 	for(uint c = 0u; c < chunks_max; c++) {
