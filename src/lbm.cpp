@@ -1160,17 +1160,20 @@ void LBM::voxelize_stl(const string& path, const float size, const uchar flag) {
 // Self-coupling (src == tgt, same plane) is the validation test — should be no-op invariant.
 void LBM::couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpec& tgt_plane, const CouplingOptions& opts) {
 	if(src_plane.axis != tgt_plane.axis) { print_error("couple_fields: src and tgt plane axes differ"); return; }
-	if(src_plane.extent_a != tgt_plane.extent_a || src_plane.extent_b != tgt_plane.extent_b) {
-		print_warning("couple_fields: src and tgt extents differ — same-res 5b-pre requires identical (resolution-ratio in Phase 5b)");
-	}
 	const uint axis = src_plane.axis;
-	const uint a = src_plane.extent_a; // width
-	const uint b = src_plane.extent_b; // height
+	const uint a  = src_plane.extent_a; // src width  (in src cells)
+	const uint b  = src_plane.extent_b; // src height (in src cells)
+	const uint ta = tgt_plane.extent_a; // tgt width  (in tgt cells)
+	const uint tb = tgt_plane.extent_b; // tgt height (in tgt cells)
 	const ulong n_plane = (ulong)a * (ulong)b;
+	const ulong n_tgt   = (ulong)ta * (ulong)tb;
+	const bool needs_resample = (a != ta) || (b != tb); // Phase 5b-DR: bilinear up/downsample when src and tgt extents differ
 
-	// Step 1: Sync src→host (triggers update_fields if UPDATE_FIELDS is not auto)
-	u.read_from_device();
-	rho.read_from_device();
+	// Step 1: Sync src→host (triggers update_fields if UPDATE_FIELDS is not auto). PERF-D: caller may pre-sync and pass opts.sync_pcie=false.
+	if(opts.sync_pcie) {
+		u.read_from_device();
+		rho.read_from_device();
+	}
 
 	// Step 2: Extract plane data (u_x, u_y, u_z, rho per cell)
 	std::vector<float> plane_ux(n_plane), plane_uy(n_plane), plane_uz(n_plane), plane_rho(n_plane);
@@ -1227,44 +1230,96 @@ void LBM::couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpe
 		plane_rho = std::move(smooth_rho);
 	}
 
-	// Step 4: Sync tgt flags→host (read once; minimal cost)
-	tgt_sim.flags.read_from_device();
+	// Step 3b: Phase 5b-DR — bilinear resample from src grid (a×b) to tgt grid (ta×tb) if extents differ.
+	// Up-sample when ta>a (Far→Near), down-sample when ta<a (Near→Far). Same array layout (idx = i + j*width).
+	std::vector<float> tgt_ux, tgt_uy, tgt_uz, tgt_rho;
+	if(!needs_resample) {
+		tgt_ux  = std::move(plane_ux);
+		tgt_uy  = std::move(plane_uy);
+		tgt_uz  = std::move(plane_uz);
+		tgt_rho = std::move(plane_rho);
+	} else {
+		tgt_ux.resize(n_tgt); tgt_uy.resize(n_tgt); tgt_uz.resize(n_tgt); tgt_rho.resize(n_tgt);
+		const float scale_a = (ta > 1u) ? (float)(a - 1u) / (float)(ta - 1u) : 0.0f;
+		const float scale_b = (tb > 1u) ? (float)(b - 1u) / (float)(tb - 1u) : 0.0f;
+		for(uint it = 0u; it < ta; it++) {
+			for(uint jt = 0u; jt < tb; jt++) {
+				const float xs = (float)it * scale_a;
+				const float ys = (float)jt * scale_b;
+				const uint i0 = (uint)floorf(xs);
+				const uint j0 = (uint)floorf(ys);
+				const uint i1 = (i0 + 1u < a) ? i0 + 1u : a - 1u;
+				const uint j1 = (j0 + 1u < b) ? j0 + 1u : b - 1u;
+				const float wx = xs - (float)i0;
+				const float wy = ys - (float)j0;
+				const ulong i00 = (ulong)i0 + (ulong)j0 * (ulong)a;
+				const ulong i10 = (ulong)i1 + (ulong)j0 * (ulong)a;
+				const ulong i01 = (ulong)i0 + (ulong)j1 * (ulong)a;
+				const ulong i11 = (ulong)i1 + (ulong)j1 * (ulong)a;
+				const ulong it_ = (ulong)it + (ulong)jt * (ulong)ta;
+				const float w00 = (1.0f-wx)*(1.0f-wy), w10 = wx*(1.0f-wy), w01 = (1.0f-wx)*wy, w11 = wx*wy;
+				tgt_ux[it_]  = w00*plane_ux[i00]  + w10*plane_ux[i10]  + w01*plane_ux[i01]  + w11*plane_ux[i11];
+				tgt_uy[it_]  = w00*plane_uy[i00]  + w10*plane_uy[i10]  + w01*plane_uy[i01]  + w11*plane_uy[i11];
+				tgt_uz[it_]  = w00*plane_uz[i00]  + w10*plane_uz[i10]  + w01*plane_uz[i01]  + w11*plane_uz[i11];
+				tgt_rho[it_] = w00*plane_rho[i00] + w10*plane_rho[i10] + w01*plane_rho[i01] + w11*plane_rho[i11];
+			}
+		}
+	}
 
-	// Step 5: Write plane data to target as TYPE_E (only modifies plane cells)
+	// Step 4: Sync tgt flags→host (read once; minimal cost). PERF-D: skip if caller pre-synced.
+	if(opts.sync_pcie) tgt_sim.flags.read_from_device();
+	// Step 4b: if α-blend active, also need current tgt u/rho to compute (1-α)*tgt + α*src. PERF-D: skip if caller pre-synced.
+	const float alpha = (opts.alpha < 1.0f && opts.alpha > 0.0f) ? opts.alpha : 1.0f;
+	const bool soft_blend = (alpha < 1.0f);
+	if(opts.sync_pcie && soft_blend) {
+		tgt_sim.u.read_from_device();
+		tgt_sim.rho.read_from_device();
+	}
+
+	// Step 5: Write resampled plane data to target as TYPE_E (uses tgt extents, indexed against tgt grid)
 	const uint tx = tgt_plane.origin.x, ty = tgt_plane.origin.y, tz = tgt_plane.origin.z;
-	for(uint i=0u; i<a; i++) {
-		for(uint j=0u; j<b; j++) {
+	for(uint i=0u; i<ta; i++) {
+		for(uint j=0u; j<tb; j++) {
 			uint cx = tx, cy = ty, cz = tz;
 			if(axis == 0u) { cy = ty + i; cz = tz + j; }
 			else if(axis == 1u) { cx = tx + i; cz = tz + j; }
 			else /* axis == 2u */ { cx = tx + i; cy = ty + j; }
 			const ulong n = (ulong)cx + (ulong)cy * (ulong)tgt_sim.Nx + (ulong)cz * (ulong)tgt_sim.Nx * (ulong)tgt_sim.Ny;
-			const ulong idx = (ulong)i + (ulong)j * (ulong)a;
+			const ulong idx = (ulong)i + (ulong)j * (ulong)ta;
 			tgt_sim.flags[n]  = TYPE_E;
-			tgt_sim.u.x[n]    = plane_ux[idx];
-			tgt_sim.u.y[n]    = plane_uy[idx];
-			tgt_sim.u.z[n]    = plane_uz[idx];
-			tgt_sim.rho[n]    = plane_rho[idx];
+			if(soft_blend) {
+				tgt_sim.u.x[n]  = (1.0f-alpha) * tgt_sim.u.x[n]  + alpha * tgt_ux[idx];
+				tgt_sim.u.y[n]  = (1.0f-alpha) * tgt_sim.u.y[n]  + alpha * tgt_uy[idx];
+				tgt_sim.u.z[n]  = (1.0f-alpha) * tgt_sim.u.z[n]  + alpha * tgt_uz[idx];
+				tgt_sim.rho[n]  = (1.0f-alpha) * tgt_sim.rho[n]  + alpha * tgt_rho[idx];
+			} else {
+				tgt_sim.u.x[n]    = tgt_ux[idx];
+				tgt_sim.u.y[n]    = tgt_uy[idx];
+				tgt_sim.u.z[n]    = tgt_uz[idx];
+				tgt_sim.rho[n]    = tgt_rho[idx];
+			}
 		}
 	}
 
-	// Step 6: Sync host→target
-	tgt_sim.flags.write_to_device();
-	tgt_sim.u.write_to_device();
-	tgt_sim.rho.write_to_device();
+	// Step 6: Sync host→target. PERF-D: skip if caller will write back after batch.
+	if(opts.sync_pcie) {
+		tgt_sim.flags.write_to_device();
+		tgt_sim.u.write_to_device();
+		tgt_sim.rho.write_to_device();
+	}
 
-	// Step 7: Optional diagnostics
+	// Step 7: Optional diagnostics — operate on tgt-side data (post-resample) since plane_ux may have been moved-from
 	if(opts.export_csv) {
-		float ux_min = plane_ux[0], ux_max = plane_ux[0], ux_sum = 0.0f;
-		float rho_min = plane_rho[0], rho_max = plane_rho[0], rho_sum = 0.0f;
-		for(ulong k=0; k<n_plane; k++) {
-			ux_min = fminf(ux_min, plane_ux[k]); ux_max = fmaxf(ux_max, plane_ux[k]); ux_sum += plane_ux[k];
-			rho_min = fminf(rho_min, plane_rho[k]); rho_max = fmaxf(rho_max, plane_rho[k]); rho_sum += plane_rho[k];
+		float ux_min = tgt_ux[0], ux_max = tgt_ux[0], ux_sum = 0.0f;
+		float rho_min = tgt_rho[0], rho_max = tgt_rho[0], rho_sum = 0.0f;
+		for(ulong k=0; k<n_tgt; k++) {
+			ux_min = fminf(ux_min, tgt_ux[k]); ux_max = fmaxf(ux_max, tgt_ux[k]); ux_sum += tgt_ux[k];
+			rho_min = fminf(rho_min, tgt_rho[k]); rho_max = fmaxf(rho_max, tgt_rho[k]); rho_sum += tgt_rho[k];
 		}
 		const string csv_path = get_exe_path() + "../bin/coupling_plane_t" + to_string(get_t()) + ".csv";
 		std::ofstream f(csv_path, std::ios::app);
 		if(f.tellp() == 0) f << "t,n_cells,ux_mean,ux_min,ux_max,rho_mean,rho_min,rho_max\n";
-		f << get_t() << "," << n_plane << "," << (ux_sum/n_plane) << "," << ux_min << "," << ux_max << "," << (rho_sum/n_plane) << "," << rho_min << "," << rho_max << "\n";
+		f << get_t() << "," << n_tgt << "," << (ux_sum/n_tgt) << "," << ux_min << "," << ux_max << "," << (rho_sum/n_tgt) << "," << rho_min << "," << rho_max << "\n";
 		f.close();
 	}
 }

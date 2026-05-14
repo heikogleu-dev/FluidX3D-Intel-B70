@@ -233,6 +233,8 @@ struct CouplingOptions {
 	int smoothing_kernel_size = 3;      // 3 or 5
 	bool export_csv = false;            // diagnostic CSV: plane_t{step}_stats.csv
 	bool export_vtk = false;            // diagnostic VTK: plane_t{step}.vtk
+	float alpha = 1.0f;                 // soft-BC blend: 1.0=hard overwrite (default), <1.0=damped (tgt = (1-α)*tgt + α*src). Stabilizes iterative bidirectional Schwarz coupling.
+	bool sync_pcie = true;              // PERF-D: if false, skip PCIe transfers inside couple_fields() — caller must manually sync src u/rho before calling and write tgt flags/u/rho back after batch. Enables ~5× speedup with multiple coupling planes per chunk.
 };
 
 
