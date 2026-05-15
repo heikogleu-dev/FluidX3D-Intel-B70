@@ -1620,42 +1620,47 @@ string opencl_c_container() { return R( // ########################## begin of O
 	neighbors(n, j);
 	float fhn[def_velocity_set];
 	load_f(n, fhn, fi, j, t);
-	bool modified = false; // EP-pull layout requires: only call store_f IF we actually modified fhn. Otherwise the implicit stream moves data without collision → data corruption.
-	// For each direction pair (odd, even) check wall-adjacency
+	bool modified = false; // EP-pull: skip store_f if no modification (avoid implicit-stream corruption)
+	// Option A diagnostic (2026-05-15): replicate Step 1's EXACT formula (fhn_nb-based, Bouzidi-Step-1 confirmed Poiseuille PASSED).
+	// Limit to FIRST wall direction found (= single direction per cell, simplifies multi-wall MR2 vehicle cells).
+	// This isolates whether multi-direction modification was the bug.
 	for(uint i=1u; i<def_velocity_set; i+=2u) {
 		const uint opp_i = i+1u;
-		// Wall in direction c_i (j[i] is vehicle TYPE_S|TYPE_X)? → modify fhn[opp_i] (DDF coming FROM wall)
+		// Wall in direction c_i? → modify fhn[opp_i] using Step 1's PROVEN formula
 		if((flags[j[i]] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
 			const float q = q_data[(ulong)i*(ulong)N_active + (ulong)i_active];
-			// Skip if q≈0.5: standard BB is the correct behavior, stream_collide already handles it.
-			if(fabs(q - 0.5f) < 0.005f) continue;
-			const uxx n_nb = j[opp_i];
-			uxx j_nb[def_velocity_set];
-			neighbors(n_nb, j_nb);
-			float fhn_nb[def_velocity_set];
-			load_f(n_nb, fhn_nb, fi, j_nb, t);
-			if(q < 0.5f) {
-				fhn[opp_i] = 2.0f*q * fhn[i] + (1.0f - 2.0f*q) * fhn_nb[i];
-			} else {
-				fhn[opp_i] = (0.5f/q) * fhn[i] + (1.0f - 0.5f/q) * fhn_nb[opp_i];
+			if(fabs(q - 0.5f) >= 0.005f) {
+				const uxx n_nb = j[opp_i];
+				uxx j_nb[def_velocity_set];
+				neighbors(n_nb, j_nb);
+				float fhn_nb[def_velocity_set];
+				load_f(n_nb, fhn_nb, fi, j_nb, t);
+				if(q < 0.5f) {
+					fhn[opp_i] = 2.0f*q * fhn[i] + (1.0f - 2.0f*q) * fhn_nb[i];
+				} else {
+					fhn[opp_i] = (0.5f/q) * fhn[i] + (1.0f - 0.5f/q) * fhn_nb[opp_i];
+				}
+				modified = true;
+				break; // Option A: ONLY first wall direction per cell — isolate multi-direction effect
 			}
-			modified = true;
 		}
-		// Wall in direction c_opp_i (j[opp_i] is vehicle) → modify fhn[i]
+		// Wall in direction c_opp_i? → modify fhn[i]
 		if((flags[j[opp_i]] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
 			const float q = q_data[(ulong)opp_i*(ulong)N_active + (ulong)i_active];
-			if(fabs(q - 0.5f) < 0.005f) continue; // see comment above
-			const uxx n_nb = j[i];
-			uxx j_nb[def_velocity_set];
-			neighbors(n_nb, j_nb);
-			float fhn_nb[def_velocity_set];
-			load_f(n_nb, fhn_nb, fi, j_nb, t);
-			if(q < 0.5f) {
-				fhn[i] = 2.0f*q * fhn[opp_i] + (1.0f - 2.0f*q) * fhn_nb[opp_i];
-			} else {
-				fhn[i] = (0.5f/q) * fhn[opp_i] + (1.0f - 0.5f/q) * fhn_nb[i];
+			if(fabs(q - 0.5f) >= 0.005f) {
+				const uxx n_nb = j[i];
+				uxx j_nb[def_velocity_set];
+				neighbors(n_nb, j_nb);
+				float fhn_nb[def_velocity_set];
+				load_f(n_nb, fhn_nb, fi, j_nb, t);
+				if(q < 0.5f) {
+					fhn[i] = 2.0f*q * fhn[opp_i] + (1.0f - 2.0f*q) * fhn_nb[opp_i];
+				} else {
+					fhn[i] = (0.5f/q) * fhn[opp_i] + (1.0f - 0.5f/q) * fhn_nb[i];
+				}
+				modified = true;
+				break; // Option A: only first wall direction per cell
 			}
-			modified = true;
 		}
 	}
 	if(modified) store_f(n, fhn, fi, j, t); // EP-pull safety: skip implicit-stream if no real modification (otherwise data corruption)

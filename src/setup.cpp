@@ -945,11 +945,14 @@ void main_setup_phase5b_dr() {
 	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
 
 #ifdef BOUZIDI_VEHICLE
-	// 2026-05-15 Phase 1 sanity-check: q=0.5 (= Pure-BB equivalent). Kernel skips store_f when no modification needed
-	// (EP-pull layout safety — store_f without real modification corrupts via implicit stream).
-	// Diagnostic: forces should match Mode 3 + α=0.15 baseline (kernel = no-op when all q=0.5).
-	lbm_far.compute_bouzidi_cells_active(0.5f);
-	lbm_near.compute_bouzidi_cells_active(0.5f);
+	// 2026-05-15: Sparse Bouzidi DISABLED. EP-pull-Layout neutralisiert oder korrumpiert custom DDF modifications
+	// für komplexe vehicle-Geometrie (CC#7 deprecation-comment confirms same issue für TYPE_Y inline mods).
+	// Code-Infrastruktur (kernel + sparse buffers + compute_bouzidi_cells_active) bleibt im Source als
+	// reusable Building-Block für Pi-Tensor (Path IV) oder andere wall-treatment approaches.
+	// Siehe findings/BOUZIDI_EP_PULL_INCOMPATIBILITY_2026-05-15.md für volle Analyse.
+	// Zum Reaktivieren als no-op: compute_bouzidi_cells_active(0.5f) (q=0.5 → kernel skips store_f).
+	// lbm_far.compute_bouzidi_cells_active(0.5f);
+	// lbm_near.compute_bouzidi_cells_active(0.5f);
 #endif
 
 	// ===== Far Boundaries: TYPE_S Moving-Wall Floor (Rolling Road) + Wheel-contact-patches =====
