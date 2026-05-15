@@ -1925,21 +1925,22 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // SUBGRID
 
 )+"#ifdef WALL_VISC_BOOST"+R(
-	// Option B Phase 2 (2026-05-15): Prandtl mixing-length formula for eddy viscosity at wall-adjacent cell.
-	// Standard turbulent BL theory: nu_t = (kappa * y) * u_tau    (mixing length l_m = kappa*y, velocity scale u_tau)
-	// For y_1 = 0.5 lu: nu_t = 0.41 * 0.5 * u_tau = 0.205 * u_tau
-	// u_tau via Werner-Wengle PowerLaw closed form (no Newton iteration needed)
-	if(wall_adj_flag[n] != (uchar)0u) {
+	// Option B Phase 3 (2026-05-15): Multi-cell Prandtl mixing-length wall function.
+	// wall_adj_flag[n] = wall distance layer: 0=interior, 1=direct neighbor (y=0.5lu),
+	// 2=1 cell from wall (y=1.5lu), 3=2 cells (y=2.5lu).
+	// Mixing-length scales linearly with distance: nu_t = κ · y · u_tau, κ=0.41 (von Karman).
+	// → Layer 1: 0.205·u_tau, Layer 2: 0.615·u_tau, Layer 3: 1.025·u_tau.
+	const uchar wall_dist = wall_adj_flag[n];
+	if(wall_dist != (uchar)0u) {
 		const float u_mag = sqrt(sq(uxn)+sq(uyn)+sq(uzn));
 		if(u_mag > 1e-6f) {
 			const float nu = def_nu;
 			const float u_visc2 = 2.0f*nu*u_mag;
 			const float u_log2  = 0.0246384f * pow(nu, 0.25f) * pow(u_mag, 1.75f);
 			const float u_tau   = sqrt(max(u_visc2, u_log2));
-			// Prandtl mixing-length eddy viscosity at y_1 = 0.5 lu:
-			//   nu_t = kappa * y_1 * u_tau, kappa=0.41 (von Karman)
-			const float nu_t_target = 0.205f * u_tau; // 0.205 = 0.41 * 0.5
-			// Add to existing Smagorinsky nu_eff (NOT max — wall function + LES are additive contributions to nu)
+			// y_center_in_lu for this layer: (dist - 0.5), e.g. dist=1 → y=0.5, dist=2 → y=1.5, dist=3 → y=2.5
+			const float y_center = (float)wall_dist - 0.5f;
+			const float nu_t_target = 0.41f * y_center * u_tau; // mixing-length scaling
 			const float nu_current = (1.0f/w - 0.5f)/3.0f;
 			const float nu_new = nu_current + nu_t_target;
 			w = 1.0f/(3.0f*nu_new + 0.5f);

@@ -1042,33 +1042,51 @@ void LBM::populate_wall_adj_flag() {
 	const int cx[19] = {0,  1,-1,  0, 0,  0, 0,  1,-1,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0};
 	const int cy[19] = {0,  0, 0,  1,-1,  0, 0,  1,-1,  0, 0,  1,-1, -1, 1,  0, 0,  1,-1};
 	const int cz[19] = {0,  0, 0,  0, 0,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0, -1, 1, -1, 1};
+	// Phase 3: multi-cell wall distance via iterative BFS-like expansion.
+	// wall_adj_flag[n] = 0 = interior; 1 = direct neighbor of wall (y_center=0.5 lu);
+	// 2 = 1 fluid cell away from wall (y=1.5 lu); 3 = 2 cells away (y=2.5 lu).
+	const uint MAX_WALL_DISTANCE = 3u; // number of layers to mark
 	for(uint d=0u; d<get_D(); d++) {
 		LBM_Domain* dom = lbm_domain[d];
-		ulong n_vehicle_adj = 0ull, n_floor_adj = 0ull;
+		// Pass 1: mark distance=1 cells (direct neighbors of walls)
 		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
-			dom->wall_adj_flag[n] = 0u; // default
+			dom->wall_adj_flag[n] = 0u;
 			const uchar fn = dom->flags[n];
-			if((fn & TYPE_S) != 0u) continue; // skip solid (cells with TYPE_S bit, includes vehicle TYPE_S|TYPE_X and floor TYPE_S)
-			// Check 18 D3Q19 neighbors for any TYPE_S (vehicle or floor wall)
-			bool has_vehicle_nb = false, has_floor_nb = false;
+			if((fn & TYPE_S) != 0u) continue;
 			for(uint i=1u; i<19u; i++) {
 				const int nx = (int)x + cx[i], ny = (int)y + cy[i], nz = (int)z + cz[i];
 				if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
 				const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
 				const uchar fj = dom->flags[nj];
-				if((fj & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) has_vehicle_nb = true; // vehicle wall
-				else if((fj & TYPE_S) != 0u && (fj & TYPE_X) == 0u) has_floor_nb = true; // floor wall (TYPE_S without TYPE_X)
+				if((fj & TYPE_S) != 0u) { dom->wall_adj_flag[n] = 1u; break; }
 			}
-			if(has_vehicle_nb || has_floor_nb) {
-				dom->wall_adj_flag[n] = 1u;
-				if(has_vehicle_nb) n_vehicle_adj++;
-				if(has_floor_nb)   n_floor_adj++;
+		}
+		// Pass 2..MAX_WALL_DISTANCE: mark layer k as neighbor of any layer-(k-1) fluid cell
+		ulong layer_counts[4] = {0, 0, 0, 0};
+		for(ulong n=0ull; n<(ulong)Nx*(ulong)Ny*(ulong)Nz; n++) if(dom->wall_adj_flag[n]==1u) layer_counts[1]++;
+		for(uint dist=2u; dist<=MAX_WALL_DISTANCE; dist++) {
+			for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+				const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
+				if(dom->wall_adj_flag[n] != 0u) continue; // already marked
+				const uchar fn = dom->flags[n];
+				if((fn & TYPE_S) != 0u) continue;
+				for(uint i=1u; i<19u; i++) {
+					const int nx = (int)x + cx[i], ny = (int)y + cy[i], nz = (int)z + cz[i];
+					if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
+					const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
+					if(dom->wall_adj_flag[nj] == (uchar)(dist-1u)) {
+						dom->wall_adj_flag[n] = (uchar)dist;
+						layer_counts[dist]++;
+						break;
+					}
+				}
 			}
 		}
 		dom->wall_adj_flag.write_to_device();
 		const ulong N_total = (ulong)Nx*(ulong)Ny*(ulong)Nz;
-		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" — Vehicle-adj="+to_string(n_vehicle_adj)+" + Floor-adj="+to_string(n_floor_adj)+" wall-adjacent fluid cells ("+to_string(100.0f*(float)(n_vehicle_adj+n_floor_adj)/(float)N_total,3u)+"% of total)");
+		ulong total_walladj = 0ull; for(uint k=1u; k<=MAX_WALL_DISTANCE; k++) total_walladj += layer_counts[k];
+		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" multi-cell — Layer1="+to_string(layer_counts[1])+" Layer2="+to_string(layer_counts[2])+" Layer3="+to_string(layer_counts[3])+" (total "+to_string(100.0f*(float)total_walladj/(float)N_total,3u)+"%)");
 	}
 }
 #endif // WALL_VISC_BOOST
