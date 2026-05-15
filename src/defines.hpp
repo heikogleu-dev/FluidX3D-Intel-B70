@@ -24,7 +24,8 @@
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
 // #define WALL_MODEL_VEHICLE // 2026-05-15 DISABLED: Path I bewies Pathology in beiden Resolutionen (Far stuck 290k N, Near laminar collapse). WW-Krüger fundamentally incompatible mit MR2 Multi-Res.
 // #define WALL_MODEL_FLOOR // 2026-05-15 disabled: Krueger-Approach NoOp (kernel returns early at u_rel≈0). See FLOOR_WW_RESULT_2026-05-15.md.
-#define BOUZIDI_VEHICLE // 2026-05-15: Path Sparse Bouzidi — Sub-Grid BB an Vehicle-Surface fluid cells (TYPE_S|TYPE_X-adjacent). Sparse storage: q-data nur für wall-adjacent cells. Adressiert Voxelisierungs-Staircase (Phase 1: q=0.5 sanity check = Pure-BB equiv).
+#define BOUZIDI_VEHICLE // 2026-05-15: Sparse Bouzidi infrastructure (kernel + sparse active cells list). Inkompatibel mit EP-pull für komplexe Geometrie — siehe findings/BOUZIDI_EP_PULL_INCOMPATIBILITY_2026-05-15.md. Infrastructure (sparse list) wird wiederverwendet für WALL_SLIP_VEHICLE.
+#define WALL_SLIP_VEHICLE // 2026-05-15: Multi-cell u-prescription Approach. Post-stream kernel computes u_local from fluid neighbors, sets DDFs=feq(slip_factor*u_local) at wall-adjacent fluid cells. Soft-TYPE_E mechanism — modifies DDFs every step to enforce BL slip velocity.
 #define SPONGE_LAYER // Phase 5a: non-reflecting outlet damping zone for Multi-Resolution coupling (graduates DDFs toward f_eq(u_inlet) over last SPONGE_DEPTH_CELLS in X direction)
 #define SPONGE_DEPTH_CELLS 50 // damping zone depth in X (cells); 5-10% of typical 1500-cell domain
 #define SPONGE_STRENGTH 0.1f // max damping at outlet for f_neq-only formulation (v3 design 2026-05-13): preserves mean flow via local f_eq, dampens oscillations. v1/v2 with global u_inlet target reduced drag 74% via freestream-pull artifact.

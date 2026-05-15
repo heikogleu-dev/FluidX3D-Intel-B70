@@ -216,6 +216,11 @@ void LBM_Domain::enqueue_apply_bouzidi_sparse() { // Sparse Bouzidi sub-grid BB
 	kernel_apply_bouzidi_sparse.set_parameters(5u, t).enqueue_run();
 }
 #endif // BOUZIDI_VEHICLE
+#ifdef WALL_SLIP_VEHICLE
+void LBM_Domain::enqueue_apply_wall_slip(float slip_factor) { // Multi-cell u-prescription
+	kernel_apply_wall_slip.set_parameters(6u, t).set_parameters(7u, slip_factor).enqueue_run();
+}
+#endif // WALL_SLIP_VEHICLE
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
 	if(t!=t_last_update_fields) { // only run kernel_update_fields if the time step has changed since last update
@@ -481,6 +486,9 @@ string LBM_Domain::device_defines() const { return
 #ifdef BOUZIDI_VEHICLE
 	"\n	#define BOUZIDI_VEHICLE" // Sparse Bouzidi sub-grid BB at vehicle surface
 #endif // BOUZIDI_VEHICLE
+#ifdef WALL_SLIP_VEHICLE
+	"\n	#define WALL_SLIP_VEHICLE" // Multi-cell u-prescription at wall-adjacent fluid cells
+#endif // WALL_SLIP_VEHICLE
 
 #ifdef SPONGE_LAYER
 	"\n	#define SPONGE_LAYER" // Phase 5a: non-reflecting outlet damping
@@ -964,6 +972,11 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_bouzidi_sparse();
 	}
 #endif // BOUZIDI_VEHICLE
+#ifdef WALL_SLIP_VEHICLE
+	if(wall_slip_factor > 0.0f) { // Multi-cell u-prescription: requires compute_bouzidi_cells_active() to have populated active list
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_slip(wall_slip_factor);
+	}
+#endif // WALL_SLIP_VEHICLE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
 #ifdef SPONGE_LAYER
@@ -1068,6 +1081,11 @@ void LBM::compute_bouzidi_cells_active(const float q_default) {
 		// (Re-)create kernel with proper range = N_active and buffers
 		dom->kernel_apply_bouzidi_sparse = Kernel(dom->device, (ulong)N_active, "apply_bouzidi_sparse",
 			dom->fi, dom->flags, dom->bouzidi_active_cells, dom->bouzidi_q_data, N_active, dom->t);
+#ifdef WALL_SLIP_VEHICLE
+		// Reuse same sparse active_cells list for wall_slip kernel
+		dom->kernel_apply_wall_slip = Kernel(dom->device, (ulong)N_active, "apply_wall_slip_vehicle",
+			dom->fi, dom->rho, dom->u, dom->flags, dom->bouzidi_active_cells, N_active, dom->t, 1.0f);
+#endif // WALL_SLIP_VEHICLE
 	}
 	bouzidi_enabled = true;
 }

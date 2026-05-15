@@ -945,14 +945,21 @@ void main_setup_phase5b_dr() {
 	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
 
 #ifdef BOUZIDI_VEHICLE
-	// 2026-05-15: Sparse Bouzidi DISABLED. EP-pull-Layout neutralisiert oder korrumpiert custom DDF modifications
-	// für komplexe vehicle-Geometrie (CC#7 deprecation-comment confirms same issue für TYPE_Y inline mods).
-	// Code-Infrastruktur (kernel + sparse buffers + compute_bouzidi_cells_active) bleibt im Source als
-	// reusable Building-Block für Pi-Tensor (Path IV) oder andere wall-treatment approaches.
-	// Siehe findings/BOUZIDI_EP_PULL_INCOMPATIBILITY_2026-05-15.md für volle Analyse.
-	// Zum Reaktivieren als no-op: compute_bouzidi_cells_active(0.5f) (q=0.5 → kernel skips store_f).
-	// lbm_far.compute_bouzidi_cells_active(0.5f);
-	// lbm_near.compute_bouzidi_cells_active(0.5f);
+	// 2026-05-15: Compute sparse active-cell list (reused by both Bouzidi + WALL_SLIP kernels)
+	// q=0.5 = Bouzidi no-op (Bouzidi-itself disabled via bouzidi_enabled stays false).
+	lbm_far.compute_bouzidi_cells_active(0.5f);
+	lbm_near.compute_bouzidi_cells_active(0.5f);
+	// IMPORTANT: bouzidi_enabled set to true by compute_bouzidi_cells_active. Disable Bouzidi
+	// kernel call (we only want sparse list infrastructure, NOT Bouzidi DDF mods which fail in EP-pull):
+	lbm_far.bouzidi_enabled = false;
+	lbm_near.bouzidi_enabled = false;
+#endif
+#ifdef WALL_SLIP_VEHICLE
+	// 2026-05-15: DISABLED. Catastrophic failure at slip=1.0 (Fx=-200k N) — forcing DDFs=feq kills turbulence
+	// at wall-adjacent shell, even without slip applied. Same EP-pull-Layout pattern as Bouzidi failure.
+	// Code preserved for reference. To re-test: set wall_slip_factor > 0.
+	// lbm_far.wall_slip_factor  = 1.0f;
+	// lbm_near.wall_slip_factor = 1.0f;
 #endif
 
 	// ===== Far Boundaries: TYPE_S Moving-Wall Floor (Rolling Road) + Wheel-contact-patches =====

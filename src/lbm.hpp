@@ -65,6 +65,9 @@ private:
 	Memory<float> bouzidi_q_data;       // q-data: bouzidi_q_data[dir * N_active + i_active], 19 floats per active cell
 	uint bouzidi_N_active = 0u;         // count of active cells (set by compute_bouzidi_cells_active)
 #endif // BOUZIDI_VEHICLE
+#ifdef WALL_SLIP_VEHICLE
+	Kernel kernel_apply_wall_slip; // Multi-cell u-prescription: applies BL slip at wall-adjacent fluid cells via DDFs=feq(slip_factor*u_local)
+#endif // WALL_SLIP_VEHICLE
 #ifdef SURFACE
 	Kernel kernel_surface_0; // additional kernel for computing mass conservation and mass flux computation
 	Kernel kernel_surface_1; // additional kernel for flag handling
@@ -141,6 +144,9 @@ public:
 #ifdef BOUZIDI_VEHICLE
 	void enqueue_apply_bouzidi_sparse(); // Sparse Bouzidi sub-grid BB
 #endif // BOUZIDI_VEHICLE
+#ifdef WALL_SLIP_VEHICLE
+	void enqueue_apply_wall_slip(float slip_factor);
+#endif // WALL_SLIP_VEHICLE
 #ifdef PARTICLES
 	void enqueue_integrate_particles(const uint time_step_multiplicator=1u); // intgegrates particles forward in time and couples particles to fluid
 #endif // PARTICLES
@@ -293,6 +299,9 @@ public:
 	bool bouzidi_enabled = false; // Sparse Bouzidi BB: set true after compute_bouzidi_cells_active(). Default false (off).
 	void compute_bouzidi_cells_active(const float q_default = 0.5f); // Host-side enumerate wall-adjacent fluid cells + initialize q-data (Phase 1: uniform q=0.5; Phase 2: per-direction real q)
 #endif // BOUZIDI_VEHICLE
+#ifdef WALL_SLIP_VEHICLE
+	float wall_slip_factor = 0.0f; // 0 = disabled. >0 enables slip per step. 1.0 = no decel (sanity check), 0.7 = mild BL, 0.5 = strong BL.
+#endif // WALL_SLIP_VEHICLE
 #endif // SPONGE_LAYER
 
 	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data
