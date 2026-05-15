@@ -1036,7 +1036,7 @@ void main_setup_phase5b_dr() {
 #if PHASE_5B_COUPLE_MODE==2
 	opts.alpha        = 0.10f;       // SYMMETRIC forward α=0.10 (validated 2026-05-15 α-sweep: stable, moderate convergence; 0.33 oscillated, 0.20 had Fz swings)
 #elif PHASE_5B_COUPLE_MODE==3
-	opts.alpha        = 0.15f;       // 2026-05-15: α=0.15 als Compromiss zwischen α=0.10 (sichtbare Coupling-Kante) und α=0.20 (24% schnellere Konvergenz, sonst ähnliche Forces). User-Notiz nach α=0.20 Test.
+	opts.alpha        = 0.20f;       // 2026-05-15 EOD: α=0.20 als final (User-Direktive nach Mode 3 Production sichtung). Begründung: stärkere Coupling → mehr Wirbel-Transport Near→Far ("Far profitiert von Near's Wirbelauflösung"). α=0.20 24% schneller konvergiert + ähnliche Final-Forces wie α=0.15.
 #else
 	opts.alpha        = 0.5f;        // 2026-05-15 Mode 1 test: soft-BC α=0.5 forward (statt 1.0 hard overwrite) — User-Vorschlag nach Mode 2 α=0.10 Near-Strömung unplausibel
 #endif
@@ -1045,7 +1045,7 @@ void main_setup_phase5b_dr() {
 	CouplingOptions opts_back;
 	opts_back.smooth_plane = false;
 	opts_back.export_csv   = false;
-	opts_back.alpha        = 0.15f;  // 2026-05-15: SYMMETRIC back α=0.15 (matches forward, compromise zwischen α=0.10 und α=0.20)
+	opts_back.alpha        = 0.20f;  // 2026-05-15 EOD: SYMMETRIC back α=0.20 (matches forward, stronger coupling for vortex transport Near→Far)
 	opts_back.sync_pcie    = false;
 #endif
 
