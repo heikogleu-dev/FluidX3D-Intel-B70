@@ -145,7 +145,7 @@ public:
 	void enqueue_apply_bouzidi_sparse(); // Sparse Bouzidi sub-grid BB
 #endif // BOUZIDI_VEHICLE
 #ifdef WALL_SLIP_VEHICLE
-	void enqueue_apply_wall_slip(float slip_factor);
+	void enqueue_apply_wall_slip(float slip_factor, float blend_strength);
 #endif // WALL_SLIP_VEHICLE
 #ifdef PARTICLES
 	void enqueue_integrate_particles(const uint time_step_multiplicator=1u); // intgegrates particles forward in time and couples particles to fluid
@@ -300,7 +300,8 @@ public:
 	void compute_bouzidi_cells_active(const float q_default = 0.5f); // Host-side enumerate wall-adjacent fluid cells + initialize q-data (Phase 1: uniform q=0.5; Phase 2: per-direction real q)
 #endif // BOUZIDI_VEHICLE
 #ifdef WALL_SLIP_VEHICLE
-	float wall_slip_factor = 0.0f; // 0 = disabled. >0 enables slip per step. 1.0 = no decel (sanity check), 0.7 = mild BL, 0.5 = strong BL.
+	float wall_slip_factor = 0.0f;     // slip multiplier. 1.0 = no decel, 0.5 = strong BL
+	float wall_slip_blend  = 0.0f;     // BLEND strength. 0 = disabled (kernel skipped), 0.05-0.2 = gentle, 1.0 = full overwrite (V1 failed mode)
 #endif // WALL_SLIP_VEHICLE
 #endif // SPONGE_LAYER
 

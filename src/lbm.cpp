@@ -217,8 +217,8 @@ void LBM_Domain::enqueue_apply_bouzidi_sparse() { // Sparse Bouzidi sub-grid BB
 }
 #endif // BOUZIDI_VEHICLE
 #ifdef WALL_SLIP_VEHICLE
-void LBM_Domain::enqueue_apply_wall_slip(float slip_factor) { // Multi-cell u-prescription
-	kernel_apply_wall_slip.set_parameters(6u, t).set_parameters(7u, slip_factor).enqueue_run();
+void LBM_Domain::enqueue_apply_wall_slip(float slip_factor, float blend_strength) { // Multi-cell u-prescription (BLEND version)
+	kernel_apply_wall_slip.set_parameters(6u, t).set_parameters(7u, slip_factor).set_parameters(8u, blend_strength).enqueue_run();
 }
 #endif // WALL_SLIP_VEHICLE
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
@@ -973,8 +973,8 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	}
 #endif // BOUZIDI_VEHICLE
 #ifdef WALL_SLIP_VEHICLE
-	if(wall_slip_factor > 0.0f) { // Multi-cell u-prescription: requires compute_bouzidi_cells_active() to have populated active list
-		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_slip(wall_slip_factor);
+	if(wall_slip_blend > 0.0f) { // Multi-cell u-prescription: requires compute_bouzidi_cells_active() + wall_slip_blend > 0
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_slip(wall_slip_factor, wall_slip_blend);
 	}
 #endif // WALL_SLIP_VEHICLE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
@@ -1082,9 +1082,9 @@ void LBM::compute_bouzidi_cells_active(const float q_default) {
 		dom->kernel_apply_bouzidi_sparse = Kernel(dom->device, (ulong)N_active, "apply_bouzidi_sparse",
 			dom->fi, dom->flags, dom->bouzidi_active_cells, dom->bouzidi_q_data, N_active, dom->t);
 #ifdef WALL_SLIP_VEHICLE
-		// Reuse same sparse active_cells list for wall_slip kernel
+		// Reuse same sparse active_cells list for wall_slip kernel (params: t, slip_factor, blend_strength)
 		dom->kernel_apply_wall_slip = Kernel(dom->device, (ulong)N_active, "apply_wall_slip_vehicle",
-			dom->fi, dom->rho, dom->u, dom->flags, dom->bouzidi_active_cells, N_active, dom->t, 1.0f);
+			dom->fi, dom->rho, dom->u, dom->flags, dom->bouzidi_active_cells, N_active, dom->t, 1.0f, 0.0f);
 #endif // WALL_SLIP_VEHICLE
 	}
 	bouzidi_enabled = true;

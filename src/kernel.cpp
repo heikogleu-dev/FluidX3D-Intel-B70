@@ -1668,51 +1668,61 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // BOUZIDI_VEHICLE
 
 
-// WALL_SLIP_VEHICLE: Multi-cell u-prescription approach (2026-05-15).
+// WALL_SLIP_VEHICLE: Multi-cell u-prescription approach with BLEND (2026-05-15 V2).
 // Runs POST stream_collide. For each wall-adjacent fluid cell:
-//   1. Compute u_local = average u over fluid neighbors (in non-wall directions)
-//   2. Compute u_slip = slip_factor * u_local (slip_factor < 1 decelerates BL)
-//   3. Set DDFs at cell = feq(rho, u_slip) — soft TYPE_E enforcement
-//   4. Update u[cell] = u_slip
-// At slip_factor=1.0: equivalent to forcing local equilibrium (kills turbulence locally — sanity check baseline)
-// At slip_factor<1.0: simulates BL slip (target: 0.5-0.7)
+//   1. Load post-stream-collision DDFs (preserve turbulence/non-eq part)
+//   2. Compute u_local = average u over fluid neighbors
+//   3. Compute u_slip = slip_factor * u_local (slip<1 decelerates BL)
+//   4. Compute feq(rho, u_slip)
+//   5. BLEND: f_new = (1 - blend) * f_post + blend * feq    [blend << 1 keeps turbulence]
+//   6. store back, update u
+// V1 (failed): used full overwrite (blend=1) → killed turbulence → -200k N drag
+// V2 (now): blend parameter, gentle nudge preserving non-equilibrium
 )+"#ifdef WALL_SLIP_VEHICLE"+R(
-)+R(kernel void apply_wall_slip_vehicle(global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const global ulong* active_cells, const uint N_active, const ulong t, const float slip_factor) {
+)+R(kernel void apply_wall_slip_vehicle(global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const global ulong* active_cells, const uint N_active, const ulong t, const float slip_factor, const float blend_strength) {
 	const uxx i_active = get_global_id(0);
 	if(i_active >= (uxx)N_active) return;
 	const uxx n = (uxx)active_cells[i_active];
 	if((flags[n] & TYPE_BO) != 0u) return; // skip non-fluid (safety)
 	uxx j[def_velocity_set];
 	neighbors(n, j);
-	// Average u over fluid neighbors (skip TYPE_S, TYPE_E, TYPE_T — boundaries shouldn't pollute average)
+	// Average u over PURE fluid neighbors (skip boundaries)
 	float ux_avg = 0.0f, uy_avg = 0.0f, uz_avg = 0.0f;
 	uint count = 0u;
 	for(uint i=1u; i<def_velocity_set; i++) {
 		const uchar fj = flags[j[i]];
-		if((fj & (TYPE_S|TYPE_E|TYPE_T)) == 0u) { // pure fluid neighbor
+		if((fj & (TYPE_S|TYPE_E|TYPE_T)) == 0u) {
 			ux_avg += u[              j[i]];
 			uy_avg += u[def_N+(ulong)j[i]];
 			uz_avg += u[2ul*def_N+(ulong)j[i]];
 			count++;
 		}
 	}
-	if(count == 0u) return; // no fluid neighbors → cell is fully wall-bound, skip
+	if(count == 0u) return;
 	const float inv_c = 1.0f/(float)count;
 	ux_avg *= inv_c; uy_avg *= inv_c; uz_avg *= inv_c;
-	// Apply slip factor
 	const float ux_slip = slip_factor * ux_avg;
 	const float uy_slip = slip_factor * uy_avg;
 	const float uz_slip = slip_factor * uz_avg;
-	// Compute feq(rho_local, u_slip) and replace DDFs
-	const float rhon = rho[n];
-	const float u2 = ux_slip*ux_slip + uy_slip*uy_slip + uz_slip*uz_slip;
+	// Compute feq target
 	float feq[def_velocity_set];
-	calculate_f_eq(rhon, ux_slip, uy_slip, uz_slip, feq);
-	store_f(n, feq, fi, j, t);
-	// Update u[] to reflect new prescribed velocity
-	u[              n] = ux_slip;
-	u[def_N+(ulong)n ] = uy_slip;
-	u[2ul*def_N+(ulong)n] = uz_slip;
+	calculate_f_eq(rho[n], ux_slip, uy_slip, uz_slip, feq);
+	// Load current post-stream-collision DDFs (= contains non-equilibrium = turbulence)
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t);
+	// BLEND: gentle nudge toward feq(u_slip), preserve (1-blend) of non-eq DDF state
+	const float keep = 1.0f - blend_strength;
+	for(uint i=0u; i<def_velocity_set; i++) {
+		fhn[i] = keep * fhn[i] + blend_strength * feq[i];
+	}
+	store_f(n, fhn, fi, j, t);
+	// Update u[] to reflect blended velocity (= (1-blend)*u_current + blend*u_slip)
+	const float ux_blended = keep * u[              n] + blend_strength * ux_slip;
+	const float uy_blended = keep * u[def_N+(ulong)n ] + blend_strength * uy_slip;
+	const float uz_blended = keep * u[2ul*def_N+(ulong)n] + blend_strength * uz_slip;
+	u[              n] = ux_blended;
+	u[def_N+(ulong)n ] = uy_blended;
+	u[2ul*def_N+(ulong)n] = uz_blended;
 } // apply_wall_slip_vehicle()
 )+"#endif"+R( // WALL_SLIP_VEHICLE
 

@@ -955,11 +955,14 @@ void main_setup_phase5b_dr() {
 	lbm_near.bouzidi_enabled = false;
 #endif
 #ifdef WALL_SLIP_VEHICLE
-	// 2026-05-15: DISABLED. Catastrophic failure at slip=1.0 (Fx=-200k N) — forcing DDFs=feq kills turbulence
-	// at wall-adjacent shell, even without slip applied. Same EP-pull-Layout pattern as Bouzidi failure.
-	// Code preserved for reference. To re-test: set wall_slip_factor > 0.
-	// lbm_far.wall_slip_factor  = 1.0f;
-	// lbm_near.wall_slip_factor = 1.0f;
+	// 2026-05-15: BOTH V1 (full overwrite) AND V2 (BLEND) FAILED.
+	// V1: catastrophic -200k N (turbulence killed by full DDF=feq overwrite)
+	// V2: f_neq decay → Fx=153 N at chunk 5 (90% f_neq preservation insufficient, simple blending mathematically
+	//     decays non-equilibrium content over time, confirmed by research finding).
+	// Research-Erkenntnis: Malaspinas-Sagaut 2014 requires PHYSICAL f_neq reconstruction from wall stress,
+	// not simple blending. Simpler EP-pull-compatible Pfad: local viscosity modification (Smagorinsky-Extension).
+	// lbm_far.wall_slip_factor = 0.7f; lbm_near.wall_slip_factor = 0.7f;
+	// lbm_far.wall_slip_blend  = 0.1f; lbm_near.wall_slip_blend  = 0.1f;
 #endif
 
 	// ===== Far Boundaries: TYPE_S Moving-Wall Floor (Rolling Road) + Wheel-contact-patches =====
