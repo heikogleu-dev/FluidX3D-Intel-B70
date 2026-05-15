@@ -22,7 +22,7 @@
 #define FORCE_FIELD // enables computing the forces on solid boundaries with lbm.update_force_field(); and enables setting the force for each lattice point independently (enable VOLUME_FORCE too); allocates an extra 12 Bytes/cell
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
-#define WALL_MODEL_VEHICLE // 2026-05-15 Path I diagnostic: WW + Mode 1 (no back-coupling) — isoliert ob Mode 3 back-coupling oder WW selbst die 340k N Pathology causes. CC#10 single-domain konvergierte nach 6900 steps zu -610 N (über +342k transient). Erwartung: Mode 1 sollte ähnlich konvergieren, da kein back-coupling injects.
+// #define WALL_MODEL_VEHICLE // 2026-05-15 DISABLED: Path I bewies Pathology in beiden Resolutionen (Far stuck 290k N, Near laminar collapse). WW-Krüger fundamentally incompatible mit MR2 Multi-Res. Floor-only Wall-Model nach α=0.20 Test als next step (Path II.5).
 #define SPONGE_LAYER // Phase 5a: non-reflecting outlet damping zone for Multi-Resolution coupling (graduates DDFs toward f_eq(u_inlet) over last SPONGE_DEPTH_CELLS in X direction)
 #define SPONGE_DEPTH_CELLS 50 // damping zone depth in X (cells); 5-10% of typical 1500-cell domain
 #define SPONGE_STRENGTH 0.1f // max damping at outlet for f_neq-only formulation (v3 design 2026-05-13): preserves mean flow via local f_eq, dampens oscillations. v1/v2 with global u_inlet target reduced drag 74% via freestream-pull artifact.

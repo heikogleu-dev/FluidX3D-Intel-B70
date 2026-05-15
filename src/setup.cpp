@@ -234,7 +234,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
-#define PHASE_5B_COUPLE_MODE 1 // 2026-05-15 Path I diagnostic: Mode 1 + WW (forward-only, no back-coupling) — testen ob WW konvergiert ohne Mode 3 feedback-loop. Mode 3 wird nach diagnostic test wieder default.
+#define PHASE_5B_COUPLE_MODE 3 // 2026-05-15: Mode 3 PERF-G Additive Schwarz (concurrent Far||Near, symmetric 1-chunk lag) + α=0.20 Test (von User vorgeschlagen — Mode 3 Production zeigte sichtbare Near→Far Kante bei α=0.10, also stärkere Coupling testen).
 #define PHASE_5B_DR 1          // Phase 5b-DR Production 2026-05-16: Far 13.5m anlauf 1.5m + TYPE_S Moving Wall floor + Mode 2 symm α=0.10 + Vehicle z=1/z=3 + auto-stop 2% over 5000 Far-steps
 
 #if AHMED_MODE>0
@@ -1003,7 +1003,7 @@ void main_setup_phase5b_dr() {
 #if PHASE_5B_COUPLE_MODE==2
 	opts.alpha        = 0.10f;       // SYMMETRIC forward α=0.10 (validated 2026-05-15 α-sweep: stable, moderate convergence; 0.33 oscillated, 0.20 had Fz swings)
 #elif PHASE_5B_COUPLE_MODE==3
-	opts.alpha        = 0.10f;       // PERF-G concurrent (additive Schwarz): forward α=0.10 (1-chunk symmetric lag braucht conservative blending)
+	opts.alpha        = 0.20f;       // 2026-05-15: α=0.20 forward test (User-Anweisung nach Mode 3 Production zeigte sichtbare Near→Far Kante bei α=0.10). Mode 3 Additive Schwarz sollte stabiler sein als Mode 2 sequential (wo α=0.20 borderline schwingungen zeigte).
 #else
 	opts.alpha        = 0.5f;        // 2026-05-15 Mode 1 test: soft-BC α=0.5 forward (statt 1.0 hard overwrite) — User-Vorschlag nach Mode 2 α=0.10 Near-Strömung unplausibel
 #endif
@@ -1012,7 +1012,7 @@ void main_setup_phase5b_dr() {
 	CouplingOptions opts_back;
 	opts_back.smooth_plane = false;
 	opts_back.export_csv   = false;
-	opts_back.alpha        = 0.10f;  // SYMMETRIC back α=0.10 (matches forward, validated stable)
+	opts_back.alpha        = 0.20f;  // 2026-05-15: SYMMETRIC back α=0.20 (matches forward in Mode 3, testen ob Mode 3 robuster ist als Mode 2 sequential bei α=0.20)
 	opts_back.sync_pcie    = false;
 #endif
 
