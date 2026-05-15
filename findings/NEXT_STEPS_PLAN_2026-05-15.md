@@ -39,26 +39,7 @@
 
 **Rollback-Punkt:** Aktueller commit a277377 (Mode 3 + α=0.10 Production)
 
-### Step 2 — H2 Voxelisation-Fix (low risk, easy win)
-
-**Hypothese:** Vehicle Y=0 cell-center alignment in Near (cell 269 exakt) erzeugt fp-noise-Voxelisierungs-Artefakt am Y=0 Slice.
-
-**Code-Change (1 Zeile):**
-```cpp
-const float near_vehicle_y_center_cell = (0.0f - (-1.345f)) / dx_near + 0.5f; // 269.0 → 269.5 (off-grid)
-```
-
-**Diagnostik:** Visualizer Y=0 slice nach Run, Vergleich mit ALL previous runs.
-
-**Success-Kriterien:** Y=0 slice zeigt clean flow ohne phantom Roof→Wing reversal.
-
-**Failure-Handling:**
-- Wenn artifact bleibt: H2 ist nicht (allein) die Ursache → check H3 (z_max coupling plane) via comparing Y=0 of Far vs Near
-- Wenn Forces sich um >5% ändern: 2.5mm offset ist doch nicht aerodynamisch irrelevant → user direktive einholen
-
-**Rollback:** trivial 1-line revert.
-
-### Step 3 — Floor-Only Wall Model (Path II.5, main task)
+### Step 2 — Floor-Only Wall Model (Path II.5, main task — promoted from Step 3 per User 2026-05-15)
 
 **Hypothese:** Han 2021 Wall Function am Floor (TYPE_S z=0, no TYPE_X) fixt die zu dicke Boundary-Layer am Boden ohne Vehicle-WW-Pathology zu triggern (weil Floor flat = keine F4 thin-feature issues).
 
@@ -96,7 +77,7 @@ Schritt 3d: **Tier-2 Production Run (~50 min)**
 - Bei Architektur-Block → dokumentieren als finding_XX_floor_ww_failure, rollback, **WICHTIG: failure ist UNTERSTANDEN** dann erst weiter
 - Next: Path II (Wall-Normal Vehicle) oder Path IV (Pi-Tensor Han 2021)
 
-### Step 4 — Vehicle-Wall-Model (only if Floor-WW succeeds)
+### Step 3 — Vehicle-Wall-Model (only if Floor-WW succeeds) — promoted from Step 4
 
 **Bedingung:** Step 3 must produce physikalisch korrekte Floor-BL (Tier-2 passed).
 
@@ -108,11 +89,31 @@ Schritt 3d: **Tier-2 Production Run (~50 min)**
 
 **Failure-Handling:** Wenn Three-Attractor return → rollback, sammle Daten, evaluate Path IV (Pi-Tensor).
 
-### Step 5 — Performance (lower priority per User)
+### Step 4 — Performance (lower priority per User) — promoted from Step 5
 
 Nur wenn alles obige funktioniert:
 - PERF-F V5 Multi-Stream PCIe Pipelining (~1 day, 2-3% gain, Phase A schon in opencl.hpp)
 - PERF-H GPU-Resident Coupling (~3-5 days, 10-15% gain, refactor shared context)
+
+### Step 5 — H2 Voxelisation-Fix (DEMOTED per User 2026-05-15) — cosmetic only
+
+**Hypothese:** Vehicle Y=0 cell-center alignment in Near (cell 269 exakt) erzeugt fp-noise-Voxelisierungs-Artefakt am Y=0 Slice.
+
+**Begründung Demotion:** Forces sind unverändert (2.5mm offset = 0.13% des vehicle width), nur Y=0 Slice-Visualisierung betroffen. Aerodynamisch irrelevant.
+
+**Code-Change (1 Zeile):**
+```cpp
+const float near_vehicle_y_center_cell = (0.0f - (-1.345f)) / dx_near + 0.5f; // 269.0 → 269.5 (off-grid)
+```
+
+**Diagnostik:** Visualizer Y=0 slice nach Run, Vergleich mit ALL previous runs.
+
+**Success-Kriterien:** Y=0 slice zeigt clean flow ohne phantom Roof→Wing reversal.
+
+**Failure-Handling:**
+- Wenn artifact bleibt: H2 ist nicht (allein) die Ursache → check H3 (z_max coupling plane) via comparing Y=0 of Far vs Near
+
+**Rollback:** trivial 1-line revert.
 
 ## Stop-Conditions
 
@@ -127,13 +128,16 @@ Ich **dokumentiere ohne stop** wenn:
 2. Fix-Versuch < 30 min absehbar
 3. Rollback eindeutig zu funktionierendem state möglich
 
-## Aktuelle Todo-Reihenfolge
+## Aktuelle Todo-Reihenfolge (2026-05-15 reorder per User)
 
-1. **Warte α=0.20 Run ab** (laufend, ~30 min) → Watcher öffnet ParaView
-2. **Sichte α=0.20 Daten** mit User → User entscheidet ob α=0.20 ok oder zurück zu 0.10
-3. **Implement H2 fix + Floor-WW gleichzeitig** (kleine + große Änderung) → Build → Tier-1 Test
-4. **Tier-2 Production wenn Tier-1 OK** → Watcher → ParaView Inspektion
-5. **Documentation + Commit** nach jeder Phase
+1. **Warte α=0.20 Run ab** (laufend) → Watcher öffnet ParaView
+2. **Sichte α=0.20 Daten** mit User → User-Go für nächsten Schritt
+3. **Floor-Only Wall Model implementieren** → Tier-1 Smoke + Tier-2 Production
+4. **Vehicle-WW (Path II)** falls Floor-WW erfolgreich
+5. **Performance V5/H** (lower priority)
+6. **H2 Y=0 Voxelization-Fix** (LAST priority, cosmetic only)
+
+Bei jedem Schritt: Hypothese + Failure-Handling per [feedback_diagnostic_methodology] memory.
 
 Bei jedem Run: zugehöriger finding-doc mit Hypothese vorher, Daten nachher, Verdict.
 
