@@ -150,6 +150,9 @@ void LBM_Domain::allocate(Device& device) {
 #ifdef WALL_MODEL_VEHICLE
 	kernel_apply_wall_model_vehicle = Kernel(device, N, "apply_wall_model_vehicle", u, flags); // CC#10 WW wall model
 #endif // WALL_MODEL_VEHICLE
+#ifdef WALL_MODEL_FLOOR
+	kernel_apply_wall_model_floor = Kernel(device, N, "apply_wall_model_floor", u, flags, 0.0f); // Path II.5 WW floor wall model (u_road param set at enqueue)
+#endif // WALL_MODEL_FLOOR
 
 #ifdef SURFACE
 	phi = Memory<float>(device, N);
@@ -201,6 +204,11 @@ void LBM_Domain::enqueue_apply_wall_model_vehicle() { // CC#10: Werner-Wengle wa
 	kernel_apply_wall_model_vehicle.enqueue_run();
 }
 #endif // WALL_MODEL_VEHICLE
+#ifdef WALL_MODEL_FLOOR
+void LBM_Domain::enqueue_apply_wall_model_floor(float u_road) { // Path II.5: WW wall model on rolling-road floor (z=0)
+	kernel_apply_wall_model_floor.set_parameters(2u, u_road).enqueue_run();
+}
+#endif // WALL_MODEL_FLOOR
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
 	if(t!=t_last_update_fields) { // only run kernel_update_fields if the time step has changed since last update
@@ -460,6 +468,9 @@ string LBM_Domain::device_defines() const { return
 #ifdef WALL_MODEL_VEHICLE
 	"\n	#define WALL_MODEL_VEHICLE" // CC#10: Werner-Wengle wall model on vehicle cells
 #endif // WALL_MODEL_VEHICLE
+#ifdef WALL_MODEL_FLOOR
+	"\n	#define WALL_MODEL_FLOOR" // Path II.5: Werner-Wengle wall model on rolling-road floor
+#endif // WALL_MODEL_FLOOR
 
 #ifdef SPONGE_LAYER
 	"\n	#define SPONGE_LAYER" // Phase 5a: non-reflecting outlet damping
@@ -930,6 +941,14 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_update_moving_boundaries(); // refresh TYPE_MS flags after wall model updates u_solid
 #endif // MOVING_BOUNDARIES
 #endif // WALL_MODEL_VEHICLE
+#ifdef WALL_MODEL_FLOOR
+	if(wall_floor_u_road != 0.0f) { // Path II.5: floor wall model (only when explicitly enabled by setup via lbm.wall_floor_u_road = u_road)
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_wall_model_floor(wall_floor_u_road);
+#ifdef MOVING_BOUNDARIES
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_update_moving_boundaries(); // refresh TYPE_MS flags after floor WW updates u
+#endif // MOVING_BOUNDARIES
+	}
+#endif // WALL_MODEL_FLOOR
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
 #ifdef SPONGE_LAYER

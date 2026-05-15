@@ -900,6 +900,14 @@ void main_setup_phase5b_dr() {
 	print_info("Total Far+Near = "+to_string((ulong)far_N.x*far_N.y*far_N.z + (ulong)near_N.x*near_N.y*near_N.z)+" cells | total VRAM ~25.8 GB (Far 10.3 + Near 15.5)");
 	LBM lbm_near(near_N, 1u, 1u, 1u, lbm_nu_near);
 
+#ifdef WALL_MODEL_FLOOR
+	// Path II.5 (2026-05-15): activate Floor WW wall model for both LBMs with rolling-road velocity = lbm_u
+	lbm_far .wall_floor_u_road = lbm_u;
+	lbm_near.wall_floor_u_road = lbm_u;
+	print_info("WALL_MODEL_FLOOR active: Werner-Wengle floor wall model with rolling-road u_road = "+to_string(lbm_u,4u)+" LBM (= "+to_string(si_u,1u)+" m/s SI)");
+#endif
+
+
 	// ===== Vehicle: voxelize in both domains at SAME physical position =====
 	// Vehicle bow at x=0, Y-centered at y=0, Z-bottom at z=0
 	Mesh* vehicle_far = read_stl(get_exe_path()+"../scenes/vehicle.stl"); // canonical MR2 binary
@@ -1003,7 +1011,7 @@ void main_setup_phase5b_dr() {
 #if PHASE_5B_COUPLE_MODE==2
 	opts.alpha        = 0.10f;       // SYMMETRIC forward α=0.10 (validated 2026-05-15 α-sweep: stable, moderate convergence; 0.33 oscillated, 0.20 had Fz swings)
 #elif PHASE_5B_COUPLE_MODE==3
-	opts.alpha        = 0.20f;       // 2026-05-15: α=0.20 forward test (User-Anweisung nach Mode 3 Production zeigte sichtbare Near→Far Kante bei α=0.10). Mode 3 Additive Schwarz sollte stabiler sein als Mode 2 sequential (wo α=0.20 borderline schwingungen zeigte).
+	opts.alpha        = 0.15f;       // 2026-05-15: α=0.15 als Compromiss zwischen α=0.10 (sichtbare Coupling-Kante) und α=0.20 (24% schnellere Konvergenz, sonst ähnliche Forces). User-Notiz nach α=0.20 Test.
 #else
 	opts.alpha        = 0.5f;        // 2026-05-15 Mode 1 test: soft-BC α=0.5 forward (statt 1.0 hard overwrite) — User-Vorschlag nach Mode 2 α=0.10 Near-Strömung unplausibel
 #endif
@@ -1012,7 +1020,7 @@ void main_setup_phase5b_dr() {
 	CouplingOptions opts_back;
 	opts_back.smooth_plane = false;
 	opts_back.export_csv   = false;
-	opts_back.alpha        = 0.20f;  // 2026-05-15: SYMMETRIC back α=0.20 (matches forward in Mode 3, testen ob Mode 3 robuster ist als Mode 2 sequential bei α=0.20)
+	opts_back.alpha        = 0.15f;  // 2026-05-15: SYMMETRIC back α=0.15 (matches forward, compromise zwischen α=0.10 und α=0.20)
 	opts_back.sync_pcie    = false;
 #endif
 

@@ -22,7 +22,8 @@
 #define FORCE_FIELD // enables computing the forces on solid boundaries with lbm.update_force_field(); and enables setting the force for each lattice point independently (enable VOLUME_FORCE too); allocates an extra 12 Bytes/cell
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
-// #define WALL_MODEL_VEHICLE // 2026-05-15 DISABLED: Path I bewies Pathology in beiden Resolutionen (Far stuck 290k N, Near laminar collapse). WW-Krüger fundamentally incompatible mit MR2 Multi-Res. Floor-only Wall-Model nach α=0.20 Test als next step (Path II.5).
+// #define WALL_MODEL_VEHICLE // 2026-05-15 DISABLED: Path I bewies Pathology in beiden Resolutionen (Far stuck 290k N, Near laminar collapse). WW-Krüger fundamentally incompatible mit MR2 Multi-Res.
+#define WALL_MODEL_FLOOR // 2026-05-15: Path II.5 — Werner-Wengle PowerLaw Wall Function NUR am TYPE_S Moving Wall Floor (z=0, ohne TYPE_X). Floor ist flat → keine F4 thin-feature ambiguity wie bei Vehicle WW. Relative velocity formulation (u - u_road) damit rolling-road kompatibel.
 #define SPONGE_LAYER // Phase 5a: non-reflecting outlet damping zone for Multi-Resolution coupling (graduates DDFs toward f_eq(u_inlet) over last SPONGE_DEPTH_CELLS in X direction)
 #define SPONGE_DEPTH_CELLS 50 // damping zone depth in X (cells); 5-10% of typical 1500-cell domain
 #define SPONGE_STRENGTH 0.1f // max damping at outlet for f_neq-only formulation (v3 design 2026-05-13): preserves mean flow via local f_eq, dampens oscillations. v1/v2 with global u_inlet target reduced drag 74% via freestream-pull artifact.

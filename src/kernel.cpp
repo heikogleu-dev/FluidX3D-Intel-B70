@@ -1557,6 +1557,54 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // WALL_MODEL_VEHICLE
 
 
+// Path II.5 (2026-05-15): Werner-Wengle Wall Function at TYPE_S Moving-Wall Floor (z=0).
+// Han 2021's design intent: WW only on flat orthogonal walls (floor), NOT complex STL. Vehicle bleibt Pure-BB.
+// Floor flat → wall normal trivially +z → no F4 thin-feature ambiguity.
+// Rolling Road: floor moves at u_road=(lbm_u, 0, 0). Apply WW on RELATIVE velocity u_rel = u_above - u_road.
+// Then write u[floor_cell] = u_road + slip*u_rel (slip applied to relative motion, road velocity preserved).
+)+"#ifdef WALL_MODEL_FLOOR"+R(
+)+R(kernel void apply_wall_model_floor(global float* u, const global uchar* flags, const float u_road) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N||is_halo(n)) return;
+	const uchar fn = flags[n];
+	// Filter: TYPE_S floor cells only (no TYPE_X = no vehicle cells, no wheel-contact patches)
+	if((fn & (TYPE_S|TYPE_X)) != TYPE_S) return;
+	const uint3 xyz = coordinates(n);
+	if(xyz.z != 0u) return; // only z=0 floor cells
+	// Get +z neighbor (1 cell above floor) — this is the y_2 cell for wall function
+	const uxx j_up = n + (uxx)((ulong)def_Nx * (ulong)def_Ny);
+	if(j_up >= (uxx)def_N) return;
+	const uchar fj = flags[j_up];
+	if((fj & (TYPE_S|TYPE_E|TYPE_T)) != 0u) return; // skip if +z neighbor not fluid (e.g., wheel-contact above)
+	// u_2 components at y_2 = 1 lu above floor
+	const float ux_2 = u[              j_up];
+	const float uy_2 = u[def_N+(ulong)j_up];
+	// Reference frame: floor is moving wall at u_road = (u_road, 0, 0)
+	// Use RELATIVE velocity for wall model (Galilean transformation to floor frame)
+	const float u_rel_x = ux_2 - u_road;
+	const float u_rel_y = uy_2;
+	// Tangential magnitude (ignore wall-normal uz_2 component, irrelevant for wall stress)
+	const float u_t_mag = sqrt(u_rel_x*u_rel_x + u_rel_y*u_rel_y);
+	if(u_t_mag < 1e-6f) return; // no slip needed if fluid matches road speed
+	// Werner-Wengle PowerLaw on relative velocity, y_2 = 1 lu
+	const float nu = def_nu;
+	const float u_visc2 = 2.0f*nu*u_t_mag;
+	const float u_log2  = 0.0246384f * pow(nu, 0.25f) * pow(u_t_mag, 1.75f);
+	const float u_tau   = sqrt(max(u_visc2, u_log2));
+	// u+ at y_1 = 0.5 lu (half-way BB plane)
+	const float y1plus  = 0.5f * u_tau / nu;
+	const float uplus_1 = (y1plus <= 11.81f) ? y1plus : 8.3f * pow(y1plus, 1.0f/7.0f);
+	const float u_slip_mag = uplus_1 * u_tau;
+	// Safety cap: u_slip relative magnitude should not exceed u_t_mag (else fluid would be over-accelerated)
+	const float scale = (u_slip_mag < u_t_mag) ? u_slip_mag/u_t_mag : 0.95f;
+	// Write: u_floor = u_road + scale * u_rel (slip in road frame, road velocity preserved)
+	u[              n] = u_road + scale*u_rel_x;
+	u[def_N+(ulong)n ] = scale*u_rel_y;
+	u[2ul*def_N+(ulong)n] = 0.0f; // no normal slip
+} // apply_wall_model_floor()
+)+"#endif"+R( // WALL_MODEL_FLOOR
+
+
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
 )+R(kernel void update_moving_boundaries(const global float* u, global uchar* flags) { // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS

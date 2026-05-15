@@ -55,6 +55,9 @@ private:
 #ifdef WALL_MODEL_VEHICLE
 	Kernel kernel_apply_wall_model_vehicle; // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 #endif // WALL_MODEL_VEHICLE
+#ifdef WALL_MODEL_FLOOR
+	Kernel kernel_apply_wall_model_floor; // Path II.5: Werner-Wengle wall model on rolling-road floor (TYPE_S z=0, no TYPE_X)
+#endif // WALL_MODEL_FLOOR
 #ifdef SURFACE
 	Kernel kernel_surface_0; // additional kernel for computing mass conservation and mass flux computation
 	Kernel kernel_surface_1; // additional kernel for flag handling
@@ -125,6 +128,9 @@ public:
 #ifdef WALL_MODEL_VEHICLE
 	void enqueue_apply_wall_model_vehicle(); // CC#10: Werner-Wengle wall model on vehicle (TYPE_S|TYPE_X) cells
 #endif // WALL_MODEL_VEHICLE
+#ifdef WALL_MODEL_FLOOR
+	void enqueue_apply_wall_model_floor(float u_road); // Path II.5: WW wall model on rolling-road floor (TYPE_S z=0)
+#endif // WALL_MODEL_FLOOR
 #ifdef PARTICLES
 	void enqueue_integrate_particles(const uint time_step_multiplicator=1u); // intgegrates particles forward in time and couples particles to fluid
 #endif // PARTICLES
@@ -272,6 +278,7 @@ private:
 public:
 #ifdef SPONGE_LAYER
 	float sponge_u_inlet = 0.0f; // Phase 5a: outlet damping target velocity (0 = disabled, set by setup before lbm.run())
+	float wall_floor_u_road = 0.0f; // Path II.5: rolling-road velocity for WALL_MODEL_FLOOR (0 = disabled even if WALL_MODEL_FLOOR defined; set by setup before lbm.run())
 #endif // SPONGE_LAYER
 
 	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data
