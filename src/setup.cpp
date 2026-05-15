@@ -233,8 +233,8 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
-#define PHASE_5B_COUPLE_MODE 1 // GPU-perf test: Mode 1 (one-way) for cleanest baseline measurement
-#define PHASE_5B_DR 0          // Phase 5b-DR 2026-05-14: Double-Resolution Schwarz coupling (Pfad A: Far 16×8×5m @ 15mm = 190M cells, Near 6.6×2.7×1.695m @ 5mm = 242M cells, 3:1 ratio). Set 1 to activate. Default 0.
+#define PHASE_5B_COUPLE_MODE 2 // PAIR A+B 2026-05-15: TYPE_E floor + symmetric α=0.2 (Vehicle z=1/z=3 baseline)
+#define PHASE_5B_DR 0          // Phase 5b-DR 2026-05-15: validated config = TYPE_E floor + Mode 2 symmetric α=0.10 + Vehicle z=0/z=1 (wheel-contact-fix). Set 1 to activate. Default 0.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -910,7 +910,7 @@ void main_setup_phase5b_dr() {
 	vehicle_far->translate(float3(
 		far_vehicle_x_center_cell - vctr_f.x,
 		far_vehicle_y_center_cell - vctr_f.y,
-		1.0f - (vctr_f.z - vbbox_f.z * 0.5f)));     // Z-min at Far cell 1 = 15mm Clearance (per user 2026-05-14 evening: vermeidet Voxelisierungs-Seal der Wheel-Bottom bei 15mm coarse Far)
+		0.0f - (vctr_f.z - vbbox_f.z * 0.5f)));     // COMBINED RETRY 2026-05-15: TYPE_E + symm α=0.2 + z=0 (reproduce earlier crash)
 	const float3 vmin_f = vehicle_far->pmin, vmax_f = vehicle_far->pmax;
 	print_info("Far Vehicle BBox: X["+to_string(vmin_f.x,1u)+","+to_string(vmax_f.x,1u)+"] Y["+to_string(vmin_f.y,1u)+","+to_string(vmax_f.y,1u)+"] Z["+to_string(vmin_f.z,1u)+","+to_string(vmax_f.z,1u)+"] (Far cells)");
 	lbm_far.voxelize_mesh_on_device(vehicle_far, TYPE_S|TYPE_X);
@@ -927,25 +927,33 @@ void main_setup_phase5b_dr() {
 	vehicle_near->translate(float3(
 		near_vehicle_x_center_cell - vctr_n.x,
 		near_vehicle_y_center_cell - vctr_n.y,
-		3.0f - (vctr_n.z - vbbox_n.z * 0.5f)));  // Z-min at Near cell 3 = 15mm Clearance (matches Far's cell 1 × 15mm = Near cell 3 × 5mm = 15mm)
+		1.0f - (vctr_n.z - vbbox_n.z * 0.5f)));  // COMBINED RETRY 2026-05-15: Near z=1 (5mm)
 	const float3 vmin_n = vehicle_near->pmin, vmax_n = vehicle_near->pmax;
 	print_info("Near Vehicle BBox: X["+to_string(vmin_n.x,1u)+","+to_string(vmax_n.x,1u)+"] Y["+to_string(vmin_n.y,1u)+","+to_string(vmax_n.y,1u)+"] Z["+to_string(vmin_n.z,1u)+","+to_string(vmax_n.z,1u)+"] (Near cells)");
 	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
 
-	// ===== Far Boundaries (CC#6-Full pattern) =====
+	// ===== Far Boundaries: TYPE_S Floor + Wheel-contact-patches mit Road-Velocity =====
+	// 2026-05-15: Vehicle z=0 mit stationären Wheel-Cells (u=0) neben TYPE_S floor (u=lbm_u) → velocity discontinuity → Near.run hängt.
+	// Fix: Wheel-Cells AT z=0 bekommen u_x=lbm_u (match Rolling-Road) → eliminiert Diskontinuität → stabil.
 	const uint NxF = lbm_far.get_Nx(), NyF = lbm_far.get_Ny(), NzF = lbm_far.get_Nz();
 	parallel_for(lbm_far.get_N(), [&](ulong n) { uint x=0u,y=0u,z=0u; lbm_far.coordinates(n,x,y,z);
-		if((lbm_far.flags[n] & TYPE_X) != 0u) return;
-		if(z==0u) { lbm_far.flags[n] = TYPE_S; lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }
+		if((lbm_far.flags[n] & TYPE_X) != 0u) {                                                      // Vehicle TYPE_S|TYPE_X cells
+			if(z==0u) lbm_far.u.x[n] = lbm_u;                                                        //   Wheel contact patches at z=0: move with road (lbm_u, prevent discontinuity)
+			return;
+		}
+		if(z==0u) { lbm_far.flags[n] = TYPE_E; lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }  // PAIR A+B: TYPE_E floor
 		else if(x==0u || x==NxF-1u || y==0u || y==NyF-1u || z==NzF-1u) { lbm_far.flags[n]=TYPE_E; lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }
 		else { lbm_far.u.x[n]=lbm_u; lbm_far.u.y[n]=0.0f; lbm_far.u.z[n]=0.0f; }
 	});
 
-	// ===== Near Boundaries: Floor TYPE_S, outer faces TYPE_E (overwritten by coupling each chunk) =====
+	// ===== Near Boundaries: same pattern =====
 	const uint NxN = lbm_near.get_Nx(), NyN = lbm_near.get_Ny(), NzN = lbm_near.get_Nz();
 	parallel_for(lbm_near.get_N(), [&](ulong n) { uint x=0u,y=0u,z=0u; lbm_near.coordinates(n,x,y,z);
-		if((lbm_near.flags[n] & TYPE_X) != 0u) return;
-		if(z==0u) { lbm_near.flags[n] = TYPE_S; lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
+		if((lbm_near.flags[n] & TYPE_X) != 0u) {
+			if(z==0u) lbm_near.u.x[n] = lbm_u;
+			return;
+		}
+		if(z==0u) { lbm_near.flags[n] = TYPE_E; lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }  // PAIR A+B: TYPE_E floor
 		else if(x==0u || x==NxN-1u || y==0u || y==NyN-1u || z==NzN-1u) { lbm_near.flags[n]=TYPE_E; lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
 		else { lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
 	});
@@ -982,19 +990,22 @@ void main_setup_phase5b_dr() {
 	const PlaneSpec bk_src_zmax = mk(0u, 0u, near_N.z-1u-bn, 1320u, 540u, 2u, dx_near); const PlaneSpec bk_tgt_zmax = mk(233u, 177u, 111u, 440u, 180u, 2u, dx_far);
 #endif
 
-	// Forward coupling options (Mode 1 + Mode 2 forward part): hard overwrite, PERF-D batched
+	// Coupling options — SYMMETRIC α-sweep test 2026-05-15 (with pre-read fix on lines 1031-1033)
 	CouplingOptions opts;
 	opts.smooth_plane = false;
 	opts.export_csv   = false;
-	opts.alpha        = 1.0f;        // hard overwrite for forward
+#if PHASE_5B_COUPLE_MODE==2
+	opts.alpha        = 0.10f;       // SYMMETRIC forward α=0.10 (validated 2026-05-15 α-sweep: stable, moderate convergence; 0.33 oscillated, 0.20 had Fz swings)
+#else
+	opts.alpha        = 1.0f;        // Mode 1: hard overwrite
+#endif
 	opts.sync_pcie    = false;       // PERF-D: caller batches PCIe sync
 #if PHASE_5B_COUPLE_MODE==2
-	// Back-coupling options: α-blend dampened, PERF-D batched
 	CouplingOptions opts_back;
 	opts_back.smooth_plane = false;
 	opts_back.export_csv   = false;
-	opts_back.alpha        = 0.2f;   // soft-BC blend for Near→Far back-coupling (Mode 2)
-	opts_back.sync_pcie    = false;  // PERF-D batched
+	opts_back.alpha        = 0.10f;  // SYMMETRIC back α=0.10 (matches forward, validated stable)
+	opts_back.sync_pcie    = false;
 #endif
 
 	// ===== Run-Loop with time-step sync + PERF-D batched PCIe sync =====
@@ -1007,9 +1018,9 @@ void main_setup_phase5b_dr() {
 	std::ofstream fcsv(force_csv_path);
 	fcsv << "step_far,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near\n";
 	fcsv << std::scientific;
-	const uint chunk_far  = 100u;           // Default Mode 1 baseline (Mode 2 needs careful α/chunk tuning, see findings)
+	const uint chunk_far  = 100u;           // chunk=100 stable (chunk=25 caused feedback-loop in earlier Mode 2 test)
 	const uint chunk_near = chunk_far * 3u; // dt_near = dt_far / 3 → Near needs 3× steps for same SI time at Pfad A 3:1 ratio
-	const uint chunks_max = 150u;           // 15000 Far-steps = 45000 Near-steps total
+	const uint chunks_max = 150u;           // Production: 15000 Far-steps = 45000 Near-steps (5 chunks for quick smoke during dev)
 	print_info("Phase 5b-DR Run: max "+to_string(chunks_max*chunk_far)+" Far-steps = "+to_string(chunks_max*chunk_near)+" Near-steps");
 
 	for(uint c = 0u; c < chunks_max; c++) {
@@ -1020,7 +1031,11 @@ void main_setup_phase5b_dr() {
 		lbm_far.u.read_from_device();         // sync Far src ONCE for all 5 forward planes
 		lbm_far.rho.read_from_device();
 		lbm_near.flags.read_from_device();    // sync Near tgt flags ONCE (forward writes TYPE_E)
-		// no need to read Near u/rho since forward is α=1 (hard overwrite)
+#if PHASE_5B_COUPLE_MODE==2
+		// Mode 2 symmetric: forward α=0.2 needs current Near u/rho for blending
+		lbm_near.u.read_from_device();
+		lbm_near.rho.read_from_device();
+#endif
 		lbm_far.couple_fields(lbm_near, src_xmin, tgt_xmin, opts);
 		lbm_far.couple_fields(lbm_near, src_xmax, tgt_xmax, opts);
 		lbm_far.couple_fields(lbm_near, src_ymin, tgt_ymin, opts);
@@ -1060,10 +1075,8 @@ void main_setup_phase5b_dr() {
 		const ulong step = (ulong)(c+1u) * chunk_far;
 		const float t_si = units_far.si_t(step);
 		fcsv << step << "," << t_si << "," << F_far_si.x << "," << F_far_si.y << "," << F_far_si.z << "," << F_near_si.x << "," << F_near_si.y << "," << F_near_si.z << "\n";
-		if((c+1u) % 10u == 0u) fcsv.flush();
-		if((c+1u) % 25u == 0u) {
-			print_info("step_far="+to_string(step)+"  Fx_far="+to_string(F_far_si.x,1u)+"N  Fx_near="+to_string(F_near_si.x,1u)+"N  delta="+to_string(F_near_si.x-F_far_si.x,1u)+"N");
-		}
+		fcsv.flush();  // 2026-05-15: flush EVERY chunk so crash mid-run preserves data
+		print_info("step_far="+to_string(step)+"  Fx_far="+to_string(F_far_si.x,1u)+"N  Fx_near="+to_string(F_near_si.x,1u)+"N  Fz_far="+to_string(F_far_si.z,1u)+"  Fz_near="+to_string(F_near_si.z,1u));
 	}
 	fcsv.close();
 
