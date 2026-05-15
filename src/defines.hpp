@@ -22,7 +22,7 @@
 #define FORCE_FIELD // enables computing the forces on solid boundaries with lbm.update_force_field(); and enables setting the force for each lattice point independently (enable VOLUME_FORCE too); allocates an extra 12 Bytes/cell
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
-// #define WALL_MODEL_VEHICLE // PIVOT 2026-05-13: WW disabled for Pure-BB Multi-Resolution baseline. Code intact, toggle to re-enable. (CC#10: Werner-Wengle wall model on vehicle TYPE_S|TYPE_X cells via Krueger Moving-Wall; architecturally unfit per CC#11 findings 25-37 on phase0-ahmed-validation branch.)
+#define WALL_MODEL_VEHICLE // 2026-05-15 re-enabled in Multi-Res Mode 3 + TYPE_S context. CC#10 Werner-Wengle PowerLaw + Krueger Moving-Wall. Single-Domain test on MR2-STL hatte Fx=-610N (over-corrected) — testen ob Multi-Res + Mode 3 + TYPE_S Floor das Regime ändert. 0 GB VRAM overhead (slip in existing u[wall_cell] buffer).
 #define SPONGE_LAYER // Phase 5a: non-reflecting outlet damping zone for Multi-Resolution coupling (graduates DDFs toward f_eq(u_inlet) over last SPONGE_DEPTH_CELLS in X direction)
 #define SPONGE_DEPTH_CELLS 50 // damping zone depth in X (cells); 5-10% of typical 1500-cell domain
 #define SPONGE_STRENGTH 0.1f // max damping at outlet for f_neq-only formulation (v3 design 2026-05-13): preserves mean flow via local f_eq, dampens oscillations. v1/v2 with global u_inlet target reduced drag 74% via freestream-pull artifact.
