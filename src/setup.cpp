@@ -945,14 +945,17 @@ void main_setup_phase5b_dr() {
 	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
 
 #ifdef BOUZIDI_VEHICLE
-	// 2026-05-15: Compute sparse active-cell list (reused by both Bouzidi + WALL_SLIP kernels)
-	// q=0.5 = Bouzidi no-op (Bouzidi-itself disabled via bouzidi_enabled stays false).
-	lbm_far.compute_bouzidi_cells_active(0.5f);
-	lbm_near.compute_bouzidi_cells_active(0.5f);
-	// IMPORTANT: bouzidi_enabled set to true by compute_bouzidi_cells_active. Disable Bouzidi
-	// kernel call (we only want sparse list infrastructure, NOT Bouzidi DDF mods which fail in EP-pull):
-	lbm_far.bouzidi_enabled = false;
-	lbm_near.bouzidi_enabled = false;
+	// 2026-05-15: Sparse Bouzidi infrastructure preserved as reusable building-block. DISABLED.
+	// compute_bouzidi_cells_active was used by WALL_SLIP V1/V2 — both failed.
+	// Bouzidi kernel itself fails in EP-pull layout (CC#7-style neutralization). Code stays for reference.
+#endif
+#ifdef WALL_VISC_BOOST
+	// Option B Phase 1 (2026-05-15): populate wall_adj flag for Smagorinsky boost in stream_collide.
+	// Pure-host enumeration — no kernel invocation in stream pipeline beyond standard collision.
+	// Stream_collide reads wall_adj_flag[n] and boosts nu_eff in wall-adjacent cells.
+	lbm_far.populate_wall_adj_flag();
+	lbm_near.populate_wall_adj_flag();
+	print_info("WALL_VISC_BOOST Tier-1 active: boost_factor=0.3 hardcoded (Phase 2 will use Werner-Wengle law-of-the-wall)");
 #endif
 #ifdef WALL_SLIP_VEHICLE
 	// 2026-05-15: BOTH V1 (full overwrite) AND V2 (BLEND) FAILED.

@@ -1760,6 +1760,9 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef TEMPERATURE"+R(
 	, global fpxx* gi, global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
+)+"#ifdef WALL_VISC_BOOST"+R(
+	, const global uchar* wall_adj_flag // per-cell flag: 1 if wall-adjacent fluid cell
+)+"#endif"+R( // WALL_VISC_BOOST
 )+") {"+R( // stream_collide()
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute stream_collide() on halo
@@ -1920,6 +1923,24 @@ string opencl_c_container() { return R( // ########################## begin of O
 		w = 2.0f/(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // 0.76421222 = 18*sqrt(2)*(C*Delta)^2, C = 1/pi*(2/(3*CK))^(3/4) = Smagorinsky-Lilly constant, CK = 3/2 = Kolmogorov constant, Delta = 1 = lattice constant
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
+
+)+"#ifdef WALL_VISC_BOOST"+R(
+	// Option B Phase 1 (2026-05-15): boost local effective viscosity at wall-adjacent fluid cells.
+	// At wall-adj cell: nu_eff_new = nu_eff_current + nu_boost
+	// nu_boost via simple wall-function-inspired formula:
+	//   nu_boost = boost_factor * |u_local| * y_1   (Mixing-length-like, y_1=0.5 lu)
+	// boost_factor ~ 0.1-0.5 for Tier-1 diagnostic; later replaced with law-of-the-wall computation.
+	// Relationship: w = 1/(3*nu + 0.5), so nu_eff = (1/w - 0.5)/3
+	if(wall_adj_flag[n] != (uchar)0u) {
+		const float WALL_BOOST_FACTOR = 0.3f; // hardcoded Tier-1 — Phase 2 will compute via WW law-of-the-wall
+		const float u_mag = sqrt(sq(uxn)+sq(uyn)+sq(uzn));
+		const float y_1 = 0.5f; // half-cell distance (assumed half-way BB)
+		const float nu_current = (1.0f/w - 0.5f)/3.0f;
+		const float nu_boost = WALL_BOOST_FACTOR * u_mag * y_1; // mixing-length analog
+		const float nu_new = nu_current + nu_boost;
+		w = 1.0f/(3.0f*nu_new + 0.5f);
+	}
+)+"#endif"+R( // WALL_VISC_BOOST
 
 )+"#if defined(SRT)"+R(
 )+"#ifdef VOLUME_FORCE"+R(

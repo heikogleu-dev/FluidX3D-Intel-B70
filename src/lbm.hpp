@@ -68,6 +68,9 @@ private:
 #ifdef WALL_SLIP_VEHICLE
 	Kernel kernel_apply_wall_slip; // Multi-cell u-prescription: applies BL slip at wall-adjacent fluid cells via DDFs=feq(slip_factor*u_local)
 #endif // WALL_SLIP_VEHICLE
+#ifdef WALL_VISC_BOOST
+	Memory<uchar> wall_adj_flag; // per-cell flag: 1 if cell is wall-adjacent fluid (has TYPE_S|TYPE_X neighbor), 0 otherwise. Used by stream_collide for viscosity boost.
+#endif // WALL_VISC_BOOST
 #ifdef SURFACE
 	Kernel kernel_surface_0; // additional kernel for computing mass conservation and mass flux computation
 	Kernel kernel_surface_1; // additional kernel for flag handling
@@ -303,6 +306,11 @@ public:
 	float wall_slip_factor = 0.0f;     // slip multiplier. 1.0 = no decel, 0.5 = strong BL
 	float wall_slip_blend  = 0.0f;     // BLEND strength. 0 = disabled (kernel skipped), 0.05-0.2 = gentle, 1.0 = full overwrite (V1 failed mode)
 #endif // WALL_SLIP_VEHICLE
+#ifdef WALL_VISC_BOOST
+	// Per-cell wall-adjacent flag — populated by populate_wall_adj_flag() after voxelize_mesh_on_device.
+	// stream_collide reads this and boosts viscosity via Smagorinsky tau0 multiplier when wall_adj == 1.
+	void populate_wall_adj_flag(); // Host-side: iterate cells, flag those with TYPE_S|TYPE_X neighbor and current cell is fluid.
+#endif // WALL_VISC_BOOST
 #endif // SPONGE_LAYER
 
 	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data

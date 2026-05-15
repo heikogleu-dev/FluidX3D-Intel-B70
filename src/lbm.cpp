@@ -124,8 +124,12 @@ void LBM_Domain::allocate(Device& device) {
 	rho = Memory<float>(device, N, 1u, true, true, 1.0f);
 	u = Memory<float>(device, N, 3u);
 	flags = Memory<uchar>(device, N);
+#ifdef WALL_VISC_BOOST
+	wall_adj_flag = Memory<uchar>(device, N); // initialized to 0 = not wall-adjacent; set by populate_wall_adj_flag()
+#endif // WALL_VISC_BOOST
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz);
+	// WALL_VISC_BOOST add_parameters MUST happen AFTER FORCE_FIELD/SURFACE/TEMPERATURE adds — order matches kernel signature in kernel.cpp
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
 #ifdef FORCE_FIELD
@@ -175,6 +179,10 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_stream_collide.add_parameters(gi, T);
 	kernel_update_fields.add_parameters(gi, T);
 #endif // TEMPERATURE
+
+#ifdef WALL_VISC_BOOST
+	kernel_stream_collide.add_parameters(wall_adj_flag); // MUST be after FORCE_FIELD/SURFACE/TEMPERATURE (matches kernel.cpp signature order)
+#endif // WALL_VISC_BOOST
 
 #ifdef PARTICLES
 	particles = Memory<float>(device, (ulong)particles_N, 3u);
@@ -489,6 +497,9 @@ string LBM_Domain::device_defines() const { return
 #ifdef WALL_SLIP_VEHICLE
 	"\n	#define WALL_SLIP_VEHICLE" // Multi-cell u-prescription at wall-adjacent fluid cells
 #endif // WALL_SLIP_VEHICLE
+#ifdef WALL_VISC_BOOST
+	"\n	#define WALL_VISC_BOOST" // Smagorinsky-Extension: boost local effective viscosity at wall-adjacent fluid cells
+#endif // WALL_VISC_BOOST
 
 #ifdef SPONGE_LAYER
 	"\n	#define SPONGE_LAYER" // Phase 5a: non-reflecting outlet damping
@@ -1019,6 +1030,42 @@ void LBM::run_async(const ulong steps) { // PERF-G: submit `steps` LBM steps to 
 void LBM::finish() { // PERF-G: wait for all queued kernels on this LBM's compute queues
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
 }
+
+#ifdef WALL_VISC_BOOST
+// Populate wall_adj_flag: for each cell, mark 1 if it is fluid AND has at least one TYPE_S|TYPE_X (vehicle) neighbor in D3Q19.
+// Must be called AFTER voxelize_mesh_on_device. stream_collide reads this flag and boosts local viscosity.
+void LBM::populate_wall_adj_flag() {
+	flags.read_from_device(); // sync flags to host
+	const uint Nx = get_Nx(), Ny = get_Ny(), Nz = get_Nz();
+	const int cx[19] = {0,  1,-1,  0, 0,  0, 0,  1,-1,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0};
+	const int cy[19] = {0,  0, 0,  1,-1,  0, 0,  1,-1,  0, 0,  1,-1, -1, 1,  0, 0,  1,-1};
+	const int cz[19] = {0,  0, 0,  0, 0,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0, -1, 1, -1, 1};
+	for(uint d=0u; d<get_D(); d++) {
+		LBM_Domain* dom = lbm_domain[d];
+		ulong n_walladj = 0ull;
+		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
+			dom->wall_adj_flag[n] = 0u; // default
+			const uchar fn = dom->flags[n];
+			if((fn & TYPE_S) != 0u) continue; // skip solid (cells with TYPE_S bit, includes vehicle TYPE_S|TYPE_X)
+			// Check 18 D3Q19 neighbors for TYPE_S|TYPE_X (vehicle wall)
+			for(uint i=1u; i<19u; i++) {
+				const int nx = (int)x + cx[i], ny = (int)y + cy[i], nz = (int)z + cz[i];
+				if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
+				const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
+				if((dom->flags[nj] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
+					dom->wall_adj_flag[n] = 1u;
+					n_walladj++;
+					break;
+				}
+			}
+		}
+		dom->wall_adj_flag.write_to_device();
+		const ulong N_total = (ulong)Nx*(ulong)Ny*(ulong)Nz;
+		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" — "+to_string(n_walladj)+" wall-adjacent fluid cells ("+to_string(100.0f*(float)n_walladj/(float)N_total,3u)+"% of total)");
+	}
+}
+#endif // WALL_VISC_BOOST
 
 #ifdef BOUZIDI_VEHICLE
 // Host-side: enumerate wall-adjacent fluid cells (those with at least one TYPE_S|TYPE_X neighbor), allocate sparse buffers,
