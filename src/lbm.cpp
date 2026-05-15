@@ -1035,34 +1035,40 @@ void LBM::finish() { // PERF-G: wait for all queued kernels on this LBM's comput
 // Populate wall_adj_flag: for each cell, mark 1 if it is fluid AND has at least one TYPE_S|TYPE_X (vehicle) neighbor in D3Q19.
 // Must be called AFTER voxelize_mesh_on_device. stream_collide reads this flag and boosts local viscosity.
 void LBM::populate_wall_adj_flag() {
-	flags.read_from_device(); // sync flags to host
+	// IMPORTANT: must be called AFTER all flag modifications (BC loops, voxelize) and BEFORE LBM::run().
+	// Do NOT call flags.read_from_device() — at setup time, host flags are current; reading from device
+	// would overwrite host changes (BC parallel_for modifications) with stale device data.
 	const uint Nx = get_Nx(), Ny = get_Ny(), Nz = get_Nz();
 	const int cx[19] = {0,  1,-1,  0, 0,  0, 0,  1,-1,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0};
 	const int cy[19] = {0,  0, 0,  1,-1,  0, 0,  1,-1,  0, 0,  1,-1, -1, 1,  0, 0,  1,-1};
 	const int cz[19] = {0,  0, 0,  0, 0,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0, -1, 1, -1, 1};
 	for(uint d=0u; d<get_D(); d++) {
 		LBM_Domain* dom = lbm_domain[d];
-		ulong n_walladj = 0ull;
+		ulong n_vehicle_adj = 0ull, n_floor_adj = 0ull;
 		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
 			dom->wall_adj_flag[n] = 0u; // default
 			const uchar fn = dom->flags[n];
-			if((fn & TYPE_S) != 0u) continue; // skip solid (cells with TYPE_S bit, includes vehicle TYPE_S|TYPE_X)
-			// Check 18 D3Q19 neighbors for TYPE_S|TYPE_X (vehicle wall)
+			if((fn & TYPE_S) != 0u) continue; // skip solid (cells with TYPE_S bit, includes vehicle TYPE_S|TYPE_X and floor TYPE_S)
+			// Check 18 D3Q19 neighbors for any TYPE_S (vehicle or floor wall)
+			bool has_vehicle_nb = false, has_floor_nb = false;
 			for(uint i=1u; i<19u; i++) {
 				const int nx = (int)x + cx[i], ny = (int)y + cy[i], nz = (int)z + cz[i];
 				if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
 				const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
-				if((dom->flags[nj] & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) {
-					dom->wall_adj_flag[n] = 1u;
-					n_walladj++;
-					break;
-				}
+				const uchar fj = dom->flags[nj];
+				if((fj & (TYPE_S|TYPE_X)) == (TYPE_S|TYPE_X)) has_vehicle_nb = true; // vehicle wall
+				else if((fj & TYPE_S) != 0u && (fj & TYPE_X) == 0u) has_floor_nb = true; // floor wall (TYPE_S without TYPE_X)
+			}
+			if(has_vehicle_nb || has_floor_nb) {
+				dom->wall_adj_flag[n] = 1u;
+				if(has_vehicle_nb) n_vehicle_adj++;
+				if(has_floor_nb)   n_floor_adj++;
 			}
 		}
 		dom->wall_adj_flag.write_to_device();
 		const ulong N_total = (ulong)Nx*(ulong)Ny*(ulong)Nz;
-		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" — "+to_string(n_walladj)+" wall-adjacent fluid cells ("+to_string(100.0f*(float)n_walladj/(float)N_total,3u)+"% of total)");
+		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" — Vehicle-adj="+to_string(n_vehicle_adj)+" + Floor-adj="+to_string(n_floor_adj)+" wall-adjacent fluid cells ("+to_string(100.0f*(float)(n_vehicle_adj+n_floor_adj)/(float)N_total,3u)+"% of total)");
 	}
 }
 #endif // WALL_VISC_BOOST

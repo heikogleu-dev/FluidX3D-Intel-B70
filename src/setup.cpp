@@ -949,14 +949,7 @@ void main_setup_phase5b_dr() {
 	// compute_bouzidi_cells_active was used by WALL_SLIP V1/V2 — both failed.
 	// Bouzidi kernel itself fails in EP-pull layout (CC#7-style neutralization). Code stays for reference.
 #endif
-#ifdef WALL_VISC_BOOST
-	// Option B Phase 1 (2026-05-15): populate wall_adj flag for Smagorinsky boost in stream_collide.
-	// Pure-host enumeration — no kernel invocation in stream pipeline beyond standard collision.
-	// Stream_collide reads wall_adj_flag[n] and boosts nu_eff in wall-adjacent cells.
-	lbm_far.populate_wall_adj_flag();
-	lbm_near.populate_wall_adj_flag();
-	print_info("WALL_VISC_BOOST Tier-1 active: boost_factor=0.3 hardcoded (Phase 2 will use Werner-Wengle law-of-the-wall)");
-#endif
+// WALL_VISC_BOOST populate_wall_adj_flag moved to AFTER BC loops (line ~998+) — required so floor TYPE_S is set first
 #ifdef WALL_SLIP_VEHICLE
 	// 2026-05-15: BOTH V1 (full overwrite) AND V2 (BLEND) FAILED.
 	// V1: catastrophic -200k N (turbulence killed by full DDF=feq overwrite)
@@ -994,6 +987,13 @@ void main_setup_phase5b_dr() {
 		else if(x==0u || x==NxN-1u || y==0u || y==NyN-1u || z==NzN-1u) { lbm_near.flags[n]=TYPE_E; lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
 		else { lbm_near.u.x[n]=lbm_u; lbm_near.u.y[n]=0.0f; lbm_near.u.z[n]=0.0f; }
 	});
+
+#ifdef WALL_VISC_BOOST
+	// MOVED HERE (2026-05-15 fix): populate AFTER BC loops set floor TYPE_S, so floor-adjacency is detected.
+	lbm_far.populate_wall_adj_flag();
+	lbm_near.populate_wall_adj_flag();
+	print_info("WALL_VISC_BOOST Phase 2 V2 active: Werner-Wengle + Prandtl mixing-length nu_t = 0.205*u_tau (Vehicle + Floor walls)");
+#endif
 
 	// ===== 5 Forward Coupling Planes Far → Near (bilinear 3:1 upsample) =====
 	// Far overlap extents (180×112, 440×112, 440×180) × 3:1 = Near tgt extents (540×336, 1320×336, 1320×540).
