@@ -234,7 +234,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
-#define PHASE_5B_COUPLE_MODE 3 // Modes: 1 = Forward-only (Mode 1, no back), 2 = Multiplicative Schwarz (sequential, asymmetric lag — current Mode 2), 3 = Additive Schwarz (PERF-G concurrent Far ∥ Near, symmetric 1-chunk lag, ~20-30% speedup + physikalisch konsistenter)
+#define PHASE_5B_COUPLE_MODE 1 // 2026-05-15 Path I diagnostic: Mode 1 + WW (forward-only, no back-coupling) — testen ob WW konvergiert ohne Mode 3 feedback-loop. Mode 3 wird nach diagnostic test wieder default.
 #define PHASE_5B_DR 1          // Phase 5b-DR Production 2026-05-16: Far 13.5m anlauf 1.5m + TYPE_S Moving Wall floor + Mode 2 symm α=0.10 + Vehicle z=1/z=3 + auto-stop 2% over 5000 Far-steps
 
 #if AHMED_MODE>0
