@@ -248,7 +248,7 @@ private:
 	void sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho); // sanity checks on grid resolution and extension support
 	void sanity_checks_initialization(); // sanity checks during initialization on used extensions based on used flags
 	void initialize(); // write all data fields to device and call kernel_initialize
-	void do_time_step(); // call kernel_stream_collide to perform one LBM time step
+	void do_time_step(const bool sync_single_gpu = true); // call kernel_stream_collide to perform one LBM time step; sync_single_gpu=false skips per-step finish_queue (PERF-G concurrent mode)
 
 	void communicate_field(const enum_transfer_field field, const uint bytes_per_cell);
 
@@ -474,6 +474,8 @@ public:
 	~LBM();
 
 	void run(const ulong steps=max_ulong, const ulong total_steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
+	void run_async(const ulong steps); // PERF-G: non-blocking variant for concurrent execution of multiple LBM instances on one GPU (Additive Schwarz). Caller must call finish() before reading u/rho. Skips per-step finish_queue + info/clock updates.
+	void finish(); // PERF-G: wait for all queued work on this LBM's compute queue
 	void update_fields(); // update fields (rho, u, T) manually
 	void reset(); // reset simulation (takes effect in following run() call)
 #ifdef FORCE_FIELD

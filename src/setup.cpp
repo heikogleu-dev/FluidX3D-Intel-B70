@@ -2,6 +2,7 @@
 // Fork: github.com/heikogleu-dev/FluidX3D-Intel-B70 — Intel Arc Pro B70 (Battlemage) patches.
 // Original copyright: (c) 2022-2026 Dr. Moritz Lehmann, see LICENSE.md.
 #include "setup.hpp"
+// PERF-G 2026-05-15: concurrent LBM execution (Far ∥ Near auf einer GPU) via LBM::run_async() + finish() — keine host-threads, queues parallelisieren via OpenCL driver
 
 
 
@@ -233,7 +234,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define AHMED_MODE 0        // CC#X: 0 = Real Vehicle (Yaris/MR2 setup), 1 = Ahmed 25° (Phase 1 FAILED, see findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md), 2 = Ahmed 35°
 #define SELF_COUPLING_TEST 0 // Phase 5b-pre 2026-05-13: validate couple_fields() pipeline via single-domain self-coupling. Temporarily off for baseline.
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
-#define PHASE_5B_COUPLE_MODE 1 // 2026-05-15 Mode 1 test (per User after Mode 2 α=0.10 zeigte unplausible Near-Strömung): forward-only Far→Near soft-BC mit α=0.5, kein Back-Coupling, TYPE_E floor bleibt
+#define PHASE_5B_COUPLE_MODE 3 // Modes: 1 = Forward-only (Mode 1, no back), 2 = Multiplicative Schwarz (sequential, asymmetric lag — current Mode 2), 3 = Additive Schwarz (PERF-G concurrent Far ∥ Near, symmetric 1-chunk lag, ~20-30% speedup + physikalisch konsistenter)
 #define PHASE_5B_DR 1          // Phase 5b-DR Production 2026-05-16: Far 13.5m anlauf 1.5m + TYPE_S Moving Wall floor + Mode 2 symm α=0.10 + Vehicle z=1/z=3 + auto-stop 2% over 5000 Far-steps
 
 #if AHMED_MODE>0
@@ -879,9 +880,11 @@ void main_setup_phase5b_dr() {
 	print_info("Re(L) = "+to_string(to_uint(units_far.si_Re(si_length, si_u, si_nu))));
 	print_info("Far cell = 15 mm, Near cell = 5 mm | ratio 3:1 | dt_far = 3 * dt_near");
 #if PHASE_5B_COUPLE_MODE==2
-	print_info("MODE 2: bidirectional Far+Near with band=2 Near (10mm depth), α=0.2 back-coupling, PERF-D batched sync");
+	print_info("MODE 2: SEQUENTIAL bidirectional (Multiplicative Schwarz), band=2 Near, α=0.10 both directions, PERF-D batched sync");
+#elif PHASE_5B_COUPLE_MODE==3
+	print_info("MODE 3: CONCURRENT Far||Near (PERF-G Additive Schwarz, symmetric 1-chunk lag), band=2 Near, α=0.10 both directions");
 #else
-	print_info("MODE 1: one-way Far→Near (5 planes), PERF-D batched sync");
+	print_info("MODE 1: SEQUENTIAL one-way Far→Near (5 planes), α=0.5 forward soft-BC, PERF-D batched sync");
 #endif
 
 	// ===== Far Domain (16 × 8 × 5 m @ 15 mm) =====
@@ -975,8 +978,8 @@ void main_setup_phase5b_dr() {
 	// Z_max: Far z=112, Near z=338
 	const PlaneSpec src_zmax = mk(67u,  177u, 112u,  440u, 180u, 2u, dx_far);   const PlaneSpec tgt_zmax = mk(0u,    0u,   338u, 1320u, 540u, 2u, dx_near);
 
-#if PHASE_5B_COUPLE_MODE==2
-	// ===== 5 Back-Coupling Planes Near → Far (bilinear 3:1 DOWNsample for Mode 2 bidirectional) =====
+#if PHASE_5B_COUPLE_MODE==2 || PHASE_5B_COUPLE_MODE==3
+	// ===== 5 Back-Coupling Planes Near → Far (bilinear 3:1 DOWNsample for Mode 2 bidirectional + Mode 3 concurrent) =====
 	// band = 2 Near cells (10mm physical depth) inside Near's outer boundary.
 	// Far target: 1 Far cell INSIDE Near's overlap (= 1 cell past Near-boundary in Far coords). ~22.5mm physical depth (slight mismatch with Near's 10mm — bilinear handles).
 	const uint bn = 2u; // band depth in Near cells
@@ -991,7 +994,7 @@ void main_setup_phase5b_dr() {
 	const PlaneSpec bk_src_ymax = mk(0u, near_N.y-1u-bn, 1u, 1320u, 336u, 1u, dx_near); const PlaneSpec bk_tgt_ymax = mk(67u,  356u, 1u, 440u, 112u, 1u, dx_far);
 	// Z_max back: src Near z=336, tgt Far z=111
 	const PlaneSpec bk_src_zmax = mk(0u, 0u, near_N.z-1u-bn, 1320u, 540u, 2u, dx_near); const PlaneSpec bk_tgt_zmax = mk(67u,  177u, 111u, 440u, 180u, 2u, dx_far);
-#endif
+#endif // PHASE_5B_COUPLE_MODE == 2 || 3
 
 	// Coupling options — SYMMETRIC α-sweep test 2026-05-15 (with pre-read fix on lines 1031-1033)
 	CouplingOptions opts;
@@ -999,11 +1002,13 @@ void main_setup_phase5b_dr() {
 	opts.export_csv   = false;
 #if PHASE_5B_COUPLE_MODE==2
 	opts.alpha        = 0.10f;       // SYMMETRIC forward α=0.10 (validated 2026-05-15 α-sweep: stable, moderate convergence; 0.33 oscillated, 0.20 had Fz swings)
+#elif PHASE_5B_COUPLE_MODE==3
+	opts.alpha        = 0.10f;       // PERF-G concurrent (additive Schwarz): forward α=0.10 (1-chunk symmetric lag braucht conservative blending)
 #else
 	opts.alpha        = 0.5f;        // 2026-05-15 Mode 1 test: soft-BC α=0.5 forward (statt 1.0 hard overwrite) — User-Vorschlag nach Mode 2 α=0.10 Near-Strömung unplausibel
 #endif
 	opts.sync_pcie    = false;       // PERF-D: caller batches PCIe sync
-#if PHASE_5B_COUPLE_MODE==2
+#if PHASE_5B_COUPLE_MODE==2 || PHASE_5B_COUPLE_MODE==3
 	CouplingOptions opts_back;
 	opts_back.smooth_plane = false;
 	opts_back.export_csv   = false;
@@ -1015,6 +1020,8 @@ void main_setup_phase5b_dr() {
 	// Far 100 steps, Near 300 steps per chunk (3:1 ratio → same SI Δt)
 #if PHASE_5B_COUPLE_MODE==2
 	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_dr_mode2.csv";
+#elif PHASE_5B_COUPLE_MODE==3
+	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_dr_mode3.csv";
 #else
 	const string force_csv_path = get_exe_path()+"../bin/forces_phase5b_dr.csv";
 #endif
@@ -1034,6 +1041,58 @@ void main_setup_phase5b_dr() {
 
 	uint final_chunks = chunks_max;
 	for(uint c = 0u; c < chunks_max; c++) {
+#if PHASE_5B_COUPLE_MODE==3
+		// ===== PERF-G: Concurrent Far + Near compute (Additive Schwarz, symmetric 1-chunk lag) =====
+		// Beide LBMs laufen parallel auf ihren eigenen cl_queues. Boundary-Werte wurden am Ende des
+		// vorigen Chunks gesetzt (oder bei c=0 von initial setup). Beide sehen Partner mit 1 chunk lag,
+		// symmetric — entspricht klassischem Additive Schwarz im Zeit-Stepping. Coupling wird NACH dem
+		// concurrent run angewandt und wirkt auf chunk c+1.
+		// PERF-G impl: 1st chunk needs blocking init via run(); subsequent chunks use run_async() so
+		// both LBMs queue all their kernels to their own cl_queue without per-step finish_queue,
+		// allowing OpenCL driver to interleave compute on Intel DMA + EU engines.
+		if(c == 0u) {
+			// First chunk: blocking run() to trigger initialize() — sequential to avoid init race
+			lbm_far .run(chunk_far );
+			lbm_near.run(chunk_near);
+		} else {
+			lbm_far .run_async(chunk_far ); // queue 100 Far steps, return immediately
+			lbm_near.run_async(chunk_near); // queue 300 Near steps, return immediately
+			lbm_far .finish();              // wait for Far to complete (cl_queue barrier)
+			lbm_near.finish();              // wait for Near to complete (separate queue)
+		}
+
+		// Beide jetzt bei t_{c+1}. Coupling mit fresh state beider Domains.
+		// PERF-D: batched reads (1 read per array per LBM, deckt alle 10 coupling planes)
+		lbm_far .u   .read_from_device();
+		lbm_far .rho .read_from_device();
+		lbm_far .flags.read_from_device();
+		lbm_near.u   .read_from_device();
+		lbm_near.rho .read_from_device();
+		lbm_near.flags.read_from_device();
+
+		// Forward Far→Near (5 planes): Near's outer boundary für chunk c+1
+		lbm_far.couple_fields(lbm_near, src_xmin, tgt_xmin, opts);
+		lbm_far.couple_fields(lbm_near, src_xmax, tgt_xmax, opts);
+		lbm_far.couple_fields(lbm_near, src_ymin, tgt_ymin, opts);
+		lbm_far.couple_fields(lbm_near, src_ymax, tgt_ymax, opts);
+		lbm_far.couple_fields(lbm_near, src_zmax, tgt_zmax, opts);
+
+		// Back Near→Far (5 planes): Far's interior coupling-plane für chunk c+1
+		lbm_near.couple_fields(lbm_far, bk_src_xmin, bk_tgt_xmin, opts_back);
+		lbm_near.couple_fields(lbm_far, bk_src_xmax, bk_tgt_xmax, opts_back);
+		lbm_near.couple_fields(lbm_far, bk_src_ymin, bk_tgt_ymin, opts_back);
+		lbm_near.couple_fields(lbm_far, bk_src_ymax, bk_tgt_ymax, opts_back);
+		lbm_near.couple_fields(lbm_far, bk_src_zmax, bk_tgt_zmax, opts_back);
+
+		// PERF-D: batched writes
+		lbm_near.flags.write_to_device();
+		lbm_near.u    .write_to_device();
+		lbm_near.rho  .write_to_device();
+		lbm_far .flags.write_to_device();
+		lbm_far .u    .write_to_device();
+		lbm_far .rho  .write_to_device();
+#else
+		// ===== Modes 1 + 2: Sequential (Multiplicative Schwarz oder Forward-only) =====
 		// 1. Run Far for chunk
 		lbm_far.run(chunk_far);
 
@@ -1074,6 +1133,7 @@ void main_setup_phase5b_dr() {
 		lbm_far.u.write_to_device();
 		lbm_far.rho.write_to_device();
 #endif
+#endif // PHASE_5B_COUPLE_MODE==3 vs sequential
 
 		// 5. Force diagnostics (force_field already current after last LBM run on each domain)
 		lbm_far.update_force_field();

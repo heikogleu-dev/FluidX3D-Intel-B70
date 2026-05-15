@@ -920,7 +920,7 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 	initialized = true;
 }
 
-void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time step
+void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_collide to perform one LBM time step
 #ifdef SURFACE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
@@ -959,8 +959,18 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_integrate_particles(); // intgegrate particles forward in time and couple particles to fluid
 	communicate_particles(); // communicate_F() is not required in do_time_step()
 #endif // PARTICLES
-	if(get_D()==1u) for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue(); // this additional domain synchronization barrier is only required in single-GPU, as communication calls already provide all necessary synchronization barriers in multi-GPU
+	if(sync_single_gpu && get_D()==1u) for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue(); // PERF-G: skip when called from run_async() — caller does barrier
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->increment_time_step();
+}
+
+void LBM::run_async(const ulong steps) { // PERF-G: submit `steps` LBM steps to GPU queue without per-step barrier; caller MUST call lbm.finish() before reading any device buffer
+	if(!initialized) { print_error("LBM::run_async called before initialization. Call run() once first to initialize, then use run_async for subsequent chunks."); return; }
+	info.append(steps, max_ulong, get_t());
+	for(ulong i=1ull; i<=steps; i++) do_time_step(false);
+}
+
+void LBM::finish() { // PERF-G: wait for all queued kernels on this LBM's compute queues
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
 }
 
 void LBM::run(const ulong steps, const ulong total_steps) { // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
