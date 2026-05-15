@@ -1925,20 +1925,25 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // SUBGRID
 
 )+"#ifdef WALL_VISC_BOOST"+R(
-	// Option B Phase 1 (2026-05-15): boost local effective viscosity at wall-adjacent fluid cells.
-	// At wall-adj cell: nu_eff_new = nu_eff_current + nu_boost
-	// nu_boost via simple wall-function-inspired formula:
-	//   nu_boost = boost_factor * |u_local| * y_1   (Mixing-length-like, y_1=0.5 lu)
-	// boost_factor ~ 0.1-0.5 for Tier-1 diagnostic; later replaced with law-of-the-wall computation.
-	// Relationship: w = 1/(3*nu + 0.5), so nu_eff = (1/w - 0.5)/3
+	// Option B Phase 2 (2026-05-15): Prandtl mixing-length formula for eddy viscosity at wall-adjacent cell.
+	// Standard turbulent BL theory: nu_t = (kappa * y) * u_tau    (mixing length l_m = kappa*y, velocity scale u_tau)
+	// For y_1 = 0.5 lu: nu_t = 0.41 * 0.5 * u_tau = 0.205 * u_tau
+	// u_tau via Werner-Wengle PowerLaw closed form (no Newton iteration needed)
 	if(wall_adj_flag[n] != (uchar)0u) {
-		const float WALL_BOOST_FACTOR = 0.3f; // hardcoded Tier-1 — Phase 2 will compute via WW law-of-the-wall
 		const float u_mag = sqrt(sq(uxn)+sq(uyn)+sq(uzn));
-		const float y_1 = 0.5f; // half-cell distance (assumed half-way BB)
-		const float nu_current = (1.0f/w - 0.5f)/3.0f;
-		const float nu_boost = WALL_BOOST_FACTOR * u_mag * y_1; // mixing-length analog
-		const float nu_new = nu_current + nu_boost;
-		w = 1.0f/(3.0f*nu_new + 0.5f);
+		if(u_mag > 1e-6f) {
+			const float nu = def_nu;
+			const float u_visc2 = 2.0f*nu*u_mag;
+			const float u_log2  = 0.0246384f * pow(nu, 0.25f) * pow(u_mag, 1.75f);
+			const float u_tau   = sqrt(max(u_visc2, u_log2));
+			// Prandtl mixing-length eddy viscosity at y_1 = 0.5 lu:
+			//   nu_t = kappa * y_1 * u_tau, kappa=0.41 (von Karman)
+			const float nu_t_target = 0.205f * u_tau; // 0.205 = 0.41 * 0.5
+			// Add to existing Smagorinsky nu_eff (NOT max — wall function + LES are additive contributions to nu)
+			const float nu_current = (1.0f/w - 0.5f)/3.0f;
+			const float nu_new = nu_current + nu_t_target;
+			w = 1.0f/(3.0f*nu_new + 0.5f);
+		}
 	}
 )+"#endif"+R( // WALL_VISC_BOOST
 
