@@ -283,6 +283,7 @@ class Device {
 private:
 	cl::Program cl_program;
 	cl::CommandQueue cl_queue;
+	cl::CommandQueue cl_transfer_queue; // PERF-F V5: separate queue for PCIe transfers to overlap compute (Intel DMA engine parallel to compute units)
 	bool exists = false;
 	inline string enable_device_capabilities() const { return // enable FP64/FP16 capabilities if available
 		string(info.patch_nvidia_fp16         ? "\n #define cl_khr_fp16"                : "")+ // Nvidia Pascal and newer GPUs with driver>=520.00 don't report cl_khr_fp16, but do support basic FP16 arithmetic
@@ -307,6 +308,7 @@ public:
 		print_device_info(info);
 		this->info = info;
 		this->cl_queue = cl::CommandQueue(info.cl_context, info.cl_device); // queue to push commands for the device
+		this->cl_transfer_queue = cl::CommandQueue(info.cl_context, info.cl_device); // PERF-F V5: dedicated transfer queue (uses DMA engine concurrently with compute queue)
 		cl::Program::Sources cl_source;
 		const string kernel_code = enable_device_capabilities()+"\n"+opencl_c_code;
 		cl_source.push_back({ kernel_code.c_str(), kernel_code.length() });
@@ -331,9 +333,11 @@ public:
 	inline Device() {} // default constructor
 	inline void barrier(const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { cl_queue.enqueueBarrierWithWaitList(event_waitlist, event_returned); }
 	inline void finish_queue() { cl_queue.finish(); }
+	inline void finish_transfer_queue() { cl_transfer_queue.finish(); } // PERF-F V5
 	inline cl::Context get_cl_context() const { return info.cl_context; }
 	inline cl::Program get_cl_program() const { return cl_program; }
 	inline cl::CommandQueue get_cl_queue() const { return cl_queue; }
+	inline cl::CommandQueue get_cl_transfer_queue() const { return cl_transfer_queue; } // PERF-F V5
 	inline bool is_initialized() const { return exists; }
 };
 

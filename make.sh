@@ -30,4 +30,5 @@ else # else (make is not installed), compile FluidX3D with a single CPU core
 	esac
 fi
 
-if [[ $? == 0 ]]; then bin/FluidX3D "$@"; fi # run FluidX3D only if last compilation was successful
+# 2026-05-15 (per User): Auto-run nach Build deaktiviert — immer manuell `./bin/FluidX3D` starten (vermeidet Doppelläufe + VRAM-Overflow auf B70)
+# if [[ $? == 0 ]]; then bin/FluidX3D "$@"; fi # run FluidX3D only if last compilation was successful
