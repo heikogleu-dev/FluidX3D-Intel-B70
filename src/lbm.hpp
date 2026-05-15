@@ -18,6 +18,7 @@ string default_filename(const string& name, const string& extension, const ulong
 enum enum_transfer_field { fi, rho_u_flags, flags, F, phi_massex_flags, gi, T, enum_transfer_field_length };
 
 class LBM_Domain {
+	friend class LBM; // LBM aggregates LBM_Domain instances and may need direct access for sparse-bouzidi infrastructure
 private:
 	uint Nx=1u, Ny=1u, Nz=1u; // (local) lattice dimensions
 	uint Dx=1u, Dy=1u, Dz=1u; // lattice domains
@@ -58,6 +59,12 @@ private:
 #ifdef WALL_MODEL_FLOOR
 	Kernel kernel_apply_wall_model_floor; // Path II.5: Werner-Wengle wall model on rolling-road floor (TYPE_S z=0, no TYPE_X)
 #endif // WALL_MODEL_FLOOR
+#ifdef BOUZIDI_VEHICLE
+	Kernel kernel_apply_bouzidi_sparse; // Sparse Bouzidi sub-grid BB: applies q-fractional bounce-back only at wall-adjacent fluid cells
+	Memory<ulong> bouzidi_active_cells; // sparse index list: cell indices that are wall-adjacent fluid
+	Memory<float> bouzidi_q_data;       // q-data: bouzidi_q_data[dir * N_active + i_active], 19 floats per active cell
+	uint bouzidi_N_active = 0u;         // count of active cells (set by compute_bouzidi_cells_active)
+#endif // BOUZIDI_VEHICLE
 #ifdef SURFACE
 	Kernel kernel_surface_0; // additional kernel for computing mass conservation and mass flux computation
 	Kernel kernel_surface_1; // additional kernel for flag handling
@@ -131,6 +138,9 @@ public:
 #ifdef WALL_MODEL_FLOOR
 	void enqueue_apply_wall_model_floor(float u_road); // Path II.5: WW wall model on rolling-road floor (TYPE_S z=0)
 #endif // WALL_MODEL_FLOOR
+#ifdef BOUZIDI_VEHICLE
+	void enqueue_apply_bouzidi_sparse(); // Sparse Bouzidi sub-grid BB
+#endif // BOUZIDI_VEHICLE
 #ifdef PARTICLES
 	void enqueue_integrate_particles(const uint time_step_multiplicator=1u); // intgegrates particles forward in time and couples particles to fluid
 #endif // PARTICLES
@@ -279,6 +289,10 @@ public:
 #ifdef SPONGE_LAYER
 	float sponge_u_inlet = 0.0f; // Phase 5a: outlet damping target velocity (0 = disabled, set by setup before lbm.run())
 	float wall_floor_u_road = 0.0f; // Path II.5: rolling-road velocity for WALL_MODEL_FLOOR (0 = disabled even if WALL_MODEL_FLOOR defined; set by setup before lbm.run())
+#ifdef BOUZIDI_VEHICLE
+	bool bouzidi_enabled = false; // Sparse Bouzidi BB: set true after compute_bouzidi_cells_active(). Default false (off).
+	void compute_bouzidi_cells_active(const float q_default = 0.5f); // Host-side enumerate wall-adjacent fluid cells + initialize q-data (Phase 1: uniform q=0.5; Phase 2: per-direction real q)
+#endif // BOUZIDI_VEHICLE
 #endif // SPONGE_LAYER
 
 	template<typename T> class Memory_Container { // does not hold any data itsef, just links to LBM_Domain data

@@ -153,6 +153,8 @@ void LBM_Domain::allocate(Device& device) {
 #ifdef WALL_MODEL_FLOOR
 	kernel_apply_wall_model_floor = Kernel(device, N, "apply_wall_model_floor", u, flags, 0.0f); // Path II.5 WW floor wall model (u_road param set at enqueue)
 #endif // WALL_MODEL_FLOOR
+// BOUZIDI_VEHICLE buffers + kernel are allocated lazily in LBM::compute_bouzidi_cells_active() when called from setup.
+// Kernel/buffer remain default-constructed if compute_bouzidi_cells_active is not called → bouzidi_enabled stays false → enqueue is skipped.
 
 #ifdef SURFACE
 	phi = Memory<float>(device, N);
@@ -209,6 +211,11 @@ void LBM_Domain::enqueue_apply_wall_model_floor(float u_road) { // Path II.5: WW
 	kernel_apply_wall_model_floor.set_parameters(2u, u_road).enqueue_run();
 }
 #endif // WALL_MODEL_FLOOR
+#ifdef BOUZIDI_VEHICLE
+void LBM_Domain::enqueue_apply_bouzidi_sparse() { // Sparse Bouzidi sub-grid BB
+	kernel_apply_bouzidi_sparse.set_parameters(5u, t).enqueue_run();
+}
+#endif // BOUZIDI_VEHICLE
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
 	if(t!=t_last_update_fields) { // only run kernel_update_fields if the time step has changed since last update
@@ -471,6 +478,9 @@ string LBM_Domain::device_defines() const { return
 #ifdef WALL_MODEL_FLOOR
 	"\n	#define WALL_MODEL_FLOOR" // Path II.5: Werner-Wengle wall model on rolling-road floor
 #endif // WALL_MODEL_FLOOR
+#ifdef BOUZIDI_VEHICLE
+	"\n	#define BOUZIDI_VEHICLE" // Sparse Bouzidi sub-grid BB at vehicle surface
+#endif // BOUZIDI_VEHICLE
 
 #ifdef SPONGE_LAYER
 	"\n	#define SPONGE_LAYER" // Phase 5a: non-reflecting outlet damping
@@ -949,6 +959,11 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 #endif // MOVING_BOUNDARIES
 	}
 #endif // WALL_MODEL_FLOOR
+#ifdef BOUZIDI_VEHICLE
+	if(bouzidi_enabled) { // Sparse Bouzidi sub-grid BB at vehicle wall-adjacent fluid cells (post-stream, applied to DDFs)
+		for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_bouzidi_sparse();
+	}
+#endif // BOUZIDI_VEHICLE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_freeslip_y(); // CC#9: specular reflection at TYPE_Y cells, post-stream
 #ifdef SPONGE_LAYER
@@ -991,6 +1006,72 @@ void LBM::run_async(const ulong steps) { // PERF-G: submit `steps` LBM steps to 
 void LBM::finish() { // PERF-G: wait for all queued kernels on this LBM's compute queues
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
 }
+
+#ifdef BOUZIDI_VEHICLE
+// Host-side: enumerate wall-adjacent fluid cells (those with at least one TYPE_S|TYPE_X neighbor), allocate sparse buffers,
+// initialize q_data to q_default (Phase 1: uniform 0.5 = Pure-BB equivalent for sanity check).
+// Must be called AFTER voxelize_mesh_on_device (flags array populated) and BEFORE run().
+void LBM::compute_bouzidi_cells_active(const float q_default) {
+	flags.read_from_device(); // ensure host flags are current
+	const uint Nx = get_Nx(), Ny = get_Ny(), Nz = get_Nz();
+	const ulong N = get_N();
+	// D3Q19 c-vectors (matching FluidX3D convention)
+	const int cx[19] = {0,  1,-1,  0, 0,  0, 0,  1,-1,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0};
+	const int cy[19] = {0,  0, 0,  1,-1,  0, 0,  1,-1,  0, 0,  1,-1, -1, 1,  0, 0,  1,-1};
+	const int cz[19] = {0,  0, 0,  0, 0,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0, -1, 1, -1, 1};
+	std::vector<ulong> active_cells_host;
+	std::vector<std::array<float,19>> active_q_host; // q for each direction, per active cell
+	active_cells_host.reserve(N / 1000ull); // estimate 0.1% active
+	for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+		const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
+		const uchar fn = flags[n];
+		if((fn & TYPE_S) != 0u) continue; // skip solid (we operate on fluid cells)
+		// Check if any of 18 D3Q19 neighbors is TYPE_S|TYPE_X (vehicle)
+		bool wall_adjacent = false;
+		std::array<float,19> q_per_dir;
+		q_per_dir.fill(q_default); // default: q=0.5 → Pure-BB equivalent in Bouzidi formula
+		for(uint i=1u; i<19u; i++) {
+			const int nx = (int)x + cx[i], ny = (int)y + cy[i], nz = (int)z + cz[i];
+			if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
+			const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
+			if((flags[nj] & TYPE_X) != 0u && (flags[nj] & TYPE_S) != 0u) {
+				// neighbor in direction c_i is vehicle (TYPE_S|TYPE_X)
+				wall_adjacent = true;
+				// Phase 1: keep q_default. Phase 2: compute real q from ray-march / mesh intersection.
+			}
+		}
+		if(wall_adjacent) {
+			active_cells_host.push_back(n);
+			active_q_host.push_back(q_per_dir);
+		}
+	}
+	const uint N_active = (uint)active_cells_host.size();
+	if(N_active == 0u) {
+		print_warning("compute_bouzidi_cells_active: NO wall-adjacent fluid cells found (vehicle not voxelized?). Bouzidi remains disabled.");
+		return;
+	}
+	print_info("Sparse Bouzidi: N_active = "+to_string(N_active)+" wall-adjacent fluid cells ("+to_string(100.0f*(float)N_active/(float)N,3u)+"% of total)");
+	// Allocate device buffers per domain
+	for(uint d=0u; d<get_D(); d++) {
+		LBM_Domain* dom = lbm_domain[d];
+		dom->bouzidi_N_active = N_active;
+		dom->bouzidi_active_cells = Memory<ulong>(dom->device, (ulong)N_active);
+		dom->bouzidi_q_data       = Memory<float>(dom->device, 19ull*(ulong)N_active);
+		// Fill host data
+		for(uint i=0u; i<N_active; i++) dom->bouzidi_active_cells[i] = active_cells_host[i];
+		// SoA: q_data[dir*N_active + i_active]
+		for(uint dir=0u; dir<19u; dir++) {
+			for(uint i=0u; i<N_active; i++) dom->bouzidi_q_data[(ulong)dir*(ulong)N_active + (ulong)i] = active_q_host[i][dir];
+		}
+		dom->bouzidi_active_cells.write_to_device();
+		dom->bouzidi_q_data.write_to_device();
+		// (Re-)create kernel with proper range = N_active and buffers
+		dom->kernel_apply_bouzidi_sparse = Kernel(dom->device, (ulong)N_active, "apply_bouzidi_sparse",
+			dom->fi, dom->flags, dom->bouzidi_active_cells, dom->bouzidi_q_data, N_active, dom->t);
+	}
+	bouzidi_enabled = true;
+}
+#endif // BOUZIDI_VEHICLE
 
 void LBM::run(const ulong steps, const ulong total_steps) { // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
 	info.append(steps, total_steps, get_t()); // total_steps parameter is just for runtime estimation

@@ -906,6 +906,7 @@ void main_setup_phase5b_dr() {
 	lbm_near.wall_floor_u_road = lbm_u;
 	print_info("WALL_MODEL_FLOOR active: Werner-Wengle floor wall model with rolling-road u_road = "+to_string(lbm_u,4u)+" LBM (= "+to_string(si_u,1u)+" m/s SI)");
 #endif
+// BOUZIDI_VEHICLE activation moved to AFTER voxelize_mesh_on_device (where flags are populated)
 
 
 	// ===== Vehicle: voxelize in both domains at SAME physical position =====
@@ -942,6 +943,14 @@ void main_setup_phase5b_dr() {
 	const float3 vmin_n = vehicle_near->pmin, vmax_n = vehicle_near->pmax;
 	print_info("Near Vehicle BBox: X["+to_string(vmin_n.x,1u)+","+to_string(vmax_n.x,1u)+"] Y["+to_string(vmin_n.y,1u)+","+to_string(vmax_n.y,1u)+"] Z["+to_string(vmin_n.z,1u)+","+to_string(vmax_n.z,1u)+"] (Near cells)");
 	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
+
+#ifdef BOUZIDI_VEHICLE
+	// 2026-05-15 Phase 1 sanity-check: q=0.5 (= Pure-BB equivalent). Kernel skips store_f when no modification needed
+	// (EP-pull layout safety — store_f without real modification corrupts via implicit stream).
+	// Diagnostic: forces should match Mode 3 + α=0.15 baseline (kernel = no-op when all q=0.5).
+	lbm_far.compute_bouzidi_cells_active(0.5f);
+	lbm_near.compute_bouzidi_cells_active(0.5f);
+#endif
 
 	// ===== Far Boundaries: TYPE_S Moving-Wall Floor (Rolling Road) + Wheel-contact-patches =====
 	// 2026-05-16: REVERT TYPE_E → TYPE_S floor. ParaView Inspection 2026-05-15 zeigte: TYPE_E floor verhindert Venturi/Ground-Effect
