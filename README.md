@@ -1,8 +1,10 @@
 # FluidX3D — Intel Arc Pro B70 (Battlemage) Fork
 
-**Pioneer documentation: FluidX3D 3.6 LBM solver verified at 99.5 % peak bandwidth on Intel Arc Pro B70 Pro (BMG-G31, full Battlemage, xe driver, oneAPI OpenCL 26.05). 4× faster than the RTX 3060 Ti reference. Includes Linux/xe-driver shutdown-crash workaround, HiDPI font, windowed mode with env-var control, FORCE_FIELD enabled with VTK + CSV export of solid-boundary forces.**
+**Pioneer documentation: FluidX3D 3.6 LBM solver verified at 99.5 % peak bandwidth on Intel Arc Pro B70 Pro (BMG-G31, full Battlemage, xe driver, oneAPI OpenCL 26.05). 4× faster than the RTX 3060 Ti reference. Includes Linux/xe-driver shutdown-crash workaround, HiDPI font, windowed mode with env-var control, FORCE_FIELD enabled with VTK + CSV export of solid-boundary forces. Plus: a complete Multi-Resolution Schwarz coupling stack (Mode 3 PERF-G concurrent additive Schwarz, 3:1 Far/Near), and a viscosity-modification wall model (`WALL_VISC_BOOST`) that works inside FluidX3D's Esoteric-Pull layout where five distinct DDF-modifying wall models failed.**
 
 This is a fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D). For the original project documentation see [README_UPSTREAM.md](README_UPSTREAM.md). All changes vs upstream are tracked file-by-file in [MODIFICATIONS.md](MODIFICATIONS.md). License is **unchanged** — see [LICENSE.md](LICENSE.md), non-commercial / non-military use only.
+
+**Active development branch:** [`plan-refresh-multires`](https://github.com/heikogleu-dev/FluidX3D-Intel-B70/tree/plan-refresh-multires). The `master` branch is fast-forwarded to the same commit on every overhaul. Day-by-day session summaries live in [`findings/`](findings/) — see [SESSION_2026-05-15_SUMMARY.md](findings/SESSION_2026-05-15_SUMMARY.md) for the latest end-of-day state and [TODO_2026-05-16.md](findings/TODO_2026-05-16.md) for the next-session plan.
 
 ---
 
@@ -18,20 +20,25 @@ Together: first publicly documented end-to-end CFD evaluation on Battlemage Xe2 
 
 ---
 
-## Status
+## Status (current — 2026-05-16)
 
 | Aspect | Status |
 |---|---|
-| Compute (LBM kernels) | ✅ **4 917 MLUPS @ 16.85 M cells, 605 GB/s = 99.5 % of B70 spec (608 GB/s)** |
+| Compute (LBM kernels) | ✅ **4 917 MLUPS @ 16.85 M cells, 605 GB/s = 99.5 % of B70 spec (608 GB/s)** — see [§ "Why effective bandwidth > spec"](#why-effective-bandwidth--608-gbs) |
 | Allocation / memory layout | ✅ 56.6 B/cell empirical (D3Q19 + FP16C), matches theory; max ~449 M cells fit in B70's 28.6 GB |
 | FP16C precision (DDFs) | ✅ stable, no observed divergence over 10 000 steps |
 | `FORCE_FIELD` extension | ✅ enabled, force-field on TYPE_S boundaries written as VTK + CSV |
-| `WALL_MODEL_VEHICLE` (CC#10) | ✅ **Werner-Wengle PowerLaw via Krüger Moving-Wall — production-valid for smooth STL vehicles** (MR2: 580 N nahe real 565 N, drag in OpenFOAM range). ⚠️ NOT validated against canonical Ahmed Body (Phase 1 FAILED, 125× force-amplification on flat-faced geometry — see CC#X section below) |
-| Build (Linux + X11 + OpenCL ICD) | ✅ clean compile in 10 s with GCC 15.2 |
+| **Multi-Res Schwarz coupling (Pfad A 3:1)** | ✅ **Mode 3 PERF-G Concurrent Additive Schwarz** — Far 15 mm + Near 5 mm running concurrently on the B70 via two cl-queues (`run_async`/`finish`), symmetric 1-chunk lag, α = 0.20 (forward+back). Production-stable on the MR2 case; physically consistent forces (Fx_far ≈ Fx_near). See `findings/PERF_G_CONCURRENT_LBM_2026-05-15.md`. |
+| **Wall model `WALL_VISC_BOOST`** | ✅ **Phase 2 production-stable** (Werner-Wengle PowerLaw + Prandtl mixing-length `ν_t = κ·y·u_τ`, single cell layer) — only wall model that **works inside the Esoteric-Pull DDF layout**; five DDF-modifying approaches failed before. ⚠️ Phase 3 multi-cell (3 layers, BFS) **built but UNTESTED** — next-session priority. |
+| Legacy `WALL_MODEL_VEHICLE` (CC#10 WW) | ⚠️ **Disabled on this branch** (`// #define WALL_MODEL_VEHICLE`). Worked on smooth STL only (MR2 580 N); failed on Ahmed Body (125× force-amplification) and in Multi-Res context (Three-Attractor pathology −610 / +163 k / +290 k N). Code preserved in source. |
+| `BOUZIDI_VEHICLE` (sparse sub-grid BB) | ⏸️ infrastructure preserved (sparse-cells precompute, `bouzidi_active_cells`); EP-pull-compatible kernel still to write. Orthogonal benefit to viscosity wall model (addresses underbody voxelization staircase). |
+| TYPE_S Moving-Wall Floor (Mode 3) | ✅ Moving-floor with `u_x = lbm_u` allows Venturi underbody flow → **Fz_near = −552 N (downforce)** vs +290 N when floor was TYPE_E. |
+| Multi-GPU on B70 | 🚫 **out of scope** (single-tile B70). The TYPE_Y symmetry-plane patch attempt (CC#7) was not validated for the halo-exchange path multi-GPU would require. |
+| Build (Linux + X11 + OpenCL ICD) | ✅ clean compile in ~10 s with GCC 15.2 |
 | Linux x11 windowed mode | ✅ default 2560×1440, env-var configurable |
 | Linux xe-driver clean shutdown | ⚠️ requires `_exit(0)` workaround (see below) |
 | Live visualisation FPS | ⚠️ 0–1 FPS at large window — FluidX3D's CPU software renderer is the bottleneck, **not** the GPU |
-| Multi-GPU on B70 | 🚫 **out of scope** for this fork (single-tile B70). The TYPE_Y symmetry-plane patch attempt (CC#7) has not been validated for the halo-exchange path multi-GPU requires. |
+| Companion ParaView GPU build | ✅ self-built ParaView 6.1 + OSPRay 3.2 GPU module on Arc Pro B70 — see [Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing). Launch via wrapper script only (silent CPU-fallback otherwise). |
 
 ## Hardware target
 
@@ -134,6 +141,21 @@ To re-test if a future driver release fixes the issue, comment out the `_exit(0)
 
 The 16.85 M-cell run sustains **99.5 % of the 608 GB/s spec bandwidth**, the 145.92 M Aero-Box run sustains **94.7 %**, and the 50.0 M asym Aero-Box run **even exceeds the spec at 100.8 %** — confirming LBM is bandwidth-limited and the B70 saturates its GDDR6 subsystem at any working-set size; the spec bandwidth value is conservative on this card. ~4× the effective LBM bandwidth of an RTX 3060 Ti reference (~150 GB/s effective).
 
+#### Why effective bandwidth > 608 GB/s
+
+FluidX3D's reported bandwidth is not raw DRAM throughput — it is **effective bandwidth equivalent**, calculated as
+
+```
+bandwidth = (theoretical_bytes_per_cell_per_step × N_cells) / wallclock_per_step
+```
+
+with `theoretical_bytes_per_cell_per_step = 2 × 19 × 2 B = 76 B` (D3Q19 + FP16C, naive AA-pattern read+write). The actual DRAM traffic is roughly half that, for two reasons:
+
+1. **Esoteric-Pull (EP) layout halves DDF roundtrip.** Classical Push-Pull moves every DDF twice through DRAM (collision-read + stream-write to a neighbour); EP performs an in-place update where only the "outbound" half is scattered. Real DRAM traffic per step ≈ **38 B/cell** instead of 76 B/cell.
+2. **L2 cache hits count toward the metric.** Neighbour-pulls regularly hit the multi-MB L2 on BMG-G31; FluidX3D bills these as bandwidth used.
+
+So when the reported number reads 950 GB/s, the actual GDDR6 traffic is ~475 GB/s — exactly at the B70's 608 GB/s headroom. The metric is a performance indicator (memory-bound efficiency), not a physical bus measurement. Same factor-of-two appears in Lehmann's A100 numbers (5 TB/s reported vs 2 TB/s A100 spec).
+
 ### Thermals & power under sustained load (CC#2, 24 min @ 275 W)
 
 | Sensor | Value | Headroom |
@@ -198,6 +220,52 @@ First attempt at canonical Ahmed Body validation using a **simplified 16-triangl
 **Diagnosis (working hypothesis):** WW + flat-faced sharp-edged synthetic geometry → coherent flat-face slip-accumulation produces 125× force artifact. Same WW works correctly on smooth STL vehicles (MR2: 580 N matches real 565 N target). Full analysis: [findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md](findings/CC_X_ahmed/SESSION_2026-05-11_PHASE1_FAIL.md).
 
 **Resolution path:** the Multi-Resolution Roadmap above replaces the failed CC#X with a properly-staged sequence — **Phase 0** uses the canonical ERCOFTAC Ahmed STLs (rounded front), **Phase 0c** quantifies the BB-pathology resolution-scaling, **Phase 1** addresses Bouzidi interpolated BB. The CC#10 WW code remains the production baseline unmodified (validated for smooth STL vehicles, Iron Rule).
+
+## Current production state (end-of-day 2026-05-15)
+
+After the Phase 5b-DR validation (one-way Far→Near coupling) closed cleanly, two production-grade features were added on top to bring the Multi-Resolution stack to a defensible state for the Time-Attack MR2 case. Both are live on `master` and used as the default configuration:
+
+### Mode 3 — PERF-G Concurrent Additive Schwarz (commit `bf589f3`/`a277377`)
+
+Mode 2 sequential bidirectional coupling (Far → Near → Far → Near in series) is replaced by a **concurrent symmetric additive-Schwarz scheme** that runs Far and Near on the B70 simultaneously via two OpenCL command queues. Mode 3 contributions:
+
+- `LBM::run_async()` + `LBM::finish()` — non-blocking chunk dispatch on a second `cl_queue` (declared in `src/opencl.hpp`)
+- Far and Near pull each other's coupling-plane state with a **symmetric 1-chunk lag**, which is the standard additive-Schwarz invariant: both domains read each other's previous chunk, not the in-progress one
+- `α = 0.20` for both forward (Far → Near) and back-coupling (Near → Far). The α-sweep test confirmed 0.20 as the best compromise: visibly smooth transitions, 24 % faster convergence than 0.10, no oscillation onset.
+- **~5–10 % wallclock-overhead vs Mode 1 one-way**, but produces **physically consistent Fx_far ≈ Fx_near** (Mode 1 left a ~55 % drag gap). User note from the ParaView session: *"Wirklich interessant zu sehen wie stark das Farfield vom Nearfield bei der Wirbelauflösung durch die Kopplung profitiert!"* — back-coupling injects Near's high-resolution turbulent content into Far's coarser grid.
+
+End-of-day production numbers (Mode 3 + WALL_VISC_BOOST Phase 2 + TYPE_S moving floor):
+
+| | Far (15 mm) | Near (5 mm) |
+|---|---:|---:|
+| **Fx (drag)** | 1 464 N | 1 597 N |
+| **Fz (lift / downforce)** | — | **−563 N (downforce)** |
+| Wallclock to convergence | 150 chunks ≈ **38 min** | (same — concurrent) |
+
+The −563 N downforce is a regime change compared to the earlier TYPE_E floor result (+290 N lift). With TYPE_E acting as a free-stream below the car, the Venturi was suppressed; switching the floor to `TYPE_S` with `u_x = lbm_u` (moving wall, no-slip with road velocity) restored the underbody pressure-drop. Wheel-contact cells at `z=0` still get `lbm_u` so the wheels behave correctly.
+
+### Wall model — `WALL_VISC_BOOST` (commits `0697ba2` → `c56acad` → `4cccdaf`)
+
+Six wall-model approaches were tested in 2026-05-15 against Multi-Res Mode 3. **Five failed** with the same architectural signature — FluidX3D's Esoteric-Pull DDF layout neutralises or corrupts any inline DDF / `f_eq` modification on complex STL geometry. Only the sixth survived:
+
+| Approach | Mechanism | Result |
+|---|---|---|
+| WW Vehicle (CC#10 Krüger) | inline DDF modification per Krüger pattern | ❌ Three-Attractor pathology (−610 / +163 k / +290 k N) |
+| WW Floor (Path II.5) | same, floor-only | ❌ NoOp (u_2 ≈ u_road) |
+| Bouzidi Sparse BB | sub-grid bounce-back | ❌ flow collapse or negative drag |
+| WALL_SLIP V1 (full overwrite) | DDF slip imprint | ❌ catastrophic −200 k N |
+| WALL_SLIP V2 (BLEND) | damped DDF blend | ❌ f_neq decays → forces ≈ 150 N |
+| **`WALL_VISC_BOOST`** | **modify LBM relaxation rate `w` at wall-adjacent cells** | ✅ **stable, drag reduced ~5 % vs no wall model** |
+
+`WALL_VISC_BOOST` does **not** touch DDFs. Instead, at each wall-adjacent fluid cell it raises the local effective viscosity by an eddy-viscosity term `ν_t = κ·y·u_τ` (Prandtl mixing-length, von Kármán κ = 0.41), then translates back into the LBM relaxation rate `w = 1/(3(ν+ν_t)+0.5)`. The friction velocity `u_τ` comes from the Werner-Wengle PowerLaw closed form on the local tangential velocity `|u|`. The single new device array `wall_adj_flag` carries the wall-distance (0 = interior, 1–3 = layer index). EP-pull compatibility is by construction — we modify the *parameter* that drives the collision operator, not the DDFs themselves.
+
+**Why the other five failed and this one works** is documented in `findings/BOUZIDI_EP_PULL_INCOMPATIBILITY_2026-05-15.md`. The short version: EP-pull's `load_f` / `store_f` round-trip writes any per-DDF modification back to the same memory slot it was loaded from (for the EP-opposite pair) or to a wrong neighbour (for non-EP-opposite pairs). This was first hinted at by the original `kernel.cpp:1717` deprecated-CC#7 comment, and confirmed empirically across the five failed paths.
+
+The viscosity-modification path was suggested by Lehmann himself in [Discussion #58](https://github.com/ProjectPhysX/FluidX3D/discussions/58) as *the* practical wall-model entry point for FluidX3D, and it survived in our pipeline where the literature-canonical Krüger Moving-Wall WW did not.
+
+**Phase 2 (single cell layer) is the current production setting**: ~5 % drag reduction, physically correct mixing-length scaling, vehicle + floor cells both flagged.
+
+**Phase 3 (multi-cell BFS expansion to 3 layers)** is built in the source (`lbm.cpp::populate_wall_adj_flag` runs a multi-pass BFS from TYPE_S boundaries, `kernel.cpp` applies layer-scaled `ν_t = κ·y·u_τ` with `y = wall_dist − 0.5`) **but UNTESTED**. The user's ParaView observation from the Phase 2 production session was: *"Ja, ich kann eine Veränderung sehen, aber scheinbar ist der Effekt noch nicht stark oder tief genug von der Wand in die angrenzenden Zellen hinein. So vom optischen im Vergleich zu OpenFOAM."* — Phase 3's 3× deeper penetration is the intended response. Validation is the priority of the next session ([findings/TODO_2026-05-16.md](findings/TODO_2026-05-16.md)).
 
 ## Roadmap & Findings
 

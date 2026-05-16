@@ -21,6 +21,9 @@ The license itself (see [`LICENSE.md`](LICENSE.md)) is **unchanged**. Non-commer
 - Uncommented `#define FORCE_FIELD` (line 19). Enables `lbm.update_force_field()` and per-cell `lbm.F`. Allocates extra 12 B/cell VRAM (~200 MB at 16.85 M cells, ~1.6 GB at 135 M cells).
 - **`WALL_MODEL_VEHICLE` commented out** (2026-05-13 pivot): CC#10/CC#11 deep-dive on `phase0-ahmed-validation` branch revealed Krüger Moving-Wall is architecturally unfit for stationary-wall WW (Three-Attractor non-linear bifurcation). Pure-BB baseline used for Multi-Resolution work. WW kernel code remains intact in source.
 - **NEW `SPONGE_LAYER` toggle** (Phase 5a): defines `SPONGE_LAYER`, `SPONGE_DEPTH_CELLS=50`, `SPONGE_STRENGTH=0.1f`. Activates non-reflecting outlet damping at last 50 X-cells. Default: opt-in (sponge code compiled but `lbm.sponge_u_inlet=0.0` keeps it inactive unless setup explicitly enables). 3-variant Iron-Rule test on full-domain Yaris found sponge cuts wake recirculation → 74% drag drop. Use only for compact Multi-Res Mid-boxes where outlet is < 3L behind vehicle.
+- **NEW `BOUZIDI_VEHICLE` toggle** (2026-05-15): sparse Bouzidi sub-grid bounce-back infrastructure on vehicle surface. Sparse-cell index buffer `bouzidi_active_cells` precomputed at setup; per-step kernel only touches those cells. Architecture preserved; EP-pull-compatible kernel still pending. Currently a no-op in the run loop. Future companion to `WALL_VISC_BOOST` (orthogonal: addresses underbody voxelization staircase).
+- **NEW `WALL_SLIP_VEHICLE` toggle** (2026-05-15): DDF slip-imprint wall model, V1 full overwrite + V2 BLEND variants. Both **FAILED** in production (V1: −200 k N catastrophic, V2: f_neq decay → forces ≈ 150 N). Preserved as documented dead-end for future contributors. Default off.
+- **NEW `WALL_VISC_BOOST` toggle** (2026-05-15, **production-active on master**): activates the viscosity-modification wall model — the only wall model on this fork that survives Multi-Resolution Mode 3 on complex STL because it does NOT modify DDFs. See `src/kernel.cpp` and `src/lbm.cpp` sections below.
 
 ## `src/graphics.hpp`
 
@@ -329,4 +332,113 @@ The currently-active `main_setup()` (line ~197 onwards):
 | Half-domain test | 16.85 M | 10 000 | **4 917** | **605 GB/s** | 292 | ~30 s |
 | Full domain | 135.05 M | (run interrupted ~10 585) | 5 331 | 592 GB/s | 39 | n/a |
 
-605 GB/s ≙ 99.5 % of the B70 spec (608 GB/s) — the LBM workload is fully bandwidth-limited and the GPU is saturating its memory subsystem.
+605 GB/s ≙ 99.5 % of the B70 spec (608 GB/s) — the LBM workload is fully bandwidth-limited and the GPU is saturating its memory subsystem. See README § "Why effective bandwidth > 608 GB/s" for the relationship between FluidX3D's reported number and physical DRAM bandwidth (the metric counts a theoretical AA-pattern read+write; Esoteric-Pull halves real DRAM traffic, L2 hits count toward the metric).
+
+---
+
+# Session 2026-05-15 — Mode 3 PERF-G Concurrent LBM + `WALL_VISC_BOOST`
+
+This session closed two outstanding gaps in the Multi-Resolution stack on top of Phase 5b-DR's one-way Far→Near baseline:
+
+1. **Mode 3 PERF-G** — concurrent additive-Schwarz coupling using a second OpenCL queue, both directions blended with α = 0.20, symmetric 1-chunk lag
+2. **`WALL_VISC_BOOST`** — the first wall model on this fork that survives Multi-Resolution Mode 3 on complex STL, by modifying the LBM relaxation rate (not DDFs)
+
+Both are now the production-default on the `master` branch. The findings docs in `findings/` carry the day-by-day timeline; this section is the durable changelog.
+
+## `src/opencl.hpp`
+
+- **NEW second `cl_queue` member** in the device wrapper. Used by `LBM::run_async()` to dispatch a chunk on Near while Far is mid-chunk on the primary queue. Two-queue model is required for Mode 3 PERF-G's concurrent Additive Schwarz: neither domain blocks on the other within a chunk; coupling reads see the previous chunk's data on both sides (symmetric 1-chunk lag = canonical additive-Schwarz invariant).
+
+## `src/lbm.hpp` + `src/lbm.cpp` — Mode 3 + WALL_VISC_BOOST infrastructure
+
+### Mode 3 PERF-G — concurrent run
+
+- **NEW `LBM::run_async(uint steps)`** — non-blocking variant of `run()`. Dispatches the chunk on the secondary `cl_queue` and returns immediately.
+- **NEW `LBM::finish()`** — explicit barrier on the secondary queue. Pairs with `run_async()` for the outer chunk loop: `lbm_far.run_async(chunk); lbm_near.run(chunk); lbm_far.finish();`.
+- Wallclock overhead vs Mode 1 (sequential one-way) is **~5–10 %**, paying for the bidirectional coupling. The benefit is **physically consistent Fx_far ≈ Fx_near** (Mode 1 left a 55 % drag gap that signalled the back-coupling was missing).
+
+### `WALL_VISC_BOOST` — wall-distance flag buffer
+
+- **NEW `Memory<uchar> wall_adj_flag`** on `LBM_Domain` (allocated when `WALL_VISC_BOOST` is defined): per-cell wall-distance label, `0 = interior`, `1/2/3 = layer index from nearest TYPE_S wall`.
+- **NEW `LBM::populate_wall_adj_flag()`** — multi-pass BFS expansion on the host, executed after all BC parallel-for loops have written the final `flags` state:
+  - Pass 1: for every fluid cell, scan 6 axis neighbours; if any is `TYPE_S`, set `wall_adj_flag[n] = 1`.
+  - Passes 2..`MAX_WALL_DISTANCE` (=3): for every interior fluid cell, scan neighbours; if any is layer-`(k-1)`, set `wall_adj_flag[n] = k`.
+  - Vehicle marker (`TYPE_S | TYPE_X`) AND floor (`TYPE_S` without `TYPE_X`) are both detected — both contribute eddy-viscosity layers.
+  - Crucial timing constraint: must run **after** the BC parallel-for loops and must **NOT** call `flags.read_from_device()`, which would overwrite host-side BC state with stale GPU initial values.
+
+### Friend access for sparse Bouzidi
+
+- `LBM_Domain` declares `friend class LBM` to give the parent class direct access to the sparse-cell index buffer used by the parked Bouzidi infrastructure. Required by `compute_bouzidi_cells_active()` (precompute pass, runs at setup).
+
+## `src/kernel.cpp` — `WALL_VISC_BOOST` collision-side modification
+
+In the SRT collision branch of `stream_collide`, between the equilibrium computation and `store_f`, the relaxation rate `w` is replaced for wall-adjacent cells:
+
+```c
+#ifdef WALL_VISC_BOOST
+const uchar wall_dist = wall_adj_flag[n];
+if (wall_dist != (uchar)0u) {
+    const float u_mag = sqrt(sq(uxn) + sq(uyn) + sq(uzn));
+    if (u_mag > 1e-6f) {
+        const float nu = def_nu;
+        // Werner-Wengle PowerLaw closed-form u_tau:
+        const float u_visc2 = 2.0f * nu * u_mag;
+        const float u_log2  = 0.0246384f * pow(nu, 0.25f) * pow(u_mag, 1.75f);
+        const float u_tau   = sqrt(max(u_visc2, u_log2));
+        // Prandtl mixing-length eddy viscosity at cell-centre distance:
+        const float y_center    = (float)wall_dist - 0.5f;        // 0.5, 1.5, 2.5 lu
+        const float nu_t_target = 0.41f * y_center * u_tau;       // κ·y·u_τ
+        // Convert ν → relaxation rate:
+        const float nu_current = (1.0f / w - 0.5f) / 3.0f;
+        const float nu_new     = nu_current + nu_t_target;
+        w = 1.0f / (3.0f * nu_new + 0.5f);
+    }
+}
+#endif
+```
+
+**Why it works where five DDF-modifying approaches failed:** modifying `w` changes the local effective viscosity used by the collision operator — it does not touch the DDFs themselves. Esoteric-Pull's `load_f` / `store_f` round-trip is therefore preserved unchanged, and the modification survives the streaming step exactly as intended. This is the path Lehmann himself pointed to in [Discussion #58](https://github.com/ProjectPhysX/FluidX3D/discussions/58): *"Wall Model via local viscosity modification"*. Five DDF-modifying paths (CC#10 Krüger WW in Multi-Res, Path II.5 Floor-WW, Bouzidi Sparse, WALL_SLIP V1 full overwrite, WALL_SLIP V2 BLEND) all failed first; full failure analysis in `findings/BOUZIDI_EP_PULL_INCOMPATIBILITY_2026-05-15.md`.
+
+**Parameter-order constraint (production trap):** when extending `stream_collide` arguments with `wall_adj_flag`, it MUST be added to `add_parameters()` in `lbm.cpp` **after** the optional `FORCE_FIELD F` / `SURFACE` / `TEMPERATURE` blocks, to match the kernel signature order. Earlier insertion produced `CL_OUT_OF_RESOURCES (-5)` on `clEnqueueNDRangeKernel` — parameter-binding mismatch with the GPU side. Fixed and documented in `findings/WALL_TREATMENT_SUMMARY_2026-05-15.md`.
+
+## `src/setup.cpp` — Mode 3 production setup
+
+`PHASE_5B_COUPLE_MODE == 3` is the production default (`#define PHASE_5B_COUPLE_MODE 3`). Inside `main_setup_phase5b_dr()`:
+
+- `opts.alpha = 0.20f` (Far → Near forward blending)
+- `opts_back.alpha = 0.20f` (Near → Far back-coupling, same blend ratio for symmetric Schwarz)
+- α-sweep (0.10 / 0.15 / 0.20) confirmed 0.20 as the best compromise: 24 % faster convergence than 0.10 with smooth transitions, no oscillation onset.
+- Floor at `z = 0` is `TYPE_S` with `u_x = lbm_u` (moving wall, road velocity) on BOTH domains — this is the regime change that restored the underbody Venturi: `Fz_near = −552 N (downforce)` vs `+290 N` lift on TYPE_E floor.
+- Wheel-contact cells (vehicle cells at `z = 0`) inherit `lbm_u` so the wheel base behaves correctly.
+- After all BC parallel-for loops complete and before the outer chunk loop, both domains call `populate_wall_adj_flag()` when `WALL_VISC_BOOST` is active.
+
+### Outer chunk loop (Mode 3)
+
+```cpp
+lbm_far.run_async(chunk_far);            // dispatch Far on secondary queue
+lbm_near.run(3 * chunk_far);             // run Near on primary queue (3× steps for 3:1 ratio)
+lbm_far.finish();                        // barrier on Far before coupling
+lbm_far.couple_fields(lbm_near, ...);    // back-coupling Near → Far with α = 0.2
+lbm_near.couple_fields(lbm_far, ...);    // forward Far → Near with α = 0.2
+```
+
+### Production result (commit `4cccdaf`, EOD 2026-05-15)
+
+| | Far (15 mm) | Near (5 mm) |
+|---|---:|---:|
+| Fx (drag) | 1 464 N | 1 597 N |
+| Fz (lift/downforce) | — | **−563 N** |
+| Convergence | 150 chunks | 38 min wallclock |
+
+Phase 2 (single cell layer) is the validated state. Phase 3 multi-cell (3 layers, BFS) is **built but untested** (commit `7ec7dec`); next-session priority. Expected outcome per Prandtl mixing-length scaling: ~3× more affected cells, deeper BL coverage, stronger drag-reduction signal matching the user's ParaView observation that Phase 2's effect was *"noch nicht stark oder tief genug von der Wand in die angrenzenden Zellen hinein. So vom optischen im Vergleich zu OpenFOAM."*
+
+## Branch / repository policy
+
+As of 2026-05-16: **`master` is the only long-lived branch** on this fork. Feature work happens on `master` directly. The earlier `plan-refresh-multires` and `phase0-ahmed-validation` feature branches were consolidated:
+- `plan-refresh-multires` → fast-forward-merged into `master` (it carried the same commits, just on a feature branch by accident from earlier days)
+- `phase0-ahmed-validation` → preserved as the immutable tag [`archive/phase0-ahmed-validation`](https://github.com/heikogleu-dev/FluidX3D-Intel-B70/releases/tag/archive/phase0-ahmed-validation). The 22 unique commits (Bouzidi Step 1 PASSED, WW deep-dive Findings 20–37 architectural-limit documentation) are reachable via that tag for future resume.
+
+If you need to revisit a parked path, branch off the archive tag:
+```bash
+git checkout -b resume-bouzidi archive/phase0-ahmed-validation
+```
