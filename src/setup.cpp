@@ -882,7 +882,7 @@ void main_setup_phase5b_dr() {
 #if PHASE_5B_COUPLE_MODE==2
 	print_info("MODE 2: SEQUENTIAL bidirectional (Multiplicative Schwarz), band=2 Near, α=0.10 both directions, PERF-D batched sync");
 #elif PHASE_5B_COUPLE_MODE==3
-	print_info("MODE 3: CONCURRENT Far||Near (PERF-G Additive Schwarz, symmetric 1-chunk lag), Phase 4 tapered band=20 Near with quadratic α-decay, α=0.20 both directions");
+	print_info("MODE 3: CONCURRENT Far||Near (PERF-G Additive Schwarz, symmetric 1-chunk lag), Phase 6 Spiegelrampe-Blending 40-Cell-Band, α 0.05↔ALPHA_HIGH (Forward decay boundary→deep, Back rise boundary→deep)");
 #else
 	print_info("MODE 1: SEQUENTIAL one-way Far→Near (5 planes), α=0.5 forward soft-BC, PERF-D batched sync");
 #endif
@@ -992,8 +992,8 @@ void main_setup_phase5b_dr() {
 
 #ifdef WALL_VISC_BOOST
 	// MOVED HERE (2026-05-15 fix): populate AFTER BC loops set floor TYPE_S, so floor-adjacency is detected.
-	lbm_far.populate_wall_adj_flag();
-	lbm_near.populate_wall_adj_flag();
+	lbm_far .populate_wall_adj_flag(dx_far);   // Phase 5.1: explicit per-LBM dx_si — 20mm Far → 1 layer
+	lbm_near.populate_wall_adj_flag(dx_near);  // Phase 5.1: explicit per-LBM dx_si —  4mm Near → 5 layers
 	print_info("WALL_VISC_BOOST Phase 5.1 distance-based: Werner-Wengle + Prandtl mixing-length nu_t = κ·y·u_τ + Van Driest damping. Vehicle + Floor walls. Target BL depth ~20mm (auto-scaled per-domain to dx).");
 #endif
 
@@ -1102,21 +1102,79 @@ void main_setup_phase5b_dr() {
 		lbm_near.rho .read_from_device();
 		lbm_near.flags.read_from_device();
 
-		// Forward Far→Near (5 planes): Near's outer boundary für chunk c+1
-		// 2026-05-16: Tapered band reverted per user — visible improvement was negligible in flow field;
-		// soft transition will be applied as Python post-process step on output VTKs (findings/merge_far_near.py).
-		lbm_far.couple_fields(lbm_near, src_xmin, tgt_xmin, opts);
-		lbm_far.couple_fields(lbm_near, src_xmax, tgt_xmax, opts);
-		lbm_far.couple_fields(lbm_near, src_ymin, tgt_ymin, opts);
-		lbm_far.couple_fields(lbm_near, src_ymax, tgt_ymax, opts);
-		lbm_far.couple_fields(lbm_near, src_zmax, tgt_zmax, opts);
+		// Phase 6 Blending 2026-05-16: 40-Cell-Spiegelrampe für Forward + Back-Coupling per User-Vorschlag.
+		//   Forward Far→Near: 40 Layer-Tiefen, α(d) linear von 0.25 (Boundary, d=0) → 0.05 (deep, d=39)
+		//   Back Near→Far:    8 Layer-Tiefen (5:1 Ratio), α(dfar) linear von 0.05 (Boundary, dfar=0) → 0.25 (deep, dfar=7)
+		//   ALPHA_HIGH umschaltbar zwischen Tests (0.25 = User-Standard, 0.50 = aggressive Variante)
+		#ifndef PHASE6_ALPHA_HIGH
+		#define PHASE6_ALPHA_HIGH 0.50f
+		#endif
+		const float ALPHA_LOW  = 0.05f;
+		const float ALPHA_HIGH = PHASE6_ALPHA_HIGH;
+		const uint  BAND_NEAR  = 40u;          // Near cells = 160 mm physisch bei 4 mm dx
+		const uint  BAND_FAR   = BAND_NEAR/5u; // 8 Far cells (5:1 Ratio)
 
-		// Back Near→Far (5 planes): Far's interior coupling-plane für chunk c+1
-		lbm_near.couple_fields(lbm_far, bk_src_xmin, bk_tgt_xmin, opts_back);
-		lbm_near.couple_fields(lbm_far, bk_src_xmax, bk_tgt_xmax, opts_back);
-		lbm_near.couple_fields(lbm_far, bk_src_ymin, bk_tgt_ymin, opts_back);
-		lbm_near.couple_fields(lbm_far, bk_src_ymax, bk_tgt_ymax, opts_back);
-		lbm_near.couple_fields(lbm_far, bk_src_zmax, bk_tgt_zmax, opts_back);
+		// === FORWARD Far→Near: 5 Boundaries × 40 Near-Target-Tiefen ===
+		for(uint d = 0u; d < BAND_NEAR; d++) {
+			const float t = (float)d / (float)(BAND_NEAR - 1u);                // 0..1, 0=Boundary, 1=deep
+			const float alpha_d = ALPHA_HIGH - t * (ALPHA_HIGH - ALPHA_LOW);   // 0.25→0.05 (oder 0.50→0.05)
+			CouplingOptions opts_d = opts;
+			opts_d.alpha      = alpha_d;
+			opts_d.keep_flags = (d > 0u);                                       // nur Layer 0 (Boundary) setzt TYPE_E
+			const uint dsrc = d / 5u;                                           // Far-Cell shift (5:1)
+			PlaneSpec tgt, src;
+			// X_min: tgt deeper inward = origin.x increases
+			tgt = tgt_xmin; tgt.origin.x = d;
+			src = src_xmin; src.origin.x = src_xmin.origin.x + dsrc;
+			lbm_far.couple_fields(lbm_near, src, tgt, opts_d);
+			// X_max: tgt deeper inward = origin.x decreases
+			tgt = tgt_xmax; tgt.origin.x = tgt_xmax.origin.x - d;
+			src = src_xmax; src.origin.x = src_xmax.origin.x - dsrc;
+			lbm_far.couple_fields(lbm_near, src, tgt, opts_d);
+			// Y_min: tgt deeper = origin.y increases
+			tgt = tgt_ymin; tgt.origin.y = d;
+			src = src_ymin; src.origin.y = src_ymin.origin.y + dsrc;
+			lbm_far.couple_fields(lbm_near, src, tgt, opts_d);
+			// Y_max: tgt deeper = origin.y decreases
+			tgt = tgt_ymax; tgt.origin.y = tgt_ymax.origin.y - d;
+			src = src_ymax; src.origin.y = src_ymax.origin.y - dsrc;
+			lbm_far.couple_fields(lbm_near, src, tgt, opts_d);
+			// Z_max: tgt deeper = origin.z decreases
+			tgt = tgt_zmax; tgt.origin.z = tgt_zmax.origin.z - d;
+			src = src_zmax; src.origin.z = src_zmax.origin.z - dsrc;
+			lbm_far.couple_fields(lbm_near, src, tgt, opts_d);
+		}
+
+		// === BACK Near→Far: 5 Boundaries × 8 Far-Target-Tiefen (Near-Source-Center pro 5-Cell-Block) ===
+		for(uint dfar = 0u; dfar < BAND_FAR; dfar++) {
+			const float t = (float)dfar / (float)(BAND_FAR - 1u);              // 0..1, 0=Boundary, 1=deep
+			const float alpha_d = ALPHA_LOW + t * (ALPHA_HIGH - ALPHA_LOW);    // 0.05→0.25 (oder 0.50)
+			CouplingOptions opts_d = opts_back;
+			opts_d.alpha = alpha_d;
+			// Near source depth: center of 5-cell block für dieses Far-Cell. dfar=0 → Near=2, dfar=7 → Near=37
+			const uint dnear = 2u + 5u*dfar;
+			PlaneSpec src, tgt;
+			// X_min back
+			src = bk_src_xmin; src.origin.x = dnear;
+			tgt = bk_tgt_xmin; tgt.origin.x = 31u + dfar;
+			lbm_near.couple_fields(lbm_far, src, tgt, opts_d);
+			// X_max back
+			src = bk_src_xmax; src.origin.x = near_N.x - 1u - dnear;
+			tgt = bk_tgt_xmax; tgt.origin.x = 348u - dfar;
+			lbm_near.couple_fields(lbm_far, src, tgt, opts_d);
+			// Y_min back
+			src = bk_src_ymin; src.origin.y = dnear;
+			tgt = bk_tgt_ymin; tgt.origin.y = 88u + dfar;
+			lbm_near.couple_fields(lbm_far, src, tgt, opts_d);
+			// Y_max back
+			src = bk_src_ymax; src.origin.y = near_N.y - 1u - dnear;
+			tgt = bk_tgt_ymax; tgt.origin.y = 211u - dfar;
+			lbm_near.couple_fields(lbm_far, src, tgt, opts_d);
+			// Z_max back
+			src = bk_src_zmax; src.origin.z = near_N.z - 1u - dnear;
+			tgt = bk_tgt_zmax; tgt.origin.z = 73u - dfar;
+			lbm_near.couple_fields(lbm_far, src, tgt, opts_d);
+		}
 
 		// PERF-D: batched writes
 		lbm_near.flags.write_to_device();
