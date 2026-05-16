@@ -1,0 +1,7 @@
+PID=642585 duration=120.0s rate=0.5s
+iGPU fd = 6
+Sampling 240 ticks...
+Done sampling. min/mean/max B70 util: 0/9/100%
+min/mean/max iGPU util: 0/1/100%
+B70 ticks <10% util: 214/240 (89.2%)
+Saved plot: /tmp/b70_profile.png

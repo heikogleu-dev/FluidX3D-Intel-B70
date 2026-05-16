@@ -642,6 +642,21 @@ Result was **numerically stable but physically worse**:
 
 **Phase 7 will use 6C's α-range (0.05↔0.50), not 6D's extremes.** `main_setup_phase7_triple_res()` already hardcodes ALPHA_LOW=0.05, ALPHA_HIGH=0.50 as defaults. Detail: [findings/PHASE_6D_EXTREME_ALPHA_2026-05-16.md](findings/PHASE_6D_EXTREME_ALPHA_2026-05-16.md).
 
+## Phase 7 Run 1 — Triple-Res first production execution (2026-05-16 evening)
+
+Setup ran end-to-end without crashes: B70 hosts Near 391 M cells @ 4 mm + Far 53 M cells @ 12 mm (28.2 GB VRAM), iGPU Xe-LPG hosts Coarse 83 M cells @ 24 mm (5.3 GB shared system RAM). Per-LBM explicit `Device_Info` constructor (Phase 7 prep) worked, Coarse→Far→Near 3:1:2 cascade with Phase 6C-style plateau blending α=0.05↔0.50.
+
+Resource profile (17-min run):
+- B70 75-81 % utilized @ 220 W, 70 °C pkg, 80 °C VRAM
+- iGPU 27-40 % utilized @ 1.75-2.0 GHz (Battlemage Xe-LPG)
+- Bottleneck: B70 (iGPU has ~13 s idle per chunk waiting for B70 `.finish()`)
+
+**Convergence pathology — same as Phase 6D**: trigger fired at chunk 82 with `|dFx|/Fx = 0.017 %`, but stability σ/μ Fx_near = 58 %. Forces oscillate chunk-to-chunk in a 2-chunk saw-tooth pattern (low/high/low/high) that the 25-chunk sliding-mean smooths out. The result (Cd 1.62, Fz_near −1375 N) is not physically converged.
+
+Likely cause: `chunk_far=50` is too short for stable 3-cascade coupling. Phase 5b-DR used `chunk_far=100` with 2-cascade and had no saw-tooth (σ/μ 1.5 %). Run 2 tomorrow will use `chunk_far=100` (chunk_near=300, chunk_coarse=50) to dampen the oscillation.
+
+Detail: [findings/PHASE_7_RUN1_2026-05-16.md](findings/PHASE_7_RUN1_2026-05-16.md).
+
 ## Phase 7 — Triple-Res with iGPU as outer wake-extension domain (designed)
 
 Documented in [findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md). Pending Phase 6 results.
