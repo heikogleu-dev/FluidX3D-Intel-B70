@@ -430,7 +430,115 @@ lbm_near.couple_fields(lbm_far, ...);    // forward Far → Near with α = 0.2
 | Fz (lift/downforce) | — | **−563 N** |
 | Convergence | 150 chunks | 38 min wallclock |
 
-Phase 2 (single cell layer) is the validated state. Phase 3 multi-cell (3 layers, BFS) is **built but untested** (commit `7ec7dec`); next-session priority. Expected outcome per Prandtl mixing-length scaling: ~3× more affected cells, deeper BL coverage, stronger drag-reduction signal matching the user's ParaView observation that Phase 2's effect was *"noch nicht stark oder tief genug von der Wand in die angrenzenden Zellen hinein. So vom optischen im Vergleich zu OpenFOAM."*
+Phase 2 (single cell layer) was the EOD 2026-05-15 production setting. Phase 3 (multi-cell BFS to 3 layers, hardcoded y_p=0.5 in u_τ formula) tested 2026-05-16: forces statistically identical to Phase 2 (within ±2 %). Phase 3.1 (Phase 4 production) corrects the two physics issues — explicit y_lu in Werner-Wengle closed form + Van Driest damping `(1-exp(-y+/26))²`. See § "Session 2026-05-16" below.
+
+---
+
+# Session 2026-05-16 — Phase 4 Aggressive: 4 mm Near + 20 mm Far + 5:1 ratio + Phase 3.1 wall fix + tapered α blending
+
+Phase 4 brings together three orthogonal improvements over the Phase 3 baseline, validated 2026-05-16 with a 50-minute production run. Tagged `production-phase4-2026-05-16`. Commit `840866c` for code, `cc08f0e` for finding documentation.
+
+## `src/kernel.cpp` — Phase 3.1 WALL_VISC_BOOST upgrade
+
+The Phase 3 block hardcoded the Werner-Wengle closed-form constants `2.0*nu*u_mag` and `0.0246384*pow(nu,0.25f)*pow(u_mag,1.75f)` for y_p = 0.5 lu (the first wall-adjacent cell distance). Phase 3.1 corrects both issues:
+
+1. **Explicit `y_lu`** — the closed-form now reads
+   ```c
+   const float y_lu    = (float)wall_dist - 0.5f;
+   const float u_visc2 = nu * u_mag / y_lu;
+   const float u_log2  = 0.02462f * pow(u_mag, 1.75f) * pow(nu, 0.25f) / pow(y_lu, 0.25f);
+   ```
+   so Layer 2 (y_lu=1.5) and Layer 3 (y_lu=2.5) get physically correct u_τ instead of the systematic overshoot of the y_p=0.5-baked-in constants.
+
+2. **Van Driest damping** (Van Driest 1956, A+ = 26):
+   ```c
+   const float y_plus  = y_lu * u_tau / nu;
+   const float vd_damp = (1.0f - exp(-y_plus / 26.0f)) * (1.0f - exp(-y_plus / 26.0f));
+   const float nu_t_target = 0.41f * y_lu * u_tau * vd_damp;
+   ```
+   ν_t → 0 in the viscous sublayer (y+<5), correcting the pure-linear `κ·y·u_τ` growth that was only valid in the log layer (y+ ≈ 30–300).
+
+Empirical effect on integrated forces: ~2 % (below noise of Phase 3 vs Phase 2). The change is primarily about physical defensibility, not Drag-Quantitäts-Korrektur.
+
+## `src/lbm.hpp` — `CouplingOptions.keep_flags`
+
+New struct field `bool keep_flags = false;` controls whether `couple_fields()` writes `flags[n] = TYPE_E` on target cells. When `true`, only `u/rho` are blended (TYPE_F preserved). Enables the tapered band coupling where inner-band cells remain interior fluid but get gentle nudging toward Far's interpolated value.
+
+## `src/lbm.cpp` — `couple_fields()` respects `keep_flags`
+
+The TYPE_E write at line ~1490 is now gated:
+```cpp
+if(!opts.keep_flags) tgt_sim.flags[n] = TYPE_E;
+```
+The α-blend logic unchanged. With `keep_flags=true` + `alpha<1`, the cell stays TYPE_F and gets soft-blended.
+
+## `src/setup.cpp` — Phase 5b-DR refactored for Phase 4 Aggressive
+
+### Cell sizes and box dimensions (lines 866–905)
+
+| | Phase 3 | **Phase 4** |
+|---|---:|---:|
+| `dx_far` | 0.015 m | **0.020 m** |
+| `dx_near` | 0.005 m | **0.004 m** |
+| Ratio | 3:1 | **5:1** |
+| Far cells | 900×534×334 = 160 M | **650×300×225 = 44 M** |
+| Near cells | 1320×540×339 = 242 M | **1600×630×375 = 378 M** |
+| Far world | X[−1.5,+12] Y[±4] Z[0,+5.01] | **X[−1,+12] Y[±3] Z[0,+4.5]** |
+| Near world | X[−0.495,+6.105] Y[±1.345] Z[0,+1.695] | **X[−0.4,+6] Y[±1.26] Z[0,+1.5]** |
+| Near origin in Far cells | (67, 177, 0) | **(30, 87, 0)** |
+| Vehicle clearance | 15 mm (1 Far cell at 15 mm) | **20 mm (1 Far cell at 20 mm = 5 Near cells)** |
+| `chunk_near` multiplier | × 3 | **× 5** |
+| Total VRAM | 25.8 GB | **27.4 GB** |
+
+All Near box corners exactly align on Far cells (Near offset in Far cells: 30, 87, 0 — all integer; Near extents in Far cells: 320, 126, 75 — exact 5× of Near cell counts). Sub-cell coupling-plane mapping is therefore perfectly clean at 5:1.
+
+### Forward coupling planes — 5:1 dimensions (lines 998–1012)
+
+All 5 forward planes (X_min/max, Y_min/max, Z_max) updated for 5:1 ratio with new Near origin. Coupling Z range: Far Z=1..74 (74 cells, skip floor z=0 and skip cells beyond Near top), Near Z=1..370 (370 cells = 74×5). Top 4 Near cells (Z=371..374, adjacent to TYPE_E top wall) uncoupled — same pattern as old setup at 3:1.
+
+### Tapered α blending (Mode 3 run loop, lines 1106–1145)
+
+After the 5 outer-boundary forward calls (d=0, hard TYPE_E, α=0.20 — original behaviour), a loop adds 19 more layers per direction with soft blending:
+
+```cpp
+const uint BAND = 20u; // 80 mm physical at 4 mm Near dx
+const float alpha_max = opts.alpha;
+for(uint d = 1u; d < BAND; d++) {
+    const float taper = 1.0f - (float)d / (float)BAND;
+    CouplingOptions opts_d = opts;
+    opts_d.alpha      = alpha_max * taper * taper;  // quadratic decay
+    opts_d.keep_flags = true;                        // preserve TYPE_F
+    const uint dsrc = d / 5u;                        // Far cell shift (integer)
+    // Shift target d cells inward and source dsrc Far cells correspondingly,
+    // then call couple_fields for each of the 5 boundary directions.
+    // ...
+}
+```
+
+Result: 5 × 20 = 100 forward coupling calls per chunk (vs 5 in Phase 3). Per-call cost is small (parallel_for on plane), so the wall-clock impact is <5 % despite the 20× call count.
+
+The band creates an 80 mm sponge zone where Near's high-res turbulence is gradually relaxed toward Far's coarser representation, eliminating the visible "Kante" the user observed in Phase 3 ParaView screenshots.
+
+## Phase 4 Production Run Result
+
+Mode 3 PERF-G + WALL_VISC_BOOST Phase 3.1 + Tapered α + 4 mm Near + TYPE_S moving floor, MR2 vehicle at 30 m/s.
+
+| Force | Phase 3 (5mm/15mm) | **Phase 4 (4mm/20mm)** | Δ |
+|---|---:|---:|---:|
+| Fx_far (drag, Coupling carrier) | 1 484 N | 2 557 N | +72 % (coarsening — expected) |
+| **Fx_near** (drag, **physical signal**) | 1 574 N | **1 494 N** | **−5 %** |
+| Fy_far / Fy_near | ~0 | +23 / +3.4 N | ~0 ✓ symmetric |
+| **Fz_near** (downforce) | −552 N | **−799 N** | **+45 % stronger** |
+
+- Run converged at chunk 87 (auto-stop, `|dFx_far|/|Fx_far| < 2%`), 50 min wallclock.
+- 33 s/chunk vs Phase 3's 17.6 s/chunk — compute-bound (cell-step ratio 2.19×), not coupling-bound.
+- Far is now intentionally a coupling carrier only. Fx_far rise is a numerical artifact of 20 mm cells too coarse to resolve the vehicle BL (~1 Far-cell wide). Fx_near remains the physically-relevant drag signal.
+
+Detailed analysis: [findings/PHASE_4_FINAL_RESULT_2026-05-16.md](findings/PHASE_4_FINAL_RESULT_2026-05-16.md).
+
+## Production tag
+
+`production-phase4-2026-05-16` at commit `cc08f0e` marks this configuration as the stable production checkpoint. Future experimental work (Triple-Res with iGPU as outer wake-extension, Bouzidi BB reactivation, etc.) branches off this tag.
 
 ## Branch / repository policy
 

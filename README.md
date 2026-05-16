@@ -1,10 +1,10 @@
 # FluidX3D — Intel Arc Pro B70 (Battlemage) Fork
 
-**Pioneer documentation: FluidX3D 3.6 LBM solver verified at 99.5 % peak bandwidth on Intel Arc Pro B70 Pro (BMG-G31, full Battlemage, xe driver, oneAPI OpenCL 26.05). 4× faster than the RTX 3060 Ti reference. Includes Linux/xe-driver shutdown-crash workaround, HiDPI font, windowed mode with env-var control, FORCE_FIELD enabled with VTK + CSV export of solid-boundary forces. Plus: a complete Multi-Resolution Schwarz coupling stack (Mode 3 PERF-G concurrent additive Schwarz, 3:1 Far/Near), and a viscosity-modification wall model (`WALL_VISC_BOOST`) that works inside FluidX3D's Esoteric-Pull layout where five distinct DDF-modifying wall models failed.**
+**Pioneer documentation: FluidX3D 3.6 LBM solver verified at 99.5 % peak bandwidth on Intel Arc Pro B70 Pro (BMG-G31, full Battlemage, xe driver, oneAPI OpenCL 26.05). 4× faster than the RTX 3060 Ti reference. Includes Linux/xe-driver shutdown-crash workaround, HiDPI font, windowed mode with env-var control, FORCE_FIELD enabled with VTK + CSV export of solid-boundary forces. Plus: a complete Multi-Resolution Schwarz coupling stack (Mode 3 PERF-G concurrent additive Schwarz, 5:1 Far/Near with tapered α-blending), and a viscosity-modification wall model (`WALL_VISC_BOOST`) with Werner-Wengle + Prandtl mixing-length + Van Driest damping that works inside FluidX3D's Esoteric-Pull layout where five distinct DDF-modifying wall models failed.**
 
 This is a fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D). For the original project documentation see [README_UPSTREAM.md](README_UPSTREAM.md). All changes vs upstream are tracked file-by-file in [MODIFICATIONS.md](MODIFICATIONS.md). License is **unchanged** — see [LICENSE.md](LICENSE.md), non-commercial / non-military use only.
 
-**Active development branch:** [`plan-refresh-multires`](https://github.com/heikogleu-dev/FluidX3D-Intel-B70/tree/plan-refresh-multires). The `master` branch is fast-forwarded to the same commit on every overhaul. Day-by-day session summaries live in [`findings/`](findings/) — see [SESSION_2026-05-15_SUMMARY.md](findings/SESSION_2026-05-15_SUMMARY.md) for the latest end-of-day state and [TODO_2026-05-16.md](findings/TODO_2026-05-16.md) for the next-session plan.
+**Branch policy:** Single-branch — all work on `master`. Production checkpoints are tagged (`production-phase4-2026-05-16`, etc.). Day-by-day session summaries live in [`findings/`](findings/) — most recent: [PHASE_4_FINAL_RESULT_2026-05-16.md](findings/PHASE_4_FINAL_RESULT_2026-05-16.md).
 
 ---
 
@@ -20,25 +20,27 @@ Together: first publicly documented end-to-end CFD evaluation on Battlemage Xe2 
 
 ---
 
-## Status (current — 2026-05-16)
+## Status (current — Phase 4 Production, 2026-05-16)
 
 | Aspect | Status |
 |---|---|
 | Compute (LBM kernels) | ✅ **4 917 MLUPS @ 16.85 M cells, 605 GB/s = 99.5 % of B70 spec (608 GB/s)** — see [§ "Why effective bandwidth > spec"](#why-effective-bandwidth--608-gbs) |
-| Allocation / memory layout | ✅ 56.6 B/cell empirical (D3Q19 + FP16C), matches theory; max ~449 M cells fit in B70's 28.6 GB |
-| FP16C precision (DDFs) | ✅ stable, no observed divergence over 10 000 steps |
+| Allocation / memory layout | ✅ 64.85 B/cell empirical (D3Q19 + FP16C + WALL_VISC_BOOST flag); ~27.4 GB used for current production setup, 4.6 GB B70 headroom |
+| FP16C precision (DDFs) | ✅ stable, no observed divergence over 10 000+ steps |
 | `FORCE_FIELD` extension | ✅ enabled, force-field on TYPE_S boundaries written as VTK + CSV |
-| **Multi-Res Schwarz coupling (Pfad A 3:1)** | ✅ **Mode 3 PERF-G Concurrent Additive Schwarz** — Far 15 mm + Near 5 mm running concurrently on the B70 via two cl-queues (`run_async`/`finish`), symmetric 1-chunk lag, α = 0.20 (forward+back). Production-stable on the MR2 case; physically consistent forces (Fx_far ≈ Fx_near). See `findings/PERF_G_CONCURRENT_LBM_2026-05-15.md`. |
-| **Wall model `WALL_VISC_BOOST`** | ✅ **Phase 2 production-stable** (Werner-Wengle PowerLaw + Prandtl mixing-length `ν_t = κ·y·u_τ`, single cell layer) — only wall model that **works inside the Esoteric-Pull DDF layout**; five DDF-modifying approaches failed before. ⚠️ Phase 3 multi-cell (3 layers, BFS) **built but UNTESTED** — next-session priority. |
-| Legacy `WALL_MODEL_VEHICLE` (CC#10 WW) | ⚠️ **Disabled on this branch** (`// #define WALL_MODEL_VEHICLE`). Worked on smooth STL only (MR2 580 N); failed on Ahmed Body (125× force-amplification) and in Multi-Res context (Three-Attractor pathology −610 / +163 k / +290 k N). Code preserved in source. |
+| **Multi-Res Schwarz coupling (Pfad A 5:1)** | ✅ **Mode 3 PERF-G Concurrent Additive Schwarz** — Far 20 mm + Near 4 mm running concurrently on the B70 via two cl-queues (`run_async`/`finish`), symmetric 1-chunk lag, α = 0.20 (forward+back). **Phase 4 tapered α blending**: 20-cell band inside Near with quadratic α-decay smooths Near→Far wake transition. See [PHASE_4_FINAL_RESULT_2026-05-16.md](findings/PHASE_4_FINAL_RESULT_2026-05-16.md). |
+| **Wall model `WALL_VISC_BOOST` Phase 3.1** | ✅ **Production-stable** — Werner-Wengle PowerLaw with explicit y_lu (3 layers, BFS-expanded) + Prandtl mixing-length `ν_t = κ·y·u_τ` + **Van Driest damping** `[1-exp(-y+/26)]²`. Only wall model that **works inside the Esoteric-Pull DDF layout**; five DDF-modifying approaches failed before. Physics review: [WALL_VISC_BOOST_PHASE3_PHYSICS_REVIEW_2026-05-16.md](findings/WALL_VISC_BOOST_PHASE3_PHYSICS_REVIEW_2026-05-16.md). |
+| Legacy `WALL_MODEL_VEHICLE` (CC#10 WW) | ⚠️ **Disabled on this branch** (`// #define WALL_MODEL_VEHICLE`). Worked on smooth STL only (MR2 580 N); failed on Ahmed Body (125× force-amplification) and in Multi-Res context (Three-Attractor pathology). Code preserved in source. |
 | `BOUZIDI_VEHICLE` (sparse sub-grid BB) | ⏸️ infrastructure preserved (sparse-cells precompute, `bouzidi_active_cells`); EP-pull-compatible kernel still to write. Orthogonal benefit to viscosity wall model (addresses underbody voxelization staircase). |
-| TYPE_S Moving-Wall Floor (Mode 3) | ✅ Moving-floor with `u_x = lbm_u` allows Venturi underbody flow → **Fz_near = −552 N (downforce)** vs +290 N when floor was TYPE_E. |
+| TYPE_S Moving-Wall Floor (Mode 3) | ✅ Moving-floor with `u_x = lbm_u` allows Venturi underbody flow → **Fz_near = −799 N (downforce)** with Phase 4 4mm Near. |
 | Multi-GPU on B70 | 🚫 **out of scope** (single-tile B70). The TYPE_Y symmetry-plane patch attempt (CC#7) was not validated for the halo-exchange path multi-GPU would require. |
+| iGPU (Arrow Lake-S Xe-LPG) | 🔮 **future Triple-Res pathfinder** — could host a third coarse "wake extension" outer domain (30-50m downstream) via OpenCL platform 1. Conceptual design only; ~2 days implementation. |
 | Build (Linux + X11 + OpenCL ICD) | ✅ clean compile in ~10 s with GCC 15.2 |
 | Linux x11 windowed mode | ✅ default 2560×1440, env-var configurable |
 | Linux xe-driver clean shutdown | ⚠️ requires `_exit(0)` workaround (see below) |
 | Live visualisation FPS | ⚠️ 0–1 FPS at large window — FluidX3D's CPU software renderer is the bottleneck, **not** the GPU |
 | Companion ParaView GPU build | ✅ self-built ParaView 6.1 + OSPRay 3.2 GPU module on Arc Pro B70 — see [Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing). Launch via wrapper script only (silent CPU-fallback otherwise). |
+| VTK Multi-Res header quirk | ⚠️ FluidX3D's `Memory<T>::write_vtk()` uses **global** `units` for SPACING and box-centered ORIGIN. For DR/Multi-Res setups, run `findings/fix_vtk_origin.py` on both Far and Near VTKs after every export to fix headers. Memory: [`fluidx3d_vtk_multires_quirk`]. |
 
 ## Hardware target
 
@@ -221,9 +223,26 @@ First attempt at canonical Ahmed Body validation using a **simplified 16-triangl
 
 **Resolution path:** the Multi-Resolution Roadmap above replaces the failed CC#X with a properly-staged sequence — **Phase 0** uses the canonical ERCOFTAC Ahmed STLs (rounded front), **Phase 0c** quantifies the BB-pathology resolution-scaling, **Phase 1** addresses Bouzidi interpolated BB. The CC#10 WW code remains the production baseline unmodified (validated for smooth STL vehicles, Iron Rule).
 
-## Current production state (end-of-day 2026-05-15)
+## Current production state — Phase 4 Aggressive (2026-05-16, tag `production-phase4-2026-05-16`)
 
-After the Phase 5b-DR validation (one-way Far→Near coupling) closed cleanly, two production-grade features were added on top to bring the Multi-Resolution stack to a defensible state for the Time-Attack MR2 case. Both are live on `master` and used as the default configuration:
+The Phase 4 Aggressive configuration brings together three orthogonal improvements over the Phase 3 baseline (5 mm / 15 mm / 3:1):
+
+| Feature | Phase 3 (commit `b3f8e4a`) | **Phase 4 Production (commit `cc08f0e`)** |
+|---|---|---|
+| Near / Far cell size | 5 mm / 15 mm | **4 mm / 20 mm** |
+| Coupling ratio | 3:1 | **5:1** |
+| Box: Far | X[−1.5, +12] Y[−4, +4] Z[0, +5] | X[−1, +12] Y[−3, +3] Z[0, +4.5] |
+| Box: Near | X[−0.495, +6.105] Y[±1.345] Z[0, +1.695] | X[−0.4, +6] Y[±1.26] Z[0, +1.5] |
+| Cells Far × Near | 160 M × 242 M = 402 M | **44 M × 378 M = 422 M** |
+| VRAM Total | 25.8 GB | **27.4 GB** |
+| Wall model | Phase 3 (κ·y·u_τ) | **Phase 3.1 (+ Van Driest damping + explicit y_lu)** |
+| Coupling band | hard TYPE_E (single layer) | **Tapered α: 20-cell band, α(d) = α_max·(1−d/20)²** |
+| Convergence | 150 chunks, 38 min | **87 chunks, 50 min** |
+| **Fx_near** (drag, physical signal) | 1 574 N | **1 494 N** (−5 %) |
+| **Fz_near** (downforce) | −552 N | **−799 N** (+45 %) |
+| Fx_far (coupling carrier) | 1 484 N | 2 557 N (+72 %, expected from coarsening) |
+
+The headline results: **5 % drag reduction and 45 % more downforce on the Near domain**, achieved by finer underbody resolution (250 vs 200 cells/m), larger wheel clearance (20 vs 15 mm), better Z-top blending, and physically corrected wall model. Far drag rises (Far is now purely a coupling carrier at 20 mm — too coarse for vehicle BL, that's by design).
 
 ### Mode 3 — PERF-G Concurrent Additive Schwarz (commit `bf589f3`/`a277377`)
 
@@ -234,17 +253,19 @@ Mode 2 sequential bidirectional coupling (Far → Near → Far → Near in serie
 - `α = 0.20` for both forward (Far → Near) and back-coupling (Near → Far). The α-sweep test confirmed 0.20 as the best compromise: visibly smooth transitions, 24 % faster convergence than 0.10, no oscillation onset.
 - **~5–10 % wallclock-overhead vs Mode 1 one-way**, but produces **physically consistent Fx_far ≈ Fx_near** (Mode 1 left a ~55 % drag gap). User note from the ParaView session: *"Wirklich interessant zu sehen wie stark das Farfield vom Nearfield bei der Wirbelauflösung durch die Kopplung profitiert!"* — back-coupling injects Near's high-resolution turbulent content into Far's coarser grid.
 
-End-of-day production numbers (Mode 3 + WALL_VISC_BOOST Phase 2 + TYPE_S moving floor):
+Phase 4 production numbers (Mode 3 + Phase 3.1 WALL_VISC_BOOST + Tapered α + 4 mm Near + TYPE_S moving floor):
 
-| | Far (15 mm) | Near (5 mm) |
+| | Far (20 mm) | Near (4 mm) |
 |---|---:|---:|
-| **Fx (drag)** | 1 464 N | 1 597 N |
-| **Fz (lift / downforce)** | — | **−563 N (downforce)** |
-| Wallclock to convergence | 150 chunks ≈ **38 min** | (same — concurrent) |
+| **Fx (drag)** | 2 557 N (coupling carrier — coarse over-estimates) | **1 494 N (physical signal)** |
+| **Fz (lift / downforce)** | +379 N | **−799 N (downforce)** |
+| Wallclock to convergence | 87 chunks ≈ **50 min** | (same — concurrent) |
 
-The −563 N downforce is a regime change compared to the earlier TYPE_E floor result (+290 N lift). With TYPE_E acting as a free-stream below the car, the Venturi was suppressed; switching the floor to `TYPE_S` with `u_x = lbm_u` (moving wall, no-slip with road velocity) restored the underbody pressure-drop. Wheel-contact cells at `z=0` still get `lbm_u` so the wheels behave correctly.
+The 20 mm Far is intentionally too coarse to resolve vehicle BL — at 5:1 ratio Far primarily transports inlet/outlet/side boundary information to Near. The Fx_far value reflects this coarsening and is **not the production metric**. Fx_near and Fz_near are the physical signals.
 
-### Wall model — `WALL_VISC_BOOST` (commits `0697ba2` → `c56acad` → `4cccdaf`)
+Wheel-contact cells at `z=0` get `lbm_u` (matching the road) so the wheels don't create a velocity discontinuity. Vehicle wheel clearance at Phase 4 is 20 mm (1 Far cell = 5 Near cells via the 5:1 ratio).
+
+### Wall model — `WALL_VISC_BOOST` Phase 3.1 (commits `0697ba2` → `c56acad` → `4cccdaf` → `840866c`)
 
 Six wall-model approaches were tested in 2026-05-15 against Multi-Res Mode 3. **Five failed** with the same architectural signature — FluidX3D's Esoteric-Pull DDF layout neutralises or corrupts any inline DDF / `f_eq` modification on complex STL geometry. Only the sixth survived:
 
@@ -263,9 +284,29 @@ Six wall-model approaches were tested in 2026-05-15 against Multi-Res Mode 3. **
 
 The viscosity-modification path was suggested by Lehmann himself in [Discussion #58](https://github.com/ProjectPhysX/FluidX3D/discussions/58) as *the* practical wall-model entry point for FluidX3D, and it survived in our pipeline where the literature-canonical Krüger Moving-Wall WW did not.
 
-**Phase 2 (single cell layer) is the current production setting**: ~5 % drag reduction, physically correct mixing-length scaling, vehicle + floor cells both flagged.
+**Phase 3.1 (multi-cell BFS expansion to 3 layers + Van Driest damping) is the current production setting.** The kernel iterates over wall-adjacent cells (flagged 1/2/3 by BFS from TYPE_S boundaries) and computes:
 
-**Phase 3 (multi-cell BFS expansion to 3 layers)** is built in the source (`lbm.cpp::populate_wall_adj_flag` runs a multi-pass BFS from TYPE_S boundaries, `kernel.cpp` applies layer-scaled `ν_t = κ·y·u_τ` with `y = wall_dist − 0.5`) **but UNTESTED**. The user's ParaView observation from the Phase 2 production session was: *"Ja, ich kann eine Veränderung sehen, aber scheinbar ist der Effekt noch nicht stark oder tief genug von der Wand in die angrenzenden Zellen hinein. So vom optischen im Vergleich zu OpenFOAM."* — Phase 3's 3× deeper penetration is the intended response. Validation is the priority of the next session ([findings/TODO_2026-05-16.md](findings/TODO_2026-05-16.md)).
+```
+y_lu        = wall_dist - 0.5            // cell-center distance in lu (0.5, 1.5, 2.5)
+u_τ_visc²   = ν · u / y_lu                // Werner-Wengle viscous-sublayer form
+u_τ_log²    = u^(7/4) · ν^(1/4) · 0.02462 / y_lu^(1/4)   // 8.3^(-7/4) PowerLaw form
+u_τ         = sqrt(max(u_τ_visc², u_τ_log²))
+y_plus      = y_lu · u_τ / ν
+vd_damping  = (1 - exp(-y_plus/26))²       // Van Driest 1956, A+ = 26
+ν_t_target  = 0.41 · y_lu · u_τ · vd_damping  // Prandtl mixing-length × damping
+w           = 1 / (3·(ν_current + ν_t_target) + 0.5)   // updated relaxation rate
+```
+
+Phase 3 (without Van Driest, hardcoded y_p=0.5 in u_τ formula) was tested and gave forces statistically identical to Phase 2. Phase 3.1 corrects the two physics issues — the diff in integrated forces is small at this Reynolds number, but the code is now physically defensible per literature standards (Werner & Wengle 1991, Van Driest 1956). Physics review: [WALL_VISC_BOOST_PHASE3_PHYSICS_REVIEW_2026-05-16.md](findings/WALL_VISC_BOOST_PHASE3_PHYSICS_REVIEW_2026-05-16.md).
+
+### Tapered α blending — `CouplingOptions.keep_flags` (commit `840866c`)
+
+Phase 3 ParaView visualisation showed a sharp "Kante" at the Near→Far transition in the wake region — the discontinuity between Near's 5 mm high-res turbulent structures and Far's 15 mm coarse representation outside the Near box. Phase 4 introduces a tapered blending zone INSIDE Near:
+
+- **Outer layer (Near boundary, d=0)**: hard TYPE_E + α=0.20 (the original forward-coupling behaviour)
+- **Inner band (d=1..19, 20 cells = 80 mm at 4 mm dx)**: TYPE_F preserved (`keep_flags=true` skips the TYPE_E write), only `u/rho` blended toward the interpolated Far value, with quadratic α-decay `α(d) = α_max · (1 − d/20)²`
+
+The result is a soft sponge band that gradually relaxes Near's high-res turbulence toward Far's coarser representation as you approach the boundary. The visible Wake-Kante in Phase 3 is replaced by a graded transition in Phase 4. New `CouplingOptions.keep_flags` field gates the TYPE_E write; the existing α-blend already supported soft-overwrite via `(1-α)·tgt + α·src`.
 
 ## Roadmap & Findings
 
