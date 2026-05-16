@@ -1487,7 +1487,7 @@ void LBM::couple_fields(LBM& tgt_sim, const PlaneSpec& src_plane, const PlaneSpe
 		else if(axis == 1u) { cx = tx + i; cz = tz + j; }
 		else /* axis == 2u */ { cx = tx + i; cy = ty + j; }
 		const ulong n = (ulong)cx + (ulong)cy * (ulong)tgt_sim.Nx + (ulong)cz * (ulong)tgt_sim.Nx * (ulong)tgt_sim.Ny;
-		tgt_sim.flags[n]  = TYPE_E;
+		if(!opts.keep_flags) tgt_sim.flags[n] = TYPE_E; // Phase 4 tapered band: skip TYPE_E write at inner-band layers (TYPE_F preserved)
 		if(soft_blend) {
 			tgt_sim.u.x[n]  = (1.0f-alpha) * tgt_sim.u.x[n]  + alpha * tgt_ux[idx_flat];
 			tgt_sim.u.y[n]  = (1.0f-alpha) * tgt_sim.u.y[n]  + alpha * tgt_uy[idx_flat];

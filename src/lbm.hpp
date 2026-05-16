@@ -260,6 +260,7 @@ struct CouplingOptions {
 	bool export_vtk = false;            // diagnostic VTK: plane_t{step}.vtk
 	float alpha = 1.0f;                 // soft-BC blend: 1.0=hard overwrite (default), <1.0=damped (tgt = (1-α)*tgt + α*src). Stabilizes iterative bidirectional Schwarz coupling.
 	bool sync_pcie = true;              // PERF-D: if false, skip PCIe transfers inside couple_fields() — caller must manually sync src u/rho before calling and write tgt flags/u/rho back after batch. Enables ~5× speedup with multiple coupling planes per chunk.
+	bool keep_flags = false;            // Phase 4 tapered blending: if true, skip flags[n]=TYPE_E write. Use for inner-band cells (TYPE_F preserved) — only u/rho blended toward src. Combined with α<1 implements the gradient sponge zone.
 };
 
 

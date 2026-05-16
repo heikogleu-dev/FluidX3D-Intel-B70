@@ -1925,25 +1925,35 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // SUBGRID
 
 )+"#ifdef WALL_VISC_BOOST"+R(
-	// Option B Phase 3 (2026-05-15): Multi-cell Prandtl mixing-length wall function.
-	// wall_adj_flag[n] = wall distance layer: 0=interior, 1=direct neighbor (y=0.5lu),
-	// 2=1 cell from wall (y=1.5lu), 3=2 cells (y=2.5lu).
-	// Mixing-length scales linearly with distance: nu_t = κ · y · u_tau, κ=0.41 (von Karman).
-	// → Layer 1: 0.205·u_tau, Layer 2: 0.615·u_tau, Layer 3: 1.025·u_tau.
+	// Option B Phase 3.1 (2026-05-16): Multi-cell Prandtl mixing-length wall function with Van Driest damping.
+	// Fixes vs Phase 3:
+	//   1) Werner-Wengle closed-form u_τ uses explicit y_lu (was hardcoded for y_p=0.5), so Layer 2/3 get
+	//      physically correct u_τ instead of systematic overshoot.
+	//   2) Van Driest damping (1956): ν_t → 0 in viscous sublayer (y+ < ~26), corrects pure-linear growth.
+	// wall_adj_flag[n] = layer index: 0=interior, 1=direct wall neighbor (y_lu=0.5), 2=y_lu=1.5, 3=y_lu=2.5.
 	const uchar wall_dist = wall_adj_flag[n];
 	if(wall_dist != (uchar)0u) {
 		const float u_mag = sqrt(sq(uxn)+sq(uyn)+sq(uzn));
 		if(u_mag > 1e-6f) {
-			const float nu = def_nu;
-			const float u_visc2 = 2.0f*nu*u_mag;
-			const float u_log2  = 0.0246384f * pow(nu, 0.25f) * pow(u_mag, 1.75f);
+			const float nu     = def_nu;
+			const float y_lu   = (float)wall_dist - 0.5f; // cell-center distance from wall, in lattice units
+			// Werner-Wengle PowerLaw closed-form for u_τ at GENERAL y (Werner & Wengle 1991):
+			//   viscous sublayer:  u/u_τ = y·u_τ/ν       → u_τ² = ν·u / y
+			//   log region:        u/u_τ = 8.3·(y·u_τ/ν)^(1/7) → u_τ² = u^(7/4)·ν^(1/4)·8.3^(-7/4)·y^(-1/4)
+			//   constant 8.3^(-7/4) = 0.02462
+			const float u_visc2 = nu * u_mag / y_lu;
+			const float u_log2  = 0.02462f * pow(u_mag, 1.75f) * pow(nu, 0.25f) / pow(y_lu, 0.25f);
 			const float u_tau   = sqrt(max(u_visc2, u_log2));
-			// y_center_in_lu for this layer: (dist - 0.5), e.g. dist=1 → y=0.5, dist=2 → y=1.5, dist=3 → y=2.5
-			const float y_center = (float)wall_dist - 0.5f;
-			const float nu_t_target = 0.41f * y_center * u_tau; // mixing-length scaling
-			const float nu_current = (1.0f/w - 0.5f)/3.0f;
-			const float nu_new = nu_current + nu_t_target;
-			w = 1.0f/(3.0f*nu_new + 0.5f);
+			// Van Driest (1956): damping factor (1 - exp(-y+/A+))², A+ = 26
+			// y+ = y·u_τ/ν  (lattice units cancel since y in lu, u_τ in lbm-velocity, ν in lbm-viscosity)
+			const float y_plus  = y_lu * u_tau / nu;
+			const float vd_inner = 1.0f - exp(-y_plus / 26.0f);
+			const float vd_damp  = vd_inner * vd_inner;
+			// Prandtl mixing-length eddy viscosity with damping
+			const float nu_t_target = 0.41f * y_lu * u_tau * vd_damp;
+			const float nu_current  = (1.0f/w - 0.5f) / 3.0f;
+			const float nu_new      = nu_current + nu_t_target;
+			w = 1.0f / (3.0f * nu_new + 0.5f);
 		}
 	}
 )+"#endif"+R( // WALL_VISC_BOOST
