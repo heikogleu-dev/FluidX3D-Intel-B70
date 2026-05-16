@@ -2882,6 +2882,85 @@ void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + f
 */
 #if PHASE_7_TRIPLE_RES
 // ============================================================================
+// Phase 7 Run 2 Helper: Surface-Drag-Map als VTK-POLYDATA (Diagnostik 2026-05-16 late).
+// Schreibt für jede TYPE_S|TYPE_X-Cell (Vehicle-Surface) einen Punkt in SI-Welt-Koords
+// mit zwei Skalaren:
+//   - Fx_si_N: Drag-Beitrag dieser Cell in Newton (units.si_F(F.x_lbm))
+//   - Cd_local: dimensionless = Fx_si_N / (0.5·ρ·u²·A_ref)
+// Diagnose-Frage: Wo am Fahrzeug entsteht der Drag? (Stirnfläche / Wheel-Wells /
+// Heck-Recirculation / Splitter / Diffusor).
+// File-Größe ~10-100 KB pro Domain (nur Surface-Cells, kein 400 M-Volume-Bloat).
+// In ParaView: Open + Glyph (Sphere, 5mm) oder PointGaussianSplat, Color=Fx_si_N.
+// ============================================================================
+static void write_surface_drag_vtk_phase7(LBM& lbm, const Units& U, const string& path,
+                                          const ulong step, const float dx_m,
+                                          const float ox, const float oy, const float oz,
+                                          const float si_rho, const float si_u, const float A_ref) {
+	lbm.F.read_from_device();
+	lbm.flags.read_from_device();
+	const uint Nx = lbm.get_Nx(), Ny = lbm.get_Ny();
+	const ulong N = lbm.get_N();
+	const float q_inf = 0.5f * si_rho * si_u * si_u; // dynamic pressure SI
+	// Pre-count surface cells for VTK header
+	ulong n_surf = 0u;
+	for(ulong n=0u; n<N; n++) {
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) != 0u) n_surf++;
+	}
+	// Build path with timestamp
+	char step_buf[32]; std::snprintf(step_buf, 32, "%09llu", (unsigned long long)step);
+	const string fname = path + "drag_map-" + step_buf + ".vtk";
+	#ifdef _WIN32
+	std::filesystem::create_directories(path);
+	#else
+	(void)!system(("mkdir -p '" + path + "'").c_str()); // dir likely exists from earlier write_device_to_vtk; ignore retval
+	#endif
+	std::ofstream f(fname, std::ios::binary);
+	f << "# vtk DataFile Version 3.0\n";
+	f << "Surface-Drag-Map: Fx_si_N + Cd_local per TYPE_S|TYPE_X cell (Phase 7 Run 2 diagnostic)\n";
+	f << "ASCII\n";
+	f << "DATASET POLYDATA\n";
+	f << "POINTS " << n_surf << " float\n";
+	// Write SI positions of surface cells
+	for(ulong n=0u; n<N; n++) {
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == 0u) continue;
+		uint x=0u,y=0u,z=0u; lbm.coordinates(n, x, y, z);
+		const float sx = ox + ((float)x + 0.5f) * dx_m;
+		const float sy = oy + ((float)y + 0.5f) * dx_m;
+		const float sz = oz + ((float)z + 0.5f) * dx_m;
+		f << sx << " " << sy << " " << sz << "\n";
+	}
+	// VERTICES (1 vertex per point for ParaView to display them)
+	f << "VERTICES " << n_surf << " " << 2ull*n_surf << "\n";
+	for(ulong i=0u; i<n_surf; i++) f << "1 " << i << "\n";
+	// POINT_DATA: two scalars
+	f << "POINT_DATA " << n_surf << "\n";
+	f << "SCALARS Fx_si_N float 1\n";
+	f << "LOOKUP_TABLE default\n";
+	for(ulong n=0u; n<N; n++) {
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == 0u) continue;
+		const float Fx_si = U.si_F(lbm.F.x[n]);
+		f << Fx_si << "\n";
+	}
+	f << "SCALARS Cd_local float 1\n";
+	f << "LOOKUP_TABLE default\n";
+	for(ulong n=0u; n<N; n++) {
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == 0u) continue;
+		const float Fx_si = U.si_F(lbm.F.x[n]);
+		const float Cd_l = Fx_si / (q_inf * A_ref);
+		f << Cd_l << "\n";
+	}
+	// Optional: Fz_si for Downforce-Map
+	f << "SCALARS Fz_si_N float 1\n";
+	f << "LOOKUP_TABLE default\n";
+	for(ulong n=0u; n<N; n++) {
+		if((lbm.flags[n] & (TYPE_S|TYPE_X)) == 0u) continue;
+		f << U.si_F(lbm.F.z[n]) << "\n";
+	}
+	f.close();
+	print_info("Surface-Drag-Map: "+fname+" ("+to_string(n_surf)+" surface cells)");
+}
+
+// ============================================================================
 // PHASE 7 — Triple-Resolution Schwarz (Near 4mm + Far 12mm + Coarse 24mm)
 // Stand 2026-05-16: KÓDE COMPLETE, NOCH NICHT GETESTET. Aktivieren via
 // PHASE_7_TRIPLE_RES=1 in defines/setup-Macro. Trigger: nach Phase 6D-Sichtung
@@ -3291,6 +3370,15 @@ void main_setup_phase7_triple_res() {
 	lbm_near  .write_mesh_to_vtk(vehicle_near,   export_near);
 	lbm_far   .write_mesh_to_vtk(vehicle_far,    export_far );
 	lbm_coarse.write_mesh_to_vtk(vehicle_coarse, export_coarse); // Run 2: Vehicle jetzt auch in Coarse
+
+	// Run 2 Diagnostic: Surface-Drag-Map per Domain (Vehicle-Surface-Cells nur, klein + visualisierbar in ParaView)
+	const float A_ref = 1.85f; // Vehicle frontal area [m²]
+	const ulong step_near   = (ulong)final_chunks * (ulong)chunk_near;
+	const ulong step_far    = (ulong)final_chunks * (ulong)chunk_far;
+	const ulong step_coarse = (ulong)final_chunks * (ulong)chunk_coarse;
+	write_surface_drag_vtk_phase7(lbm_near,   units_near,   export_near,   step_near,   dx_near,   -0.4f, -1.296f, 0.0f, si_rho, si_u, A_ref);
+	write_surface_drag_vtk_phase7(lbm_far,    units_far,    export_far,    step_far,    dx_far,    -0.808f, -2.004f, 0.0f, si_rho, si_u, A_ref);
+	write_surface_drag_vtk_phase7(lbm_coarse, units_coarse, export_coarse, step_coarse, dx_coarse, -1.6f, -4.5f, 0.0f, si_rho, si_u, A_ref);
 	print_info("Phase 7 done. Force-CSV: "+force_csv_path);
 	print_info("VTKs: Near="+export_near+" | Far="+export_far+" | Coarse="+export_coarse);
 	std::fflush(nullptr);
