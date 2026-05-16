@@ -1,10 +1,10 @@
 # FluidX3D — Intel Arc Pro B70 (Battlemage) Fork
 
-**Pioneer documentation: FluidX3D 3.6 LBM solver verified at 99.5 % peak bandwidth on Intel Arc Pro B70 Pro (BMG-G31, full Battlemage, xe driver, oneAPI OpenCL 26.05). 4× faster than the RTX 3060 Ti reference. Includes Linux/xe-driver shutdown-crash workaround, HiDPI font, windowed mode with env-var control, FORCE_FIELD enabled with VTK + CSV export of solid-boundary forces. Plus: a complete Multi-Resolution Schwarz coupling stack (Mode 3 PERF-G concurrent additive Schwarz, 5:1 Far/Near with tapered α-blending), and a viscosity-modification wall model (`WALL_VISC_BOOST`) with Werner-Wengle + Prandtl mixing-length + Van Driest damping that works inside FluidX3D's Esoteric-Pull layout where five distinct DDF-modifying wall models failed.**
+**Pioneer documentation: FluidX3D 3.6 LBM solver verified at 99.5 % peak bandwidth on Intel Arc Pro B70 Pro (BMG-G31, full Battlemage, xe driver, oneAPI OpenCL 26.05). 4× faster than the RTX 3060 Ti reference. Includes: Linux/xe-driver shutdown-crash workaround, HiDPI font, windowed mode with env-var control, FORCE_FIELD enabled with VTK + CSV export of solid-boundary forces. Plus a complete Multi-Resolution Schwarz coupling stack (Mode 3 PERF-G concurrent additive Schwarz with 5:1 Far/Near cascade and 40-cell mirror-ramp blending), a viscosity-modification wall model (`WALL_VISC_BOOST`) with Werner-Wengle PowerLaw + Prandtl mixing-length + Van Driest damping that works inside FluidX3D's Esoteric-Pull layout where five distinct DDF-modifying approaches failed, and distance-based per-domain wall-layer scaling that maintains physically consistent 20 mm BL coverage across Near (4 mm) and Far (20 mm) at the 5:1 resolution ratio.**
 
 This is a fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D). For the original project documentation see [README_UPSTREAM.md](README_UPSTREAM.md). All changes vs upstream are tracked file-by-file in [MODIFICATIONS.md](MODIFICATIONS.md). License is **unchanged** — see [LICENSE.md](LICENSE.md), non-commercial / non-military use only.
 
-**Branch policy:** Single-branch — all work on `master`. Production checkpoints are tagged (`production-phase4-2026-05-16`, etc.). Day-by-day session summaries live in [`findings/`](findings/) — most recent: [PHASE_4_FINAL_RESULT_2026-05-16.md](findings/PHASE_4_FINAL_RESULT_2026-05-16.md).
+**Branch policy:** Single-branch — all work on `master`. Production checkpoints are tagged (e.g. `production-phase4-2026-05-16`). Day-by-day session summaries live in [`findings/`](findings/) — current iteration in [PHASE_6_BLENDING_COMPARISON_2026-05-16.md](findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md) and [PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md).
 
 ---
 
@@ -223,7 +223,26 @@ First attempt at canonical Ahmed Body validation using a **simplified 16-triangl
 
 **Resolution path:** the Multi-Resolution Roadmap above replaces the failed CC#X with a properly-staged sequence — **Phase 0** uses the canonical ERCOFTAC Ahmed STLs (rounded front), **Phase 0c** quantifies the BB-pathology resolution-scaling, **Phase 1** addresses Bouzidi interpolated BB. The CC#10 WW code remains the production baseline unmodified (validated for smooth STL vehicles, Iron Rule).
 
-## Current production state — Phase 4 Aggressive (2026-05-16, tag `production-phase4-2026-05-16`)
+## Iteration log 2026-05-16 — wall model audit + blending tests
+
+Within a single day's iteration on the MR2 Time-Attack case the following phases were validated and committed:
+
+| Phase | Change | Fx_near (Drag) | Fz_near (Downforce) | Cd_near (A=1.85 m²) | Δ Drag vs 5.1 |
+|---|---|---:|---:|---:|---:|
+| **5.1** (baseline) | distance-based wall model (per-domain dx, 20mm physical depth) | 1 510 N | −809 N | 1.47 | — |
+| **6A** | + 40-cell mirror-ramp blending, α 0.05↔0.25 | 1 252 N | −877 N | 1.22 | **−17 %** |
+| **6B** | + α 0.05↔0.50 (aggressive) | **1 180 N** | **−882 N** | **1.15** | **−22 %** |
+| **6C** (running) | + 1-Far-cell plateau at boundary | TBD | TBD | TBD | — |
+| **6D** (planned, conditional on 6C stability) | + α 0.0↔1.0 (extreme range) | TBD | TBD | TBD | — |
+| **7** (designed, pending) | + Triple-Res with iGPU (Coarse 24mm, 18.4×9×7.6m wake extension) | ~900–1100 N projected | ~−950 to −1050 N projected | ~0.9–1.05 | **−27 to −40 %** |
+
+Phase 6 result was the largest single-day step: the 40-cell mirror-ramp coupling between Far and Near (replacing the single-layer hard TYPE_E + α=0.20 from Phase 5.1) reduced drag by 22 % at the same downforce. The mechanism: graded Schwarz-coupling eliminates the reflection artifact that was inflating Near-domain drag at the Multi-Res interface. Detailed analysis in [`findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md`](findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md).
+
+Phase 7 design is complete pending Phase 6C/6D results: iGPU-hosted Coarse domain (24 mm, 18.4 × 9 × 7.6 m, ~83 M cells in 5 GB system RAM) coupled to B70-hosted Far (12 mm) + Near (4 mm) via 3:1:2 cascade. Expected combined drag reduction 27-40 % vs Phase 5.1, Cd approaching 1.0. See [`findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md`](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md).
+
+---
+
+## Earlier production state — Phase 4 Aggressive (2026-05-16, tag `production-phase4-2026-05-16`)
 
 The Phase 4 Aggressive configuration brings together three orthogonal improvements over the Phase 3 baseline (5 mm / 15 mm / 3:1):
 

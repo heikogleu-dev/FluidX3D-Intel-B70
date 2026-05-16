@@ -1034,10 +1034,12 @@ void LBM::finish() { // PERF-G: wait for all queued kernels on this LBM's comput
 #ifdef WALL_VISC_BOOST
 // Populate wall_adj_flag: for each cell, mark 1 if it is fluid AND has at least one TYPE_S|TYPE_X (vehicle) neighbor in D3Q19.
 // Must be called AFTER voxelize_mesh_on_device. stream_collide reads this flag and boosts local viscosity.
-void LBM::populate_wall_adj_flag() {
+void LBM::populate_wall_adj_flag(const float dx_si_override) {
 	// IMPORTANT: must be called AFTER all flag modifications (BC loops, voxelize) and BEFORE LBM::run().
 	// Do NOT call flags.read_from_device() — at setup time, host flags are current; reading from device
 	// would overwrite host changes (BC parallel_for modifications) with stale device data.
+	// Phase 5.1: dx_si_override allows per-LBM cell size for Multi-Resolution setups where global `units`
+	// is set to one domain's scale. Pass dx_near explicitly when calling on Near LBM. 0 = use global.
 	const uint Nx = get_Nx(), Ny = get_Ny(), Nz = get_Nz();
 	const int cx[19] = {0,  1,-1,  0, 0,  0, 0,  1,-1,  1,-1,  0, 0,  1,-1,  1,-1,  0, 0};
 	const int cy[19] = {0,  0, 0,  1,-1,  0, 0,  1,-1,  0, 0,  1,-1, -1, 1,  0, 0,  1,-1};
@@ -1050,7 +1052,8 @@ void LBM::populate_wall_adj_flag() {
 	// Physics-target: typische Auto-BL bei 30 m/s ist ~10-20mm dick (Hucho, Pope Turbulent Flows). 20mm
 	// abdecken reicht für den Großteil der Reibungs-relevanten Region. Floor cells included again — am Krüger-
 	// Moving-Wall-Übergang gibt es 1-2 Zellen Transfer-Imperfektion, die Mixing-Length angemessen behandelt.
-	const float dx_si = units.si_x(1.0f); // get physical cell size in meters (from global units)
+	// Phase 5.1: prefer explicit per-LBM dx_si (passed via override), fallback to global units
+	const float dx_si = (dx_si_override > 0.0f) ? dx_si_override : units.si_x(1.0f);
 	const float TARGET_BL_DEPTH_SI = 0.020f; // 20 mm physical target depth (typical race-car BL @ 30 m/s)
 	const uint MAX_WALL_DISTANCE = std::max(1u, (uint)std::ceil(TARGET_BL_DEPTH_SI / dx_si));
 	const float physical_depth_mm = 1000.0f * (float)MAX_WALL_DISTANCE * dx_si;

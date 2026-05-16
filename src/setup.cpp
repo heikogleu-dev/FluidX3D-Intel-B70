@@ -1102,22 +1102,36 @@ void main_setup_phase5b_dr() {
 		lbm_near.rho .read_from_device();
 		lbm_near.flags.read_from_device();
 
-		// Phase 6 Blending 2026-05-16: 40-Cell-Spiegelrampe für Forward + Back-Coupling per User-Vorschlag.
-		//   Forward Far→Near: 40 Layer-Tiefen, α(d) linear von 0.25 (Boundary, d=0) → 0.05 (deep, d=39)
-		//   Back Near→Far:    8 Layer-Tiefen (5:1 Ratio), α(dfar) linear von 0.05 (Boundary, dfar=0) → 0.25 (deep, dfar=7)
-		//   ALPHA_HIGH umschaltbar zwischen Tests (0.25 = User-Standard, 0.50 = aggressive Variante)
+		// Phase 6C Blending 2026-05-16: 40-Cell-Spiegelrampe + 1-Far-Cell-Plateau am Boundary (User-Vorschlag).
+		//   PLATEAU_NEAR = 5 Near-Cells = 1 Far-Cell breit (bei 5:1 Ratio) — α bleibt am Boundary-Wert konstant
+		//   bevor die linear Rampe startet. Vermeidet Sub-Far-Cell-α-Gradienten und stabilisiert Coupling.
+		//   Forward Far→Near: d=0..PLATEAU-1 → α=ALPHA_HIGH; d=PLATEAU..BAND-1 → linear ALPHA_HIGH→ALPHA_LOW
+		//   Back Near→Far: dfar=0 (1 Far-Cell-Plateau) → α=ALPHA_LOW; dfar=1..BAND_FAR-1 → linear ALPHA_LOW→ALPHA_HIGH
+		//   ALPHA_HIGH/LOW umschaltbar via Macro (Phase 6C: 0.05/0.50, Phase 6D test: 0.0/1.0)
 		#ifndef PHASE6_ALPHA_HIGH
 		#define PHASE6_ALPHA_HIGH 0.50f
 		#endif
-		const float ALPHA_LOW  = 0.05f;
+		#ifndef PHASE6_ALPHA_LOW
+		#define PHASE6_ALPHA_LOW 0.05f
+		#endif
+		const float ALPHA_LOW  = PHASE6_ALPHA_LOW;
 		const float ALPHA_HIGH = PHASE6_ALPHA_HIGH;
-		const uint  BAND_NEAR  = 40u;          // Near cells = 160 mm physisch bei 4 mm dx
-		const uint  BAND_FAR   = BAND_NEAR/5u; // 8 Far cells (5:1 Ratio)
+		const uint  BAND_NEAR    = 40u;          // Near cells = 160 mm physisch bei 4 mm dx
+		const uint  BAND_FAR     = BAND_NEAR/5u; // 8 Far cells (5:1 Ratio)
+		const uint  PLATEAU_NEAR = 5u;           // 1 Far-Cell = 5 Near-Cells Plateau am Boundary (forward)
+		const uint  PLATEAU_FAR  = 1u;           // 1 Far-Cell Plateau am Boundary (back)
 
-		// === FORWARD Far→Near: 5 Boundaries × 40 Near-Target-Tiefen ===
+		// === FORWARD Far→Near: 5 Boundaries × 40 Near-Target-Tiefen mit 5-Near-Cell-Plateau ===
 		for(uint d = 0u; d < BAND_NEAR; d++) {
-			const float t = (float)d / (float)(BAND_NEAR - 1u);                // 0..1, 0=Boundary, 1=deep
-			const float alpha_d = ALPHA_HIGH - t * (ALPHA_HIGH - ALPHA_LOW);   // 0.25→0.05 (oder 0.50→0.05)
+			float alpha_d;
+			if(d < PLATEAU_NEAR) {
+				alpha_d = ALPHA_HIGH; // Plateau-Zone (5 Near-Cells = 1 Far-Cell breit) am Boundary
+			} else {
+				const uint d_in_ramp = d - PLATEAU_NEAR;
+				const uint ramp_len  = BAND_NEAR - PLATEAU_NEAR - 1u; // 34
+				const float t = (float)d_in_ramp / (float)ramp_len;    // 0..1
+				alpha_d = ALPHA_HIGH - t * (ALPHA_HIGH - ALPHA_LOW);   // Ramp ALPHA_HIGH→ALPHA_LOW
+			}
 			CouplingOptions opts_d = opts;
 			opts_d.alpha      = alpha_d;
 			opts_d.keep_flags = (d > 0u);                                       // nur Layer 0 (Boundary) setzt TYPE_E
@@ -1145,10 +1159,17 @@ void main_setup_phase5b_dr() {
 			lbm_far.couple_fields(lbm_near, src, tgt, opts_d);
 		}
 
-		// === BACK Near→Far: 5 Boundaries × 8 Far-Target-Tiefen (Near-Source-Center pro 5-Cell-Block) ===
+		// === BACK Near→Far: 5 Boundaries × 8 Far-Target-Tiefen (Near-Source-Center pro 5-Cell-Block) mit 1-Far-Cell-Plateau ===
 		for(uint dfar = 0u; dfar < BAND_FAR; dfar++) {
-			const float t = (float)dfar / (float)(BAND_FAR - 1u);              // 0..1, 0=Boundary, 1=deep
-			const float alpha_d = ALPHA_LOW + t * (ALPHA_HIGH - ALPHA_LOW);    // 0.05→0.25 (oder 0.50)
+			float alpha_d;
+			if(dfar < PLATEAU_FAR) {
+				alpha_d = ALPHA_LOW; // Plateau-Zone (1 Far-Cell breit) am Boundary
+			} else {
+				const uint dfar_in_ramp = dfar - PLATEAU_FAR;
+				const uint ramp_len     = BAND_FAR - PLATEAU_FAR - 1u; // 6
+				const float t = (float)dfar_in_ramp / (float)ramp_len; // 0..1
+				alpha_d = ALPHA_LOW + t * (ALPHA_HIGH - ALPHA_LOW);    // Ramp ALPHA_LOW→ALPHA_HIGH
+			}
 			CouplingOptions opts_d = opts_back;
 			opts_d.alpha = alpha_d;
 			// Near source depth: center of 5-cell block für dieses Far-Cell. dfar=0 → Near=2, dfar=7 → Near=37

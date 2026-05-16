@@ -538,7 +538,93 @@ Detailed analysis: [findings/PHASE_4_FINAL_RESULT_2026-05-16.md](findings/PHASE_
 
 ## Production tag
 
-`production-phase4-2026-05-16` at commit `cc08f0e` marks this configuration as the stable production checkpoint. Future experimental work (Triple-Res with iGPU as outer wake-extension, Bouzidi BB reactivation, etc.) branches off this tag.
+`production-phase4-2026-05-16` at commit `cc08f0e` marks this configuration as the stable production checkpoint.
+
+---
+
+# Session 2026-05-16 (later) — Phase 5.1 / 6 / 7-prep
+
+Same-day continuation after Phase 4. Multiple physics audits and iteration steps:
+
+## Phase 5.1 — Distance-based per-domain wall-layer scaling (commit `a7eaf8f`)
+
+**Problem identified by user audit**: Phase 3-5 had hardcoded `MAX_WALL_DISTANCE = 3` everywhere, so the physical penetration depth of the wall-model boost differed by **5×** between Near (12 mm) and Far (60 mm). Far's 60 mm extended far beyond the actual turbulent BL → artificial damping in free-stream region.
+
+**Fix**: `src/lbm.cpp::populate_wall_adj_flag()` now accepts an explicit per-LBM `dx_si` parameter; layer count derived from target physical depth:
+```cpp
+const float TARGET_BL_DEPTH_SI = 0.020f; // 20 mm physical (typical race-car BL at 30 m/s, Pope §7.1, Hucho)
+const uint MAX_WALL_DISTANCE = max(1u, (uint)ceil(TARGET_BL_DEPTH_SI / dx_si));
+```
+- Far (20 mm): 1 layer = 20 mm
+- Near (4 mm): 5 layers = 20 mm
+Both **consistent at 20 mm physical depth**.
+
+Plus restored floor cells to trigger boost (was vehicle-only in Phase 5 — produced visible numerical floor BL artifact). Now `(fj & TYPE_S) != 0u` matches vehicle (TYPE_S|TYPE_X) AND floor (TYPE_S).
+
+Result (chunk 88 convergence at 1.494 %, ~49 min):
+- Fx_far = 2 564 N (vs Phase 4: 2 557, +0.3 %)
+- **Fx_near = 1 510 N** (Phase 4: 1 494, +1.1 %)
+- **Fz_near = −809 N** (Phase 4: −799, +1 % more downforce)
+
+Best physically-consistent forces across all wall-model variants tested.
+
+## Phase 6 — 40-Cell mirror-ramp Schwarz blending (commit `1a530ed`)
+
+User-proposed graded coupling design replacing the single-layer hard TYPE_E + α=0.20 Phase 5.1 coupling.
+
+**Concept**:
+- Forward Far→Near: 40 layer depths in Near, α linear from ALPHA_HIGH (boundary) → ALPHA_LOW (deep interior)
+- Back Near→Far: 8 layer depths in Far cells inside Near footprint, α linear from ALPHA_LOW (boundary) → ALPHA_HIGH (deep)
+- New `CouplingOptions.keep_flags` bool (added in earlier commit) lets inner-band Forward cells preserve TYPE_F (only the boundary layer sets TYPE_E)
+- 5 boundary directions (X−/X+/Y−/Y+/Z+) × 40 forward + × 8 back = **240 couple_fields calls per chunk** (vs 10 in Phase 5.1)
+
+`#define PHASE6_ALPHA_HIGH` (0.50f default since Phase 6B), `#define PHASE6_ALPHA_LOW` (0.05f default). Run loop in `setup.cpp` Mode 3 block.
+
+**A/B test results** (each ~50-57 min, MR2 vehicle, same Phase 5.1 base setup):
+
+| Variant | α_high | Conv. chunk | Fx_far | Fx_near | Fz_near | Cd |
+|---|---:|---:|---:|---:|---:|---:|
+| Phase 5.1 (no blending) | 0.20 uniform | 88 | 2 564 | 1 510 | −809 | 1.47 |
+| **Run 6A** | 0.25 | 98 | 2 291 | 1 252 | −877 | 1.22 |
+| **Run 6B** | 0.50 | 103 | **2 120** | **1 180** | **−882** | **1.15** |
+
+Run 6B is the production winner: drag −22% vs Phase 5.1 at marginally higher downforce. Mechanism: graded interface eliminates the Schwarz-coupling reflection artifact that was inflating Near-domain drag at the Multi-Res boundary; back-coupling at α=0.50 in deep Near transfers genuine high-resolution Near vortex content into Far's coarse representation, which propagates cleanly downstream.
+
+Performance impact of 240× more couple_fields calls: only +5-10 % wallclock (parallel_for on small planes is cheap). VRAM unchanged at ~27 GiB.
+
+Detailed comparison: [findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md](findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md).
+
+## Phase 6C — 1-Far-cell plateau at boundary (running 2026-05-16 evening)
+
+User-proposed refinement: hold α at boundary-value constant over 1-Far-cell width (= 5 Near-cells at 5:1 ratio) before the linear ramp starts. Avoids sub-Far-cell α-gradients within a single Far cell's information footprint.
+
+```cpp
+const uint PLATEAU_NEAR = 5u;  // 1 Far-Cell = 5 Near-Cells at 5:1
+const uint PLATEAU_FAR  = 1u;  // 1 Far-Cell buffer on back-coupling side
+// Forward: d < PLATEAU_NEAR → α = ALPHA_HIGH (plateau); else linear ramp ALPHA_HIGH→ALPHA_LOW over remaining 35 cells
+// Back: dfar < PLATEAU_FAR → α = ALPHA_LOW (plateau); else linear ramp ALPHA_LOW→ALPHA_HIGH over remaining 7 cells
+```
+
+If 6C numerically stable, autonomous Phase 6D runs with α 0.0 ↔ 1.0 (full range) to test extreme Schwarz partition.
+
+## Phase 7 — Triple-Res with iGPU as outer wake-extension domain (designed)
+
+Documented in [findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md). Pending Phase 6 results.
+
+Cascade 3:1:2:
+- **Near** (B70, 4 mm): 1500 × 648 × 402 = 391 M cells, 23.6 GiB
+- **Far** (B70, 12 mm): 734 × 334 × 218 = 53 M cells, 3.4 GiB (refined from Phase 5.1's 20 mm)
+- **Coarse** (iGPU, 24 mm): 700 × 375 × 316 = 83 M cells, 5 GiB system RAM (NEW domain)
+
+Wake-Recovery extends from 7.5 m (Phase 5.1 Far) to **10.8 m hinter Tail** in Coarse — closer to industry-standard 5-10 L = 22-45 m.
+
+Requires new FluidX3D API: per-LBM explicit `Device_Info` constructor (currently `smart_device_selection` picks a single device class for all LBMs). Implementation cost ~7-8 h total.
+
+**Vehicle scaling change for Phase 7**: per user-directive, drop the artificial 1.4% upscale and use STL-native length:
+```cpp
+const float si_length = 4.4364f;  // STL bbox native (was 4.5f)
+```
+The `scenes/vehicle.stl` widebody Time-Attack MR2 STL has native bbox 4.4364 × 1.8379 × 1.2077 m — no rescaling needed. Memory `fluidx3d_stl_native_size.md` documents this for all future setups.
 
 ## Branch / repository policy
 

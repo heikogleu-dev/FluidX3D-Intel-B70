@@ -310,7 +310,7 @@ public:
 #ifdef WALL_VISC_BOOST
 	// Per-cell wall-adjacent flag — populated by populate_wall_adj_flag() after voxelize_mesh_on_device.
 	// stream_collide reads this and boosts viscosity via Smagorinsky tau0 multiplier when wall_adj == 1.
-	void populate_wall_adj_flag(); // Host-side: iterate cells, flag those with TYPE_S|TYPE_X neighbor and current cell is fluid.
+	void populate_wall_adj_flag(const float dx_si_override = 0.0f); // Phase 5.1: per-LBM dx_si (in meters) for correct multi-domain depth scaling. If 0, fallback to global units.si_x(1.0f).
 #endif // WALL_VISC_BOOST
 #endif // SPONGE_LAYER
 
