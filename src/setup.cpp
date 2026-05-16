@@ -236,7 +236,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
 #define PHASE_5B_COUPLE_MODE 3 // 2026-05-15: Mode 3 PERF-G Additive Schwarz (concurrent Far||Near, symmetric 1-chunk lag) + α=0.20 Test (von User vorgeschlagen — Mode 3 Production zeigte sichtbare Near→Far Kante bei α=0.10, also stärkere Coupling testen).
 #define PHASE_5B_DR 1          // Phase 5b-DR Production 2026-05-16: Far 13.5m anlauf 1.5m + TYPE_S Moving Wall floor + Mode 2 symm α=0.10 + Vehicle z=1/z=3 + auto-stop 2% over 5000 Far-steps
-#define PHASE_7_TRIPLE_RES 1   // Phase 7 Triple-Resolution 2026-05-16 PRODUCTION (aktiviert nach 6D-Sichtung): 4mm Near + 12mm Far auf B70 + 24mm Coarse-Wake auf iGPU. STL-native si_length=4.4364.
+#define PHASE_7_TRIPLE_RES 0   // Phase 7 Triple-Resolution 2026-05-16 — Run 2 prepared (chunk_far=100, Vehicle-in-Coarse, multi-field convergence). Auf 1 setzen + rebuild + run für Production. See findings/PHASE_7_RUN1_2026-05-16.md.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -2998,6 +2998,22 @@ void main_setup_phase7_triple_res() {
 	print_info("Far Vehicle BBox:  X["+to_string(vehicle_far->pmin.x,1u)+","+to_string(vehicle_far->pmax.x,1u)+"] Y["+to_string(vehicle_far->pmin.y,1u)+","+to_string(vehicle_far->pmax.y,1u)+"] Z["+to_string(vehicle_far->pmin.z,1u)+","+to_string(vehicle_far->pmax.z,1u)+"] (Far cells)");
 	lbm_far.voxelize_mesh_on_device(vehicle_far, TYPE_S|TYPE_X);
 
+	// Run 2 (2026-05-16 late evening): Vehicle ALSO in Coarse (24mm) — User-Direktive für 3. unabhängige Fx-Quelle
+	// für Multi-Field-Konvergenz-Check (statt nur Fx_far). Voxelisation bei 24mm ist grob (~185 cells along length)
+	// aber genügt für Druck-Integration zur Cross-Check-Force-Diagnose.
+	Mesh* vehicle_coarse = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	vehicle_coarse->scale((si_length / dx_coarse) / bbox_orig.x);
+	const float3 vbbox_c = vehicle_coarse->get_bounding_box_size();
+	const float3 vctr_c  = vehicle_coarse->get_bounding_box_center();
+	const float coarse_veh_xctr = (0.0f - (-1.6f)) / dx_coarse + (si_length * 0.5f) / dx_coarse; // = 66.67 + 92.43 = 159.09
+	const float coarse_veh_yctr = (0.0f - (-4.5f)) / dx_coarse;                                    // = 187.5
+	vehicle_coarse->translate(float3(
+		coarse_veh_xctr - vctr_c.x,
+		coarse_veh_yctr - vctr_c.y,
+		1.0f - (vctr_c.z - vbbox_c.z * 0.5f))); // Coarse z=1 cell = 24mm clearance (matches Near 5-cell @ 4mm via 6:1)
+	print_info("Coarse Vehicle BBox: X["+to_string(vehicle_coarse->pmin.x,1u)+","+to_string(vehicle_coarse->pmax.x,1u)+"] Y["+to_string(vehicle_coarse->pmin.y,1u)+","+to_string(vehicle_coarse->pmax.y,1u)+"] Z["+to_string(vehicle_coarse->pmin.z,1u)+","+to_string(vehicle_coarse->pmax.z,1u)+"] (Coarse cells)");
+	lbm_coarse.voxelize_mesh_on_device(vehicle_coarse, TYPE_S|TYPE_X);
+
 	// ============================================================
 	// 4. Boundary Conditions: TYPE_S Moving Wall floor + TYPE_E walls (alle 3 LBMs)
 	// ============================================================
@@ -3019,12 +3035,12 @@ void main_setup_phase7_triple_res() {
 	};
 	set_bcs(lbm_near);
 	set_bcs(lbm_far);
-	set_bcs(lbm_coarse); // Coarse: kein Fahrzeug → nur Floor + freestream Equilibrium an äußeren Wänden
+	set_bcs(lbm_coarse); // Run 2: Coarse hat jetzt Fahrzeug + Floor
 
 #ifdef WALL_VISC_BOOST
 	lbm_near  .populate_wall_adj_flag(dx_near);   // 4mm → 5 layers (20mm target)
 	lbm_far   .populate_wall_adj_flag(dx_far);    // 12mm → 2 layers
-	lbm_coarse.populate_wall_adj_flag(dx_coarse); // 24mm → 1 layer (Vehicle nicht in Coarse, also nur Floor)
+	lbm_coarse.populate_wall_adj_flag(dx_coarse); // 24mm → 1 layer (jetzt mit Vehicle + Floor)
 	print_info("WALL_VISC_BOOST: distance-based pro Domain (Near 5L, Far 2L, Coarse 1L) — Target BL ~20mm");
 #endif
 
@@ -3112,23 +3128,25 @@ void main_setup_phase7_triple_res() {
 
 	// ============================================================
 	// 7. Run-Loop (Mode 3 PERF-G mit 3 LBMs, ratio 1:3:6 für gleiche SI-Δt)
-	// Far chunk = 50 → Near chunk = 150 → Coarse chunk = 25 (Far dt = 2 Coarse dt)
+	// Run 2 2026-05-16 late: chunk_far=100 (statt 50) — dämpft Saw-tooth-Schwingung
+	// (Run 1 hatte chunk_far=50 → σ/μ Fx_near 58% durch 2-Chunk-Oszillation).
+	// Near chunk = 300 → Coarse chunk = 50 (Far dt = 2× Coarse dt).
 	// ============================================================
 	const string force_csv_path = get_exe_path()+"../bin/forces_phase7_triple_res.csv";
 	std::ofstream fcsv(force_csv_path);
-	fcsv << "step_far,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near\n";
+	fcsv << "step_far,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near,Fx_coarse,Fy_coarse,Fz_coarse\n";
 	fcsv << std::scientific;
-	const uint chunk_far    = 50u;             // 50 Far steps/chunk (Coarse 25, Near 150)
-	const uint chunk_near   = chunk_far * 3u;  // 3:1 Ratio Near:Far
-	const uint chunk_coarse = chunk_far / 2u;  // 1:2 Ratio Coarse:Far (Coarse dt = 2x Far dt)
+	const uint chunk_far    = 100u;            // Run 2: 100 statt 50 (Saw-tooth-Dämpfung)
+	const uint chunk_near   = chunk_far * 3u;  // 3:1 Ratio Near:Far → 300
+	const uint chunk_coarse = chunk_far / 2u;  // 1:2 Ratio Coarse:Far → 50
 	const uint chunks_max     = 500u;
 	const uint conv_window    = 25u;
 	const uint conv_min_chunks= 50u;
 	const float conv_tol      = 0.02f;
-	std::vector<float3> Fhist_far;
-	Fhist_far.reserve(chunks_max);
-	print_info("Phase 7 Run start: max "+to_string(chunks_max*chunk_far)+" Far-steps | auto-stop bei |dFx_far|/Fx_far<2% über 5000 Far-steps (earliest chunk 50)");
-	print_info("  Per-Chunk: "+to_string(chunk_near)+" Near + "+to_string(chunk_far)+" Far + "+to_string(chunk_coarse)+" Coarse (same SI dt)");
+	std::vector<float3> Fhist_far, Fhist_near, Fhist_coarse;
+	Fhist_far.reserve(chunks_max); Fhist_near.reserve(chunks_max); Fhist_coarse.reserve(chunks_max);
+	print_info("Phase 7 Run 2 start: max "+to_string(chunks_max*chunk_far)+" Far-steps | auto-stop bei max(|dFx_far|,|dFx_near|,|dFx_coarse|)/|Fx| < 2% über 25-chunk window (earliest chunk 50)");
+	print_info("  Per-Chunk: "+to_string(chunk_near)+" Near + "+to_string(chunk_far)+" Far + "+to_string(chunk_coarse)+" Coarse (same SI dt = "+to_string(chunk_far*dx_far*lbm_u/si_u, 5u)+" s)");
 
 	uint final_chunks = chunks_max;
 	for(uint c = 0u; c < chunks_max; c++) {
@@ -3216,27 +3234,43 @@ void main_setup_phase7_triple_res() {
 		lbm_far   .flags.write_to_device();   lbm_far   .u.write_to_device();   lbm_far   .rho.write_to_device();
 		lbm_coarse.flags.write_to_device();   lbm_coarse.u.write_to_device();   lbm_coarse.rho.write_to_device();
 
-		// ----- Force Diagnostics (Far + Near, Coarse hat kein Vehicle) -----
-		lbm_far .update_force_field(); const float3 F_far_lbm = lbm_far .object_force(TYPE_S|TYPE_X);
-		lbm_near.update_force_field(); const float3 F_near_lbm = lbm_near.object_force(TYPE_S|TYPE_X);
-		const float3 F_far_si  = float3(units_far .si_F(F_far_lbm.x ), units_far .si_F(F_far_lbm.y ), units_far .si_F(F_far_lbm.z ));
-		const float3 F_near_si = float3(units_near.si_F(F_near_lbm.x), units_near.si_F(F_near_lbm.y), units_near.si_F(F_near_lbm.z));
+		// ----- Force Diagnostics (Run 2: Far + Near + Coarse — alle 3 für Multi-Field-Convergence) -----
+		lbm_far   .update_force_field(); const float3 F_far_lbm    = lbm_far   .object_force(TYPE_S|TYPE_X);
+		lbm_near  .update_force_field(); const float3 F_near_lbm   = lbm_near  .object_force(TYPE_S|TYPE_X);
+		lbm_coarse.update_force_field(); const float3 F_coarse_lbm = lbm_coarse.object_force(TYPE_S|TYPE_X);
+		const float3 F_far_si    = float3(units_far   .si_F(F_far_lbm.x   ), units_far   .si_F(F_far_lbm.y   ), units_far   .si_F(F_far_lbm.z   ));
+		const float3 F_near_si   = float3(units_near  .si_F(F_near_lbm.x  ), units_near  .si_F(F_near_lbm.y  ), units_near  .si_F(F_near_lbm.z  ));
+		const float3 F_coarse_si = float3(units_coarse.si_F(F_coarse_lbm.x), units_coarse.si_F(F_coarse_lbm.y), units_coarse.si_F(F_coarse_lbm.z));
 		const ulong step = (ulong)(c+1u) * chunk_far;
 		const float t_si = units_far.si_t(step);
-		fcsv << step << "," << t_si << "," << F_far_si.x << "," << F_far_si.y << "," << F_far_si.z << "," << F_near_si.x << "," << F_near_si.y << "," << F_near_si.z << "\n";
+		fcsv << step << "," << t_si << "," << F_far_si.x << "," << F_far_si.y << "," << F_far_si.z
+		             << "," << F_near_si.x << "," << F_near_si.y << "," << F_near_si.z
+		             << "," << F_coarse_si.x << "," << F_coarse_si.y << "," << F_coarse_si.z << "\n";
 		fcsv.flush();
-		print_info("step_far="+to_string(step)+"  Fx_far="+to_string(F_far_si.x,1u)+"N  Fx_near="+to_string(F_near_si.x,1u)+"N  Fz_near="+to_string(F_near_si.z,1u));
-		Fhist_far.push_back(F_far_si);
+		print_info("step_far="+to_string(step)+"  Fx_far="+to_string(F_far_si.x,1u)+"N  Fx_near="+to_string(F_near_si.x,1u)+"N  Fx_coarse="+to_string(F_coarse_si.x,1u)+"N  Fz_near="+to_string(F_near_si.z,1u));
+		Fhist_far.push_back(F_far_si); Fhist_near.push_back(F_near_si); Fhist_coarse.push_back(F_coarse_si);
 
+		// Run 2: Multi-Field-Convergence — max(|dFx_X|/|Fx_X|) über alle 3 Felder muss < tol sein.
+		// Verhindert falsely-positive Trigger durch in-phase Saw-tooth-Pinch-Punkte in einem einzelnen Feld
+		// (siehe Phase 7 Run 1 + Phase 6D Pathology).
 		if(c+1u >= conv_min_chunks) {
-			float3 recent_avg(0.0f), prev_avg(0.0f);
-			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist_far[Fhist_far.size()-1u-k];
-			for(uint k=0u; k<conv_window; k++) prev_avg   += Fhist_far[Fhist_far.size()-1u-conv_window-k];
-			recent_avg /= (float)conv_window;
-			prev_avg   /= (float)conv_window;
-			const float dxr = (recent_avg.x != 0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
-			if(dxr < conv_tol) {
-				print_info("CONVERGED at chunk "+to_string(c+1u)+" (step_far "+to_string(step)+"): |dFx|/Fx="+to_string(dxr*100.0f,3u)+"%  Fx_far_avg="+to_string(recent_avg.x,1u)+"N");
+			auto window_mean_x = [&](const std::vector<float3>& H, uint offset)->float {
+				float s = 0.0f;
+				for(uint k=0u; k<conv_window; k++) s += H[H.size()-1u-offset-k].x;
+				return s / (float)conv_window;
+			};
+			const float far_r    = window_mean_x(Fhist_far,    0u);
+			const float far_p    = window_mean_x(Fhist_far,    conv_window);
+			const float near_r   = window_mean_x(Fhist_near,   0u);
+			const float near_p   = window_mean_x(Fhist_near,   conv_window);
+			const float coarse_r = window_mean_x(Fhist_coarse, 0u);
+			const float coarse_p = window_mean_x(Fhist_coarse, conv_window);
+			const float d_far    = (far_r    != 0.0f) ? fabs(far_r    - far_p)    / fabs(far_r)    : 1.0f;
+			const float d_near   = (near_r   != 0.0f) ? fabs(near_r   - near_p)   / fabs(near_r)   : 1.0f;
+			const float d_coarse = (coarse_r != 0.0f) ? fabs(coarse_r - coarse_p) / fabs(coarse_r) : 1.0f;
+			const float d_max    = std::max(d_far, std::max(d_near, d_coarse));
+			if(d_max < conv_tol) {
+				print_info("CONVERGED at chunk "+to_string(c+1u)+" (step_far "+to_string(step)+"): max(|dFx|/Fx)="+to_string(d_max*100.0f,3u)+"%  [far="+to_string(d_far*100.0f,2u)+"%, near="+to_string(d_near*100.0f,2u)+"%, coarse="+to_string(d_coarse*100.0f,2u)+"%]  Fx: far="+to_string(far_r,1u)+" near="+to_string(near_r,1u)+" coarse="+to_string(coarse_r,1u)+"N");
 				final_chunks = c+1u;
 				break;
 			}
@@ -3253,9 +3287,10 @@ void main_setup_phase7_triple_res() {
 	const string export_coarse = get_exe_path()+"../export/tr_coarse/";
 	lbm_near  .u    .write_device_to_vtk(export_near);   lbm_near  .rho.write_device_to_vtk(export_near);   lbm_near  .flags.write_device_to_vtk(export_near);   lbm_near  .F.write_device_to_vtk(export_near);
 	lbm_far   .u    .write_device_to_vtk(export_far);    lbm_far   .rho.write_device_to_vtk(export_far);    lbm_far   .flags.write_device_to_vtk(export_far);    lbm_far   .F.write_device_to_vtk(export_far);
-	lbm_coarse.u    .write_device_to_vtk(export_coarse); lbm_coarse.rho.write_device_to_vtk(export_coarse); lbm_coarse.flags.write_device_to_vtk(export_coarse);
-	lbm_near  .write_mesh_to_vtk(vehicle_near, export_near);
-	lbm_far   .write_mesh_to_vtk(vehicle_far , export_far );
+	lbm_coarse.u    .write_device_to_vtk(export_coarse); lbm_coarse.rho.write_device_to_vtk(export_coarse); lbm_coarse.flags.write_device_to_vtk(export_coarse); lbm_coarse.F.write_device_to_vtk(export_coarse);
+	lbm_near  .write_mesh_to_vtk(vehicle_near,   export_near);
+	lbm_far   .write_mesh_to_vtk(vehicle_far,    export_far );
+	lbm_coarse.write_mesh_to_vtk(vehicle_coarse, export_coarse); // Run 2: Vehicle jetzt auch in Coarse
 	print_info("Phase 7 done. Force-CSV: "+force_csv_path);
 	print_info("VTKs: Near="+export_near+" | Far="+export_far+" | Coarse="+export_coarse);
 	std::fflush(nullptr);
