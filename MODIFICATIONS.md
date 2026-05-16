@@ -594,7 +594,7 @@ Performance impact of 240× more couple_fields calls: only +5-10 % wallclock (pa
 
 Detailed comparison: [findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md](findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md).
 
-## Phase 6C — 1-Far-cell plateau at boundary (running 2026-05-16 evening)
+## Phase 6C — 1-Far-cell plateau at boundary (commit `65efacc`)
 
 User-proposed refinement: hold α at boundary-value constant over 1-Far-cell width (= 5 Near-cells at 5:1 ratio) before the linear ramp starts. Avoids sub-Far-cell α-gradients within a single Far cell's information footprint.
 
@@ -605,7 +605,20 @@ const uint PLATEAU_FAR  = 1u;  // 1 Far-Cell buffer on back-coupling side
 // Back: dfar < PLATEAU_FAR → α = ALPHA_LOW (plateau); else linear ramp ALPHA_LOW→ALPHA_HIGH over remaining 7 cells
 ```
 
-If 6C numerically stable, autonomous Phase 6D runs with α 0.0 ↔ 1.0 (full range) to test extreme Schwarz partition.
+**Run 6C result** (chunk 103 convergence, ~58 min):
+- Fx_far  = 2 122 N (Phase 6B: 2 120, identical)
+- Fx_near = **1 180 N** (identical to Phase 6B)
+- Fz_near = **−893 N** (vs 6B: −882, **+1.2 % stronger downforce**)
+- Numerically stable, no NaN, convergence tolerance 1.544 %
+
+vs Phase 5.1 baseline (Fx_near=1510, Fz_near=−809):
+- Drag −21.9 %, Downforce +10.4 %, Cd 1.47 → **1.15**
+
+**Visual validation 2026-05-16 evening (User-Bestätigung in ParaView)**: the Wake-transition at the Near→Far boundary is "viel sauberer" with the plateau — the previously visible discontinuity in the wake region (Phase 6B already much better than 5.1) is now further smoothed by the 1-Far-cell buffer at the boundary.
+
+**Remaining issue confirmed**: Far's intrinsic wake at 20 mm is still "merkwürdig" (User-Beobachtung 2026-05-16) — the discontinuity is gone but Far's own representation of the wake at 20 mm × 20 mm × 20 mm cells fundamentally can't capture the same vortex granularity as Near at 4 mm. **This is a resolution-jump artifact, not a coupling artifact.** Fix: Phase 7 Far at 12 mm (3:1 to Near) — 4.6× more cells per unit volume, captures wake structure much closer to Near's quality. Coupling-improvement via Phase 6C blending alone can't overcome the Far-resolution ceiling.
+
+**Phase 6C is the production blending pattern**. Plateau will be carried forward to Phase 6D extreme-test (α 0.0↔1.0, pending user OK) and Phase 7 Triple-Res (both Near↔Far and Far↔Coarse cascades use plateau).
 
 ## Phase 7 — Triple-Res with iGPU as outer wake-extension domain (designed)
 

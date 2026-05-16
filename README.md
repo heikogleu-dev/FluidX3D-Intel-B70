@@ -231,14 +231,16 @@ Within a single day's iteration on the MR2 Time-Attack case the following phases
 |---|---|---:|---:|---:|---:|
 | **5.1** (baseline) | distance-based wall model (per-domain dx, 20mm physical depth) | 1 510 N | −809 N | 1.47 | — |
 | **6A** | + 40-cell mirror-ramp blending, α 0.05↔0.25 | 1 252 N | −877 N | 1.22 | **−17 %** |
-| **6B** | + α 0.05↔0.50 (aggressive) | **1 180 N** | **−882 N** | **1.15** | **−22 %** |
-| **6C** (running) | + 1-Far-cell plateau at boundary | TBD | TBD | TBD | — |
-| **6D** (planned, conditional on 6C stability) | + α 0.0↔1.0 (extreme range) | TBD | TBD | TBD | — |
+| **6B** | + α 0.05↔0.50 (aggressive) | 1 180 N | −882 N | 1.15 | **−22 %** |
+| **6C** | + 1-Far-cell plateau at boundary | **1 180 N** | **−893 N** | **1.15** | **−22 %** ✓ current production |
+| **6D** (planned, conditional) | + α 0.0↔1.0 (extreme range) | TBD | TBD | TBD | — |
 | **7** (designed, pending) | + Triple-Res with iGPU (Coarse 24mm, 18.4×9×7.6m wake extension) | ~900–1100 N projected | ~−950 to −1050 N projected | ~0.9–1.05 | **−27 to −40 %** |
 
 Phase 6 result was the largest single-day step: the 40-cell mirror-ramp coupling between Far and Near (replacing the single-layer hard TYPE_E + α=0.20 from Phase 5.1) reduced drag by 22 % at the same downforce. The mechanism: graded Schwarz-coupling eliminates the reflection artifact that was inflating Near-domain drag at the Multi-Res interface. Detailed analysis in [`findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md`](findings/PHASE_6_BLENDING_COMPARISON_2026-05-16.md).
 
-Phase 7 design is complete pending Phase 6C/6D results: iGPU-hosted Coarse domain (24 mm, 18.4 × 9 × 7.6 m, ~83 M cells in 5 GB system RAM) coupled to B70-hosted Far (12 mm) + Near (4 mm) via 3:1:2 cascade. Expected combined drag reduction 27-40 % vs Phase 5.1, Cd approaching 1.0. See [`findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md`](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md).
+Phase 6C added a 1-Far-cell plateau at the coupling boundary before the ramp starts — keeps α constant over 5 Near-cells width at the boundary value, avoiding sub-Far-cell α-gradient anomalies. Effect: identical drag to 6B, +1.2 % stronger downforce, numerically stable. **6C is the current best blending pattern** and the basis for Phase 7. Detail: [`findings/PHASE_6C_PLATEAU_2026-05-16.md`](findings/PHASE_6C_PLATEAU_2026-05-16.md).
+
+Phase 7 design is complete pending Phase 6D run + user review: iGPU-hosted Coarse domain (24 mm, 18.4 × 9 × 7.6 m, ~83 M cells in 5 GB system RAM) coupled to B70-hosted Far (12 mm) + Near (4 mm) via 3:1:2 cascade. Expected combined drag reduction 27-40 % vs Phase 5.1, Cd approaching 1.0. See [`findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md`](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md).
 
 ---
 
