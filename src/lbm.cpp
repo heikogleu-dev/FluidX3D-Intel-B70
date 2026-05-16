@@ -1045,13 +1045,19 @@ void LBM::populate_wall_adj_flag() {
 	// Phase 3: multi-cell wall distance via iterative BFS-like expansion.
 	// wall_adj_flag[n] = 0 = interior; 1 = direct neighbor of wall (y_center=0.5 lu);
 	// 2 = 1 fluid cell away from wall (y=1.5 lu); 3 = 2 cells away (y=2.5 lu).
-	const uint MAX_WALL_DISTANCE = 3u; // number of layers to mark
-	// Phase 5 2026-05-16: Vehicle-only boost (TYPE_X bit required). Plain TYPE_S floor cells no longer
-	// trigger the boost — Krüger Moving-Wall transfer + Smagorinsky SGS handle the floor without extra ν_t,
-	// which was producing a visible numerical BL artifact on the moving road in Phase 4 ParaView screenshots.
+	// Phase 5.1 2026-05-16: Distance-based MAX_WALL_DISTANCE — physical penetration depth ~ TARGET_BL_DEPTH_SI.
+	// Replaces hardcoded 3 layers (which gave 12mm Near vs 60mm Far — inconsistent physics across domains).
+	// Physics-target: typische Auto-BL bei 30 m/s ist ~10-20mm dick (Hucho, Pope Turbulent Flows). 20mm
+	// abdecken reicht für den Großteil der Reibungs-relevanten Region. Floor cells included again — am Krüger-
+	// Moving-Wall-Übergang gibt es 1-2 Zellen Transfer-Imperfektion, die Mixing-Length angemessen behandelt.
+	const float dx_si = units.si_x(1.0f); // get physical cell size in meters (from global units)
+	const float TARGET_BL_DEPTH_SI = 0.020f; // 20 mm physical target depth (typical race-car BL @ 30 m/s)
+	const uint MAX_WALL_DISTANCE = std::max(1u, (uint)std::ceil(TARGET_BL_DEPTH_SI / dx_si));
+	const float physical_depth_mm = 1000.0f * (float)MAX_WALL_DISTANCE * dx_si;
+	print_info("WALL_VISC_BOOST Phase 5.1: dx="+to_string(1000.0f*dx_si,2u)+"mm → "+to_string(MAX_WALL_DISTANCE)+" layers = "+to_string(physical_depth_mm,1u)+"mm physical depth (target "+to_string(1000.0f*TARGET_BL_DEPTH_SI,1u)+"mm)");
 	for(uint d=0u; d<get_D(); d++) {
 		LBM_Domain* dom = lbm_domain[d];
-		// Pass 1: mark distance=1 cells (direct neighbors of VEHICLE walls only — TYPE_S|TYPE_X)
+		// Pass 1: mark distance=1 cells (direct neighbors of ANY wall — Vehicle TYPE_S|TYPE_X AND Floor TYPE_S)
 		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
 			dom->wall_adj_flag[n] = 0u;
@@ -1062,11 +1068,12 @@ void LBM::populate_wall_adj_flag() {
 				if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
 				const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
 				const uchar fj = dom->flags[nj];
-				if((fj & TYPE_X) != 0u) { dom->wall_adj_flag[n] = 1u; break; } // only vehicle TYPE_X triggers boost; bare TYPE_S floor does NOT
+				if((fj & TYPE_S) != 0u) { dom->wall_adj_flag[n] = 1u; break; } // Phase 5.1: ANY TYPE_S (vehicle + floor) triggers boost
 			}
 		}
 		// Pass 2..MAX_WALL_DISTANCE: mark layer k as neighbor of any layer-(k-1) fluid cell
-		ulong layer_counts[4] = {0, 0, 0, 0};
+		// Phase 5.1: dynamic layer count (MAX_WALL_DISTANCE per-domain based on dx)
+		std::vector<ulong> layer_counts(MAX_WALL_DISTANCE + 1u, 0ull);
 		for(ulong n=0ull; n<(ulong)Nx*(ulong)Ny*(ulong)Nz; n++) if(dom->wall_adj_flag[n]==1u) layer_counts[1]++;
 		for(uint dist=2u; dist<=MAX_WALL_DISTANCE; dist++) {
 			for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
@@ -1089,7 +1096,12 @@ void LBM::populate_wall_adj_flag() {
 		dom->wall_adj_flag.write_to_device();
 		const ulong N_total = (ulong)Nx*(ulong)Ny*(ulong)Nz;
 		ulong total_walladj = 0ull; for(uint k=1u; k<=MAX_WALL_DISTANCE; k++) total_walladj += layer_counts[k];
-		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" multi-cell — Layer1="+to_string(layer_counts[1])+" Layer2="+to_string(layer_counts[2])+" Layer3="+to_string(layer_counts[3])+" (total "+to_string(100.0f*(float)total_walladj/(float)N_total,3u)+"%)");
+		// Summary print: first 3 layers + total
+		string layer_summary = "Layer1="+to_string(layer_counts[1]);
+		if(MAX_WALL_DISTANCE >= 2u) layer_summary += " Layer2="+to_string(layer_counts[2]);
+		if(MAX_WALL_DISTANCE >= 3u) layer_summary += " Layer3="+to_string(layer_counts[3]);
+		if(MAX_WALL_DISTANCE >  3u) layer_summary += " ... LayerMax="+to_string(layer_counts[MAX_WALL_DISTANCE]);
+		print_info("WALL_VISC_BOOST: domain "+to_string(d)+" multi-cell — "+layer_summary+" (total "+to_string(100.0f*(float)total_walladj/(float)N_total,3u)+"%, "+to_string(MAX_WALL_DISTANCE)+" layers)");
 	}
 }
 #endif // WALL_VISC_BOOST
