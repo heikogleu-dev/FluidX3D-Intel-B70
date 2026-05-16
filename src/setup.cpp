@@ -236,7 +236,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
 #define PHASE_5B_COUPLE_MODE 3 // 2026-05-15: Mode 3 PERF-G Additive Schwarz (concurrent Far||Near, symmetric 1-chunk lag) + α=0.20 Test (von User vorgeschlagen — Mode 3 Production zeigte sichtbare Near→Far Kante bei α=0.10, also stärkere Coupling testen).
 #define PHASE_5B_DR 1          // Phase 5b-DR Production 2026-05-16: Far 13.5m anlauf 1.5m + TYPE_S Moving Wall floor + Mode 2 symm α=0.10 + Vehicle z=1/z=3 + auto-stop 2% over 5000 Far-steps
-#define PHASE_7_TRIPLE_RES 0   // Phase 7 Triple-Resolution 2026-05-16 (Code complete, default OFF — auf 1 setzen + rebuild für Triple-Res-Run): 4mm Near + 12mm Far auf B70 + 24mm Coarse-Wake auf iGPU. STL-native si_length=4.4364.
+#define PHASE_7_TRIPLE_RES 1   // Phase 7 Triple-Resolution 2026-05-16 PRODUCTION (aktiviert nach 6D-Sichtung): 4mm Near + 12mm Far auf B70 + 24mm Coarse-Wake auf iGPU. STL-native si_length=4.4364.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -2927,9 +2927,21 @@ void main_setup_phase7_triple_res() {
 	// ============================================================
 	const vector<Device_Info>& all_devices = get_devices();
 	Device_Info dev_b70  = select_device_with_most_flops(all_devices);
+	// Pick iGPU = das ANDERE Gerät mit "Graphics" im Namen (skip CPU-OpenCL und Duplikate). Auf Arrow Lake-S:
+	//   B70  = "Intel(R) Graphics [0xe223]"  (discrete BMG-G31, hex ID-Suffix)
+	//   iGPU = "Intel(R) Graphics"           (integrated Xe-LPG, ohne Hex-ID-Suffix)
+	//   CPU  = "Intel(R) Core(TM) Ultra 9 285K"  (skip — Coarse-Domain auf CPU wäre 100× langsamer als iGPU)
 	Device_Info dev_igpu = dev_b70;
 	for(uint i=0u; i<(uint)all_devices.size(); i++) {
-		if(all_devices[i].id != dev_b70.id) { dev_igpu = all_devices[i]; break; }
+		if(all_devices[i].id == dev_b70.id) continue;
+		const string nm = all_devices[i].name;
+		if(nm.find("Graphics") != string::npos) { dev_igpu = all_devices[i]; break; } // bevorzugt Graphics-Device
+	}
+	if(dev_igpu.id == dev_b70.id) {
+		// Fallback: kein zweites Graphics-Device gefunden → nimm irgendein anderes
+		for(uint i=0u; i<(uint)all_devices.size(); i++) {
+			if(all_devices[i].id != dev_b70.id) { dev_igpu = all_devices[i]; break; }
+		}
 	}
 	if(dev_igpu.id == dev_b70.id) print_warning("Phase 7: nur 1 OpenCL-Device gefunden — Coarse läuft auf B70 (suboptimal, RAM-knapp!)");
 	print_info("Phase 7 Devices: B70 = ID "+to_string(dev_b70.id)+" ("+dev_b70.name+") | iGPU = ID "+to_string(dev_igpu.id)+" ("+dev_igpu.name+")");

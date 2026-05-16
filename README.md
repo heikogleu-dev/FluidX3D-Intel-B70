@@ -240,7 +240,9 @@ Phase 6 result was the largest single-day step: the 40-cell mirror-ramp coupling
 
 Phase 6C added a 1-Far-cell plateau at the coupling boundary before the ramp starts — keeps α constant over 5 Near-cells width at the boundary value, avoiding sub-Far-cell α-gradient anomalies. Effect: identical drag to 6B, +1.2 % stronger downforce, numerically stable. **6C is the current best blending pattern** and the basis for Phase 7. Detail: [`findings/PHASE_6C_PLATEAU_2026-05-16.md`](findings/PHASE_6C_PLATEAU_2026-05-16.md).
 
-Phase 7 design is complete pending Phase 6D run + user review: iGPU-hosted Coarse domain (24 mm, 18.4 × 9 × 7.6 m, ~83 M cells in 5 GB system RAM) coupled to B70-hosted Far (12 mm) + Near (4 mm) via 3:1:2 cascade. Expected combined drag reduction 27-40 % vs Phase 5.1, Cd approaching 1.0. See [`findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md`](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md).
+Phase 6D autonomous extreme-α test (α 0.0↔1.0 with the 6C plateau, same Mode 3 PERF-G) confirmed that extreme coupling-α at the boundary is **numerically stable but physically worse**: Cd inflated to 2.00 (+73 %) and σ/μ stability degraded 5×. Mechanism: α=1.0 forward hard-overwrites Near's 4 mm boundary-layer plateau with Far's 20 mm pressure gradient, destroying the resolution advantage. **Phase 7 uses 6C's moderate α=0.05↔0.50.** Detail: [`findings/PHASE_6D_EXTREME_ALPHA_2026-05-16.md`](findings/PHASE_6D_EXTREME_ALPHA_2026-05-16.md).
+
+Phase 7 (Triple-Res with iGPU-hosted Coarse domain at 24 mm, 18.4 × 9 × 7.6 m, ~83 M cells in 5 GB system RAM, coupled to B70-hosted Far at 12 mm + Near at 4 mm via 3:1:2 cascade) is **code complete** (commit `2bd2526`, default `PHASE_7_TRIPLE_RES 0`) and being launched as the first production run on this codebase. Expected combined drag reduction 27-40 % vs Phase 5.1, Cd approaching 1.0. Design: [`findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md`](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md).
 
 ---
 

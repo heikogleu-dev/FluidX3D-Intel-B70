@@ -620,6 +620,28 @@ vs Phase 5.1 baseline (Fx_near=1510, Fz_near=−809):
 
 **Phase 6C is the production blending pattern**. Plateau will be carried forward to Phase 6D extreme-test (α 0.0↔1.0, pending user OK) and Phase 7 Triple-Res (both Near↔Far and Far↔Coarse cascades use plateau).
 
+## Phase 6D — Extreme α 0.0↔1.0 + Plateau (autonomous test 2026-05-16 evening)
+
+Test ran after Phase 6C visual validation (per user direction "if 6C plateau visually clean, autonomously test α 0.0↔1.0").
+Same Plateau-Ramp structure as 6C, only the α-range was widened to the boundary extremes (α=1.0 hard overwrite at Forward Far→Near boundary, α=0.0 means Far totally ignores Near at Back boundary).
+
+Result was **numerically stable but physically worse**:
+
+| Metric | 6C (α 0.05↔0.50) | **6D (α 0.0↔1.0)** | Δ |
+|---|---:|---:|---:|
+| Fx_near | 1 179 N | **2 037 N** | **+73 %** |
+| Fz_near | −892 N | **−1 379 N** | **+55 % Downforce** |
+| **Cd (A=1.85 m²)** | **1.16** | **2.00** | **+73 %** |
+| Stability σ/μ Fx_near | 1.54 % | **7.87 %** | 5× more volatile |
+| Convergence chunk | 103 | 57 | 2× earlier (but **falsely** — see below) |
+
+**Why 6D is worse**:
+- α=1.0 forward (boundary plateau) means Far's 20 mm cell data **hard-overwrites** Near's plateau region. Near's 4 mm BL resolution advantage is destroyed within the first 5 Near cells, because Far's coarser pressure gradient dictates the boundary state.
+- α=0.0 back means Far never sees Near's high-resolution vortex feedback — Far evolves "blind" to the high-fidelity wake structure resolved in Near.
+- 6D's earlier convergence trigger is **falsely positive**: the 2 % Δ-Mean test only smooths over the high oscillation amplitude (σ/μ jumped from 1.5 % to 7.9 %). System is not physically converged, the sliding window mean just happens to plateau due to averaging.
+
+**Phase 7 will use 6C's α-range (0.05↔0.50), not 6D's extremes.** `main_setup_phase7_triple_res()` already hardcodes ALPHA_LOW=0.05, ALPHA_HIGH=0.50 as defaults. Detail: [findings/PHASE_6D_EXTREME_ALPHA_2026-05-16.md](findings/PHASE_6D_EXTREME_ALPHA_2026-05-16.md).
+
 ## Phase 7 — Triple-Res with iGPU as outer wake-extension domain (designed)
 
 Documented in [findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md](findings/PHASE_7_TRIPLE_RES_DESIGN_2026-05-16.md). Pending Phase 6 results.
