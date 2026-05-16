@@ -1103,48 +1103,13 @@ void main_setup_phase5b_dr() {
 		lbm_near.flags.read_from_device();
 
 		// Forward Far→Near (5 planes): Near's outer boundary für chunk c+1
-		// Phase 4 tapered blending (2026-05-16): Outer layer d=0 = hard TYPE_E + α=0.20 (boundary).
-		//   Inner layers d=1..BAND-1 = TYPE_F preserved (keep_flags=true) + α(d) = α_max·(1-d/BAND)² decay.
-		//   Result: ~80mm soft sponge band into Near interior smoothly bridging Near's high-res to Far's coarse.
-		//   Visible Kante in Wake (Phase 3 issue) gets damped by gradient α relaxation.
-		// d=0: hard TYPE_E at outermost Near cell (original behavior)
+		// 2026-05-16: Tapered band reverted per user — visible improvement was negligible in flow field;
+		// soft transition will be applied as Python post-process step on output VTKs (findings/merge_far_near.py).
 		lbm_far.couple_fields(lbm_near, src_xmin, tgt_xmin, opts);
 		lbm_far.couple_fields(lbm_near, src_xmax, tgt_xmax, opts);
 		lbm_far.couple_fields(lbm_near, src_ymin, tgt_ymin, opts);
 		lbm_far.couple_fields(lbm_near, src_ymax, tgt_ymax, opts);
 		lbm_far.couple_fields(lbm_near, src_zmax, tgt_zmax, opts);
-		// d=1..BAND-1: tapered soft-blend INSIDE Near (no TYPE_E flag write)
-		const uint BAND = 20u; // band depth in Near cells = 80mm physical at 4mm dx
-		const float alpha_max = opts.alpha; // 0.20 in Mode 3
-		for(uint d = 1u; d < BAND; d++) {
-			const float taper = 1.0f - (float)d / (float)BAND;
-			CouplingOptions opts_d = opts;
-			opts_d.alpha      = alpha_max * taper * taper; // quadratic decay: α(0)=0.2, α(BAND/2)=0.05, α(BAND)=0
-			opts_d.keep_flags = true; // preserve TYPE_F at inner-band cells (only u/rho blended)
-			// Shift target planes d cells into Near. Source planes shift d/5 Far cells (integer division;
-			// for d<5 same Far plane is used, mapping is approximately identical).
-			const uint dsrc = d / 5u;
-			// X_min: tgt origin.x += d, src origin.x += dsrc
-			PlaneSpec tgt_d = tgt_xmin; tgt_d.origin.x += d;
-			PlaneSpec src_d = src_xmin; src_d.origin.x += dsrc;
-			lbm_far.couple_fields(lbm_near, src_d, tgt_d, opts_d);
-			// X_max: tgt origin.x -= d, src origin.x -= dsrc
-			tgt_d = tgt_xmax; tgt_d.origin.x -= d;
-			src_d = src_xmax; src_d.origin.x -= dsrc;
-			lbm_far.couple_fields(lbm_near, src_d, tgt_d, opts_d);
-			// Y_min: tgt origin.y += d, src origin.y += dsrc
-			tgt_d = tgt_ymin; tgt_d.origin.y += d;
-			src_d = src_ymin; src_d.origin.y += dsrc;
-			lbm_far.couple_fields(lbm_near, src_d, tgt_d, opts_d);
-			// Y_max: tgt origin.y -= d, src origin.y -= dsrc
-			tgt_d = tgt_ymax; tgt_d.origin.y -= d;
-			src_d = src_ymax; src_d.origin.y -= dsrc;
-			lbm_far.couple_fields(lbm_near, src_d, tgt_d, opts_d);
-			// Z_max: tgt origin.z -= d, src origin.z -= dsrc
-			tgt_d = tgt_zmax; tgt_d.origin.z -= d;
-			src_d = src_zmax; src_d.origin.z -= dsrc;
-			lbm_far.couple_fields(lbm_near, src_d, tgt_d, opts_d);
-		}
 
 		// Back Near→Far (5 planes): Far's interior coupling-plane für chunk c+1
 		lbm_near.couple_fields(lbm_far, bk_src_xmin, bk_tgt_xmin, opts_back);
