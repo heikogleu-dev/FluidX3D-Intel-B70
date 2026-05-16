@@ -882,7 +882,7 @@ void main_setup_phase5b_dr() {
 #if PHASE_5B_COUPLE_MODE==2
 	print_info("MODE 2: SEQUENTIAL bidirectional (Multiplicative Schwarz), band=2 Near, α=0.10 both directions, PERF-D batched sync");
 #elif PHASE_5B_COUPLE_MODE==3
-	print_info("MODE 3: CONCURRENT Far||Near (PERF-G Additive Schwarz, symmetric 1-chunk lag), band=2 Near, α=0.10 both directions");
+	print_info("MODE 3: CONCURRENT Far||Near (PERF-G Additive Schwarz, symmetric 1-chunk lag), band=2 Near, α=0.20 both directions");
 #else
 	print_info("MODE 1: SEQUENTIAL one-way Far→Near (5 planes), α=0.5 forward soft-BC, PERF-D batched sync");
 #endif
@@ -992,7 +992,7 @@ void main_setup_phase5b_dr() {
 	// MOVED HERE (2026-05-15 fix): populate AFTER BC loops set floor TYPE_S, so floor-adjacency is detected.
 	lbm_far.populate_wall_adj_flag();
 	lbm_near.populate_wall_adj_flag();
-	print_info("WALL_VISC_BOOST Phase 2 V2 active: Werner-Wengle + Prandtl mixing-length nu_t = 0.205*u_tau (Vehicle + Floor walls)");
+	print_info("WALL_VISC_BOOST Phase 3 multi-cell active: Werner-Wengle + Prandtl mixing-length nu_t = κ·y·u_τ across 3 layers (y = 0.5/1.5/2.5 lu), Vehicle + Floor walls");
 #endif
 
 	// ===== 5 Forward Coupling Planes Far → Near (bilinear 3:1 upsample) =====
