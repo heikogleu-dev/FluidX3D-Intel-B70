@@ -1,7 +1,26 @@
 # Phase 7 — Triple-Resolution mit iGPU als Outer-Wake-Domain — Design Spec
 
-**Status:** Design Complete, Implementation pending Phase 6C/6D Resultate
+**Status:** Design Complete + **Code Complete (2026-05-16 abend)** — Build-verified, Run pending User-Freigabe morgen
 **Datum:** 2026-05-16
+
+## Implementations-Status (2026-05-16 22:18)
+
+| Komponente | Status | Ort |
+|---|---|---|
+| Per-LBM `Device_Info` Konstruktor | ✓ implementiert | [src/lbm.hpp:514](../src/lbm.hpp#L514), [src/lbm.cpp:760+](../src/lbm.cpp#L760) |
+| `main_setup_phase7_triple_res()` Funktion | ✓ implementiert | [src/setup.cpp:~2880](../src/setup.cpp) (am Datei-Ende) |
+| Near↔Far Coupling (3:1) + Plateau-Blending | ✓ implementiert | im Run-Loop |
+| Far↔Coarse Coupling (2:1) + Plateau-Blending | ✓ implementiert | im Run-Loop |
+| Mode 3 PERF-G Run-Loop 3-Devices | ✓ implementiert | Concurrent run_async aller 3 LBMs |
+| STL-native si_length=4.4364f | ✓ implementiert | per memory `fluidx3d_stl_native_size.md` |
+| Build-Verifikation (PHASE_7_TRIPLE_RES=1) | ✓ clean compile, 0 warnings | g++ -c |
+| **Production Run** | ⏸ pending — auf 1 setzen + rebuild + User-OK | Default-Macro: **`PHASE_7_TRIPLE_RES 0`** |
+
+**Aktivierung morgen:**
+1. `src/setup.cpp:239`: `#define PHASE_7_TRIPLE_RES 1`
+2. `./make.sh` (Auto-Run ist deaktiviert per Heiko-Policy)
+3. `pgrep -af FluidX3D` checken (keine Konflikte!)
+4. `./bin/FluidX3D` starten
 
 ## Konfiguration
 

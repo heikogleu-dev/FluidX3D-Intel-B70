@@ -236,6 +236,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #define PHASE_5B_DUAL_DOMAIN 0 // Phase 5b 2026-05-13: two-LBM-instance same-resolution Schwarz coupling (Far 225M + Near 38.85M @ 10mm). Set to 1 to activate; default 0 for clean baseline.
 #define PHASE_5B_COUPLE_MODE 3 // 2026-05-15: Mode 3 PERF-G Additive Schwarz (concurrent Far||Near, symmetric 1-chunk lag) + α=0.20 Test (von User vorgeschlagen — Mode 3 Production zeigte sichtbare Near→Far Kante bei α=0.10, also stärkere Coupling testen).
 #define PHASE_5B_DR 1          // Phase 5b-DR Production 2026-05-16: Far 13.5m anlauf 1.5m + TYPE_S Moving Wall floor + Mode 2 symm α=0.10 + Vehicle z=1/z=3 + auto-stop 2% over 5000 Far-steps
+#define PHASE_7_TRIPLE_RES 0   // Phase 7 Triple-Resolution 2026-05-16 (Code complete, default OFF — auf 1 setzen + rebuild für Triple-Res-Run): 4mm Near + 12mm Far auf B70 + 24mm Coarse-Wake auf iGPU. STL-native si_length=4.4364.
 
 #if AHMED_MODE>0
 // ============================================================================
@@ -377,10 +378,17 @@ void main_setup_phase5b_dual(); // forward decl
 #if PHASE_5B_DR
 void main_setup_phase5b_dr();   // forward decl — Double-Resolution Schwarz
 #endif
+#if PHASE_7_TRIPLE_RES
+void main_setup_phase7_triple_res(); // forward decl — Phase 7 Triple-Resolution (Near 4mm + Far 12mm B70, Coarse 24mm iGPU)
+#endif
 
 void main_setup() { // CC#6/CC#7 Aero-Box 10mm, Auto-Stop bei <2% Force-Drift. Required: FP16C, EQUILIBRIUM_BOUNDARIES, MOVING_BOUNDARIES, SUBGRID, VOLUME_FORCE, FORCE_FIELD.
 #if AHMED_MODE>0
 	main_setup_ahmed();
+	return;
+#endif
+#if PHASE_7_TRIPLE_RES
+	main_setup_phase7_triple_res();
 	return;
 #endif
 #if PHASE_5B_DR
@@ -2872,3 +2880,373 @@ void main_setup() { // WINDKANAL halbe Domain TestRes (CC#2): 100 steps, VTK + f
 	print_info("  Auslass (x=+9): Equilibrium Boundary DRUCK-Outlet (Geschwindigkeit frei)");
 } // end of old wind tunnel setup
 */
+#if PHASE_7_TRIPLE_RES
+// ============================================================================
+// PHASE 7 — Triple-Resolution Schwarz (Near 4mm + Far 12mm + Coarse 24mm)
+// Stand 2026-05-16: KÓDE COMPLETE, NOCH NICHT GETESTET. Aktivieren via
+// PHASE_7_TRIPLE_RES=1 in defines/setup-Macro. Trigger: nach Phase 6D-Sichtung
+// und User-Freigabe.
+//
+// Topologie:
+//   B70 (renderD129, ~32 GiB):  Near 1500×648×402 @ 4mm  (391 M cells, 23.6 GiB)
+//                                Far  734×334×218 @ 12mm  (53.4 M cells,  3.4 GiB)
+//   iGPU (renderD128, shared):  Coarse 700×375×316 @ 24mm (83.0 M cells,  5.0 GiB)
+// Box-Geometrie:
+//   Near :  X[-0.4 , +5.6 ]  Y[-1.296, +1.296]  Z[0, +1.608]
+//   Far  :  X[-0.808, +8.0]  Y[-2.004, +2.004]  Z[0, +2.616]
+//   Coarse: X[-1.6 , +16.8]  Y[-4.5  , +4.5  ]  Z[0, +7.584]
+// si_length = 4.4364 m (STL-native, KEINE 1.4% Up-Skalierung — Phase 7 onwards).
+// ============================================================================
+void main_setup_phase7_triple_res() {
+	// ============================================================
+	// 0. Physics + Units
+	// ============================================================
+	const float lbm_u   = 0.075f;
+	const float si_u    = 30.0f;
+	const float si_nu   = 1.48E-5f, si_rho = 1.225f;
+	const float si_length = 4.4364f; // STL-native: original MR2 STL X-bbox-extent, kein Up-Scaling
+
+	const float dx_near   = 0.004f;   // 4 mm
+	const float dx_far    = 0.012f;   // 12 mm
+	const float dx_coarse = 0.024f;   // 24 mm
+
+	Units units_near, units_far, units_coarse;
+	units_near  .set_m_kg_s(si_length/dx_near,   lbm_u, 1.0f, si_length, si_u, si_rho);
+	units_far   .set_m_kg_s(si_length/dx_far,    lbm_u, 1.0f, si_length, si_u, si_rho);
+	units_coarse.set_m_kg_s(si_length/dx_coarse, lbm_u, 1.0f, si_length, si_u, si_rho);
+	units = units_far; // global = Far (mittlere Skala, für generic print_info-Kompatibilität)
+	const float lbm_nu_near   = units_near  .nu(si_nu);
+	const float lbm_nu_far    = units_far   .nu(si_nu);
+	const float lbm_nu_coarse = units_coarse.nu(si_nu);
+
+	print_info("==================== PHASE 7: TRIPLE-RES SCHWARZ (Near 4mm + Far 12mm B70 || Coarse 24mm iGPU) ====================");
+	print_info("Re(L) = "+to_string(to_uint(units_far.si_Re(si_length, si_u, si_nu)))+" | si_length="+to_string(si_length,4u)+" m (STL-native)");
+
+	// ============================================================
+	// 1. Device Selection: B70 (most-flops) + iGPU (any other)
+	// ============================================================
+	const vector<Device_Info>& all_devices = get_devices();
+	Device_Info dev_b70  = select_device_with_most_flops(all_devices);
+	Device_Info dev_igpu = dev_b70;
+	for(uint i=0u; i<(uint)all_devices.size(); i++) {
+		if(all_devices[i].id != dev_b70.id) { dev_igpu = all_devices[i]; break; }
+	}
+	if(dev_igpu.id == dev_b70.id) print_warning("Phase 7: nur 1 OpenCL-Device gefunden — Coarse läuft auf B70 (suboptimal, RAM-knapp!)");
+	print_info("Phase 7 Devices: B70 = ID "+to_string(dev_b70.id)+" ("+dev_b70.name+") | iGPU = ID "+to_string(dev_igpu.id)+" ("+dev_igpu.name+")");
+
+	// ============================================================
+	// 2. Three LBM Instances mit explizitem Device_Info
+	// ============================================================
+	const uint3 near_N   = uint3(1500u, 648u, 402u);  // 391.0 M cells
+	const uint3 far_N    = uint3( 734u, 334u, 218u);  //  53.4 M cells
+	const uint3 coarse_N = uint3( 700u, 375u, 316u);  //  82.9 M cells
+	print_info("Near  : "+to_string(near_N.x)+"x"+to_string(near_N.y)+"x"+to_string(near_N.z)+" @ 4mm  = "+to_string((ulong)near_N.x*near_N.y*near_N.z)+" cells  (B70  ~23.6 GiB)");
+	print_info("Far   : "+to_string(far_N.x )+"x"+to_string(far_N.y )+"x"+to_string(far_N.z )+" @ 12mm = "+to_string((ulong)far_N.x *far_N.y *far_N.z )+" cells  (B70  ~3.4 GiB)");
+	print_info("Coarse: "+to_string(coarse_N.x)+"x"+to_string(coarse_N.y)+"x"+to_string(coarse_N.z)+" @ 24mm = "+to_string((ulong)coarse_N.x*coarse_N.y*coarse_N.z)+" cells  (iGPU ~5.0 GiB)");
+
+	LBM lbm_near  (near_N  , lbm_nu_near  , dev_b70 );
+	LBM lbm_far   (far_N   , lbm_nu_far   , dev_b70 );
+	LBM lbm_coarse(coarse_N, lbm_nu_coarse, dev_igpu);
+
+#ifdef WALL_MODEL_FLOOR
+	lbm_near  .wall_floor_u_road = lbm_u;
+	lbm_far   .wall_floor_u_road = lbm_u;
+	lbm_coarse.wall_floor_u_road = lbm_u;
+	print_info("WALL_MODEL_FLOOR active on all 3 LBMs (Rolling Road u_road = "+to_string(lbm_u,4u)+" LBM = "+to_string(si_u,1u)+" m/s)");
+#endif
+
+	// ============================================================
+	// 3. Vehicle Voxelization in Near + Far (NICHT in Coarse — 24mm zu coarse)
+	// ============================================================
+	Mesh* vehicle_near = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	const float3 bbox_orig = vehicle_near->get_bounding_box_size(); // STL-native bbox, x_extent = si_length
+	vehicle_near->scale((si_length / dx_near) / bbox_orig.x);
+	const float3 vbbox_n = vehicle_near->get_bounding_box_size();
+	const float3 vctr_n  = vehicle_near->get_bounding_box_center();
+	// Near world origin = -0.4 m in X, -1.296 m in Y, 0 in Z. Vehicle bow @ SI x=0.
+	const float near_veh_xctr = (0.0f - (-0.4f )) / dx_near + (si_length * 0.5f) / dx_near; // = 100 + 554.55 = 654.55
+	const float near_veh_yctr = (0.0f - (-1.296f)) / dx_near;                                // = 324
+	vehicle_near->translate(float3(
+		near_veh_xctr - vctr_n.x,
+		near_veh_yctr - vctr_n.y,
+		5.0f - (vctr_n.z - vbbox_n.z * 0.5f))); // Vehicle Near z=5 cell = 20mm clearance
+	print_info("Near Vehicle BBox: X["+to_string(vehicle_near->pmin.x,1u)+","+to_string(vehicle_near->pmax.x,1u)+"] Y["+to_string(vehicle_near->pmin.y,1u)+","+to_string(vehicle_near->pmax.y,1u)+"] Z["+to_string(vehicle_near->pmin.z,1u)+","+to_string(vehicle_near->pmax.z,1u)+"] (Near cells)");
+	lbm_near.voxelize_mesh_on_device(vehicle_near, TYPE_S|TYPE_X);
+
+	Mesh* vehicle_far = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	vehicle_far->scale((si_length / dx_far) / bbox_orig.x);
+	const float3 vbbox_f = vehicle_far->get_bounding_box_size();
+	const float3 vctr_f  = vehicle_far->get_bounding_box_center();
+	const float far_veh_xctr = (0.0f - (-0.808f)) / dx_far + (si_length * 0.5f) / dx_far; // = 67.33 + 184.85 = 252.18
+	const float far_veh_yctr = (0.0f - (-2.004f)) / dx_far;                                // = 167
+	vehicle_far->translate(float3(
+		far_veh_xctr - vctr_f.x,
+		far_veh_yctr - vctr_f.y,
+		1.0f - (vctr_f.z - vbbox_f.z * 0.5f))); // Far z=1 cell = 12mm clearance (3-cell Near match via 3:1 ratio)
+	print_info("Far Vehicle BBox:  X["+to_string(vehicle_far->pmin.x,1u)+","+to_string(vehicle_far->pmax.x,1u)+"] Y["+to_string(vehicle_far->pmin.y,1u)+","+to_string(vehicle_far->pmax.y,1u)+"] Z["+to_string(vehicle_far->pmin.z,1u)+","+to_string(vehicle_far->pmax.z,1u)+"] (Far cells)");
+	lbm_far.voxelize_mesh_on_device(vehicle_far, TYPE_S|TYPE_X);
+
+	// ============================================================
+	// 4. Boundary Conditions: TYPE_S Moving Wall floor + TYPE_E walls (alle 3 LBMs)
+	// ============================================================
+	auto set_bcs = [&](LBM& L) {
+		const uint Nx = L.get_Nx(), Ny = L.get_Ny(), Nz = L.get_Nz();
+		parallel_for(L.get_N(), [&](ulong n) {
+			uint x=0u, y=0u, z=0u; L.coordinates(n, x, y, z);
+			if((L.flags[n] & TYPE_X) != 0u) {
+				if(z==0u) L.u.x[n] = lbm_u; // wheel-contact-patch wandert mit Boden
+				return;
+			}
+			if(z==0u) { L.flags[n] = TYPE_S; L.u.x[n] = lbm_u; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f; }
+			else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) {
+				L.flags[n] = TYPE_E; L.u.x[n] = lbm_u; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f;
+			} else {
+				L.u.x[n] = lbm_u; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f;
+			}
+		});
+	};
+	set_bcs(lbm_near);
+	set_bcs(lbm_far);
+	set_bcs(lbm_coarse); // Coarse: kein Fahrzeug → nur Floor + freestream Equilibrium an äußeren Wänden
+
+#ifdef WALL_VISC_BOOST
+	lbm_near  .populate_wall_adj_flag(dx_near);   // 4mm → 5 layers (20mm target)
+	lbm_far   .populate_wall_adj_flag(dx_far);    // 12mm → 2 layers
+	lbm_coarse.populate_wall_adj_flag(dx_coarse); // 24mm → 1 layer (Vehicle nicht in Coarse, also nur Floor)
+	print_info("WALL_VISC_BOOST: distance-based pro Domain (Near 5L, Far 2L, Coarse 1L) — Target BL ~20mm");
+#endif
+
+	// ============================================================
+	// 5. Coupling-Planes
+	//    Near↔Far  (3:1): Near in Far cells = (34, 59, 0), extent (500, 216, 134)
+	//    Far↔Coarse (2:1): Far  in Coarse cells = (33, 104, 0), extent (367, 167, 109)
+	// ============================================================
+	auto mk = [&](uint ox,uint oy,uint oz, uint ea,uint eb, uint ax, float cs){ PlaneSpec p; p.origin=uint3(ox,oy,oz); p.extent_a=ea; p.extent_b=eb; p.axis=ax; p.cell_size=cs; return p; };
+
+	// ---------- Near↔Far Forward Plane Sources (in Far) ----------
+	// Near origin in Far cells: (34, 59, 0). Far cells inside Near: x 34..533 (500), y 59..274 (216), z 0..133 (134).
+	const uint NF_OX = 34u, NF_OY = 59u, NF_OZ = 0u;
+	const uint NF_EX = 500u, NF_EY = 216u, NF_EZ = 134u; // extents in Far cells
+	// Far→Near forward sources (skip z=0 floor)
+	const PlaneSpec nf_src_xmin = mk(NF_OX,            NF_OY,            1u,           NF_EY, NF_EZ-1u, 0u, dx_far);
+	const PlaneSpec nf_src_xmax = mk(NF_OX+NF_EX-1u,   NF_OY,            1u,           NF_EY, NF_EZ-1u, 0u, dx_far);
+	const PlaneSpec nf_src_ymin = mk(NF_OX,            NF_OY,            1u,           NF_EX, NF_EZ-1u, 1u, dx_far);
+	const PlaneSpec nf_src_ymax = mk(NF_OX,            NF_OY+NF_EY-1u,   1u,           NF_EX, NF_EZ-1u, 1u, dx_far);
+	const PlaneSpec nf_src_zmax = mk(NF_OX,            NF_OY,            NF_OZ+NF_EZ-1u, NF_EX, NF_EY, 2u, dx_far);
+	// Near targets (skip z=0 floor)
+	const PlaneSpec nf_tgt_xmin = mk(0u,               0u,               1u, near_N.y, near_N.z-1u, 0u, dx_near);
+	const PlaneSpec nf_tgt_xmax = mk(near_N.x-1u,      0u,               1u, near_N.y, near_N.z-1u, 0u, dx_near);
+	const PlaneSpec nf_tgt_ymin = mk(0u,               0u,               1u, near_N.x, near_N.z-1u, 1u, dx_near);
+	const PlaneSpec nf_tgt_ymax = mk(0u,               near_N.y-1u,      1u, near_N.x, near_N.z-1u, 1u, dx_near);
+	const PlaneSpec nf_tgt_zmax = mk(0u,               0u,               near_N.z-1u, near_N.x, near_N.y, 2u, dx_near);
+
+	// ---------- Far↔Coarse Forward Plane Sources (in Coarse) ----------
+	// Far origin in Coarse cells: (33, 104, 0). Coarse cells inside Far: x 33..399 (367), y 104..270 (167), z 0..108 (109).
+	const uint FC_OX = 33u, FC_OY = 104u, FC_OZ = 0u;
+	const uint FC_EX = 367u, FC_EY = 167u, FC_EZ = 109u; // extents in Coarse cells
+	const PlaneSpec fc_src_xmin = mk(FC_OX,            FC_OY,            1u,           FC_EY, FC_EZ-1u, 0u, dx_coarse);
+	const PlaneSpec fc_src_xmax = mk(FC_OX+FC_EX-1u,   FC_OY,            1u,           FC_EY, FC_EZ-1u, 0u, dx_coarse);
+	const PlaneSpec fc_src_ymin = mk(FC_OX,            FC_OY,            1u,           FC_EX, FC_EZ-1u, 1u, dx_coarse);
+	const PlaneSpec fc_src_ymax = mk(FC_OX,            FC_OY+FC_EY-1u,   1u,           FC_EX, FC_EZ-1u, 1u, dx_coarse);
+	const PlaneSpec fc_src_zmax = mk(FC_OX,            FC_OY,            FC_OZ+FC_EZ-1u, FC_EX, FC_EY, 2u, dx_coarse);
+	// Far targets (skip z=0 floor)
+	const PlaneSpec fc_tgt_xmin = mk(0u,               0u,               1u, far_N.y, far_N.z-1u, 0u, dx_far);
+	const PlaneSpec fc_tgt_xmax = mk(far_N.x-1u,       0u,               1u, far_N.y, far_N.z-1u, 0u, dx_far);
+	const PlaneSpec fc_tgt_ymin = mk(0u,               0u,               1u, far_N.x, far_N.z-1u, 1u, dx_far);
+	const PlaneSpec fc_tgt_ymax = mk(0u,               far_N.y-1u,       1u, far_N.x, far_N.z-1u, 1u, dx_far);
+	const PlaneSpec fc_tgt_zmax = mk(0u,               0u,               far_N.z-1u, far_N.x, far_N.y, 2u, dx_far);
+
+	// ---------- Near↔Far Back Plane Sources (in Near) ----------
+	const uint bn_nf = 2u; // band depth in Near cells
+	const PlaneSpec bk_nf_src_xmin = mk(bn_nf,             0u,                  1u, near_N.y, near_N.z-1u, 0u, dx_near);
+	const PlaneSpec bk_nf_src_xmax = mk(near_N.x-1u-bn_nf, 0u,                  1u, near_N.y, near_N.z-1u, 0u, dx_near);
+	const PlaneSpec bk_nf_src_ymin = mk(0u,                bn_nf,               1u, near_N.x, near_N.z-1u, 1u, dx_near);
+	const PlaneSpec bk_nf_src_ymax = mk(0u,                near_N.y-1u-bn_nf,   1u, near_N.x, near_N.z-1u, 1u, dx_near);
+	const PlaneSpec bk_nf_src_zmax = mk(0u,                0u,                  near_N.z-1u-bn_nf, near_N.x, near_N.y, 2u, dx_near);
+	// targets in Far (1 Far cell inside Near's overlap)
+	const PlaneSpec bk_nf_tgt_xmin = mk(NF_OX+1u,          NF_OY,               1u, NF_EY, NF_EZ-1u, 0u, dx_far);
+	const PlaneSpec bk_nf_tgt_xmax = mk(NF_OX+NF_EX-2u,    NF_OY,               1u, NF_EY, NF_EZ-1u, 0u, dx_far);
+	const PlaneSpec bk_nf_tgt_ymin = mk(NF_OX,             NF_OY+1u,            1u, NF_EX, NF_EZ-1u, 1u, dx_far);
+	const PlaneSpec bk_nf_tgt_ymax = mk(NF_OX,             NF_OY+NF_EY-2u,      1u, NF_EX, NF_EZ-1u, 1u, dx_far);
+	const PlaneSpec bk_nf_tgt_zmax = mk(NF_OX,             NF_OY,               NF_OZ+NF_EZ-2u, NF_EX, NF_EY, 2u, dx_far);
+
+	// ---------- Far↔Coarse Back Plane Sources (in Far) ----------
+	const uint bn_fc = 2u; // band depth in Far cells (≥ 2:1 ratio)
+	const PlaneSpec bk_fc_src_xmin = mk(bn_fc,             0u,                  1u, far_N.y, far_N.z-1u, 0u, dx_far);
+	const PlaneSpec bk_fc_src_xmax = mk(far_N.x-1u-bn_fc,  0u,                  1u, far_N.y, far_N.z-1u, 0u, dx_far);
+	const PlaneSpec bk_fc_src_ymin = mk(0u,                bn_fc,               1u, far_N.x, far_N.z-1u, 1u, dx_far);
+	const PlaneSpec bk_fc_src_ymax = mk(0u,                far_N.y-1u-bn_fc,    1u, far_N.x, far_N.z-1u, 1u, dx_far);
+	const PlaneSpec bk_fc_src_zmax = mk(0u,                0u,                  far_N.z-1u-bn_fc, far_N.x, far_N.y, 2u, dx_far);
+	// targets in Coarse
+	const PlaneSpec bk_fc_tgt_xmin = mk(FC_OX+1u,          FC_OY,               1u, FC_EY, FC_EZ-1u, 0u, dx_coarse);
+	const PlaneSpec bk_fc_tgt_xmax = mk(FC_OX+FC_EX-2u,    FC_OY,               1u, FC_EY, FC_EZ-1u, 0u, dx_coarse);
+	const PlaneSpec bk_fc_tgt_ymin = mk(FC_OX,             FC_OY+1u,            1u, FC_EX, FC_EZ-1u, 1u, dx_coarse);
+	const PlaneSpec bk_fc_tgt_ymax = mk(FC_OX,             FC_OY+FC_EY-2u,      1u, FC_EX, FC_EZ-1u, 1u, dx_coarse);
+	const PlaneSpec bk_fc_tgt_zmax = mk(FC_OX,             FC_OY,               FC_OZ+FC_EZ-2u, FC_EX, FC_EY, 2u, dx_coarse);
+
+	// ============================================================
+	// 6. Coupling Options
+	// ============================================================
+	CouplingOptions opts;       opts.smooth_plane = false;       opts.export_csv = false;       opts.sync_pcie = false;
+	CouplingOptions opts_back;  opts_back.smooth_plane = false;  opts_back.export_csv = false;  opts_back.sync_pcie = false;
+
+	// Blending: Plateau + Linear-Ramp wie Phase 6C (α = ALPHA_HIGH am Boundary, fällt linear ins Innere; back rise α=ALPHA_LOW boundary).
+	const float ALPHA_LOW  = 0.05f;  // Phase 6C-Default (kann nach 6D-Sichtung auf 0.0 gesetzt werden)
+	const float ALPHA_HIGH = 0.50f;  // Phase 6C-Default (kann nach 6D-Sichtung auf 1.0 gesetzt werden)
+	// Near↔Far (3:1): 36 Near = 12 Far Band-Tiefe, Plateau 1 Far = 3 Near
+	const uint  BAND_NEAR_NF = 36u; const uint BAND_FAR_NF = 12u; const uint PLATEAU_NEAR_NF = 3u; const uint PLATEAU_FAR_NF = 1u;
+	// Far↔Coarse (2:1): 12 Far = 6 Coarse Band-Tiefe, Plateau 1 Coarse = 2 Far
+	const uint  BAND_FAR_FC = 12u; const uint BAND_COARSE_FC = 6u; const uint PLATEAU_FAR_FC = 2u; const uint PLATEAU_COARSE_FC = 1u;
+
+	// ============================================================
+	// 7. Run-Loop (Mode 3 PERF-G mit 3 LBMs, ratio 1:3:6 für gleiche SI-Δt)
+	// Far chunk = 50 → Near chunk = 150 → Coarse chunk = 25 (Far dt = 2 Coarse dt)
+	// ============================================================
+	const string force_csv_path = get_exe_path()+"../bin/forces_phase7_triple_res.csv";
+	std::ofstream fcsv(force_csv_path);
+	fcsv << "step_far,t_si,Fx_far,Fy_far,Fz_far,Fx_near,Fy_near,Fz_near\n";
+	fcsv << std::scientific;
+	const uint chunk_far    = 50u;             // 50 Far steps/chunk (Coarse 25, Near 150)
+	const uint chunk_near   = chunk_far * 3u;  // 3:1 Ratio Near:Far
+	const uint chunk_coarse = chunk_far / 2u;  // 1:2 Ratio Coarse:Far (Coarse dt = 2x Far dt)
+	const uint chunks_max     = 500u;
+	const uint conv_window    = 25u;
+	const uint conv_min_chunks= 50u;
+	const float conv_tol      = 0.02f;
+	std::vector<float3> Fhist_far;
+	Fhist_far.reserve(chunks_max);
+	print_info("Phase 7 Run start: max "+to_string(chunks_max*chunk_far)+" Far-steps | auto-stop bei |dFx_far|/Fx_far<2% über 5000 Far-steps (earliest chunk 50)");
+	print_info("  Per-Chunk: "+to_string(chunk_near)+" Near + "+to_string(chunk_far)+" Far + "+to_string(chunk_coarse)+" Coarse (same SI dt)");
+
+	uint final_chunks = chunks_max;
+	for(uint c = 0u; c < chunks_max; c++) {
+		// ----- Concurrent Run aller 3 LBMs (PERF-G Additive Schwarz) -----
+		if(c == 0u) {
+			lbm_coarse.run(chunk_coarse);
+			lbm_far   .run(chunk_far   );
+			lbm_near  .run(chunk_near  );
+		} else {
+			lbm_coarse.run_async(chunk_coarse);
+			lbm_far   .run_async(chunk_far   );
+			lbm_near  .run_async(chunk_near  );
+			lbm_coarse.finish();
+			lbm_far   .finish();
+			lbm_near  .finish();
+		}
+
+		// ----- PERF-D: batched device→host reads -----
+		lbm_near  .u.read_from_device();   lbm_near  .rho.read_from_device();   lbm_near  .flags.read_from_device();
+		lbm_far   .u.read_from_device();   lbm_far   .rho.read_from_device();   lbm_far   .flags.read_from_device();
+		lbm_coarse.u.read_from_device();   lbm_coarse.rho.read_from_device();   lbm_coarse.flags.read_from_device();
+
+		// ----- Forward Coupling Near↔Far (Coarse-Cell-Ratio 3:1, plateau-ramp) -----
+		for(uint d = 0u; d < BAND_NEAR_NF; d++) {
+			float a;
+			if(d < PLATEAU_NEAR_NF) a = ALPHA_HIGH;
+			else { const uint r = d - PLATEAU_NEAR_NF; const uint L = BAND_NEAR_NF - PLATEAU_NEAR_NF - 1u; a = ALPHA_HIGH - (float)r/(float)L * (ALPHA_HIGH - ALPHA_LOW); }
+			CouplingOptions od = opts; od.alpha = a; od.keep_flags = (d > 0u);
+			const uint dsrc = d / 3u;
+			PlaneSpec t, s;
+			t = nf_tgt_xmin; t.origin.x = d;                    s = nf_src_xmin; s.origin.x = nf_src_xmin.origin.x + dsrc;  lbm_far.couple_fields(lbm_near, s, t, od);
+			t = nf_tgt_xmax; t.origin.x = nf_tgt_xmax.origin.x - d;  s = nf_src_xmax; s.origin.x = nf_src_xmax.origin.x - dsrc;  lbm_far.couple_fields(lbm_near, s, t, od);
+			t = nf_tgt_ymin; t.origin.y = d;                    s = nf_src_ymin; s.origin.y = nf_src_ymin.origin.y + dsrc;  lbm_far.couple_fields(lbm_near, s, t, od);
+			t = nf_tgt_ymax; t.origin.y = nf_tgt_ymax.origin.y - d;  s = nf_src_ymax; s.origin.y = nf_src_ymax.origin.y - dsrc;  lbm_far.couple_fields(lbm_near, s, t, od);
+			t = nf_tgt_zmax; t.origin.z = nf_tgt_zmax.origin.z - d;  s = nf_src_zmax; s.origin.z = nf_src_zmax.origin.z - dsrc;  lbm_far.couple_fields(lbm_near, s, t, od);
+		}
+
+		// ----- Back Coupling Near→Far (3:1 ratio, plateau-ramp) -----
+		for(uint df = 0u; df < BAND_FAR_NF; df++) {
+			float a;
+			if(df < PLATEAU_FAR_NF) a = ALPHA_LOW;
+			else { const uint r = df - PLATEAU_FAR_NF; const uint L = BAND_FAR_NF - PLATEAU_FAR_NF - 1u; a = ALPHA_LOW + (float)r/(float)L * (ALPHA_HIGH - ALPHA_LOW); }
+			CouplingOptions od = opts_back; od.alpha = a;
+			const uint dn = 1u + 3u*df; // Near source: center of 3-cell block
+			PlaneSpec s, t;
+			s = bk_nf_src_xmin; s.origin.x = dn;                       t = bk_nf_tgt_xmin; t.origin.x = NF_OX+1u + df;             lbm_near.couple_fields(lbm_far, s, t, od);
+			s = bk_nf_src_xmax; s.origin.x = near_N.x-1u-dn;            t = bk_nf_tgt_xmax; t.origin.x = NF_OX+NF_EX-2u - df;       lbm_near.couple_fields(lbm_far, s, t, od);
+			s = bk_nf_src_ymin; s.origin.y = dn;                       t = bk_nf_tgt_ymin; t.origin.y = NF_OY+1u + df;             lbm_near.couple_fields(lbm_far, s, t, od);
+			s = bk_nf_src_ymax; s.origin.y = near_N.y-1u-dn;            t = bk_nf_tgt_ymax; t.origin.y = NF_OY+NF_EY-2u - df;       lbm_near.couple_fields(lbm_far, s, t, od);
+			s = bk_nf_src_zmax; s.origin.z = near_N.z-1u-dn;            t = bk_nf_tgt_zmax; t.origin.z = NF_OZ+NF_EZ-2u - df;       lbm_near.couple_fields(lbm_far, s, t, od);
+		}
+
+		// ----- Forward Coupling Far↔Coarse (2:1 ratio, plateau-ramp) -----
+		for(uint d = 0u; d < BAND_FAR_FC; d++) {
+			float a;
+			if(d < PLATEAU_FAR_FC) a = ALPHA_HIGH;
+			else { const uint r = d - PLATEAU_FAR_FC; const uint L = BAND_FAR_FC - PLATEAU_FAR_FC - 1u; a = ALPHA_HIGH - (float)r/(float)L * (ALPHA_HIGH - ALPHA_LOW); }
+			CouplingOptions od = opts; od.alpha = a; od.keep_flags = (d > 0u);
+			const uint dsrc = d / 2u;
+			PlaneSpec t, s;
+			t = fc_tgt_xmin; t.origin.x = d;                    s = fc_src_xmin; s.origin.x = fc_src_xmin.origin.x + dsrc;  lbm_coarse.couple_fields(lbm_far, s, t, od);
+			t = fc_tgt_xmax; t.origin.x = fc_tgt_xmax.origin.x - d;  s = fc_src_xmax; s.origin.x = fc_src_xmax.origin.x - dsrc;  lbm_coarse.couple_fields(lbm_far, s, t, od);
+			t = fc_tgt_ymin; t.origin.y = d;                    s = fc_src_ymin; s.origin.y = fc_src_ymin.origin.y + dsrc;  lbm_coarse.couple_fields(lbm_far, s, t, od);
+			t = fc_tgt_ymax; t.origin.y = fc_tgt_ymax.origin.y - d;  s = fc_src_ymax; s.origin.y = fc_src_ymax.origin.y - dsrc;  lbm_coarse.couple_fields(lbm_far, s, t, od);
+			t = fc_tgt_zmax; t.origin.z = fc_tgt_zmax.origin.z - d;  s = fc_src_zmax; s.origin.z = fc_src_zmax.origin.z - dsrc;  lbm_coarse.couple_fields(lbm_far, s, t, od);
+		}
+
+		// ----- Back Coupling Far→Coarse (2:1 ratio, plateau-ramp) -----
+		for(uint dc = 0u; dc < BAND_COARSE_FC; dc++) {
+			float a;
+			if(dc < PLATEAU_COARSE_FC) a = ALPHA_LOW;
+			else { const uint r = dc - PLATEAU_COARSE_FC; const uint L = BAND_COARSE_FC - PLATEAU_COARSE_FC - 1u; a = ALPHA_LOW + (float)r/(float)L * (ALPHA_HIGH - ALPHA_LOW); }
+			CouplingOptions od = opts_back; od.alpha = a;
+			const uint df = 2u*dc; // Far source: center of 2-cell block (0.5+0.5 floor)
+			PlaneSpec s, t;
+			s = bk_fc_src_xmin; s.origin.x = df;                       t = bk_fc_tgt_xmin; t.origin.x = FC_OX+1u + dc;             lbm_far.couple_fields(lbm_coarse, s, t, od);
+			s = bk_fc_src_xmax; s.origin.x = far_N.x-1u-df;             t = bk_fc_tgt_xmax; t.origin.x = FC_OX+FC_EX-2u - dc;       lbm_far.couple_fields(lbm_coarse, s, t, od);
+			s = bk_fc_src_ymin; s.origin.y = df;                       t = bk_fc_tgt_ymin; t.origin.y = FC_OY+1u + dc;             lbm_far.couple_fields(lbm_coarse, s, t, od);
+			s = bk_fc_src_ymax; s.origin.y = far_N.y-1u-df;             t = bk_fc_tgt_ymax; t.origin.y = FC_OY+FC_EY-2u - dc;       lbm_far.couple_fields(lbm_coarse, s, t, od);
+			s = bk_fc_src_zmax; s.origin.z = far_N.z-1u-df;             t = bk_fc_tgt_zmax; t.origin.z = FC_OZ+FC_EZ-2u - dc;       lbm_far.couple_fields(lbm_coarse, s, t, od);
+		}
+
+		// ----- PERF-D: batched host→device writes -----
+		lbm_near  .flags.write_to_device();   lbm_near  .u.write_to_device();   lbm_near  .rho.write_to_device();
+		lbm_far   .flags.write_to_device();   lbm_far   .u.write_to_device();   lbm_far   .rho.write_to_device();
+		lbm_coarse.flags.write_to_device();   lbm_coarse.u.write_to_device();   lbm_coarse.rho.write_to_device();
+
+		// ----- Force Diagnostics (Far + Near, Coarse hat kein Vehicle) -----
+		lbm_far .update_force_field(); const float3 F_far_lbm = lbm_far .object_force(TYPE_S|TYPE_X);
+		lbm_near.update_force_field(); const float3 F_near_lbm = lbm_near.object_force(TYPE_S|TYPE_X);
+		const float3 F_far_si  = float3(units_far .si_F(F_far_lbm.x ), units_far .si_F(F_far_lbm.y ), units_far .si_F(F_far_lbm.z ));
+		const float3 F_near_si = float3(units_near.si_F(F_near_lbm.x), units_near.si_F(F_near_lbm.y), units_near.si_F(F_near_lbm.z));
+		const ulong step = (ulong)(c+1u) * chunk_far;
+		const float t_si = units_far.si_t(step);
+		fcsv << step << "," << t_si << "," << F_far_si.x << "," << F_far_si.y << "," << F_far_si.z << "," << F_near_si.x << "," << F_near_si.y << "," << F_near_si.z << "\n";
+		fcsv.flush();
+		print_info("step_far="+to_string(step)+"  Fx_far="+to_string(F_far_si.x,1u)+"N  Fx_near="+to_string(F_near_si.x,1u)+"N  Fz_near="+to_string(F_near_si.z,1u));
+		Fhist_far.push_back(F_far_si);
+
+		if(c+1u >= conv_min_chunks) {
+			float3 recent_avg(0.0f), prev_avg(0.0f);
+			for(uint k=0u; k<conv_window; k++) recent_avg += Fhist_far[Fhist_far.size()-1u-k];
+			for(uint k=0u; k<conv_window; k++) prev_avg   += Fhist_far[Fhist_far.size()-1u-conv_window-k];
+			recent_avg /= (float)conv_window;
+			prev_avg   /= (float)conv_window;
+			const float dxr = (recent_avg.x != 0.0f) ? fabs(recent_avg.x - prev_avg.x) / fabs(recent_avg.x) : 1.0f;
+			if(dxr < conv_tol) {
+				print_info("CONVERGED at chunk "+to_string(c+1u)+" (step_far "+to_string(step)+"): |dFx|/Fx="+to_string(dxr*100.0f,3u)+"%  Fx_far_avg="+to_string(recent_avg.x,1u)+"N");
+				final_chunks = c+1u;
+				break;
+			}
+		}
+	}
+	fcsv.close();
+	print_info("Phase 7 Run done after "+to_string(final_chunks)+" chunks ("+to_string(final_chunks*chunk_far)+" Far-steps)");
+
+	// ============================================================
+	// 8. VTK Export — alle 3 Domains in eigene Subfolder
+	// ============================================================
+	const string export_near   = get_exe_path()+"../export/tr_near/";
+	const string export_far    = get_exe_path()+"../export/tr_far/";
+	const string export_coarse = get_exe_path()+"../export/tr_coarse/";
+	lbm_near  .u    .write_device_to_vtk(export_near);   lbm_near  .rho.write_device_to_vtk(export_near);   lbm_near  .flags.write_device_to_vtk(export_near);   lbm_near  .F.write_device_to_vtk(export_near);
+	lbm_far   .u    .write_device_to_vtk(export_far);    lbm_far   .rho.write_device_to_vtk(export_far);    lbm_far   .flags.write_device_to_vtk(export_far);    lbm_far   .F.write_device_to_vtk(export_far);
+	lbm_coarse.u    .write_device_to_vtk(export_coarse); lbm_coarse.rho.write_device_to_vtk(export_coarse); lbm_coarse.flags.write_device_to_vtk(export_coarse);
+	lbm_near  .write_mesh_to_vtk(vehicle_near, export_near);
+	lbm_far   .write_mesh_to_vtk(vehicle_far , export_far );
+	print_info("Phase 7 done. Force-CSV: "+force_csv_path);
+	print_info("VTKs: Near="+export_near+" | Far="+export_far+" | Coarse="+export_coarse);
+	std::fflush(nullptr);
+	_exit(0); // xe-driver cleanup-race workaround
+}
+#endif // PHASE_7_TRIPLE_RES

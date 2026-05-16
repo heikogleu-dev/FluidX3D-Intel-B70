@@ -757,6 +757,55 @@ LBM::LBM(const uint3 N, const float nu, const uint particles_N, const float part
 LBM::LBM(const uint3 N, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho)
 	:LBM(N.x, N.y, N.z, 1u, 1u, 1u, nu, fx, fy, fz, 0.0f, 0.0f, 0.0f, particles_N, particles_rho) { // delegating constructor
 }
+LBM::LBM(const uint3 N, const float nu, const Device_Info& device_info, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // Phase 7: explicit Device_Info (bypass smart_device_selection for heterogenous multi-GPU)
+	this->Nx = N.x; this->Ny = N.y; this->Nz = N.z;
+	this->Dx = 1u; this->Dy = 1u; this->Dz = 1u;
+	const vector<Device_Info> device_infos(1u, device_info);
+	sanity_checks_constructor(device_infos, this->Nx, this->Ny, this->Nz, 1u, 1u, 1u, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
+	lbm_domain = new LBM_Domain*[1u];
+	lbm_domain[0] = new LBM_Domain(device_info, this->Nx, this->Ny, this->Nz, 1u, 1u, 1u, 0, 0, 0, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
+	{
+		Memory<float>** buffers_rho = new Memory<float>*[1u];
+		buffers_rho[0] = &(lbm_domain[0]->rho);
+		rho = Memory_Container(this, buffers_rho, "rho");
+	} {
+		Memory<float>** buffers_u = new Memory<float>*[1u];
+		buffers_u[0] = &(lbm_domain[0]->u);
+		u = Memory_Container(this, buffers_u, "u");
+	} {
+		Memory<uchar>** buffers_flags = new Memory<uchar>*[1u];
+		buffers_flags[0] = &(lbm_domain[0]->flags);
+		flags = Memory_Container(this, buffers_flags, "flags");
+	}
+#ifdef FORCE_FIELD
+	{
+		Memory<float>** buffers_F = new Memory<float>*[1u];
+		buffers_F[0] = &(lbm_domain[0]->F);
+		F = Memory_Container(this, buffers_F, "F");
+	}
+#endif // FORCE_FIELD
+#ifdef SURFACE
+	{
+		Memory<float>** buffers_phi = new Memory<float>*[1u];
+		buffers_phi[0] = &(lbm_domain[0]->phi);
+		phi = Memory_Container(this, buffers_phi, "phi");
+	}
+#endif // SURFACE
+#ifdef TEMPERATURE
+	{
+		Memory<float>** buffers_T = new Memory<float>*[1u];
+		buffers_T[0] = &(lbm_domain[0]->T);
+		T = Memory_Container(this, buffers_T, "T");
+	}
+#endif // TEMPERATURE
+#ifdef PARTICLES
+	particles = &(lbm_domain[0]->particles);
+#endif // PARTICLES
+#ifdef GRAPHICS
+	graphics = Graphics(this);
+#endif // GRAPHICS
+}
+
 LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) { // multiple devices
 	const uint NDx=(Nx/Dx)*Dx, NDy=(Ny/Dy)*Dy, NDz=(Nz/Dz)*Dz; // make resolution equally divisible by domains
 	if(NDx!=Nx||NDy!=Ny||NDz!=Nz) print_warning("LBM grid ("+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+") is not equally divisible in domains ("+to_string(Dx)+"x"+to_string(Dy)+"x"+to_string(Dz)+"). Changing resolution to ("+to_string(NDx)+"x"+to_string(NDy)+"x"+to_string(NDz)+").");

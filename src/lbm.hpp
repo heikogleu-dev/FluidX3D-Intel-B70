@@ -511,6 +511,11 @@ public:
 	LBM(const uint3 N, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
 	LBM(const uint3 N, const float nu, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
 	LBM(const uint3 N, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
+	// Phase 7 2026-05-16: Single-Device LBM mit explizitem Device_Info (bypasst smart_device_selection).
+	// Notwendig für Triple-Res mit heterogenen GPUs (B70 + iGPU), wo verschiedene LBM-Instanzen auf
+	// verschiedenen Devices laufen müssen — smart_device_selection wählt sonst für ALLE Domains das
+	// gleiche schnellste Device, was iGPU-Coarse-Domain unmöglich macht.
+	LBM(const uint3 N, const float nu, const Device_Info& device_info, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=1.0f);
 	~LBM();
 
 	void run(const ulong steps=max_ulong, const ulong total_steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
