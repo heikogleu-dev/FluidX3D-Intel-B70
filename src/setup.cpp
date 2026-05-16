@@ -994,7 +994,7 @@ void main_setup_phase5b_dr() {
 	// MOVED HERE (2026-05-15 fix): populate AFTER BC loops set floor TYPE_S, so floor-adjacency is detected.
 	lbm_far.populate_wall_adj_flag();
 	lbm_near.populate_wall_adj_flag();
-	print_info("WALL_VISC_BOOST Phase 3 multi-cell active: Werner-Wengle + Prandtl mixing-length nu_t = κ·y·u_τ across 3 layers (y = 0.5/1.5/2.5 lu), Vehicle + Floor walls");
+	print_info("WALL_VISC_BOOST Phase 5 vehicle-only: Werner-Wengle + Prandtl mixing-length nu_t = κ·y·u_τ + Van Driest damping across 3 layers (y = 0.5/1.5/2.5 lu). Floor cells NOT boosted — Krüger Moving-Wall + Smagorinsky handle floor BL.");
 #endif
 
 	// ===== 5 Forward Coupling Planes Far → Near (bilinear 5:1 upsample, Phase 4 2026-05-16) =====

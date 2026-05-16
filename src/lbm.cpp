@@ -1046,20 +1046,23 @@ void LBM::populate_wall_adj_flag() {
 	// wall_adj_flag[n] = 0 = interior; 1 = direct neighbor of wall (y_center=0.5 lu);
 	// 2 = 1 fluid cell away from wall (y=1.5 lu); 3 = 2 cells away (y=2.5 lu).
 	const uint MAX_WALL_DISTANCE = 3u; // number of layers to mark
+	// Phase 5 2026-05-16: Vehicle-only boost (TYPE_X bit required). Plain TYPE_S floor cells no longer
+	// trigger the boost — Krüger Moving-Wall transfer + Smagorinsky SGS handle the floor without extra ν_t,
+	// which was producing a visible numerical BL artifact on the moving road in Phase 4 ParaView screenshots.
 	for(uint d=0u; d<get_D(); d++) {
 		LBM_Domain* dom = lbm_domain[d];
-		// Pass 1: mark distance=1 cells (direct neighbors of walls)
+		// Pass 1: mark distance=1 cells (direct neighbors of VEHICLE walls only — TYPE_S|TYPE_X)
 		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
 			dom->wall_adj_flag[n] = 0u;
 			const uchar fn = dom->flags[n];
-			if((fn & TYPE_S) != 0u) continue;
+			if((fn & TYPE_S) != 0u) continue; // skip solid cells (themselves)
 			for(uint i=1u; i<19u; i++) {
 				const int nx = (int)x + cx[i], ny = (int)y + cy[i], nz = (int)z + cz[i];
 				if(nx<0||nx>=(int)Nx||ny<0||ny>=(int)Ny||nz<0||nz>=(int)Nz) continue;
 				const ulong nj = (ulong)nx + (ulong)ny*(ulong)Nx + (ulong)nz*(ulong)Nx*(ulong)Ny;
 				const uchar fj = dom->flags[nj];
-				if((fj & TYPE_S) != 0u) { dom->wall_adj_flag[n] = 1u; break; }
+				if((fj & TYPE_X) != 0u) { dom->wall_adj_flag[n] = 1u; break; } // only vehicle TYPE_X triggers boost; bare TYPE_S floor does NOT
 			}
 		}
 		// Pass 2..MAX_WALL_DISTANCE: mark layer k as neighbor of any layer-(k-1) fluid cell
