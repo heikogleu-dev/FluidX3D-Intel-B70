@@ -45,7 +45,8 @@
 // ★ GEMESSEN 2026-08-08, nachdem ich es abgeschaltet hatte: der Fahrzeugfall wird damit SCHLECHTER,
 // nicht besser -- 869 nan statt 7, Kraefte auf exakt null. TRT und SUBGRID sind keine Alternativen,
 // sondern zwei verschiedene Aufgaben: TRT fixiert die WANDPOSITION, SUBGRID liefert die BULK-
-// DISSIPATION. Bei nu_lat = 9.25e-6 traegt Smagorinsky die gesamte Viskositaet; ohne ihn ist die
+// DISSIPATION. Bei nu_lat = 9.4e-6 (Fahrzeug, 4 mm, nu = 1.51e-5) traegt Smagorinsky die gesamte
+// Viskositaet -- die 9.25e-6 im vorigen Kommentar gehoerten noch zu nu = 1.48e-5; ohne ihn ist die
 // Stroemung faktisch reibungsfrei. Es bleibt also AN.
 // OFFEN und fallweise zu loesen: fuer die Kugel-Validierung gegen die Standard-Widerstandskurve bei
 // Re_D = 100..1000 MUSS es aus, sonst misst man das SGS-Modell statt der Kugel (dort addiert es 30

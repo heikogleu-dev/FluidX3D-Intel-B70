@@ -1015,6 +1015,14 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 #elif defined(SRT)&&defined(TRT)
 	print_error("Too many LBM collision operators selected. Comment out either \"#define SRT\" or \"#define TRT\" in defines.hpp");
 #endif // SRT && TRT
+// ★ FORK 2026-08-08: dieselbe Absicherung fuer das Zahlenformat, und zwar aus Erfahrung. Am 2026-08-08
+// waren FP16S UND FP16C gleichzeitig gesetzt; die #if defined(FP16S) / #elif defined(FP16C)-Ketten in
+// device_defines() und info.cpp lassen dann still FP16S gewinnen. Die gesamte Kugelvalidierung lief
+// dadurch im falschen Format, ohne eine einzige Meldung. Fuer SRT/TRT gab es diesen Waechter schon --
+// fuer FP16 nicht, obwohl der Fehler dort genauso lautlos ist.
+#if defined(FP16S)&&defined(FP16C)
+	print_error("FP16S und FP16C sind beide gesetzt. Die #if/#elif-Ketten lassen dann still FP16S gewinnen. Genau eines von beiden in defines.hpp auskommentieren.");
+#endif // FP16S && FP16C
 #ifndef VOLUME_FORCE
 	if(fx!=0.0f||fy!=0.0f||fz!=0.0f) print_error("Volume force is set in LBM constructor in main_setup(), but VOLUME_FORCE is not enabled. Uncomment \"#define VOLUME_FORCE\" in defines.hpp.");
 #else // VOLUME_FORCE
@@ -1132,12 +1140,13 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
 	// FORK: u am Druck-Auslass VOR stream_collide setzen.
-	// ★ EHRLICHE EINORDNUNG (Pruefer-Befund 2026-08-08): der Druckteil (rho=rho_out) wirkt jeden Schritt.
-	// Der Geschwindigkeitsteil dagegen ist innerhalb eines Chunks IDEMPOTENT -- u wird ohne UPDATE_FIELDS
-	// nur vom Host-Aufruf lbm.update_fields() aufgefrischt, also einmal pro CFD_SAMPLE_EVERY Schritten.
-	// Der Per-Schritt-Dispatch kauft dort nachweislich nichts; die Neumann-Bedingung hinkt um 1 bis
-	// CFD_SAMPLE_EVERY Schritte hinterher. Er bleibt trotzdem hier, weil er korrekt wird, sobald u
-	// haeufiger aufgefrischt wird -- aber er ist keine Begruendung fuer Aktualitaet.
+	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand, der Geschwindigkeitsteil sei innerhalb eines
+	// Chunks idempotent und hinke um bis zu CFD_SAMPLE_EVERY Schritte hinterher. Das galt fuer einen
+	// Stand OHNE UPDATE_FIELDS. UPDATE_FIELDS ist inzwischen fest eingeschaltet (defines.hpp), also
+	// schreibt stream_collide rho und u in JEDEM Schritt (der Block ist nur fuer TYPE_E ausgenommen).
+	// Der Per-Schritt-Dispatch ist damit nicht Vorrat, sondern noetig: die Neumann-Bedingung sieht das
+	// Innenfeld des unmittelbar vorangegangenen Schritts. Der alte Kommentar war zu pessimistisch und
+	// widersprach dem, was setup.cpp an derselben Sache richtig beschreibt.
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 #if defined(SURFACE) || defined(GRAPHICS)

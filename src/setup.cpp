@@ -717,11 +717,17 @@ static void main_setup_fahrzeug_dd() {
 
 	// ratio ist der einzige Regler, der ueber die Kosten entscheidet: die groben Zellen skalieren
 	// mit 1/ratio^3 und die groben Schritte mit 1/ratio, das Fernfeld kostet also 1/ratio^4.
-	// Default 8 (dx_c = 32 mm): das Fernfeld ist damit exakt die OpenFOAM-Box UND verschwindet
-	// hinter dem Nahfeld. Gemessen 2026-08-08: B70 4648 MLUPs, iGPU 594 MLUPs (12,8 %).
-	// CFD_RATIO=4 halbiert die grobe Zellweite, verachtzehnfacht aber die Fernfeldkosten.
+	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand "Default 8 (dx_c = 32 mm)" -- der Code hat 4.
+	// Der Kommentar stammte aus meinem ersten Entwurf mit der OpenFOAM-Box und war nach der Umstellung
+	// auf die V1-Masse stehengeblieben. Bei ratio = 8 ginge 12,2720/0,032 nicht einmal auf einem halben
+	// Gitterpunkt auf. DEFAULT IST 4 (dx_c = 16 mm), und das ist die V1-Wahl.
+	// Gemessen 2026-08-08: B70 4648 MLUPs, iGPU 594 MLUPs (12,8 %). Bei ratio = 4 kosten vier feine
+	// Schritte 0,432 s und ein grober 0,343 s -- das Fernfeld braucht 79 % der feinen Zeit und
+	// verschwindet gerade noch dahinter. CFD_RATIO=8 waere billiger, kostet aber Aufloesung an der
+	// Grenzflaeche und ist der A/B dazu.
 	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
-	const float dx_f  = 0.001f*env_f("CFD_DX", 4.0f);
+	// ★ dx = 0 waere eine Division durch null in dt_f und nu_lat, ohne Meldung. Untergrenze 0,1 mm.
+	const float dx_f  = 0.001f*fmax(0.1f, env_f("CFD_DX", 4.0f));
 	const float dx_c  = dx_f*(float)ratio;
 	const float dt_f  = u_lat*dx_f/si_u;
 	const float dt_c  = (float)ratio*dt_f;
@@ -775,7 +781,6 @@ static void main_setup_fahrzeug_dd() {
 	const uint NF_OY = (cNy-cey)/2u;
 	const uint NF_OZ = 0u; // Fahrbahn ist beiden Gittern gemeinsam
 	const float far_y0  = -0.5f*(float)(cNy-1u)*dx_c;   // Mittelebene y=0 in der Mitte des Fernfelds
-	const float far_y1  = -far_y0;
 	const float near_y0 = far_y0 + (float)NF_OY*dx_c;
 	const float near_z0 = 0.0f;
 
@@ -867,6 +872,13 @@ static void main_setup_fahrzeug_dd() {
 	// Das Fahrzeug MUSS auch im groben Gitter stehen. Sonst traegt das Fernfeld die Verdraengung nicht,
 	// und die Nahfeld-Raender bekaemen ungestoerte Anstroemung aufgepraegt -- der Wagen staende dann in
 	// einer Stroemung, die nicht weiss, dass er da ist.
+	// ★ Bewusste Asymmetrie (Pruefer-Befund 2026-08-08): hier wird nur flags zurueckgelesen, nicht u.
+	// Der Voxelisierungs-Kernel schreibt geraeteseitig AUCH u (die Koerpergeschwindigkeit), und
+	// initialize() laedt spaeter das Host-u hoch und ueberschreibt das bedingungslos. Heute folgenlos,
+	// weil das Fahrzeug steht und beide Seiten 0 sind. WER DEM FAHRZEUG JE EINE GESCHWINDIGKEIT GIBT,
+	// muss hier zusaetzlich u.read_from_device() rufen -- sonst ist sie lautlos weg, und initialize()
+	// setzt dann auch kein TYPE_MS an der Fahrzeugwand, die Wand waere also nicht mitbewegt.
+	// Nicht vorsorglich eingebaut, weil das Ruecklesen von u 6 GB ueber PCIe kostet und heute nichts tut.
 	lbm_f.voxelize_mesh_on_device(veh_f, TYPE_S|TYPE_X); lbm_f.flags.read_from_device();
 	sat_shell_and_void_fill(lbm_f, veh_f, fNx, fNy, fNz);
 	lbm_c.voxelize_mesh_on_device(veh_c, TYPE_S|TYPE_X); lbm_c.flags.read_from_device();
@@ -957,7 +969,7 @@ static void main_setup_fahrzeug_dd() {
 					if(bo==TYPE_S)      { n_solid++; ux_sum+=(double)L.u.x[n]; ux_n++; }
 					else if(bo==TYPE_E) { n_equil++; ux_sum+=(double)L.u.x[n]; ux_n++; }
 					else if(bo==0u)     { n_fluid++; }
-					else                { n_other++; } // TYPE_S und TYPE_E gleichzeitig -- gaebe es nicht geben duerfen
+					else                { n_other++; } // TYPE_S und TYPE_E gleichzeitig -- das duerfte es nicht geben
 				}
 				print_info(string("  ")+fname[f]+": Wand "+to_string(n_solid)+", Gleichgewicht "+to_string(n_equil)
 					+", freies Fluid "+to_string(n_fluid)+(n_other? (", UNKLAR "+to_string(n_other)) : string(""))
@@ -1042,7 +1054,7 @@ static void main_setup_fahrzeug_dd() {
 	}
 
 	// ---------------------------------------------------------------- Laufsteuerung
-	const float t_flush  = (far_x0+(float)(cNx-1u)*dx_c-far_x0)/si_u; // Durchspuelung des FERNfelds
+	const float t_flush  = (float)(cNx-1u)*dx_c/si_u; // Durchspuelung des FERNfelds (far_x0 kuerzt sich weg)
 	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
 	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
@@ -1053,6 +1065,14 @@ static void main_setup_fahrzeug_dd() {
 	const float q_inf = 0.5f*si_rho*si_u*si_u;
 	print_info("Eine Fernfeld-Durchspuelung = "+to_string(t_flush,4u)+" s; Laufzeit "+to_string(t_end,3u)+" s = "
 		+to_string(n_outer)+" grobe x "+to_string(ratio)+" feine Schritte, Mittelung ab "+to_string(t_warmup,3u)+" s");
+	// ★ Pruefer-Befund 2026-08-08: die Pruefung auf genug Samples stand HINTER der Zeitschleife.
+	// Bei 2,5 Stunden Laufzeit heisst das: erst nach dem vollen Lauf erfaehrt man, dass die Parameter
+	// gar keine auswertbare Reihe ergeben. Sie gehoert hierher, VOR den ersten Zeitschritt.
+	{
+		const long n_expect = (long)((double)fmax(0.0f, t_end-t_warmup)/((double)sample_every*(double)dt_c));
+		print_info("Erwartete Samples nach dem Warmlauf: "+to_string((uint)max(0L, n_expect))+" (mindestens 16 noetig, ab 32 traegt der Block-SEM ueber 16 Bloecke)");
+		if(n_expect<16L) { print_error("Diese Parameter ergeben nur "+to_string((uint)max(0L, n_expect))+" Samples nach dem Warmlauf. Lauf nicht gestartet -- CFD_T_END, CFD_T_WARMUP oder CFD_SAMPLE_EVERY anpassen."); _exit(1); }
+	}
 
 	// ---------------------------------------------------------------- Initialisieren und Kopplung anlegen
 	lbm_f.run(0u); // nur initialisieren
@@ -1087,7 +1107,6 @@ static void main_setup_fahrzeug_dd() {
 				if((fl&(TYPE_S|TYPE_E))==MS) n_ms_total++;
 				if(z==0u) {
 					if((fl&(TYPE_S|TYPE_E))==TYPE_S) { n_road_z0++; if(L.u.x[n]!=0.0f) n_road_moving++; }
-					if(L.flags[n+(ulong)Nx*(ulong)Ny*0ull]==VEH) {} // (z=0-Fahrzeugzellen: siehe n_veh_z0)
 				}
 				if(z==1u) {
 					if((fl&(TYPE_S|TYPE_E))==MS) n_ms_z1++;
@@ -1120,7 +1139,12 @@ static void main_setup_fahrzeug_dd() {
 
 	std::vector<float> face[5];
 	lbm_c.run(1u); // ein grober Schritt, damit ein Zustand zum Entnehmen existiert
-	for(uint p=0u; p<5u; p++) lbm_c.extract_plane_macros(cp[p], face[p]);
+	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier lief die Schleife ueber ALLE FUENF Ebenen, obwohl
+	// x+ gar nicht getrieben wird (dort steht der Druckauslass). Die grobe x+-Ebene wurde also jeden
+	// groben Schritt entnommen -- mit blockierendem finish_queue, 304 kB Device-Read und einer
+	// Host-Kopierschleife -- und dann von niemandem gelesen. Genau das Muster, das diesen Baum
+	// ueberhaupt noetig gemacht hat: extrahiert, transferiert, weggeworfen.
+	for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_c.extract_plane_macros(cp[p], face[p]);
 
 	// ---------------------------------------------------------------- Zeitschleife
 	// Der grobe Schritt laeuft ASYNCHRON auf dem zweiten Geraet, waehrend das Nahfeld seine ratio
@@ -1134,6 +1158,13 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<double> ts, fx, fz, fx_c;
 	float slice_next = 0.0f;
 	Clock outer_clock; double t_acc = 0.0; ulong n_acc = 0ull;
+	// ★ Pruefer-Befund 2026-08-08: die CSV entstand bisher ERST NACH der Schleife. Bei 2,5 Stunden
+	// Laufzeit heisst das: ein Abbruch durch Treiber, Speicher, Stromausfall oder Strg-C kostet
+	// SAEMTLICHE Samples. Jetzt wird jede Zeile sofort geschrieben und geleert -- die Datei ist damit
+	// zu jedem Zeitpunkt vollstaendig bis zum letzten Sample, und ein abgebrochener Lauf bleibt
+	// auswertbar. Die Vektoren bleiben zusaetzlich fuer die Statistik am Ende.
+	std::ofstream fcsv(out_dir+"forces.csv"); fcsv.precision(8);
+	fcsv << "time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N\n" << std::flush;
 	const ulong verify_at2 = min(n_outer>0ull ? n_outer-1ull : 0ull, (ulong)env_u("CFD_DD_VERIFY_AT", 200u));
 	for(ulong outer=0ull; outer<n_outer; outer++) {
 		outer_clock.start();
@@ -1204,7 +1235,7 @@ static void main_setup_fahrzeug_dd() {
 		}
 
 		lbm_c.finish();
-		for(uint p=0u; p<5u; p++) lbm_c.extract_plane_macros(cp[p], face[p]);
+		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_c.extract_plane_macros(cp[p], face[p]); // nur die vier getriebenen Flaechen -- x+ ist Druckauslass, siehe oben
 		t_acc += outer_clock.stop(); n_acc++;
 
 		if((outer+1ull)%(ulong)sample_every==0ull) {
@@ -1213,10 +1244,11 @@ static void main_setup_fahrzeug_dd() {
 			lbm_c.update_force_field();
 			const float3 Fc = lbm_c.object_force(TYPE_S|TYPE_X);
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
-			ts.push_back(t_si);
-			fx.push_back((double)units_fine.si_F(F.x));
-			fz.push_back((double)units_fine.si_F(F.z));
-			fx_c.push_back((double)units_coarse.si_F(Fc.x));
+			const double Fx_si = (double)units_fine.si_F(F.x), Fz_si = (double)units_fine.si_F(F.z);
+			const double Fx_far = (double)units_coarse.si_F(Fc.x);
+			ts.push_back(t_si); fx.push_back(Fx_si); fz.push_back(Fz_si); fx_c.push_back(Fx_far);
+			fcsv << t_si << "," << Fx_si << "," << Fz_si << "," << Fx_si/((double)q_inf*A_ref) << ","
+			     << Fz_si/((double)q_inf*A_ref) << "," << Fx_far << "\n" << std::flush; // sofort auf Platte, siehe oben
 			if(slice_dt>0.0f && (float)t_si>=slice_next) {
 				slice_next = (float)t_si + slice_dt;
 				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
@@ -1231,13 +1263,8 @@ static void main_setup_fahrzeug_dd() {
 	if(n_acc>0ull) print_info("Mittlere Zeit je grobem Schritt: "+to_string((float)(t_acc/(double)n_acc),4u)+" s ("+to_string(ratio)+" feine Schritte inklusive)");
 
 	// ---------------------------------------------------------------- Auswertung
-	{
-		std::ofstream f(out_dir+"forces.csv"); f.precision(8);
-		f << "time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N\n";
-		for(size_t i=0u; i<ts.size(); i++)
-			f << ts[i] << "," << fx[i] << "," << fz[i] << "," << fx[i]/((double)q_inf*A_ref) << "," << fz[i]/((double)q_inf*A_ref) << "," << fx_c[i] << "\n";
-		print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen)");
-	}
+	fcsv.close(); // die Zeilen stehen bereits einzeln auf Platte, siehe Schleife
+	print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen, waehrend des Laufs geschrieben)");
 	std::vector<double> cd, cz;
 	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
 		cd.push_back(fx[i]/((double)q_inf*A_ref)); cz.push_back(fz[i]/((double)q_inf*A_ref));

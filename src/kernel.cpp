@@ -2209,7 +2209,12 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
 	local float3 cache[cl_workgroup_size];
-	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? cross(position(coordinates(n))-(float3)(cx, cy, cz), load3(F, n)) : (float3)(0.0f, 0.0f, 0.0f);
+	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand load3(F, n) mit dem VOLL-Domaenen-Index.
+	// F ist im Fork nur so gross wie die Bounding-Box um den Koerper (3*def_FBN statt 3*def_N), also
+	// las das weit hinter dem Puffer. Latent, weil object_torque von keinem Setup gerufen wird -- aber
+	// es ist eine Falle fuer den Tag, an dem jemand Momente auswertet. Alle uebrigen F-Zugriffe des
+	// Forks waren bereits auf load3_F umgestellt, nur dieser eine nicht.
+	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? cross(position(coordinates(n))-(float3)(cx, cy, cz), load3_F(F, n)) : (float3)(0.0f, 0.0f, 0.0f);
 	barrier(CLK_GLOBAL_MEM_FENCE);
 	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
 		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
