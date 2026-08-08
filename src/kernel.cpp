@@ -1977,7 +1977,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	}
 } // update_fields()
 
-)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out) {
+)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out, const float po_sigma) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
 	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
 	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
@@ -1989,14 +1989,40 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	//
 	// Jede Randzelle kommt genau einmal in der Liste vor -- vom Host geprueft. Ohne das schrieben zwei
 	// Work-Items dieselbe Zelle, und welches zuletzt gewinnt, ist undefiniert.
+	// ★★ WEICHER DRUCKANKER, 2026-08-08. Vorher stand hier rho[n] = rho_out, also eine harte Klemme.
+	// Ein Pruefer hat die Randregel in D1Q3 exakt nachgebaut und den Reflexionsgrad gemessen:
+	//   rho UND u fest (alter Einlass) ....... R = 0,27..0,30   -- reiner Loeschoperator
+	//   rho fest, u extrapoliert (DIESER Rand) R = 0,98..0,99   -- fast perfekter Spiegel
+	//   rho extrapoliert, u fest ............. R = 1,00         -- vollkommener Spiegel
+	// Sobald EINE Groesse aus der Innenzelle zurueckgelesen wird, entsteht eine Rueckkopplung:
+	// Stoerung -> u[m] -> f_eq -> Nachbarzelle. Aus dem Absorber wird ein Spiegel.
+	// Der weiche Anker relaxiert stattdessen mit der Rate sigma gegen rho_out:
+	//   sigma  1,0    0,5    0,2    0,1    0,05   0,02   0,01
+	//   R      0,981  0,919  0,726  0,526  0,339  0,167  0,092
+	// Der Anker bleibt erhalten: bei sigma = 0,02 ist die Zeitkonstante 50 Schritte = 2,0 ms gegen
+	// eine Durchspuelung von 0,409 s -- also 200-mal schneller als die Stroemung.
+	// sigma = 1 ist BIT-GENAU der bisherige Zustand und damit der Kontrollarm.
 	const uint gid = get_global_id(0);
 	if(gid>=N_po) return;
 	const ulong n = po_cells[gid], m = po_interior[gid];
-	rho[n] = rho_out;
+	rho[n] = fma(po_sigma, rho_out-rho[m], rho[m]);
 	u[                  n] = u[                  m];
 	u[    def_N+(ulong)n] = u[    def_N+(ulong)m];
 	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
 } // apply_pressure_outlet()
+
+)+R(kernel void apply_velocity_inlet(global float* rho, const global ulong* vi_cells, const global ulong* vi_interior, const uint N_vi) {
+	// FORK -- Spiegelbild des Druck-Auslasses. Dort wird rho vorgeschrieben und u aus der Innenzelle
+	// genommen; hier wird u vorgeschrieben (das erledigt der TYPE_E-Zweig in stream_collide) und rho
+	// aus der Innenzelle uebernommen. Damit ist je Rand genau EINE Groesse vorgegeben.
+	// Warum das noetig ist, gemessen am leeren groben Kanal: mit vorgeschriebenem rho UND u ist der
+	// Rand ueberbestimmt, reflektiert jede ankommende Druckwelle vollstaendig und schiebt die
+	// Massendifferenz jeden Schritt in die erste Fluidzelle dahinter. Genau dort sass die Stoerung.
+	const uint gid = get_global_id(0);
+	if(gid>=N_vi) return;
+	const ulong n = vi_cells[gid], m = vi_interior[gid];
+	rho[n] = rho[m];
+} // apply_velocity_inlet()
 
 // =====================================================================================
 // FORK -- Doppel-Domaene: Kopplung grobes Fernfeld -> feines Nahfeld.

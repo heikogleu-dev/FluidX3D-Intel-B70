@@ -58,8 +58,15 @@ private:
 	Memory<ulong> po_interior; // zugehoerige echte Innenzelle, aus der extrapoliert wird
 	Kernel kernel_apply_pressure_outlet;
 	uint po_N_active = 0u;
+	// FORK -- Geschwindigkeits-Einlass: u bleibt vorgeschrieben (das macht TYPE_E), rho laeuft mit.
+	// Spiegelbild des Druck-Auslasses; beide benutzen denselben Sammler collect_boundary_pairs.
+	Memory<ulong> vi_cells, vi_interior;
+	Kernel kernel_apply_velocity_inlet;
+	uint vi_N_active = 0u;
+	bool collect_boundary_pairs(const uint face_mask, const string& wofuer, std::vector<ulong>& cells, std::vector<ulong>& interior);
 	uint fbx0=0u, fby0=0u, fbz0=0u, fbnx=0u, fbny=0u, fbnz=0u; // FORK: aktive F-Bounding-Box dieser Domaene
 	float po_rho = 1.0f; // vorgeschriebene Dichte am Auslass (LBM-Einheiten); 1.0 = Referenzdruck
+	float po_sigma = 1.0f; // Ankerrate: 1 = harte Klemme (bisheriger Zustand), kleiner = weicher, siehe Kernel
 #ifdef FORCE_FIELD
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)
@@ -100,6 +107,8 @@ public:
 	// Lesen zurueckgesetzt (read-once), damit eine zweite Domaene nicht versehentlich dieselbe Box erbt.
 	static uint s_fbbox[6]; // {x0, y0, z0, nx, ny, nz}; nx==0 -> volle Domaene
 	static void set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz);
+	void set_velocity_inlet_faces(const uint face_mask); // FORK: Geschwindigkeits-Einlass, rho laeuft mit
+	void enqueue_apply_velocity_inlet();
 
 	// FORK -- Doppel-Domaene: EIN Streifenpuffer, gross genug fuer die groesste vorkommende Ebene, plus
 	// zwei Kernel. Nur belegt, wenn LBM::alloc_coupling_planes() gerufen wurde; sonst bleibt alles unangetastet.
@@ -507,6 +516,7 @@ public:
 	void update_fields(); // update fields (rho, u, T) manually
 	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out=1.0f); // FORK: Druck-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
+	void set_velocity_inlet_faces(const uint face_mask); // FORK: Geschwindigkeits-Einlass -- u vorgeschrieben, rho laeuft mit der Innenzelle mit
 	// FORK -- Doppel-Domaene (Kopplung grob -> fein). Reihenfolge: einmal alloc_coupling_planes() auf BEIDEN
 	// Domaenen, danach je Fernfeld-Schritt extract_plane_macros() auf der groben und drive_boundary_from_coarse()
 	// auf der feinen Domaene. Beide erfordern einen vorherigen run() (Kernel brauchen initialisierte Puffer).

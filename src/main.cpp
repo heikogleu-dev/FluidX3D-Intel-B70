@@ -151,6 +151,13 @@ void main_physics() {
 
 #ifndef GRAPHICS
 int main(int argc, char* argv[]) {
+	// ★ FORK 2026-08-08: Ausgabe zeilenweise leeren. Wird die Ausgabe in eine Datei umgeleitet --
+	// also bei JEDEM Hintergrundlauf --, sammelt die Standardbibliothek sie blockweise. Am
+	// 2026-08-08 stand ein Lauf elf Minuten, und das Log hatte 0 Bytes: nicht eine Zeile, nicht
+	// einmal das Startbanner. Nach dem Abbruch mit SIGKILL war der Puffer verloren, es blieb also
+	// NICHTS uebrig, woran sich haette ablesen lassen, wo der Lauf steht. Bei Laeufen ueber Stunden
+	// ist das kein Komfortmangel, sondern der Unterschied zwischen Diagnose und Raten.
+	std::cout << std::unitbuf;
 	info.allow_printing.lock();
 	main_arguments = get_main_arguments(argc, argv);
 	thread compute_thread(main_physics);

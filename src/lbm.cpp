@@ -1148,6 +1148,7 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	// Der Per-Schritt-Dispatch ist damit nicht Vorrat, sondern noetig: die Neumann-Bedingung sieht das
 	// Innenfeld des unmittelbar vorangegangenen Schritts. Der alte Kommentar war zu pessimistisch und
 	// widersprach dem, was setup.cpp an derselben Sache richtig beschreibt.
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_velocity_inlet(); // FORK: rho am Einlass mitlaufen lassen
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 #if defined(SURFACE) || defined(GRAPHICS)
@@ -1239,9 +1240,14 @@ void LBM::finalize_sparse_tiles() { // FORK: Block-Tiling abschliessen (no-op we
 //
 // WICHTIG: die Flags werden vom HOST gelesen. Zur Setup-Zeit ist der Host aktuell; ein
 // read_from_device() wuerde die gerade gesetzten Randbedingungen mit altem Stand ueberschreiben.
-void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
-	if(face_mask==0u) { print_warning("Druck-Auslass: face_mask=0, nichts gesetzt."); return; }
-	po_rho = rho_out;
+// FORK -- gemeinsamer Sammler fuer BEIDE vorgeschriebenen Raender (Druck-Auslass und
+// Geschwindigkeits-Einlass). Bewusst EINE Fassung statt zweier Kopien: die Zuordnung Randzelle ->
+// Innenzelle ist die heikle Stelle (Kanten, Ecken, Dimensionen der Dicke 1), sie wurde am
+// 2026-08-08 von drei Pruefern durchgesehen und zweimal korrigiert. Eine zweite Kopie waere die
+// naechste Stelle, an der beide auseinanderlaufen, ohne dass es jemand merkt. `wofuer` geht nur
+// in die Meldungen ein.
+bool LBM_Domain::collect_boundary_pairs(const uint face_mask, const string& wofuer, std::vector<ulong>& cells, std::vector<ulong>& interior) {
+	if(face_mask==0u) { print_warning(wofuer+": face_mask=0, nichts gesetzt."); return false; }
 	const ulong NxNy = (ulong)Nx*(ulong)Ny;
 	auto IDX = [&](const int x, const int y, const int z) { return (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*NxNy; };
 	auto is_fluid = [&](const int x, const int y, const int z) { // echte Innenzelle: weder Rand noch Solid
@@ -1257,7 +1263,7 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 	const bool f_ymin=(face_mask&4u)!=0u, f_ymax=(face_mask&8u)!=0u;
 	const bool f_zmin=(face_mask&16u)!=0u, f_zmax=(face_mask&32u)!=0u;
 
-	std::vector<ulong> cells, interior;
+	cells.clear(); interior.clear();
 	ulong n_composite=0ull, n_fallback=0ull, n_skipped=0ull, n_degenerate=0ull, n_on_face=0ull;
 	// Jede Randzelle GENAU EINMAL: ueber alle Zellen laufen und pruefen, ob sie auf einer der
 	// angeforderten Flaechen liegt. Der frueher benutzte Weg (pro Flaeche sammeln) trug Kanten- und
@@ -1300,7 +1306,7 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 		else n_skipped++; // voellig eingeschlossen -> gar kein Auslass, auslassen statt raten
 	}
 	const uint N_po = (uint)cells.size();
-	if(N_po==0u) { print_warning("Druck-Auslass: keine TYPE_E-Zellen auf den angeforderten Flaechen gefunden."); return; }
+	if(N_po==0u) { print_warning(wofuer+": keine TYPE_E-Zellen auf den angeforderten Flaechen gefunden."); return false; }
 
 	// --- Selbstpruefung.
 	// ★ 2026-08-08: die erste Fassung dieser Pruefung war TAUTOLOGISCH -- Eindeutigkeit und
@@ -1312,7 +1318,7 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 	// oben behobene Defekt vorbeigelaufen. Diese Bilanz wird jetzt geprueft.
 	{
 		if((ulong)N_po + n_skipped + n_degenerate != n_on_face) {
-			print_error("Druck-Auslass: Bilanz stimmt nicht -- "+to_string((uint)n_on_face)+" Zellen auf den Flaechen, aber nur "
+			print_error(wofuer+": Bilanz stimmt nicht -- "+to_string((uint)n_on_face)+" Zellen auf den Flaechen, aber nur "
 				+to_string(N_po)+" zugeordnet + "+to_string((uint)n_skipped)+" uebersprungen + "+to_string((uint)n_degenerate)+" degeneriert. Es gehen Zellen still verloren.");
 		}
 		// Die konstruktiv garantierten Eigenschaften trotzdem pruefen -- nicht fuer heute, sondern als
@@ -1321,12 +1327,25 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 		std::vector<ulong> sorted_cells = cells;
 		std::sort(sorted_cells.begin(), sorted_cells.end());
 		if(std::adjacent_find(sorted_cells.begin(), sorted_cells.end())!=sorted_cells.end())
-			print_error("Druck-Auslass: mindestens eine Randzelle kommt mehrfach vor -- konkurrierende Schreibzugriffe.");
+			print_error(wofuer+": mindestens eine Randzelle kommt mehrfach vor -- konkurrierende Schreibzugriffe.");
 		for(uint i=0u; i<N_po; i++) {
-			if((flags[interior[i]]&(TYPE_S|TYPE_E))!=0u) print_error("Druck-Auslass: Innenzelle "+to_string(interior[i])+" ist selbst Rand oder Solid.");
-			if(interior[i]==cells[i]) print_error("Druck-Auslass: Innenzelle zeigt auf sich selbst.");
+			if((flags[interior[i]]&(TYPE_S|TYPE_E))!=0u) print_error(wofuer+": Innenzelle "+to_string(interior[i])+" ist selbst Rand oder Solid.");
+			if(interior[i]==cells[i]) print_error(wofuer+": Innenzelle zeigt auf sich selbst.");
 		}
 	}
+	print_info(wofuer+": "+to_string(N_po)+" Zellen (face_mask=0x"+to_string(face_mask)+")."
+		+" Innenzelle direkt: "+to_string((uint)n_composite)+", ueber Nachbarsuche: "+to_string((uint)n_fallback)
+		+(n_skipped? (", ohne Fluidnachbar uebersprungen: "+to_string((uint)n_skipped)) : string(""))
+		+(n_degenerate? (", degeneriert (Dimension der Dicke 1): "+to_string((uint)n_degenerate)) : string(""))+".");
+	return true;
+}
+
+void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
+	po_rho = rho_out;
+	{ const char* v = getenv("CFD_PO_SIGMA"); po_sigma = v ? (float)fmax(0.0, fmin(1.0, atof(v))) : 1.0f; }
+	std::vector<ulong> cells, interior;
+	if(!collect_boundary_pairs(face_mask, "Druck-Auslass", cells, interior)) return;
+	const uint N_po = (uint)cells.size();
 	// Bit 1 ist x_min und damit ueblicherweise der EINLASS. Wer ihn als Auslass anfordert, verliert
 	// stillschweigend die Zustroembedingung: u wird dort dann extrapoliert statt auf u_inf gehalten.
 	if((face_mask&1u)!=0u) print_warning("Druck-Auslass: face_mask enthaelt x_min. Das ist normalerweise der EINLASS -- dort wird u jetzt extrapoliert statt vorgegeben.");
@@ -1337,16 +1356,51 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 	for(uint i=0u; i<N_po; i++) { po_cells[i] = cells[i]; po_interior[i] = interior[i]; }
 	po_cells.write_to_device();
 	po_interior.write_to_device();
-	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, rho, po_cells, po_interior, N_po, po_rho);
-	print_info("Druck-Auslass: "+to_string(N_po)+" Zellen (face_mask=0x"+to_string(face_mask)+", rho_out="+to_string(po_rho,4u)+")."
-		+" Innenzelle direkt: "+to_string((uint)n_composite)+", ueber Nachbarsuche: "+to_string((uint)n_fallback)
-		+(n_skipped? (", ohne Fluidnachbar uebersprungen: "+to_string((uint)n_skipped)) : string(""))
-		+(n_degenerate? (", degeneriert (Dimension der Dicke 1): "+to_string((uint)n_degenerate)) : string(""))+".");
+	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, rho, po_cells, po_interior, N_po, po_rho, po_sigma);
+	print_info("Druck-Auslass: rho_out = "+to_string(po_rho,4u)+", Ankerrate sigma = "+to_string(po_sigma,4u)+" (1 = harte Klemme wie bisher, kleiner = weicher und weniger reflektierend), u aus der Innenzelle.");
 	// OFFEN, bewusst nicht hier geloest: ein echter Nichtgleichgewichts-Rand (Guo/Zheng/Shi 2002,
 	// f_i = f_eq(rho_b,u_b) + [f_i(n) - f_eq(rho_n,u_n)]) waere zweiter Ordnung statt erster. Er muesste
 	// fi am Rand NACH dem Streaming ueberschreiben, und in der Esoteric-Pull-Ablage gehoeren die Slots
 	// einer Zelle teilweise ihren Nachbarn -- ein Fehler dort erzeugt still falsche Ergebnisse statt
 	// eines Absturzes. Das braucht eine eigene Validierung und nicht denselben Commit.
+}
+
+// FORK 2026-08-08 -- GESCHWINDIGKEITS-EINLASS mit MITLAUFENDER DICHTE.
+// Gemessen an einem leeren groben Kanal (kein Fahrzeug, keine Kopplung): der bisherige Einlass
+// schreibt rho UND u vor. Fuer einen kompressiblen Loeser ist das ueberbestimmt -- eine von innen
+// ankommende Druckwelle kann dort weder hinaus noch absorbiert werden, und die Massenbilanz geht
+// jeden Schritt nicht auf. Die Differenz landet in der ERSTEN Fluidzelle dahinter: gemessen war
+// die Stoerung dort 413 (willkuerliche Einheit) gegen 0 auf der Randebene selbst und 8 weit
+// stromab. Die Streuung von u_x wuchs monoton von 0,012 auf 0,125, bei 38 % der Zellen ueber
+// 10 % daneben -- im LEEREN Kanal, wo u_x konstant sein muesste.
+// Viskositaet ist nicht der Hebel: der zehnfache Wert aendert nichts (10,94 -> 10,77 % verdorbene
+// Zellen), der hundertfache halbiert nur (4,71 %), und selbst dann ist tau erst 0,5007.
+// Die Abhilfe ist die Spiegelung des Druck-Auslasses: dort wird rho vorgeschrieben und u aus der
+// Innenzelle genommen -- hier wird u vorgeschrieben (das erledigt TYPE_E) und rho aus der
+// Innenzelle uebernommen. Damit ist genau EINE Groesse je Rand vorgegeben, und Druckwellen
+// laufen hinaus statt zurueck.
+void LBM_Domain::set_velocity_inlet_faces(const uint face_mask) {
+	std::vector<ulong> cells, interior;
+	if(!collect_boundary_pairs(face_mask, "Geschwindigkeits-Einlass", cells, interior)) return;
+	const uint N_vi = (uint)cells.size();
+	vi_N_active = N_vi;
+	vi_cells    = Memory<ulong>(device, (ulong)N_vi);
+	vi_interior = Memory<ulong>(device, (ulong)N_vi);
+	for(uint i=0u; i<N_vi; i++) { vi_cells[i] = cells[i]; vi_interior[i] = interior[i]; }
+	vi_cells.write_to_device();
+	vi_interior.write_to_device();
+	kernel_apply_velocity_inlet = Kernel(device, (ulong)N_vi, "apply_velocity_inlet", rho, vi_cells, vi_interior, N_vi);
+	print_info("Geschwindigkeits-Einlass: u bleibt vorgeschrieben, rho laeuft mit der Innenzelle mit.");
+}
+
+void LBM_Domain::enqueue_apply_velocity_inlet() {
+	if(vi_N_active==0u) return;
+	kernel_apply_velocity_inlet.enqueue_run();
+}
+
+void LBM::set_velocity_inlet_faces(const uint face_mask) {
+	if(get_D()!=1u) { print_warning("Geschwindigkeits-Einlass: nur fuer eine einzelne Domaene validiert, uebersprungen."); return; }
+	lbm_domain[0]->set_velocity_inlet_faces(face_mask);
 }
 
 void LBM::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {

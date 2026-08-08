@@ -1386,8 +1386,135 @@ static void main_setup_fahrzeug_dd() {
 	_exit(0);
 }
 
-void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug oder fahrzeug_dd
+// =============================================================================================
+// FERNFELD ALLEIN -- Diagnosefall
+//
+// WOZU. Der Doppel-Domaenen-Lauf dd_lauf01 kippte am 2026-08-08 bei 0,15 s, und die Schnitte
+// zeigten ein Fernfeld, das vom Einlass her klingelt: bei 51 ms eine schmale oszillierende Saeule
+// bei x = 0, bei 151 ms horizontale Streifen ueber die ganze Domaene. Solange Fahrzeug UND
+// Kopplung mitlaufen, laesst sich nicht sagen, ob das grobe Gitter von selbst ringt oder erst
+// durch eines von beidem. Dieser Fall trennt das: dasselbe Gitter, dasselbe tau, dieselben
+// Raender -- aber leer und ungekoppelt. Ringt es hier schon, ist die Ursache eindeutig Rand
+// plus Viskositaet, und nichts anderes.
+//
+// Er laeuft auf dem SCHNELLSTEN Geraet, nicht auf der iGPU: die Physik ist dieselbe, aber ein
+// Schritt kostet 0,044 statt 0,343 s. Eine Diagnose, die acht Mal so lange braucht wie noetig,
+// wird nicht oft genug wiederholt.
+//
+// Schalter: CFD_FERN_NU (Faktor auf nu, Default 1 = wie im gekoppelten Fall)
+//           CFD_FERN_VEH=1 (Fahrzeug doch voxelisieren -- trennt "leer" von "mit Koerper")
+// =============================================================================================
+static void main_setup_fernfeld() {
+	const float si_u = 30.0f, si_rho = 1.225f, si_length = 4.4364f, u_lat = 0.075f;
+	const float si_nu = env_f("CFD_NU", 1.51e-5f);
+	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
+	const float dx_f  = 0.001f*fmax(0.1f, env_f("CFD_DX", 4.0f));
+	const float dx    = dx_f*(float)ratio;                 // Zellweite des Fernfelds
+	const float dt    = u_lat*dx/si_u;
+	const float nu_faktor = env_f("CFD_FERN_NU", 1.0f);    // Weg 2 aus EINLASS-AUSLASS.md
+	const float nu_lat = si_nu*dt/(dx*dx)*nu_faktor;
+	const float tau    = 3.0f*nu_lat + 0.5f;
+
+	auto n_cells = [](const float len, const float d) { return (uint)floor(len/d + 0.5f) + 1u; };
+	const float far_Lx = env_f("CFD_FAR_LX", 12.2720f), far_Ly = env_f("CFD_FAR_LY", 7.6640f), far_Lz = env_f("CFD_FAR_LZ", 8.8160f);
+	const float far_x0 = env_f("CFD_FAR_X0", -0.6f*si_length);
+	const uint Nx = n_cells(far_Lx, dx), Ny = n_cells(far_Ly, dx), Nz = n_cells(far_Lz, dx);
+	const float far_y0 = -0.5f*(float)(Ny-1u)*dx;
+
+	units.set_m_kg_s(si_length/dx, u_lat, 1.0f, si_length, si_u, si_rho);
+	print_info("=================== Fernfeld allein (Diagnose) ===================");
+	print_info("Gitter "+to_string(Nx)+" x "+to_string(Ny)+" x "+to_string(Nz)+" @ "+to_string(dx*1000.0f,2u)+" mm = "
+		+to_string((float)((ulong)Nx*Ny*Nz)/1e6f,1u)+" M Zellen, identisch zum gekoppelten Fernfeld");
+	print_info("tau = "+to_string(tau,7u)+" (nu-Faktor "+to_string(nu_faktor,2u)+"), Lambda = (tau-0.5)^2 = "+to_string((tau-0.5f)*(tau-0.5f),12u));
+	print_info("Randbedingungen wie im gekoppelten Fall: z- mitbewegte Fahrbahn, x- / y+- / z+ Gleichgewicht, x+ Druckauslass.");
+
+	const bool mit_fahrzeug = env_on("CFD_FERN_VEH");
+	Mesh* veh = nullptr;
+	if(mit_fahrzeug) {
+		veh = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+		const float3 bb0 = veh->get_bounding_box_size();
+		veh->scale((si_length/dx)/bb0.x);
+		const float3 bb = veh->get_bounding_box_size(), ctr = veh->get_bounding_box_center();
+		veh->translate(float3((0.0f-far_x0)/dx + 0.5f*bb.x - ctr.x, (0.0f-far_y0)/dx - ctr.y, 0.5f*bb.z - ctr.z));
+	}
+	LBM lbm(uint3(Nx, Ny, Nz), nu_lat);
+	if(mit_fahrzeug) {
+		lbm.voxelize_mesh_on_device(veh, TYPE_S|TYPE_X); lbm.flags.read_from_device();
+		sat_shell_and_void_fill(lbm, veh, Nx, Ny, Nz);
+	} else lbm.flags.read_from_device();
+
+	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		if((lbm.flags[n]&TYPE_S)!=0u) continue;
+		if(z==0u) { lbm.flags[n] = TYPE_S; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+		else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { lbm.flags[n] = TYPE_E; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+		else { lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+	}
+	lbm.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f));
+	// ★★ GEMESSEN UND VERWORFEN, 2026-08-08. Der Geschwindigkeits-Einlass (u vorgeschrieben, rho aus
+	// der Innenzelle) sollte die Ueberbestimmung des Randes beheben. Er tut es NICHT -- A/B im leeren
+	// Kanal, beide Arme mit demselben Binary, der Kontrollarm reproduzierte den Vorlauf bitgenau:
+	//   bei 0,08 s: Streuung 0,0695 (aus) gegen 0,0712 (an), ueber 10 % daneben 10,94 gegen 12,90 %.
+	//   Und der Massenstrom sackt ab: u im Mittel faellt monoton auf 0,9696 und weiter.
+	// LEHRE: meine Erklaerung war zur Haelfte falsch. Das Problem ist nicht, DASS rho und u beide
+	// vorgegeben sind, sondern dass der Gleichgewichts-Reset den Nichtgleichgewichtsanteil verwirft.
+	// Die Dichte schweben zu lassen beseitigt den Reset nicht -- es nimmt dem Einlass nur den
+	// Druckanker, und die Domaene entleert sich langsam. DEFAULT DESHALB AUS; CFD_FERN_VI=1 fuer
+	// eigene Versuche. Der Kernel bleibt, weil er korrekt ist und fuer andere Faelle taugen kann.
+	const bool vi_an = env_on("CFD_FERN_VI");
+	if(vi_an) lbm.set_velocity_inlet_faces(45u);
+	else print_info("Geschwindigkeits-Einlass AUS (CFD_FERN_VI=0): rho bleibt am Einlass festgenagelt, alter Zustand.");
+
+	const float t_flush = (float)(Nx-1u)*dx/si_u;
+	const float t_end   = env_f("CFD_T_END", 0.5f*t_flush);
+	const ulong n_steps = (ulong)(t_end/dt + 0.5f);
+	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 100u));
+	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f);
+	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fernfeld"))+"/";
+	create_folder(out_dir);
+	print_info("Laufzeit "+to_string(t_end,4u)+" s = "+to_string(n_steps)+" Schritte (eine Durchspuelung = "+to_string(t_flush,4u)+" s)");
+
+	// RAUSCHMASS. Nicht das Auge entscheidet, sondern eine Zahl: die Standardabweichung von u_x
+	// ueber alle freien Fluidzellen, auf u_inf normiert. In einem ungestoerten Kanal ohne Koerper
+	// gehoert sie nahe null zu bleiben. Dazu die groesste Abweichung und der Anteil der Zellen,
+	// die um mehr als 10 % danebenliegen -- der trennt "ein paar Ausreisser" von "global verrauscht".
+	std::ofstream csv(out_dir+"rauschen.csv"); csv.precision(8);
+	csv << "time_s,u_mittel_rel,u_streuung_rel,u_max_rel,anteil_ueber_10prozent\n" << std::flush;
+	float slice_next = 0.0f;
+	lbm.run(0u);
+	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
+		const ulong chunk = min((ulong)sample_every, n_steps-step);
+		lbm.run(chunk, n_steps);
+		lbm.u.read_from_device(); lbm.flags.read_from_device();
+		double s1=0.0, s2=0.0; ulong nf=0ull, nbad=0ull; float umax=0.0f;
+		for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+			const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+			if((lbm.flags[n]&(TYPE_S|TYPE_E))!=0u) continue; // nur freie Fluidzellen
+			const float ux = lbm.u.x[n]; const float r = ux/u_lat;
+			s1 += (double)r; s2 += (double)r*(double)r; nf++;
+			if(fabs(r-1.0f)>0.10f) nbad++;
+			umax = fmax(umax, fabs(r-1.0f));
+		}
+		const double mu = nf? s1/(double)nf : 0.0;
+		const double sd = nf? sqrt(fmax(0.0, s2/(double)nf - mu*mu)) : 0.0;
+		const double t_si = (double)((float)(step+chunk)*dt);
+		csv << t_si << "," << mu << "," << sd << "," << umax << "," << (nf? (double)nbad/(double)nf : 0.0) << "\n" << std::flush;
+		print_info("[RAUSCHEN] t = "+to_string((float)t_si,4u)+" s: u_x im Mittel "+to_string((float)mu,4u)+" von u_inf, Streuung "
+			+to_string((float)sd,5u)+", groesste Abweichung "+to_string(100.0f*umax,1u)+" %, ueber 10 % daneben: "
+			+to_string((float)(100.0*(nf? (double)nbad/(double)nf : 0.0)),2u)+" % der Zellen");
+		if(slice_dt>0.0f && (float)t_si>=slice_next) {
+			slice_next = (float)t_si + slice_dt;
+			render_yslice(lbm, Nx, Ny, Nz, Ny/2u, si_u/u_lat, si_u, (int)((float)t_si*1000.0f+0.5f), out_dir, "fern");
+		}
+		if(!std::isfinite(sd) || sd>1.0) { print_error("Fernfeld allein ist auseinandergelaufen (Streuung "+to_string((float)sd,4u)+" von u_inf) bei t = "+to_string((float)t_si,4u)+" s."); }
+	}
+	print_info("CSV: "+out_dir+"rauschen.csv");
+	_exit(0);
+}
+
+void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug, fahrzeug_dd oder fernfeld
 	const char* c = getenv("CFD_CASE");
+	if(c!=nullptr && string(c)=="fernfeld") main_setup_fernfeld();
 	if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
 	else if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
 	else main_setup_kugel();

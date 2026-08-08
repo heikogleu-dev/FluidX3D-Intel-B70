@@ -53,8 +53,7 @@ Nur Fähigkeiten, die in V1 nachweislich gewirkt haben — nach Bedeutung für d
 (device-seitig **nie dereferenziert**) · Tier-Sweep `TARGET_BL_MM` (20/7/3,5 mm bit-identisch,
 `ceil` liefert immer 1) · `WM_YMATCH` (kollabiert auf 0, gesampelt wird die Wandzelle selbst —
 und die Ausgabe behauptet etwas anderes) · HRR · σ-Modell · SVF („WIP/BLOCKIERT, blow-up't") ·
-WALE · SA-DDES / RAST (Lauf bit-identisch zu BASE) · `INLET_VELOCITY_CLAMP` (Gate nie wahr, und
-enthält **noch** den alten MS-Guard-Bug) · **f_neq-Kopplung** (494 MB von 598 MB Lift-Puffer sind
+WALE · SA-DDES / RAST (Lauf bit-identisch zu BASE) · · **f_neq-Kopplung** (494 MB von 598 MB Lift-Puffer sind
 f_neq, das nie gelesen wird) · Zeitinterpolation (vollständig verdrahtet, **nie gerufen**) ·
 fein→grob-Rückkopplung · URF-/Richtungs-Blending („AUSGEKLAMMERT") · Π_neq-Handover (183 Zeilen,
 10,5 MB VRAM, 4 Kernel, die nie starten) · `VISCOUS_STRESS_DIRECT` („Sackgasse") · Sponge-Layer

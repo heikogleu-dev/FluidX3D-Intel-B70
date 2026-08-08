@@ -61,7 +61,7 @@ V1 hatte zwei Mechanismen an genau dieser Stelle. Beide sind laut Prüfung vom 2
 | V1-Mechanismus | Status |
 |---|---|
 | `FLOOR_VELOCITY_INLET` (Bodenprägung, 3 Zellen) | 2026-06-06 als **akustische Quelle disqualifiziert** — verschlimmert genau das hier beschriebene Problem |
-| `INLET_VELOCITY_CLAMP` (Einlassklemme, 3 grobe Zellen) | am 2026-06-16 **nach** der Disqualifikation eingeführt, gleicher Mechanismus. Die Prüfung fand zudem: das Gate wird nur im gekoppelten Bauzustand gesetzt, und der Kernel **enthält noch den alten Flag-Wächter-Fehler** — er greift also womöglich gar nicht |
+| `INLET_VELOCITY_CLAMP` (Einlassklemme, 3 grobe Zellen) | ★ **KORRIGIERT 2026-08-08:** hier stand, das Gate greife womöglich gar nicht. Das ist **falsch**. Im **gekoppelten** Bauzustand ist es gesetzt (`setup.cpp:1637`), und der Flag-Wächter-Fehler trifft nur `TYPE_MS`-Zellen — im groben Gitter also **eine** von 552 z-Lagen. **99,8 % der Einlassebene wurden geklemmt.** Das ist der stärkste Kandidat dafür, warum V1 lief |
 | Sponge-Layer | in V1 entfernt; die Entfernung ließ das u-Feld **bit-identisch** — er war wirkungslos |
 | `CFD_COARSE_NU` (ν-Anhebung im Fernfeld) | vorhanden, Default 1,0 = aus. Der einzige der vier, der am Kern ansetzt |
 
@@ -104,3 +104,119 @@ Bis 0,14 s war Cd zwischen 0,4 und 1,0 und fiel sauber vom Anlaufstoß 53,9 heru
 Rechnung war auf dem richtigen Weg. Was sie umgebracht hat, sitzt im groben Gitter — nicht im
 Aufbau des Fahrzeugfalls, nicht in der Kopplung (die ist bit-genau nachgewiesen) und nicht in
 den Randbedingungen des Nahfelds (die sind vollständig ausgezählt).
+
+---
+
+# Nachtrag 2026-08-08 spätabends — drei Experimente, zwei Widerlegungen
+
+## Der Befund, isoliert
+
+Ein **leerer** grober Kanal (kein Fahrzeug, keine Kopplung, 768 × 480 × 552 @ 16 mm,
+τ = 0,5000071) klingelt von selbst. Die Störung entsteht in der **ersten Fluidzelle hinter der
+Einlassebene** — Abweichungsmaß 413 dort, **0 auf der Randebene selbst**, 8 weit stromab. Die
+Streuung von u_x wächst monoton von 0,012 auf 0,125; bei 0,204 s liegen **38 % der Zellen über
+10 % daneben**. In einem leeren Kanal.
+
+Warum ausgerechnet die erste Fluidzelle: die Randzelle *kann* nichts anzeigen. `stream_collide`
+schreibt an TYPE_E-Zellen ρ und u nie zurück — dort steht per Konstruktion der Initialwert. Erst
+die erste Fluidzelle summiert die unvereinbare Mischung aus fünf Rand-Populationen (reines
+Gleichgewicht, ohne Spannungsanteil) und vierzehn inneren.
+
+## Die drei Experimente
+
+| Ansatz | Ergebnis bei 0,08 s | Bewertung |
+|---|---|---|
+| **Einlass: ρ mitlaufen lassen** (u vorgeschrieben) | Streuung 0,0695 → 0,0712, >10 % von 10,94 auf 12,90 %, u_mittel fällt auf 0,9696 | **schlechter** |
+| **Auslass: weicher Anker** σ von 1 auf 0,02 | Streuung 0,0695 → 0,0715, >10 % 10,94 → 11,88 % | **unverändert** |
+| **Viskosität ×1000** | Streuung 0,0400 → 0,0253 bei 0,04 s | **wirkt** |
+
+Alle A/B mit demselben Binary; der Kontrollarm reproduzierte den Vorlauf jeweils bitgenau.
+
+## Warum die beiden Randänderungen scheiterten
+
+Ein Prüfer hat die Randregel in D1Q3 nachgebaut und den Reflexionsgrad gemessen:
+
+| Regel | R |
+|---|---:|
+| ρ **und** u fest — der alte Einlass | 0,27…0,30 |
+| ρ fest, u extrapoliert — der Auslass | **0,98…0,99** (Vorzeichen −) |
+| ρ extrapoliert, u fest — **mein „Fix"** | **1,00** |
+| beides extrapoliert | 0,07…0,09 |
+
+Der überbestimmte Rand ist ausgerechnet der **am wenigsten** reflektierende — er ist ein reiner
+Löschoperator, was ankommt verschwindet. Sobald **eine** Größe aus der Innenzelle zurückgelesen
+wird, entsteht die Rückkopplung Störung → u[m] → f_eq → Nachbar, und aus dem Absorber wird ein
+Spiegel. Mein Fix hat den Einlass von R ≈ 0,3 auf **R = 1,00** gebracht. Das Modell sagte es
+voraus, die unabhängige Messung bestätigte es.
+
+**Und die Auslass-Reflexion ist nicht der Treiber.** Sie von 0,98 auf 0,17 zu senken ändert die
+Streuung nicht. Das Klingeln wird nicht durch Hin- und Herlaufen aufgebaut, sondern **lokal an
+der Quelle verstärkt**.
+
+## Der Mechanismus, vollständig — es sind zwei Dinge
+
+**Quelle:** der Gleichgewichts-Reset. `f = f_eq` an TYPE_E legt alle **19** Verteilungen fest, wo
+höchstens **5** zulässig sind, und erzwingt Π_neq = 0 — der gesamte Spannungstensor wird jeden
+Schritt verworfen. Zusätzlich ist er nicht massenerhaltend: ρ und u_x sind an einem Rand über die
+Kompatibilitätsrelation ρ = [Σ_{c_x=0} f + 2 Σ_{c_x<0} f] / (1 − u_x) **nicht unabhängig
+wählbar**. Wer beide vorschreibt, verletzt sie jeden Schritt.
+
+**Fehlender Abfluss:** bei w → 2 ist die Kollision keine Relaxation mehr, sondern eine
+**Spiegelung** (f_post = 2·f_eq − f_pre). Der Nichtgleichgewichtsanteil klingt nicht ab, er
+wechselt jeden Schritt das Vorzeichen — die Periode-2-Mode, und damit genau die horizontalen
+Streifen im Schnitt.
+
+Die Abklingzeiten erklären die gesamte Viskositätsreihe:
+
+| ν-Faktor | τ | e-Faltung | Befund (Lauf = 2000 Schritte) |
+|---:|---:|---:|---|
+| 1 | 0,5000071 | 35.321 Schritte | keine Dämpfung ✓ |
+| 10 | 0,5000708 | 3.533 | „wirkungslos" ✓ |
+| 100 | 0,5007078 | 354 | „halbiert" ✓ |
+| 1000 | 0,5070781 | 36 | dämpft ✓ |
+
+**TRT hilft hier nicht:** `wp = w` kommt aus τ, nur `wm` aus Λ. Λ = 3/16 fixiert die
+Wandposition, nicht die Dämpfung der akustischen Moden.
+
+## Warum V1 lief — korrigiert
+
+V1 hatte **denselben** überbestimmten Einlass, dasselbe grobe Gitter und τ_c = 0,5000069. Zwei
+Unterschiede erklären, warum es dort nicht auffiel:
+
+1. **Eine 3 Zellen dicke Klemmschicht hinter dem Einlass** (`INLET_VELOCITY_CLAMP`, x = 1…3),
+   im **gekoppelten** Bauzustand aktiv, die f jeden Schritt auf f_eq zurücksetzt — genau in den
+   Zellen, in denen die Störung entsteht.
+   ★ Korrektur zweier Aussagen weiter oben in diesem Dokument: sie greift sehr wohl. „Gate nie
+   wahr" gilt für den Kugel-Bauzustand; der Flag-Wächter-Fehler trifft nur TYPE_MS-Zellen, im
+   groben Gitter also **eine von 552 z-Lagen** — 99,8 % der Ebene wurden geklemmt.
+2. **V1s grobes Gitter enthielt das Fahrzeug** → aufgelöste Scherung → ν_t > 0 aus Smagorinsky.
+   Der leere Kanal hat |S| ≈ 0, dort liefert Smagorinsky nichts. Deshalb sieht V2 den Effekt nackt.
+
+V1 kannte den Mechanismus wörtlich (2026-05-25: „TYPE_E impose f_i = f_eq jedes step → ρ und u
+beide fixiert → Wake-Druckwellen werden reflektiert"), verortete ihn aber stets am Auslass, am
+Boden oder bei ω ≈ 2 — nie am Einlass. Und besaß kein Messgerät dafür.
+
+**Nebenbefund aus V1s Laufdaten:** alle gekoppelten Läufe ab etwa Juli liefern Cd ≈ −53…−61 in
+der Kraft-CSV, also Schub statt Widerstand, während die älteren 0,54…0,92 zeigen. Dazu gibt es im
+V1-Baum keine Notiz. Das entwertet die Kraftreihen der letzten fünf Wochen als Rauschmaß.
+
+## Was als Nächstes zu tun ist
+
+**Der regularisierte Rand.** `f = f_eq + f_neq` statt `f = f_eq`, mit f_neq aus dem
+Scherratentensor, den man per Zentraldifferenz aus dem **Feld** `u[]` der Nachbarn bildet
+(Latt/Chopard). Er ist der einzige der geprüften Wege, der die **Quelle** ersetzt statt sie zu
+parametrisieren, und er ist unter Esoteric Pull ungefährlich: er liest ausschließlich ρ und u,
+beide vom Vorschritt fertig, also kein Slot-Aliasing und kein Wettlauf.
+
+Die wörtliche Guo-Extrapolation bräuchte dagegen die vollen f des Nachbarn — und die gehören
+unter Esoteric Pull teilweise diesem selbst; das wäre ein Wettlauf im selben Kernel-Start und
+ginge nur über einen zusätzlichen Pass mit ~90 MB Zwischenpuffer.
+
+**Unabhängig davon offen** (Prüferbefunde, noch nicht behoben):
+- Der feine Auslass sitzt **0,449 Fahrzeuglängen hinter dem Heck** und erzwingt mit ρ = 1,0 ein
+  c_p = 0, wo etwa −0,15 hingehört — auf 300.564 Zellen. Der Basisdruck ist beim Fahrzeug der
+  größte Einzelbeitrag zu Cd. Abhilfe: den Anker nur auf den **Flächenmittelwert** legen.
+- Im Diagnosefall überlappen Ein- und Auslassmaske in **1580 Zellen**; heute gewinnt der Auslass
+  allein durch die Reihenfolge zweier Codezeilen, nirgends dokumentiert.
+- `setup.cpp` unterdrückt die Warnung „Zellen ohne Randbedingung" ausgerechnet für die
+  Auslassfläche.
