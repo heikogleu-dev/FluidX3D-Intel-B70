@@ -136,7 +136,8 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif // GRAPHICS
 }
 
-// FORK -- Block-Tiling: Voreinstellungen. Default aus = bit-identisch zu Upstream.
+// FORK -- F-Bounding-Box und Block-Tiling: Voreinstellungen. Beide default aus/voll = bit-identisch
+// zu Upstream. (Die Ueberschrift nannte frueher nur das Block-Tiling, direkt ueber s_fbbox.)
 uint LBM_Domain::s_fbbox[6] = {0u,0u,0u,0u,0u,0u};
 void LBM_Domain::set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz) {
 	s_fbbox[0]=x0; s_fbbox[1]=y0; s_fbbox[2]=z0; s_fbbox[3]=nx; s_fbbox[4]=ny; s_fbbox[5]=nz;

@@ -455,9 +455,10 @@ static void main_setup_kugel() {
 //
 // SPEICHER: bei dx=4mm braeuchte die volle Domaene 33.6 GB (fi 38 B + rho 4 + u 12 + flags 1 +
 // F 12 = 67 B/Zelle x 501 M) und passt NICHT in die 32 GB der B70. Nachgerechnet, nicht geschaetzt.
-// Default ist deshalb dx=5mm (257 M Zellen, 17.2 GB). Der Weg zu 4mm waere eine F-Bounding-Box
-// (F nur um das Fahrzeug statt ueber die ganze Domaene) -- der alte Baum hatte die, sie ist noch
-// nicht portiert.
+// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand "Default ist deshalb dx=5mm" und "die
+// F-Bounding-Box ist noch nicht portiert". Beides ueberholt -- der Default ist 4 mm, und die
+// F-Bounding-Box wird 40 Zeilen weiter unten gesetzt (seit Commit 76c80be). Genau daran waere sonst
+// jemand haengengeblieben, der die Speicherrechnung nachvollziehen will.
 // =============================================================================================
 static void main_setup_fahrzeug() {
 	const float si_u      = 30.0f;
@@ -503,7 +504,7 @@ static void main_setup_fahrzeug() {
 		veh->translate(float3(
 			bow_from_xmin/dx + 0.5f*bb.x - ctr.x,   // Nase bei bow_from_xmin hinter dem Einlass
 			0.5f*(float)(Ny-1u) - ctr.y,            // mittig in y
-			z_offset_cells - (ctr.z - 0.5f*bb.z))); // Unterkante 16 mm ueber dem Boden
+			z_offset_cells - (ctr.z - 0.5f*bb.z))); // Unterkante auf die Fahrbahn (z_offset_cells ist 0)
 	}
 	{	// F-Box = Fahrzeug plus Rand. Der Rand muss die wandnahen Fluidzellen mitnehmen, auf die
 		// update_force_field schreibt; 4 Zellen decken die Reichweite von load_f (hoechstens 2) sicher ab.
@@ -969,7 +970,9 @@ static void main_setup_fahrzeug_dd() {
 					if(bo==TYPE_S)      { n_solid++; ux_sum+=(double)L.u.x[n]; ux_n++; }
 					else if(bo==TYPE_E) { n_equil++; ux_sum+=(double)L.u.x[n]; ux_n++; }
 					else if(bo==0u)     { n_fluid++; }
-					else                { n_other++; } // TYPE_S und TYPE_E gleichzeitig -- das duerfte es nicht geben
+					else                { n_other++; } // 0x03: auf dem Host TYPE_S|TYPE_E, geraeteseitig TYPE_MS.
+					                                   // Vor initialize() kann das hier nicht auftreten, danach schon --
+					                                   // wer diesen Census hinter run(0u) schiebt, zaehlt einen NORMALZUSTAND als unklar.
 				}
 				print_info(string("  ")+fname[f]+": Wand "+to_string(n_solid)+", Gleichgewicht "+to_string(n_equil)
 					+", freies Fluid "+to_string(n_fluid)+(n_other? (", UNKLAR "+to_string(n_other)) : string(""))
@@ -1010,12 +1013,17 @@ static void main_setup_fahrzeug_dd() {
 
 	// ---------------------------------------------------------------- Nachpruefen, bevor gerechnet wird
 	// Drei Dinge, die still falsch sein koennten und es dann fuer den ganzen Lauf blieben.
+	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand ueberall print_error(...) gefolgt von bad++,
+	// und am Ende eine Zusammenfassung. print_error ruft aber exit(1) -- alles ab dem ersten Befund war
+	// unerreichbar, die Sammlung also toter Code, und man saehe von mehreren Fehlern immer nur den
+	// ersten. Jetzt wird gesammelt (print_warning) und AM ENDE einmal abgebrochen: man sieht alle
+	// Beanstandungen auf einmal, und abgebrochen wird trotzdem.
 	{
 		uint bad = 0u;
 		for(uint p=0u; p<5u; p++) { // (1) Deckungspunkt-Konvention je Ebene
 			const uint ea_exp = (cp[p].extent_a-1u)*ratio+1u, eb_exp = (cp[p].extent_b-1u)*ratio+1u;
 			if(ea_exp!=fp[p].extent_a || eb_exp!=fp[p].extent_b) {
-				print_error(string("Ebene ")+face_name[p]+": grob "+to_string(cp[p].extent_a)+"x"+to_string(cp[p].extent_b)
+				print_warning(string("Ebene ")+face_name[p]+": grob "+to_string(cp[p].extent_a)+"x"+to_string(cp[p].extent_b)
 					+" ergaebe fein "+to_string(ea_exp)+"x"+to_string(eb_exp)+", die feine Ebene ist aber "
 					+to_string(fp[p].extent_a)+"x"+to_string(fp[p].extent_b)+"."); bad++;
 			}
@@ -1047,9 +1055,9 @@ static void main_setup_fahrzeug_dd() {
 		                         {near_y0, far_y0+(float)cp[2].origin.y*dx_c}, {near_y0+(float)(fNy-1u)*dx_f, far_y0+(float)cp[3].origin.y*dx_c},
 		                         {(float)(fNz-1u)*dx_f, (float)cp[4].origin.z*dx_c}};
 		for(uint p=0u; p<5u; p++) if(fabs(dxy[p][0]-dxy[p][1])>1e-4f) {
-			print_error(string("Ebene ")+face_name[p]+" liegt raeumlich auseinander: fein "+to_string(dxy[p][0],5u)+" m, grob "+to_string(dxy[p][1],5u)+" m."); bad++;
+			print_warning(string("Ebene ")+face_name[p]+" liegt raeumlich auseinander: fein "+to_string(dxy[p][0],5u)+" m, grob "+to_string(dxy[p][1],5u)+" m."); bad++;
 		}
-		if(bad>0u) print_warning("Kopplungspruefung: "+to_string(bad)+" Beanstandung(en) -- siehe oben.");
+		if(bad>0u) print_error("Kopplungspruefung: "+to_string(bad)+" Beanstandung(en) -- siehe oben. Lauf nicht gestartet.");
 		else print_info("Kopplungspruefung: Deckungspunkte, Fahrzeugfreiheit und Weltlage aller fuenf Ebenen in Ordnung.");
 	}
 
@@ -1245,6 +1253,21 @@ static void main_setup_fahrzeug_dd() {
 			const float3 Fc = lbm_c.object_force(TYPE_S|TYPE_X);
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
 			const double Fx_si = (double)units_fine.si_F(F.x), Fz_si = (double)units_fine.si_F(F.z);
+			// ★ NaN-WAECHTER (Pruefer-Befund 2026-08-08). Ohne ihn kostet eine Divergenz den ganzen Lauf:
+			// die CSV liefe 2,5 Stunden mit nan voll, Mittelwert und Block-SEM lieferten nan, und gewarnt
+			// haette nichts. Genau das ist am 2026-08-08 passiert -- bei 3,8 ms stand nan in der Reihe,
+			// danach fror das Feld ein. In LBM breitet sich ein nan aus und verschwindet nie wieder;
+			// Weiterrechnen waere nicht Geduld, sondern Verschwendung. Besonders wichtig, solange
+			// RHO_CLAMP fehlt und tau bei 0,50003 steht.
+			{
+				const double Fxf = (double)units_coarse.si_F(Fc.x);
+				if(!std::isfinite(Fx_si) || !std::isfinite(Fz_si) || !std::isfinite(Fxf)) {
+					fcsv << std::flush; fcsv.close();
+					print_error("Divergenz bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
+						+"): die Kraft ist keine Zahl mehr. Lauf abgebrochen. Die CSV bis hierher steht in "
+						+out_dir+"forces.csv -- dort ist zu sehen, wann es kippt.");
+				}
+			}
 			const double Fx_far = (double)units_coarse.si_F(Fc.x);
 			ts.push_back(t_si); fx.push_back(Fx_si); fz.push_back(Fz_si); fx_c.push_back(Fx_far);
 			fcsv << t_si << "," << Fx_si << "," << Fz_si << "," << Fx_si/((double)q_inf*A_ref) << ","
