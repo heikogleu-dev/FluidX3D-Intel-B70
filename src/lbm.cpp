@@ -103,6 +103,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	this->alpha = alpha; this->beta = beta;
 	this->particles_N = particles_N;
 	this->particles_rho = particles_rho;
+	// FORK -- F-Bounding-Box HIER aufloesen, nicht erst in allocate(). Der Konstruktor baut den
+	// OpenCL-Code (und damit def_FBNX/def_FBN) weiter unten; allocate() laeuft erst DANACH. Stand die
+	// Aufloesung in allocate(), wurde def_FBNX = 0 emittiert, f_bbox lieferte ueberall false und
+	// SAEMTLICHE Kraefte kamen als exakt null heraus -- auch im Voll-Domaenen-Fall, wo die Box die
+	// Identitaet sein muesste. Genau so ist es passiert und so wurde es gefunden.
+	if(s_fbbox[3]>0u && s_fbbox[4]>0u && s_fbbox[5]>0u) {
+		fbx0=s_fbbox[0]; fby0=s_fbbox[1]; fbz0=s_fbbox[2]; fbnx=s_fbbox[3]; fbny=s_fbbox[4]; fbnz=s_fbbox[5];
+	} else { fbx0=0u; fby0=0u; fbz0=0u; fbnx=Nx; fbny=Ny; fbnz=Nz; }
+	for(uint i=0u; i<6u; i++) s_fbbox[i]=0u; // read-once: eine zweite Domaene erbt die Box nicht
 	string opencl_c_code;
 #ifdef GRAPHICS
 	graphics = Graphics(this);
@@ -119,6 +128,10 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 }
 
 // FORK -- Block-Tiling: Voreinstellungen. Default aus = bit-identisch zu Upstream.
+uint LBM_Domain::s_fbbox[6] = {0u,0u,0u,0u,0u,0u};
+void LBM_Domain::set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz) {
+	s_fbbox[0]=x0; s_fbbox[1]=y0; s_fbbox[2]=z0; s_fbbox[3]=nx; s_fbbox[4]=ny; s_fbbox[5]=nz;
+}
 bool LBM_Domain::s_sparse_tiles_on = false;
 uint LBM_Domain::s_sparse_T = 8u;
 
@@ -145,7 +158,12 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
 #ifdef FORCE_FIELD
-	F = Memory<float>(device, N, 3u);
+	// FORK -- F-BBox: die Box wurde bereits im Konstruktor aufgeloest (sie muss vor device_defines()
+	// feststehen). Hier wird sie nur noch benutzt.
+	const ulong F_N = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
+	if(F_N<(ulong)get_N()) print_info("F-BBox: F auf "+to_string(fbnx)+"x"+to_string(fbny)+"x"+to_string(fbnz)
+		+" statt "+to_string((ulong)get_N())+" Zellen -> "+to_string((float)(((ulong)get_N()-F_N)*12ull)/1e9f,2u)+" GB gespart");
+	F = Memory<float>(device, F_N, 3u);
 	object_sum = Memory<float>(device, 1u, 4u); // x, y, z, cell count
 	kernel_stream_collide.add_parameters(F);
 	kernel_update_fields.add_parameters(F);
@@ -549,6 +567,18 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_particles_N "+to_string(particles_N)+"ul"
 	"\n	#define def_particles_rho "+to_string(particles_rho)+"f"
 #endif // PARTICLES
+
+	// FORK -- F-Bounding-Box: der Kernel braucht Ursprung, Ausdehnung und Stride der Box.
+	// Bei voller Domaene ist def_FBN == def_N und der Index identisch -- bit-identisch zu Upstream.
+#ifdef FORCE_FIELD
+	+"\n	#define def_FBX0 "+to_string(fbx0)+"u"
+	+"\n	#define def_FBY0 "+to_string(fby0)+"u"
+	+"\n	#define def_FBZ0 "+to_string(fbz0)+"u"
+	+"\n	#define def_FBNX "+to_string(fbnx)+"u"
+	+"\n	#define def_FBNY "+to_string(fbny)+"u"
+	+"\n	#define def_FBNZ "+to_string(fbnz)+"u"
+	+"\n	#define def_FBN "+to_string((ulong)fbnx*(ulong)fbny*(ulong)fbnz)+"ul"
+#endif // FORCE_FIELD
 
 	// FORK -- Block-Tiling. index_f() wird per Makro auf index_f_impl(..., tile_slot) umgeschrieben, damit
 	// alle Aufrufstellen unveraendert bleiben; nur die Signaturen bekommen tile_slot ueber TS_P.

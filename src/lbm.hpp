@@ -53,6 +53,7 @@ private:
 	Memory<ulong> po_interior; // zugehoerige echte Innenzelle, aus der extrapoliert wird
 	Kernel kernel_apply_pressure_outlet;
 	uint po_N_active = 0u;
+	uint fbx0=0u, fby0=0u, fbz0=0u, fbnx=0u, fbny=0u, fbnz=0u; // FORK: aktive F-Bounding-Box dieser Domaene
 	float po_rho = 1.0f; // vorgeschriebene Dichte am Auslass (LBM-Einheiten); 1.0 = Referenzdruck
 #ifdef FORCE_FIELD
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
@@ -89,6 +90,12 @@ public:
 	// Free des vollen fi-Buffers bringt den Intel-Treiber mit CL_OUT_OF_RESOURCES zu Fall).
 	// finalize_sparse_tiles() legt die echte sparse fi an -- NACH der Voxelisierung, weil erst dann
 	// feststeht, welche Tiles voll solid sind.
+	// FORK -- F-Bounding-Box: F nur um den Koerper allozieren statt ueber die ganze Domaene.
+	// MUSS vor der LBM-Konstruktion gesetzt werden, weil allocate() F sonst auf N legt. Wird nach dem
+	// Lesen zurueckgesetzt (read-once), damit eine zweite Domaene nicht versehentlich dieselbe Box erbt.
+	static uint s_fbbox[6]; // {x0, y0, z0, nx, ny, nz}; nx==0 -> volle Domaene
+	static void set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz);
+
 	static bool s_sparse_tiles_on; // CFD_SPARSE_TILES
 	static uint s_sparse_T;        // CFD_TILE: 8 = VRAM-lastig (-40 % Tempo, 1,43 GB), 16 = Tempo-lastig (-28 %, 0,77 GB)
 	void finalize_sparse_tiles();  // Tiles klassifizieren, sparse fi allozieren, Kernel neu binden

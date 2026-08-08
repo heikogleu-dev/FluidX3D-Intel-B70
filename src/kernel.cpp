@@ -858,6 +858,27 @@ string opencl_c_container() { return R( // ########################## begin of O
 	return (b&0x80000000)>>16 | (e>112)*((((e-112)<<11)&0x7800)|m>>12) | ((e<113)&(e>100))*((((0x007FF800+m)>>(124-e))+1)>>1); // sign : normalized : denormalized (assume [-2,2])
 }
 
+)+"#ifdef FORCE_FIELD"+R(
+// FORK -- F-Bounding-Box. F wird nur um den Koerper herum alloziert statt ueber die ganze Domaene.
+// Ohne das braucht der Fahrzeugfall bei 4 mm rund 6 GB allein fuer F und passt nicht mehr in die
+// 32 GB der B70; mit ihm laeuft er bei 29,6 GB (im alten Baum gemessen, nicht geschaetzt).
+// Ausserhalb der Box liefert load3_F null und store3_F verwirft -- die Kraft interessiert dort nicht.
+// Bei voller Domaene ist def_FBN == def_N und der Index identisch, also bit-identisch zu Upstream.
+bool f_bbox(const uxx n, uxx* fbi) {
+	const uint3 xyz = coordinates(n);
+	if(xyz.x<def_FBX0||xyz.x>=def_FBX0+def_FBNX||xyz.y<def_FBY0||xyz.y>=def_FBY0+def_FBNY||xyz.z<def_FBZ0||xyz.z>=def_FBZ0+def_FBNZ) return false;
+	*fbi = (uxx)(xyz.x-def_FBX0)+(uxx)(xyz.y-def_FBY0)*def_FBNX+(uxx)(xyz.z-def_FBZ0)*(uxx)def_FBNX*(uxx)def_FBNY;
+	return true;
+}
+float3 load3_F(const global float* F, const uxx n) {
+	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f, 0.0f, 0.0f);
+	return (float3)(F[fbi], F[def_FBN+(ulong)fbi], F[2ul*def_FBN+(ulong)fbi]);
+}
+void store3_F(global float* F, const uxx n, const float3 v) {
+	uxx fbi; if(!f_bbox(n, &fbi)) return;
+	F[fbi]=v.x; F[def_FBN+(ulong)fbi]=v.y; F[2ul*def_FBN+(ulong)fbi]=v.z;
+}
+)+"#endif"+R( // FORCE_FIELD
 )+"#ifdef SPARSE_TILES"+R(
 // FORK -- Block-Tiling (sparse solid). fi wird nur fuer AKTIVE Tiles alloziert; eine Tile gilt als tot,
 // wenn sie SAMT 2-Zell-Halo vollstaendig solid ist. Layout tile-major SoA:
@@ -1578,9 +1599,8 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 )+"#ifdef FORCE_FIELD"+R(
 	{ // separate block to avoid variable name conflicts
-		fxn += F[                 n]; // apply force field
-		fyn += F[    def_N+(ulong)n];
-		fzn += F[2ul*def_N+(ulong)n];
+		const float3 Fn = load3_F(F, n); // FORK: bbox-bewusst
+		fxn += Fn.x; fyn += Fn.y; fzn += Fn.z;
 	}
 )+"#endif"+R( // FORCE_FIELD
 
@@ -1909,9 +1929,8 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 )+"#ifdef FORCE_FIELD"+R(
 	{ // separate block to avoid variable name conflicts
-		fxn += F[                 n]; // apply force field
-		fyn += F[    def_N+(ulong)n];
-		fzn += F[2ul*def_N+(ulong)n];
+		const float3 Fn = load3_F(F, n); // FORK: bbox-bewusst
+		fxn += Fn.x; fyn += Fn.y; fzn += Fn.z;
 	}
 )+"#endif"+R( // FORCE_FIELD
 
@@ -1996,12 +2015,12 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 	float Fb=1.0f, fx=0.0f, fy=0.0f, fz=0.0f;
 	calculate_rho_u(fhn, &Fb, &fx, &fy, &fz); // abuse calculate_rho_u() method for calculating force
-	store3(F, n, 2.0f*Fb*(float3)(fx, fy, fz)); // 2x because fi are reflected on solid boundary cells (bounced-back)
+	store3_F(F, n, 2.0f*Fb*(float3)(fx, fy, fz)); // FORK: bbox-bewusst // 2x because fi are reflected on solid boundary cells (bounced-back)
 } // update_force_field()
 )+R(kernel void reset_force_field(global float* F) { // reset force field
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N) return; // execute reset_force_field() also on halo
-	store3(F, n, (float3)(0.0f, 0.0f, 0.0f));
+	store3_F(F, n, (float3)(0.0f, 0.0f, 0.0f)); // FORK: bbox-bewusst
 } // reset_force_field()
 )+R(void atomic_add_f(volatile global float* addr, const float val) {
 )+"#if cl_nv_compute_capability>=20"+R( // use hardware-supported atomic addition on Nvidia GPUs with inline PTX assembly
@@ -2043,7 +2062,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
 	local float3 cache[cl_workgroup_size];
-	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? load3(F, n) : (float3)(0.0f, 0.0f, 0.0f);
+	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? load3_F(F, n) : (float3)(0.0f, 0.0f, 0.0f); // FORK: bbox-bewusst
 	barrier(CLK_GLOBAL_MEM_FENCE);
 	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
 		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];

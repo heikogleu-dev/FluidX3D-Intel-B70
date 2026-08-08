@@ -82,7 +82,87 @@ static double block_sem(const std::vector<double>& v, const uint nblocks) {
 	return sqrt(var/(double)(nblocks-1u)/(double)nblocks);
 }
 
-void main_setup() {
+
+// Ein y-Schnitt als PNG. Blau = langsam, weiss = Anstroemung, rot = schnell; Solid schwarz.
+// u und flags muessen vorher vom Device gelesen sein -- der Aufrufer entscheidet, wie oft das passiert,
+// denn es kostet einen vollen Transfer.
+static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uint y_slice,
+                          const float u2si, const float u_ref_si, const int t_ms, const string& dir) {
+	Image img(Nx, Nz);
+	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
+		const ulong n = (ulong)x + (ulong)Nx*((ulong)y_slice + (ulong)Ny*(ulong)z);
+		int col;
+		if((L.flags[n]&(TYPE_S|TYPE_X))!=0u) col = 0x000000; // Solid
+		else {
+			const float ux=L.u.x[n], uy=L.u.y[n], uz=L.u.z[n];
+			// Skala relativ zur Anstroemung: 0.5*u_ref (blau) .. u_ref (weiss) .. 1.5*u_ref (rot)
+			float v = u2si*sqrt(ux*ux+uy*uy+uz*uz);
+			v = fmin(1.5f*u_ref_si, fmax(0.5f*u_ref_si, v));
+			int r,g,b;
+			if(v<=u_ref_si) { const float t=(v-0.5f*u_ref_si)/(0.5f*u_ref_si); r=(int)(255.0f*t+0.5f); g=r; b=255; }
+			else            { const float t=(v-u_ref_si)/(0.5f*u_ref_si);      r=255; g=(int)(255.0f*(1.0f-t)+0.5f); b=g; }
+			col = (r<<16)|(g<<8)|b;
+		}
+		img.set_color(x, Nz-1u-z, col); // Bildzeile 0 ist oben, z waechst nach oben
+	}
+	const string sdir = dir+"slices/"; create_folder(sdir);
+	string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
+	write_png(sdir+"slice_y"+to_string(y_slice)+"_"+ms+"ms.png", &img);
+}
+
+// SAT-Schale plus Void-Fill. Upstreams Ray-Paritaets-Voxelizer laesst achsparallele Ebenen loechrig
+// (an der Kugel: 72 statt ~1064 Solidzellen in der Symmetrieebene), und die SAT-Schale allein ergaebe
+// einen HOHLKOERPER mit durchstroemtem Inneren -- gemessen 224 statt ~1100 Zellen im Mittelschnitt.
+// Beides zusammen ergibt die dichte Geometrie. Von beiden Faellen benutzt.
+static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const uint Ny, const uint Nz) {
+	const int bx0=(int)fmax(0.0f, floor(mesh->pmin.x)-2.0f), bx1=(int)fmin((float)Nx-1.0f, ceil(mesh->pmax.x)+2.0f);
+	const int by0=(int)fmax(0.0f, floor(mesh->pmin.y)-2.0f), by1=(int)fmin((float)Ny-1.0f, ceil(mesh->pmax.y)+2.0f);
+	const int bz0=(int)fmax(0.0f, floor(mesh->pmin.z)-2.0f), bz1=(int)fmin((float)Nz-1.0f, ceil(mesh->pmax.z)+2.0f);
+	auto idx = [&](const int x, const int y, const int z) { return (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx; };
+	ulong added = 0ull;
+	for(uint tri=0u; tri<mesh->triangle_number; tri++) {
+		const float3 &V0=mesh->p0[tri], &V1=mesh->p1[tri], &V2=mesh->p2[tri];
+		const int tx0=(int)fmax((float)bx0, floor(fmin(fmin(V0.x,V1.x),V2.x))-1.0f), tx1=(int)fmin((float)bx1, ceil(fmax(fmax(V0.x,V1.x),V2.x))+1.0f);
+		const int ty0=(int)fmax((float)by0, floor(fmin(fmin(V0.y,V1.y),V2.y))-1.0f), ty1=(int)fmin((float)by1, ceil(fmax(fmax(V0.y,V1.y),V2.y))+1.0f);
+		const int tz0=(int)fmax((float)bz0, floor(fmin(fmin(V0.z,V1.z),V2.z))-1.0f), tz1=(int)fmin((float)bz1, ceil(fmax(fmax(V0.z,V1.z),V2.z))+1.0f);
+		for(int z=tz0; z<=tz1; z++) for(int y=ty0; y<=ty1; y++) for(int x=tx0; x<=tx1; x++) {
+			const ulong n = idx(x,y,z);
+			if((lbm.flags[n]&TYPE_S)!=0u) continue;
+			if(sat_tri_box_overlap(V0, V1, V2, (float)x, (float)y, (float)z, 0.5f)) { lbm.flags[n] = TYPE_S|TYPE_X; added++; }
+		}
+	}
+	print_info("SAT-Schale: "+to_string(added)+" Zellen ergaenzt");
+
+	std::vector<bool> reach((size_t)((ulong)Nx*Ny*Nz), false);
+	std::vector<ulong> stack;
+	auto seed = [&](const int x, const int y, const int z) {
+		const ulong n = idx(x,y,z);
+		if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { reach[(size_t)n]=true; stack.push_back(n); }
+	};
+	for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) { seed(bx0,y,z); seed(bx1,y,z); }
+	for(int z=bz0; z<=bz1; z++) for(int x=bx0; x<=bx1; x++) { seed(x,by0,z); seed(x,by1,z); }
+	for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) { seed(x,y,bz0); seed(x,y,bz1); }
+	while(!stack.empty()) {
+		const ulong n = stack.back(); stack.pop_back();
+		const int z=(int)(n/((ulong)Nx*Ny)), y=(int)((n/(ulong)Nx)%(ulong)Ny), x=(int)(n%(ulong)Nx);
+		const int nb[6][3] = {{x-1,y,z},{x+1,y,z},{x,y-1,z},{x,y+1,z},{x,y,z-1},{x,y,z+1}};
+		for(int k=0; k<6; k++) {
+			const int xx=nb[k][0], yy=nb[k][1], zz=nb[k][2];
+			if(xx<bx0||xx>bx1||yy<by0||yy>by1||zz<bz0||zz>bz1) continue;
+			const ulong nn = idx(xx,yy,zz);
+			if((lbm.flags[nn]&TYPE_X)==0u && !reach[(size_t)nn]) { reach[(size_t)nn]=true; stack.push_back(nn); }
+		}
+	}
+	ulong filled = 0ull;
+	for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) {
+		const ulong n = idx(x,y,z);
+		if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { lbm.flags[n] = TYPE_S|TYPE_X; filled++; }
+	}
+	print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert");
+	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
+}
+
+static void main_setup_kugel() {
 	// ---------------------------------------------------------------- Physik
 	const float si_u   = 30.0f;                          // Anstroemung und Bodengeschwindigkeit [m/s]
 	const float si_rho = 1.225f;                         // ISA Meereshoehe [kg/m^3]
@@ -160,64 +240,7 @@ void main_setup() {
 	lbm.voxelize_mesh_on_device(kugel, TYPE_S|TYPE_X);
 	lbm.flags.read_from_device();
 
-	// SAT-Schale: jede vom STL geschnittene Zelle wird solid. Der Ray-Paritaets-Voxelizer
-	// oben laesst achsparallele Ebenen loechrig -- an der Symmetrieebene y=Dy_center war das
-	// im alten Baum als 72 statt ~1064 Solidzellen messbar.
-	{
-		const int bx0=(int)fmax(0.0f, floor(kugel->pmin.x)-2.0f), bx1=(int)fmin((float)Nx-1.0f, ceil(kugel->pmax.x)+2.0f);
-		const int by0=(int)fmax(0.0f, floor(kugel->pmin.y)-2.0f), by1=(int)fmin((float)Ny-1.0f, ceil(kugel->pmax.y)+2.0f);
-		const int bz0=(int)fmax(0.0f, floor(kugel->pmin.z)-2.0f), bz1=(int)fmin((float)Nz-1.0f, ceil(kugel->pmax.z)+2.0f);
-		ulong added = 0ull;
-		for(uint tri=0u; tri<kugel->triangle_number; tri++) {
-			const float3 &V0=kugel->p0[tri], &V1=kugel->p1[tri], &V2=kugel->p2[tri];
-			const int tx0=(int)fmax((float)bx0, floor(fmin(fmin(V0.x,V1.x),V2.x))-1.0f), tx1=(int)fmin((float)bx1, ceil(fmax(fmax(V0.x,V1.x),V2.x))+1.0f);
-			const int ty0=(int)fmax((float)by0, floor(fmin(fmin(V0.y,V1.y),V2.y))-1.0f), ty1=(int)fmin((float)by1, ceil(fmax(fmax(V0.y,V1.y),V2.y))+1.0f);
-			const int tz0=(int)fmax((float)bz0, floor(fmin(fmin(V0.z,V1.z),V2.z))-1.0f), tz1=(int)fmin((float)bz1, ceil(fmax(fmax(V0.z,V1.z),V2.z))+1.0f);
-			for(int z=tz0; z<=tz1; z++) for(int y=ty0; y<=ty1; y++) for(int x=tx0; x<=tx1; x++) {
-				const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
-				if((lbm.flags[n]&TYPE_S)!=0u) continue;
-				if(sat_tri_box_overlap(V0, V1, V2, (float)x, (float)y, (float)z, 0.5f)) { lbm.flags[n] = TYPE_S|TYPE_X; added++; }
-			}
-		}
-		print_info("SAT-Schale: "+to_string(added)+" Zellen ergaenzt");
-
-		// Void-Fill. Die SAT-Schale markiert nur die geschnittenen Zellen -- das Innere bleibt hohl,
-		// und Upstreams Ray-Paritaet fuellt es hier nicht zuverlaessig (an der Kugel lieferte sie eine
-		// nahezu leere Symmetrieebene). Ohne diesen Schritt ist die "Kugel" eine Hohlkugel mit
-		// durchstroemtem Inneren: gemessen 224 statt ~1100 Solidzellen im Mittelschnitt, also
-		// R_eff = 8,4 statt 18,8 Zellen. Flood-Fill vom Aussenrand der Bounding-Box; was von aussen
-		// nicht erreichbar ist, ist eingeschlossen und damit solid.
-		std::vector<bool> reach((size_t)((ulong)Nx*Ny*Nz), false);
-		std::vector<ulong> stack;
-		auto idx = [&](const int x, const int y, const int z) { return (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx; };
-		auto seed = [&](const int x, const int y, const int z) {
-			const ulong n = idx(x,y,z);
-			if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { reach[(size_t)n]=true; stack.push_back(n); }
-		};
-		for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) { seed(bx0,y,z); seed(bx1,y,z); }
-		for(int z=bz0; z<=bz1; z++) for(int x=bx0; x<=bx1; x++) { seed(x,by0,z); seed(x,by1,z); }
-		for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) { seed(x,y,bz0); seed(x,y,bz1); }
-		while(!stack.empty()) {
-			const ulong n = stack.back(); stack.pop_back();
-			const int z=(int)(n/((ulong)Nx*Ny)), y=(int)((n/(ulong)Nx)%(ulong)Ny), x=(int)(n%(ulong)Nx);
-			const int nb[6][3] = {{x-1,y,z},{x+1,y,z},{x,y-1,z},{x,y+1,z},{x,y,z-1},{x,y,z+1}};
-			for(int k=0; k<6; k++) {
-				const int xx=nb[k][0], yy=nb[k][1], zz=nb[k][2];
-				if(xx<bx0||xx>bx1||yy<by0||yy>by1||zz<bz0||zz>bz1) continue;
-				const ulong nn = idx(xx,yy,zz);
-				if((lbm.flags[nn]&TYPE_X)==0u && !reach[(size_t)nn]) { reach[(size_t)nn]=true; stack.push_back(nn); }
-			}
-		}
-		ulong filled = 0ull;
-		for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) {
-			const ulong n = idx(x,y,z);
-			if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { lbm.flags[n] = TYPE_S|TYPE_X; filled++; }
-		}
-		print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert");
-		// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags ohnehin hoch
-		// (lbm.cpp:982-984), und das passiert beim ersten run(). Nachgeprueft 2026-08-08 -- ein
-		// zusaetzlicher Upload hier waere wirkungslos und wuerde nur Aktivitaet vortaeuschen.
-	}
+	sat_shell_and_void_fill(lbm, kugel, Nx, Ny, Nz);
 
 	// Flaechenaequivalenter Ist-Radius aus dem echten Querschnitt in der Symmetrieebene.
 	// Daraus die effektive Stirnflaeche -- die Zahl, um die Cd systematisch zu hoch liegt.
@@ -352,4 +375,167 @@ void main_setup() {
 	// corruption (out)" (rc=134), nachdem alle Dateien geschrieben sind. Upstream hat denselben
 	// Exit-Bug an anderer Stelle und musste den "sauberen" Fix einen Tag spaeter zurueckrudern.
 	_exit(0);
+}
+
+// =============================================================================================
+// FAHRZEUG (MR2), SINGLE-DOMAIN
+//
+// Referenz ist der OpenFOAM-13-Fall mr2v40H: Cd = 0.599, Cz = -1.301 (Fenster 1100-1200,
+// nachgemessen 2026-08-07; die frueher im Code stehenden 0.59 / -1.27 waren veraltet).
+//
+// BEWUSST OHNE Lagrava-Latt-Kopplung. Der alte Baum fuhr Fein- und Grobgitter gekoppelt; das ist
+// die komplizierteste Komponente und kommt als eigener, messbarer Schritt. Hier laeuft erst der
+// Fall selbst, damit man sieht, was ohne sie herauskommt.
+//
+// SPEICHER: bei dx=4mm braeuchte die volle Domaene 33.6 GB (fi 38 B + rho 4 + u 12 + flags 1 +
+// F 12 = 67 B/Zelle x 501 M) und passt NICHT in die 32 GB der B70. Nachgerechnet, nicht geschaetzt.
+// Default ist deshalb dx=5mm (257 M Zellen, 17.2 GB). Der Weg zu 4mm waere eine F-Bounding-Box
+// (F nur um das Fahrzeug statt ueber die ganze Domaene) -- der alte Baum hatte die, sie ist noch
+// nicht portiert.
+// =============================================================================================
+static void main_setup_fahrzeug() {
+	const float si_u      = 30.0f;
+	const float si_rho    = 1.225f;
+	const float si_nu     = env_f("CFD_NU", 1.48e-5f);
+	const float si_length = 4.4364f;   // Fahrzeuglaenge laut STL-Konvention des Projekts
+	const float A_ref     = 1.85f;     // Projekt-Konvention; die STL misst 1.8597 (0.5 % groesser)
+	const float dx        = 0.001f*env_f("CFD_DX", 4.0f);
+	const float u_lat     = 0.075f;
+	const float dt        = u_lat*dx/si_u;
+	const float nu_lat    = si_nu*dt/(dx*dx);
+	const float tau       = 3.0f*nu_lat + 0.5f;
+
+	// Domaene physikalisch statt in Zellen, damit dx frei waehlbar bleibt. Die Masse stammen aus der
+	// 4mm-Baseline des alten Baums (1665 x 621 x 485 Zellen) und sind hier in Meter umgerechnet.
+	const float Lx = 6.660f, Ly = 2.484f, Lz = 1.940f;
+	const float bow_from_xmin = 0.22984f; // Fahrzeugnase liegt so weit hinter dem Einlass
+	const uint Nx = (uint)(Lx/dx + 0.5f), Ny = (uint)(Ly/dx + 0.5f), Nz = (uint)(Lz/dx + 0.5f);
+	const float z_offset_cells = 4.0f*0.004f/dx; // 16 mm ueber dem Boden, dx-unabhaengig
+
+	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
+	if(LBM_Domain::s_sparse_tiles_on) {
+		const uint T = env_u("CFD_TILE", 8u);
+		if(T!=4u && T!=8u && T!=16u) print_error("CFD_TILE muss 4, 8 oder 16 sein.");
+		LBM_Domain::s_sparse_T = T;
+	}
+
+	// STL ZUERST lesen und platzieren -- die F-Bounding-Box muss feststehen, BEVOR der LBM-Konstruktor
+	// F alloziert. Ohne das faellt F auf die volle Domaene: bei 4 mm rund 6 GB extra, und der Fall
+	// passt nicht mehr in die 32 GB der B70. Der alte Baum machte denselben Reorder aus demselben Grund.
+	Mesh* veh = read_stl(get_exe_path()+"../scenes/vehicle.stl");
+	{
+		const float3 bbox0 = veh->get_bounding_box_size();
+		print_info("STL BBox roh: "+to_string(bbox0.x,4u)+" x "+to_string(bbox0.y,4u)+" x "+to_string(bbox0.z,4u));
+		veh->scale((si_length/dx)/bbox0.x);
+	}
+	{
+		const float3 bb = veh->get_bounding_box_size(), ctr = veh->get_bounding_box_center();
+		veh->translate(float3(
+			bow_from_xmin/dx + 0.5f*bb.x - ctr.x,   // Nase bei bow_from_xmin hinter dem Einlass
+			0.5f*(float)(Ny-1u) - ctr.y,            // mittig in y
+			z_offset_cells - (ctr.z - 0.5f*bb.z))); // Unterkante 16 mm ueber dem Boden
+	}
+	{	// F-Box = Fahrzeug plus Rand. Der Rand muss die wandnahen Fluidzellen mitnehmen, auf die
+		// update_force_field schreibt; 4 Zellen decken die Reichweite von load_f (hoechstens 2) sicher ab.
+		const uint M = 4u;
+		const uint x0=(uint)fmax(0.0f, veh->pmin.x-(float)M), x1=(uint)fmin((float)Nx-1.0f, veh->pmax.x+(float)M);
+		const uint y0=(uint)fmax(0.0f, veh->pmin.y-(float)M), y1=(uint)fmin((float)Ny-1.0f, veh->pmax.y+(float)M);
+		const uint z0=(uint)fmax(0.0f, veh->pmin.z-(float)M), z1=(uint)fmin((float)Nz-1.0f, veh->pmax.z+(float)M);
+		LBM_Domain::set_force_bbox(x0, y0, z0, x1-x0+1u, y1-y0+1u, z1-z0+1u);
+	}
+
+	units.set_m_kg_s(si_length/dx, u_lat, 1.0f, si_length, si_u, si_rho);
+	LBM lbm(Nx, Ny, Nz, nu_lat);
+
+	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
+	print_info("dx = "+to_string(dx*1000.0f,2u)+" mm, Gitter "+to_string(Nx)+" x "+to_string(Ny)+" x "+to_string(Nz)
+		+" = "+to_string((ulong)Nx*Ny*Nz)+" Zellen ("+to_string((float)((ulong)Nx*Ny*Nz)/1e6f,1u)+" M)");
+	print_info("Box "+to_string((float)Nx*dx,3u)+" x "+to_string((float)Ny*dx,3u)+" x "+to_string((float)Nz*dx,3u)+" m");
+	print_info("U = "+to_string(si_u,1u)+" m/s, Re_L = "+to_string((uint)(si_u*si_length/si_nu))
+		+", u_lat = "+to_string(u_lat,4u)+", tau = "+to_string(tau,5u));
+	print_info("Ziel (OpenFOAM 13, mr2v40H): Cd = 0.599, Cz = -1.301");
+
+	// ---------------------------------------------------------------- Fahrzeug voxelisieren
+	print_info("Fahrzeug BBox im Gitter: X["+to_string(veh->pmin.x,1u)+","+to_string(veh->pmax.x,1u)
+		+"] Y["+to_string(veh->pmin.y,1u)+","+to_string(veh->pmax.y,1u)
+		+"] Z["+to_string(veh->pmin.z,1u)+","+to_string(veh->pmax.z,1u)+"]");
+	lbm.voxelize_mesh_on_device(veh, TYPE_S|TYPE_X);
+	lbm.flags.read_from_device();
+	sat_shell_and_void_fill(lbm, veh, Nx, Ny, Nz); // derselbe Voxelizer wie beim Kugelfall
+
+	// ---------------------------------------------------------------- Randbedingungen
+	// Boden mitbewegt (Rollstrasse), Decke und Seiten Freistrom, x- Einlass, x+ Auslass.
+	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		if((lbm.flags[n]&(TYPE_S|TYPE_X))!=0u) continue;
+		if(z==0u) { lbm.flags[n] = TYPE_S; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; } // Rollstrasse
+		else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) {
+			lbm.flags[n] = TYPE_E; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+		} else { lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
+	}
+	lbm.set_pressure_outlet_faces(env_u("CFD_PO_FACES", 2u), env_f("CFD_PO_RHO", 1.0f));
+	lbm.finalize_sparse_tiles();
+
+	// ---------------------------------------------------------------- Lauf
+	const float t_end    = env_f("CFD_T_END", 0.500f);
+	const float t_warmup = env_f("CFD_T_WARMUP", 0.300f);
+	const uint  sample_every = env_u("CFD_SAMPLE_EVERY", 10u);
+	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f); // 0 = keine Slices
+	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
+	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug"))+"/";
+	create_folder(out_dir);
+	const float q_inf = 0.5f*si_rho*si_u*si_u;
+	const uint y_mid = Ny/2u;
+	print_info("Laufzeit "+to_string(t_end,3u)+" s = "+to_string(n_steps)+" Schritte, Mittelung ab "+to_string(t_warmup,3u)+" s");
+
+	std::vector<double> ts, fx, fz;
+	float slice_next = 0.0f;
+	lbm.run(0u, n_steps);
+	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
+		const ulong chunk = min((ulong)sample_every, n_steps-step);
+		lbm.run(chunk, n_steps);
+		lbm.update_fields();       // noetig fuer den Druck-Auslass (u) und fuer die Slices
+		lbm.update_force_field();
+		const float3 F = lbm.object_force(TYPE_S|TYPE_X);
+		const double t_si = (double)((float)(step+chunk)*dt);
+		ts.push_back(t_si); fx.push_back((double)units.si_F(F.x)); fz.push_back((double)units.si_F(F.z));
+		if(slice_dt>0.0f && (float)t_si>=slice_next) {
+			slice_next = (float)t_si + slice_dt;
+			lbm.u.read_from_device(); lbm.flags.read_from_device();
+			render_yslice(lbm, Nx, Ny, Nz, y_mid, si_u/u_lat, si_u, (int)((float)t_si*1000.0f+0.5f), out_dir);
+			print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
+		}
+	}
+
+	// ---------------------------------------------------------------- Auswertung
+	{
+		std::ofstream f(out_dir+"forces.csv"); f.precision(8);
+		f << "time_s,Fx_N,Fz_N,Cd,Cz\n";
+		for(size_t i=0u; i<ts.size(); i++)
+			f << ts[i] << "," << fx[i] << "," << fz[i] << "," << fx[i]/((double)q_inf*A_ref) << "," << fz[i]/((double)q_inf*A_ref) << "\n";
+		f.close();
+		print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen)");
+	}
+	std::vector<double> cd, cz;
+	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
+		cd.push_back(fx[i]/((double)q_inf*A_ref)); cz.push_back(fz[i]/((double)q_inf*A_ref));
+	}
+	if(cd.size()<16u) { print_warning("Zu wenige Samples fuer eine belastbare Statistik."); _exit(0); }
+	double mcd=0.0, mcz=0.0;
+	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
+	mcd/=(double)cd.size(); mcz/=(double)cz.size();
+	print_info("---------------------------------------------------------------");
+	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
+	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OF13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
+	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OF13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
+	print_info("  Block-SEM von Cd (ehrlich ist die Zahl bei WENIGEN Bloecken):");
+	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
+	print_info("---------------------------------------------------------------");
+	_exit(0);
+}
+
+void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default) oder fahrzeug
+	const char* c = getenv("CFD_CASE");
+	if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
+	else main_setup_kugel();
 }
