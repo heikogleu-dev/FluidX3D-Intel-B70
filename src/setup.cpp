@@ -480,14 +480,37 @@ static void main_setup_fahrzeug() {
 	// Fz erreichte bei 2.8 ms -11.4 Millionen N, bei 3.8 ms stand nan in der Reihe, danach fror das Feld
 	// bei +343640 N ein. Das ist die auf die FP16C-Grenze gesaettigte DDF-Ablage dieser Zellen, keine Kraft.
 	//
-	// Der alte Baum machte dasselbe (setup.cpp:1909: TYPE_X-Zellen bei z=0 bekommen u_lat) -- nur liess er
-	// das Fahrzeug zusaetzlich 16 mm schweben. Auf dem Boden stehen ist die physikalisch richtigere Wahl,
-	// dann muss die Kontaktflaeche aber sauber an die Strasse uebergeben werden.
+	// ABGRENZUNG zum alten Baum, korrigiert: der macht es ANDERS, nicht gleich. Er BEHAELT TYPE_X und
+	// SETZT u_lat (../FluidX3D/src/setup.cpp:1909) -- die Zellen bleiben dort also Objekt und werden
+	// weiter mitsummiert; er umgeht das Problem nur dadurch, dass das Fahrzeug 16 mm schwebt und die
+	// Kontaktflaeche gar nicht existiert. Hier wird TYPE_X entfernt UND u_lat gesetzt.
+	//
+	// REIHENFOLGE IST TRAGEND: das muss NACH dem Void-Fill stehen. Der flutet auf `(flags & TYPE_X)==0`
+	// und seine Box beginnt bei z=0; liefe diese Schleife davor, waeren die Latschzellen Flutungs-Saaten
+	// und die Flutung koennte durch den Latsch ins Fahrzeuginnere laufen -- der Wagen waere hohl.
+	//
+	// WAS DIESE AENDERUNG NICHT TUT: sie stabilisiert nichts. TYPE_X wird device-seitig nur im Voxelizer
+	// und in der Graphics-Faerbung gelesen; alle Solverkernel maskieren mit TYPE_BO. Sie ist ausserhalb
+	// von object_force beweisbar wirkungsfrei -- die Divergenz hat eine andere Ursache (Lambda).
+	//
+	// Die Spalt-Begruendung oben (2694/5142/3374 in z=0/1/2) rechtfertigt diese Aenderung uebrigens NICHT:
+	// sie gilt fuer z=1 und z=2 genauso, und die bleiben unangetastet. Sie gehoert zur Lambda-Frage.
+	// Was diese Aenderung rechtfertigt, ist allein: z=0 ist die periodische Nahtebene und liegt buendig
+	// mit der Fahrbahnwand.
 	{
 		ulong contact = 0ull;
 		for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 			const ulong n = (ulong)x + (ulong)y*(ulong)Nx; // z = 0
-			if((lbm.flags[n]&TYPE_X)!=0u) { lbm.flags[n] &= (uchar)~TYPE_X; contact++; } // wird unten zu TYPE_S + u_road
+			if((lbm.flags[n]&TYPE_X)!=0u) {
+				lbm.flags[n] &= (uchar)~TYPE_X;
+				// ★ u HIER setzen, nicht auf die Randschleife hoffen. Deren Waechter lautet
+				// `(flags & (TYPE_S|TYPE_X)) != 0 -> continue`, und 0x01 & 0x41 = 0x01 ist ungleich null --
+				// die Zellen werden dort also uebersprungen. Ohne diese Zeilen blieben sie bei u=0 stehen:
+				// eine ruhende Insel mitten in einer mit u_road laufenden Fahrbahn, genau im Nullspalt.
+				// Von einem unabhaengigen Pruefer gefunden; mein Kommentar behauptete vorher das Gegenteil.
+				lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+				contact++;
+			}
 		}
 		print_info("Kontaktflaeche: "+to_string(contact)+" Fahrzeugzellen auf z=0 an die Strasse uebergeben (TYPE_X entfernt)");
 	}

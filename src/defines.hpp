@@ -7,8 +7,16 @@
 #define D3Q19 // choose D3Q19 velocity set for 3D; allocates 93 (FP32) or 55 (FP16) Bytes/cell; (default)
 //#define D3Q27 // choose D3Q27 velocity set for 3D; allocates 125 (FP32) or 71 (FP16) Bytes/cell
 
-#define SRT // choose single-relaxation-time LBM collision operator; (default)
-//#define TRT // choose two-relaxation-time LBM collision operator
+//#define SRT // choose single-relaxation-time LBM collision operator; (default)
+// ★ FORK 2026-08-08: TRT statt SRT. Bei SRT sind tau und Lambda=(tau-0.5)^2 gekoppelt; Lambda=3/16
+// (die viskositaetsunabhaengige Bounce-Back-Wandposition, Ginzburg/d'Humieres PRE 68, 066614) verlangte
+// tau=0.933, also Re_L=576 -- bei realistischem Re also prinzipiell unerreichbar. Gemessen lag Lambda
+// beim Fahrzeug bei 7.7e-10, acht Zehnerpotenzen darunter; die effektive Wandposition wandert dann ins
+// Fluid und die null- bis einzelligen Spalte an den Reifenaufstandsflaechen werden effektiv negativ breit.
+// Belegt durch einen A/B mit Kontrollarm: bei tau=0.8 (Lambda=0.09) laeuft der Fall stabil (0 nan),
+// bei tau=0.50003 divergiert er reproduzierbar (Fz -11.4 Mio N, 7 nan). TRT setzt Lambda fest auf 3/16,
+// unabhaengig von nu UND vom Smagorinsky-nu_t.
+#define TRT // choose two-relaxation-time LBM collision operator
 
 //#define FP16S // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to range-shifted IEEE-754 FP16; number conversion is done in hardware; all arithmetic is still done in FP32
 #define FP16C // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to more accurate custom FP16C format; number conversion is emulated in software; all arithmetic is still done in FP32
@@ -29,6 +37,19 @@
 // separate update_fields-Durchlauf. Netto etwa 10 bis 15 Prozent Durchsatz -- der Preis dafuer, dass
 // Rand und Diagnose nie auf veralteten Daten arbeiten.
 #define UPDATE_FIELDS
+// ★ FORK 2026-08-08: SUBGRID war hier unmarkiert eingeschaltet und hat die geplante Validierung
+// verfaelscht -- bei Re_D=1000 addiert Smagorinsky grob 30 bis 85 Prozent zur molekularen Viskositaet
+// in der Kugelgrenzschicht, die effektive Reynoldszahl liegt dann bei 550 bis 750 statt 1000.
+// Der Kommentar im Kugelfall sagt ausdruecklich, dort brauche es kein Turbulenzmodell.
+//
+// ★ GEMESSEN 2026-08-08, nachdem ich es abgeschaltet hatte: der Fahrzeugfall wird damit SCHLECHTER,
+// nicht besser -- 869 nan statt 7, Kraefte auf exakt null. TRT und SUBGRID sind keine Alternativen,
+// sondern zwei verschiedene Aufgaben: TRT fixiert die WANDPOSITION, SUBGRID liefert die BULK-
+// DISSIPATION. Bei nu_lat = 9.25e-6 traegt Smagorinsky die gesamte Viskositaet; ohne ihn ist die
+// Stroemung faktisch reibungsfrei. Es bleibt also AN.
+// OFFEN und fallweise zu loesen: fuer die Kugel-Validierung gegen die Standard-Widerstandskurve bei
+// Re_D = 100..1000 MUSS es aus, sonst misst man das SGS-Modell statt der Kugel (dort addiert es 30
+// bis 85 Prozent zur molekularen Viskositaet). Das ist ein Fall-Schalter, kein globaler.
 #define SUBGRID // enables Smagorinsky-Lilly subgrid turbulence LES model to keep simulations with very large Reynolds number stable
 //#define PARTICLES // enables particles with immersed-boundary method (for 2-way coupling also activate VOLUME_FORCE and FORCE_FIELD; only supported in single-GPU)
 

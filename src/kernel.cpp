@@ -2011,6 +2011,15 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	if((flags[n]&TYPE_BO)!=TYPE_S) return; // only continue for solid boundary cells
 	uxx j[def_velocity_set]; // neighbor indices
 	neighbors(n, j); // calculate neighbor indices
+	// FORK: nur Solidzellen mit MINDESTENS EINEM Fluidnachbarn rechnen. Die Momentum-Exchange-Kraft
+	// entsteht dort, wo Verteilungen zurueckprallen -- eine Zelle tief im Koerperinneren hat keinen
+	// Fluidnachbarn, liefert null und kostet nur Zeit. Beim Block-Tiling ist es schlimmer als nutzlos:
+	// ihre Nachbarn liegen in toten Tiles, cell_base() liefert dafuer den Papierkorb-Slot 0, und dessen
+	// Inhalt ist weder null noch definiert -- die Zelle traegt dann eine erfundene Kraft bei, die im
+	// dichten Pfad nicht existiert. Genau daran haette die behauptete Bit-Neutralitaet scheitern koennen.
+	bool has_fluid_neighbor = false;
+	for(uint i=1u; i<def_velocity_set; i++) has_fluid_neighbor = has_fluid_neighbor || (flags[j[i]]&TYPE_BO)!=TYPE_S;
+	if(!has_fluid_neighbor) { store3_F(F, n, (float3)(0.0f, 0.0f, 0.0f)); return; }
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 	float Fb=1.0f, fx=0.0f, fy=0.0f, fz=0.0f;
