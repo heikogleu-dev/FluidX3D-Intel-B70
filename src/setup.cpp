@@ -169,14 +169,25 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 	}
 	print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert");
 
-	// ---------------------------------------------------------------- Hohlraum-Diagnose
-	// Der Void-Fill fuellt nur, was von aussen NICHT erreichbar ist. Ist die Schale irgendwo offen --
-	// Fensterausschnitte, Radhaeuser, Motorraumluefter --, laeuft die Flutung hinein und der Koerper
-	// bleibt innen hohl. Am 2026-08-08 im Schnittbild des Fahrzeugs sichtbar geworden: das hintere
-	// Drittel war innen Fluid. Diese Zaehlung sagt, WIE GROSS das ist, statt es dem Auge zu ueberlassen.
+	// ---------------------------------------------------------------- Hohlraum-Ueberwachung
+	// ★★ DER OFFENE INNENRAUM IST GEWOLLT. NICHT ZUSCHMIEREN. ★★
+	// Heiko 2026-08-08: das ist der mitsimulierte MOTORRAUM. Die Kuehlung ist beim MR2 der schwierige
+	// Teil und muss mitgerechnet werden -- die Durchstroemung des Motorraums gehoert zur Aufgabe, nicht
+	// zu den Fehlern. Wer den Void-Fill so lange "verbessert", bis der Wagen massiv ist, entfernt genau
+	// die Physik, um die es geht. Der Void-Fill ist damit richtig, wie er ist: er schliesst nur, was von
+	// aussen NICHT erreichbar ist, und laesst die durchstroemten Raeume offen.
+	//
+	// Diese Zaehlung bleibt trotzdem -- als UEBERWACHUNG, nicht als Fehlersuche. Sie sagt, wie gross der
+	// offene Innenraum ist, und macht sichtbar, wenn er sich unbemerkt aendert: weil jemand am Voxelizer
+	// dreht, die Aufloesung wechselt oder die STL getauscht wird. Gemessen am 2026-08-08:
+	//   fein  (4 mm): 11 900 828 Zellen = 0,762 m3 = 19,1 % des Solidvolumens (3,99 m3)
+	//   grob (16 mm):    162 772 Zellen = 0,667 m3 = 15,2 %
+	// Zwei Aufloesungen, dasselbe Volumen -- es ist Geometrie, keine Diskretisierung.
+	//
 	// Kriterium: eine Nicht-Solidzelle gilt als innenliegend, wenn sie in ALLEN DREI Achsen zwischen
 	// Solid eingeschlossen ist (links und rechts, vorn und hinten, oben und unten je ein Treffer).
-	// Das ist konservativ -- der Spalt unter dem Wagen ist in x und y eingeschlossen, in z aber nicht.
+	// Der Spalt unter dem Wagen faellt dadurch heraus (in z nicht eingeschlossen); die Radhaeuser
+	// fallen NICHT heraus und sind mitgezaehlt, obwohl sie Aussenraum sind.
 	{
 		const ulong nbx = (ulong)(bx1-bx0+1), nby = (ulong)(by1-by0+1), nbz = (ulong)(bz1-bz0+1);
 		std::vector<uchar> enc((size_t)(nbx*nby*nbz), 0u); // Bit 0/1/2 = in x/y/z eingeschlossen
@@ -1046,6 +1057,62 @@ static void main_setup_fahrzeug_dd() {
 	// ---------------------------------------------------------------- Initialisieren und Kopplung anlegen
 	lbm_f.run(0u); // nur initialisieren
 	lbm_c.run(0u);
+
+	// ---------------------------------------------------------------- Bodenkontakt und mitbewegte Wand
+	// Drei Fragen, die sich NUR nach initialize() beantworten lassen, weil erst dieser Kernel die
+	// TYPE_MS-Markierung setzt -- und weil genau daran im alten Baum schon einmal alles haengen blieb:
+	// dort war die Bodengeschwindigkeit ein vollstaendiges No-op, weil ein MS-Waechter nie ausloeste.
+	//
+	//  (1) STEHT DER WAGEN AUF DEM BODEN? Gezaehlt wird nicht die Absicht, sondern der Zustand:
+	//      an wie vielen Stellen liegt eine Fahrzeugzelle DIREKT auf einer Fahrbahnzelle.
+	//  (2) BEWEGT SICH DIE FAHRBAHN WIRKLICH? Der mitbewegte Rand wirkt ueber apply_moving_boundaries,
+	//      und das laeuft AUSSCHLIESSLICH auf Zellen mit flags&TYPE_BO == TYPE_MS. Ohne TYPE_MS ueber
+	//      der Fahrbahn ist der bewegte Boden eine ruhende Wand -- ohne jede Fehlermeldung.
+	//  (3) GEHT DIE AUFSTANDSFLAECHE IN DIE KRAFT EIN? object_force vergleicht flags[n] == flag_marker
+	//      auf EXAKTE Gleichheit (kernel.cpp, object_force). Fahrzeug ist 0x41, die uebergebene
+	//      Aufstandsflaeche 0x01 -- sie faellt damit aus der Summe. Hier wird beides ausgezaehlt.
+	{
+		auto audit = [&](LBM& L, const uint Nx, const uint Ny, const uint Nz, const float dx, const char* who) {
+			L.flags.read_from_device(); L.u.read_from_device();
+			const uchar VEH = (uchar)(TYPE_S|TYPE_X);
+			// TYPE_MS ist nur geraeteseitig definiert (lbm.cpp emittiert 0x03); host-seitig ist es TYPE_S|TYPE_E.
+			const uchar MS = (uchar)(TYPE_S|TYPE_E);
+			ulong n_veh=0ull, n_veh_z0=0ull, n_contact=0ull, n_road_z0=0ull, n_road_moving=0ull;
+			ulong n_ms_z1=0ull, n_fluid_z1=0ull, n_ms_total=0ull;
+			uint z_min_veh = Nz;
+			for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+				const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+				const uchar fl = L.flags[n];
+				if(fl==VEH) { n_veh++; if(z<z_min_veh) z_min_veh=z; if(z==0u) n_veh_z0++; }
+				if((fl&(TYPE_S|TYPE_E))==MS) n_ms_total++;
+				if(z==0u) {
+					if((fl&(TYPE_S|TYPE_E))==TYPE_S) { n_road_z0++; if(L.u.x[n]!=0.0f) n_road_moving++; }
+					if(L.flags[n+(ulong)Nx*(ulong)Ny*0ull]==VEH) {} // (z=0-Fahrzeugzellen: siehe n_veh_z0)
+				}
+				if(z==1u) {
+					if((fl&(TYPE_S|TYPE_E))==MS) n_ms_z1++;
+					if((fl&(TYPE_S|TYPE_E))==0u || (fl&(TYPE_S|TYPE_E))==MS) n_fluid_z1++;
+					// Direkter Bodenkontakt: Fahrzeugzelle auf z=1 unmittelbar ueber einer Fahrbahnzelle
+					const ulong n0 = (ulong)x + (ulong)y*(ulong)Nx;
+					if(fl==VEH && (L.flags[n0]&(TYPE_S|TYPE_E))==TYPE_S) n_contact++;
+				}
+			}
+			print_info(string("--- Bodenkontakt und mitbewegte Wand, ")+who+" ---");
+			print_info("  Fahrzeugzellen (flags == 0x41, genau die zaehlt object_force): "+to_string(n_veh)
+				+"; unterste bei z = "+to_string(z_min_veh)+" ("+to_string((float)z_min_veh*dx*1000.0f,1u)+" mm ueber der Fahrbahn)");
+			print_info("  Fahrzeugzellen auf z = 0: "+to_string(n_veh_z0)+" (muss 0 sein -- sie wurden an die Strasse uebergeben)");
+			print_info("  Direkter Aufstand: "+to_string(n_contact)+" Fahrzeugzellen auf z = 1 sitzen unmittelbar auf einer Fahrbahnzelle");
+			print_info("  Fahrbahn z = 0: "+to_string(n_road_z0)+" Wandzellen, davon "+to_string(n_road_moving)+" mit u_x != 0");
+			print_info("  Mitbewegte Wand: "+to_string(n_ms_z1)+" von "+to_string(n_fluid_z1)+" Fluidzellen auf z = 1 tragen TYPE_MS"
+				+" (nur diese bekommen den Krueger-Impulsterm); im ganzen Gitter "+to_string(n_ms_total));
+			if(n_veh_z0>0ull) print_warning(string(who)+": es liegen noch Fahrzeugzellen auf z = 0 -- die Uebergabe an die Strasse hat nicht gegriffen.");
+			if(n_contact==0ull) print_warning(string(who)+": KEIN direkter Aufstand -- der Wagen schwebt.");
+			if(n_road_moving!=n_road_z0) print_warning(string(who)+": "+to_string(n_road_z0-n_road_moving)+" Fahrbahnzellen stehen still.");
+			if(n_ms_z1==0ull) print_warning(string(who)+": KEINE TYPE_MS-Zelle ueber der Fahrbahn -- der mitbewegte Boden ist wirkungslos.");
+		};
+		audit(lbm_f, fNx, fNy, fNz, dx_f, "Nahfeld");
+		audit(lbm_c, cNx, cNy, cNz, dx_c, "Fernfeld");
+	}
 	ulong max_cp = 0ull;
 	for(uint p=0u; p<5u; p++) max_cp = max(max_cp, (ulong)cp[p].extent_a*(ulong)cp[p].extent_b);
 	lbm_c.alloc_coupling_planes(max_cp); // entnimmt
