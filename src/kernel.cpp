@@ -1958,6 +1958,34 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	}
 } // update_fields()
 
+)+R(kernel void apply_pressure_outlet(global float* u, const global ulong* po_cells, const global uchar* po_dirs, const uint N_po, const uint Nx, const uint Ny) {
+	// FORK -- Druck-Auslass. Kopiert u aus der inneren Nachbarzelle in die Randzelle (Nullgradient,
+	// also Neumann auf u). Zusammen mit rho = 1.0 und der TYPE_E-Logik in stream_collide ergibt das
+	// einen effektiven Zou-He-Auslass: Dirichlet auf den Druck, Neumann auf die Geschwindigkeit.
+	//
+	// Warum das noetig ist: ein blosser TYPE_E-Auslass mit aufgepraegtem u_lat erzwingt BEIDE Groessen
+	// und ueberbestimmt den Ausfluss. Am Kugelfall macht das gemessen 9,5 % in Cz aus (2,8 sigma) --
+	// darum kommt der Rand mit, und nicht aus Prinzip.
+	//
+	// po_dirs: 0 = +x auswaerts (Inneres bei n-1), 1 = -x, 2 = +y, 3 = -y, 4 = +z, 5 = -z.
+	const uint gid = get_global_id(0);
+	if(gid>=N_po) return;
+	const ulong n = po_cells[gid];
+	ulong n_int;
+	switch(po_dirs[gid]) {
+		case 0u: n_int = n - 1ul;                 break;
+		case 1u: n_int = n + 1ul;                 break;
+		case 2u: n_int = n - (ulong)Nx;           break;
+		case 3u: n_int = n + (ulong)Nx;           break;
+		case 4u: n_int = n - (ulong)Nx*(ulong)Ny; break;
+		case 5u: n_int = n + (ulong)Nx*(ulong)Ny; break;
+		default: return;
+	}
+	u[                  n] = u[                  n_int];
+	u[    def_N+(ulong)n] = u[    def_N+(ulong)n_int];
+	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)n_int];
+} // apply_pressure_outlet()
+
 )+"#ifdef FORCE_FIELD"+R(
 )+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx

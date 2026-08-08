@@ -210,7 +210,9 @@ void main_setup() {
 			if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { lbm.flags[n] = TYPE_S|TYPE_X; filled++; }
 		}
 		print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert");
-		lbm.flags.write_to_device(); // Host-Aenderungen muessen aufs Device, bevor initialize() laeuft
+		// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags ohnehin hoch
+		// (lbm.cpp:982-984), und das passiert beim ersten run(). Nachgeprueft 2026-08-08 -- ein
+		// zusaetzlicher Upload hier waere wirkungslos und wuerde nur Aktivitaet vortaeuschen.
 	}
 
 	// Flaechenaequivalenter Ist-Radius aus dem echten Querschnitt in der Symmetrieebene.
@@ -239,6 +241,12 @@ void main_setup() {
 		}
 	}
 
+	// Druck-Auslass an x+ (Zou-He). Ohne ihn erzwingt der blosse TYPE_E-Rand sowohl Druck als auch
+	// Geschwindigkeit und ueberbestimmt den Ausfluss. Gemessen macht das 9,5 % in Cz aus (2,8 sigma,
+	// Vergleich alter Baum gegen neuen am 2026-08-08) -- deshalb kommt er mit. Nach der
+	// Randbedingungs-Schleife aufrufen: er sammelt genau die TYPE_E-Zellen, die dort gesetzt wurden.
+	lbm.set_pressure_outlet_faces(2u); // Bit 2 = x_max
+
 	// Tiles erst JETZT klassifizieren: der Klassifizierer liest die Flags, und die Waende oben sind
 	// ebenfalls TYPE_S. Liefe finalize schon nach der Voxelisierung, klassifizierte es gegen ein
 	// Zwischenbild der Geometrie. Bei ausgeschaltetem Sparse ist der Aufruf ein No-op.
@@ -266,6 +274,12 @@ void main_setup() {
 	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
 		const ulong chunk = min((ulong)sample_every, n_steps-step);
 		lbm.run(chunk, n_steps);
+		// u/rho aus den DDFs auffrischen. Fuer die KRAEFTE ist das nicht noetig -- update_force_field
+		// liest fi direkt. Noetig ist es fuer den DRUCK-AUSLASS: der extrapoliert u aus der Innenzelle,
+		// und ohne diesen Aufruf saehe er ewig das Initialfeld u_lat und taete damit gar nichts.
+		// UPDATE_FIELDS ist in dieser Konfiguration nicht definiert (haengt an SURFACE/PARTICLES/
+		// GRAPHICS), stream_collide schreibt u also nicht selbst -- es muss explizit passieren.
+		lbm.update_fields();
 		lbm.update_force_field();
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
 		ts.push_back((double)((float)(step+chunk)*dt));

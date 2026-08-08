@@ -386,11 +386,16 @@ private:
 			if(device.info.memory_used>device.info.memory) print_error("Device \""+device.info.name+"\" does not have enough memory. Allocating another "+to_string((uint)(capacity()/1048576ull))+" MB would use a total of "+to_string(device.info.memory_used)+" MB / "+to_string(device.info.memory)+" MB.");
 			int error = 0;
 			is_zero_copy = allow_zero_copy&&host_buffer_exists&&device.info.uses_ram&&(!external_host_buffer||((ulong)host_buffer%4096ull==0ull&&capacity()%64ull==0ull));
-			// FORK 2026-05-19 (Intel Arc Pro B70, libigdrcl.so): bei Zero-Copy-Buffern oberhalb ~1 GB dreht der
+			// FORK 2026-05-19 (Intel, libigdrcl.so): bei Zero-Copy-Buffern oberhalb ~1 GB dreht der
 			// i915-USERPTR-ioctl endlos. Per Backtrace auf TID-14422 als Ursache verifiziert, nicht vermutet.
 			// ZEROCOPY_THRESHOLD_MB=<N> schaltet Zero-Copy nur fuer Buffer > N MB ab -> NEO macht dann eine
 			// regulaere Device-Allokation statt CL_MEM_USE_HOST_PTR. Ungesetzt = 0 = Upstream-Verhalten.
 			// Bewusst wertauswertend (atoi), nicht per Existenzpruefung: "=0" muss ausschalten heissen.
+			//
+			// ★ GELTUNGSBEREICH, nachgeprueft 2026-08-08: is_zero_copy verlangt uses_ram, und das ist nur bei
+			// CPUs und iGPUs wahr (Zeile 137, CL_DEVICE_HOST_UNIFIED_MEMORY). Die Arc Pro B70 meldet VRAM,
+			// dort greift dieser Zweig also NIE. Er betrifft ausschliesslich den iGPU-Pfad -- im Fahrzeugfall
+			// rechnet die iGPU die grobe Domaene. Solange nur die dGPU laeuft, ist der Schalter inert.
 			if(const char* zc = getenv("ZEROCOPY_THRESHOLD_MB")) {
 				const uint threshold_mb = (uint)max(0, atoi(zc));
 				if(threshold_mb>0u && is_zero_copy && (uint)(capacity()/1048576ull)>threshold_mb) {

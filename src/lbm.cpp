@@ -207,6 +207,11 @@ void LBM_Domain::allocate(Device& device) {
 	if(get_D()>1u) allocate_transfer(device);
 }
 
+void LBM_Domain::enqueue_apply_pressure_outlet() { // FORK: Druck-Auslass
+	if(po_N_active==0u) return; // nicht konfiguriert -> nichts zu tun (kein Leerlauf-Dispatch)
+	kernel_apply_pressure_outlet.enqueue_run();
+}
+
 void LBM_Domain::finalize_sparse_tiles() {
 	// Nach der Voxelisierung aufrufen: erst dann steht fest, welche Tiles voll solid sind.
 	// Eine Tile ist tot, wenn sie SAMT 2-Zell-Halo vollstaendig solid ist. Der Halo muss 2 sein, nicht 1:
@@ -1021,6 +1026,9 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 #ifdef SURFACE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
+	// FORK: u am Druck-Auslass VOR stream_collide neu extrapolieren -- der Rand muss die
+	// Geschwindigkeit des aktuellen Innenfeldes sehen, nicht die des vorigen Schritts.
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
@@ -1077,6 +1085,44 @@ void LBM::update_fields() { // update fields (rho, u, T) manually
 
 void LBM::finalize_sparse_tiles() { // FORK: Block-Tiling abschliessen (no-op wenn ausgeschaltet)
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finalize_sparse_tiles();
+}
+
+
+// FORK -- Druck-Auslass (Zou-He). Sammelt die TYPE_E-Zellen der angeforderten Aussenflaechen in eine
+// duenne Liste; apply_pressure_outlet extrapoliert dort jeden Schritt u aus der Innenzelle.
+// Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
+// WICHTIG: die Flags werden vom HOST gelesen, nicht vom Device. Zur Setup-Zeit ist der Host aktuell;
+// ein read_from_device() wuerde die gerade gesetzten Randbedingungen mit altem Stand ueberschreiben.
+void LBM_Domain::set_pressure_outlet_faces(const uint face_mask) {
+	if(face_mask==0u) { print_warning("set_pressure_outlet_faces: face_mask=0, nichts gesetzt."); return; }
+	std::vector<ulong> cells; std::vector<uchar> dirs;
+	auto add_face = [&](const uint dir_code, const uint x_lo, const uint x_hi, const uint y_lo, const uint y_hi, const uint z_lo, const uint z_hi) {
+		for(uint z=z_lo; z<=z_hi; z++) for(uint y=y_lo; y<=y_hi; y++) for(uint x=x_lo; x<=x_hi; x++) {
+			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
+			if((flags[n]&TYPE_E)!=0u) { cells.push_back(n); dirs.push_back((uchar)dir_code); } // nur TYPE_E; Solid bleibt unangetastet
+		}
+	};
+	if(face_mask&2u)  add_face(0u, Nx-1u, Nx-1u, 0u, Ny-1u, 0u, Nz-1u);
+	if(face_mask&1u)  add_face(1u, 0u, 0u, 0u, Ny-1u, 0u, Nz-1u);
+	if(face_mask&8u)  add_face(2u, 0u, Nx-1u, Ny-1u, Ny-1u, 0u, Nz-1u);
+	if(face_mask&4u)  add_face(3u, 0u, Nx-1u, 0u, 0u, 0u, Nz-1u);
+	if(face_mask&32u) add_face(4u, 0u, Nx-1u, 0u, Ny-1u, Nz-1u, Nz-1u);
+	if(face_mask&16u) add_face(5u, 0u, Nx-1u, 0u, Ny-1u, 0u, 0u);
+	const uint N_po = (uint)cells.size();
+	if(N_po==0u) { print_warning("set_pressure_outlet_faces: keine TYPE_E-Zellen auf den angeforderten Flaechen gefunden."); return; }
+	po_N_active = N_po;
+	po_cells = Memory<ulong>(device, (ulong)N_po);
+	po_dirs  = Memory<uchar>(device, (ulong)N_po);
+	for(uint i=0u; i<N_po; i++) { po_cells[i] = cells[i]; po_dirs[i] = dirs[i]; }
+	po_cells.write_to_device();
+	po_dirs.write_to_device();
+	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, po_cells, po_dirs, N_po, Nx, Ny);
+	print_info("Druck-Auslass: "+to_string(N_po)+" Zellen aktiv (face_mask=0x"+to_string(face_mask)+"), u wird jeden Schritt neu extrapoliert.");
+}
+
+void LBM::set_pressure_outlet_faces(const uint face_mask) {
+	if(get_D()!=1u) { print_warning("set_pressure_outlet_faces: nur fuer eine einzelne Domaene, uebersprungen."); return; }
+	lbm_domain[0]->set_pressure_outlet_faces(face_mask);
 }
 
 void LBM::reset() { // reset simulation (takes effect in following run() call)
