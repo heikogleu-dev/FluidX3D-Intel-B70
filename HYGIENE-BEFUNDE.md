@@ -90,6 +90,56 @@ ehrlich dokumentiert, alle CFD_KUGEL_*/CFD_FERN_*/CFD_DEV_*-Schalter verdrahtet.
 
 ---
 
-## Prüfer 2: Effektlosigkeit auf echten Pfaden
+## Prüfer 2: Effektlosigkeit auf echten Pfaden — Rangfolge nach Schwere
 
-*(ausstehend — Bericht wird ergänzt, sobald er vorliegt)*
+### Mittel–hoch
+
+1. **Der Bodenkontakt/TYPE_MS-Audit läuft NUR im dd-Fall** (`setup.cpp:1120-1159`). Der
+   Einzelgitter-Fahrzeugfall hat dieselbe Kontaktflächen-Übergabe und vier mitbewegte Wände, der
+   Kugelfall den mitbewegten Boden — alles hängt an derselben stillen Kette
+   initialize→TYPE_MS→apply_moving_boundaries, an der **V1 nachweislich einmal komplett
+   wirkungslos war**. Ein No-op der Wandmitbewegung würde in kugel/fahrzeug von nichts gemeldet.
+   → Audit in alle drei Fälle. Nebenbefund: er liest u volldomänig (~6 GB), wertet u aber nur auf
+   z=0 aus — Teil-Read spart das.
+
+### Mittel
+
+2. **VOLUME_FORCE mit Nullkraft** läuft in allen vier Fällen: kein Setup übergibt eine Kraft,
+   trotzdem rechnet jeder Schritt `calculate_forcing_terms` (~130 FLOP), den kompletten
+   19er-Fib-Block (TRT) und den `load3_F`-Speicherzugriff (12 B/Zelle in der F-Box — **im
+   Kugelfall ist das die volle Domäne**, ~11 % des Zellverkehrs, weil dort keine F-Box gesetzt
+   wird!). Ersparnis bei Abschalten: einstellige Prozent, Kugel bis ~10 %.
+   **Gefahr dabei:** ohne VOLUME_FORCE wird per-Zellen-F kommentarlos verworfen
+   (`kernel.cpp:1685`), und die „Kraft ist 0"-Warnung ist bei aktivem FORCE_FIELD **unterdrückt**
+   (`lbm.cpp:1080-1083`) — wer je eine F-basierte Funktion zurückholt, hätte einen lautlosen
+   No-op. → erst Wächter, dann A/B.
+3. **Die 1580 vi∩po-Doppelzellen** (Kanten der x+-Ebene, nachgerechnet: 2×551+480−2): der
+   Einlass schreibt zuerst, der Auslass überschreibt — deterministisch über die
+   Enqueue-Reihenfolge `lbm.cpp:1202/1203`, aber **nirgends dokumentiert**. Wer die zwei Zeilen
+   tauscht, lässt den Einlass die Auslasskante prägen. → Kommentar an beide Stellen.
+
+### Niedrig
+
+4. Der Kopplungs-Wirksamkeitsnachweis liest je Prüfpunkt **~8,5 GB** zurück (2× je Lauf) und wird
+   dem Phasenkonto „Fernfeld" zugebucht — das **erste** [PHASEN]-Fenster überzeichnet ph_grob;
+   nicht als Baseline nehmen. `CFD_DD_VERIFY_AT=0` legt beide Prüfpunkte auf outer==0 zusammen
+   und verliert still den Spätnachweis.
+5. Kugelfall ohne `set_force_bbox` → F auf voller Domäne (siehe 2) — eigenständig behebenswert.
+6. `CFD_SPONGE_N` wirkt auf **jede** LBM-Instanz des Prozesses — im dd-Fall bekämen fein UND grob
+   dieselbe Zonenbreite in Zellen (physisch Faktor 4 verschieden). Dokumentieren, bevor die Zone
+   dort eingeschaltet wird.
+
+### Ausdrücklich in Ordnung (mit Beweis geprüft)
+
+- **REG aus = nichts kompiliert** (OpenCL-Präprozessor entfernt deriv_reg/reg_fneq/S-Block
+  vollständig); REG an ist am Druckauslass beweisbar No-op (S≡0, weil u kopiert wird) — Wirkung
+  nur an Einlass- und getriebenen Flächen.
+- `po_sigma` wirkt auf beiden Armen; die D1Q3-R-Tabelle gilt quantitativ nur für den
+  po_hart-Kontrollarm — korrekt selbstdokumentiert.
+- velocity-inlet: Bau nur im fernfeld-Fall, per-Schritt-Guard sauber, kein Leerlauf-Dispatch.
+- **SPONGE: Emission kommt an, Formel algebraisch exakt** (nu=(1/w−½)/3, korrekt gerundete
+  Konstanten), Platzierung vor der TRT-wm-Ableitung → Λ=3/16 bleibt in der Zone erhalten,
+  Fahrbahn ausgenommen.
+- Leistungsindex: alle fünf Phasen werden gemessen, keine systematischen Fehler bei „Slices aus"
+  oder „Kräfte seltener".
+- Hohlraum-Überwachung deckt alle voxelisierenden Fälle.
