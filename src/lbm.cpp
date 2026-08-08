@@ -529,6 +529,22 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define TYPE_X 0x40" // 0b01000000 // reserved type X
 	"\n	#define TYPE_Y 0x80" // 0b10000000 // reserved type Y
 
+	// ★★ DAEMPFUNGSZONE (Sponge) an den TYPE_E-Flaechen, 2026-08-09. DER Weg, der nach drei
+	// gescheiterten Randumbauten uebrig bleibt -- und der einzige, der durch Messung gestuetzt ist:
+	// im leeren Fernfeld hat AUSSCHLIESSLICH die Viskositaet gedaempft (nu x1000: Streuung 0,040 ->
+	// 0,025), waehrend jede Aenderung der Randgleichung das Klingeln verstaerkte. Die Zone hebt nu
+	// nur in einem Streifen vor den Raendern an (quadratische Rampe), also dort, wo die Quelle sitzt
+	// und die Reflexionen laufen -- nicht im Messvolumen. Sie liest nichts zurueck, erhaelt Masse
+	// und Impuls (reine Aenderung der Relaxationsrate) und ist unter Esoteric Pull trivial sicher.
+	// Der Boden z=0 ist AUSGENOMMEN: dort ist Fahrbahn, keine TYPE_E-Flaeche, und die Grenzschicht
+	// darf nicht kuenstlich verdickt werden. V1s wirksame Klemmschicht war der harte Vorlaeufer
+	// dieser Idee -- gleicher Ort, aber als f-Reset statt als Viskositaet.
+	// Nur emittiert, wenn CFD_SPONGE_N gesetzt ist; ohne die Variable ist der Quelltext bit-identisch.
+	+((getenv("CFD_SPONGE_N")!=nullptr&&atoi(getenv("CFD_SPONGE_N"))>0) ? (string)
+	"\n	#define SPONGE"
+	"\n	#define def_sponge_n "+to_string((uint)atoi(getenv("CFD_SPONGE_N")))+"u"
+	"\n	#define def_sponge_a "+to_string(getenv("CFD_SPONGE_A")!=nullptr?(float)atof(getenv("CFD_SPONGE_A")):3000.0f,1u)+"f"
+	: (string)"")
 	// FORK: REG_E(i) ist der Randwert einer TYPE_E-Zelle -- reines Gleichgewicht wie bisher, oder mit
 	// REGULARIZED_BOUNDARIES zusaetzlich der rekonstruierte Nichtgleichgewichtsanteil.
 	//
@@ -541,8 +557,17 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	//     Damit liefert DASSELBE Binary mit CFD_REG_BC=0 exakt den alten OpenCL-Quelltext -- das ist
 	//     der bit-genaue Kontrollarm fuer jedes A/B, und zugleich der Rettungsanker, falls der
 	//     GPU-Uebersetzer am regularisierten Code doch wieder haengen sollte.
+	// ★★ GEMESSEN UND DEFAULT AUS, 2026-08-09. A/B im leeren Fernfeld, gleiches Binary, Kontrollarm:
+	//   bei 0,08 s Streuung 0,0719 (aus) gegen 0,1042 (an), Zellen ueber 10 % daneben 12,1 gegen 20,2 %.
+	// Der regularisierte Einlass VERSTAERKT das Klingeln. Es ist der dritte Randumbau, der am selben
+	// Muster scheitert: S wird aus dem u[] der Nachbarn gebildet, und die erste Fluidzelle ist genau
+	// die, die die Stoerung traegt -- der Rand koppelt das Rauschen auf sich selbst zurueck, und bei
+	// w -> 2 daempft die Kollision nichts, sie spiegelt. Der reine Gleichgewichts-Reset ist in diesem
+	// Regime der am wenigsten schaedliche Rand, WEIL er nichts zurueckliest.
+	// Der Code bleibt (mathematisch korrekt, Erhaltung symbolisch bestaetigt) fuer Regimes mit
+	// ordentlichem tau; CFD_REG_BC=1 schaltet ihn ein.
 #ifdef REGULARIZED_BOUNDARIES
-	+((getenv("CFD_REG_BC")==nullptr||!(getenv("CFD_REG_BC")[0]=='0'&&getenv("CFD_REG_BC")[1]=='\0')) ? (string)
+	+((getenv("CFD_REG_BC")!=nullptr&&!(getenv("CFD_REG_BC")[0]=='0'&&getenv("CFD_REG_BC")[1]=='\0')) ? (string)
 	"\n	#define REGULARIZED_BOUNDARIES"
 	"\n	#define REG_E(i) (feq[i]+reg_fneq(i, regf, Sxx, Syy, Szz, Sxy, Sxz, Syz, trS3))"
 	: (string)

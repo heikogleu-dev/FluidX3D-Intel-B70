@@ -1716,6 +1716,28 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
 
+)+"#ifdef SPONGE"+R(
+	// ★★ DAEMPFUNGSZONE. Hebt nu in einem def_sponge_n Zellen breiten Streifen vor den TYPE_E-
+	// Flaechen an (x-, x+, y-, y+, z+; der Boden z=0 ist Fahrbahn und bleibt aussen vor), mit
+	// quadratischer Rampe bis Faktor def_sponge_a am Rand. Warum das der richtige Hebel ist und
+	// drei Randumbauten es nicht waren, steht bei der Emission in lbm.cpp (Suchwort SPONGE).
+	// Wirkt NACH SUBGRID auf dasselbe w, von dem TRT sein wm ableitet -- Lambda = 3/16 bleibt
+	// also auch in der Zone erhalten, nur die Daempfung steigt.
+	{
+		const uint3 sxyz = coordinates(n);
+		const uint sdx = min(sxyz.x, def_Nx-1u-sxyz.x);
+		const uint sdy = min(sxyz.y, def_Ny-1u-sxyz.y);
+		const uint sdz = def_Nz-1u-sxyz.z; // nur die Decke, nicht der Boden
+		const uint sd = min(min(sdx, sdy), sdz);
+		if(sd<def_sponge_n) {
+			const float sr = 1.0f-(float)sd/(float)def_sponge_n; // 1 am Rand, 0 innen
+			const float nu_l = fma(1.0f/w, 0.33333334f, -0.16666667f); // nu aus dem aktuellen w
+			const float nu_s = nu_l*fma(sr*sr, def_sponge_a-1.0f, 1.0f);
+			w = 1.0f/fma(3.0f, nu_s, 0.5f);
+		}
+	}
+)+"#endif"+R( // SPONGE
+
 )+"#if defined(EQUILIBRIUM_BOUNDARIES)&&defined(REGULARIZED_BOUNDARIES)"+R(
 	// ★★ REGULARISIERTER GLEICHGEWICHTSRAND (Latt/Chopard 2006).
 	// Statt f = f_eq wird an TYPE_E-Zellen f = f_eq + f_neq gesetzt, mit

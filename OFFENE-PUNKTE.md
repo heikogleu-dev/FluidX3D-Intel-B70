@@ -13,6 +13,34 @@ steckt, dass ihr Pfad wirklich erreicht wird, und dass sie tut, was sie behaupte
 
 ---
 
+
+---
+
+## Übergabe 2026-08-09, kurz nach Mitternacht — hier weitermachen
+
+**Stand:** Einlass und Auslass sind umgesetzt, übersetzerfest und zur Laufzeit schaltbar. Der
+Rechner-Einfrierer ist verstanden (Riesen-Makro 19-fach in der Kollisionszeile + Desktop auf der
+B70) und durch Umbau plus Testleiter CPU→iGPU→B70 abgesichert.
+
+**Gemessen und entschieden:**
+- Regularisierter Einlass (CFD_REG_BC): **verstärkt** das Klingeln (Streuung 0,104 gegen 0,072,
+  >10 %-Zellen 20,2 gegen 12,1 %) → **Default AUS**. Dritter Randumbau, der am selben Muster
+  scheitert: alles, was aus dem Inneren zurückliest, koppelt das Rauschen auf sich selbst zurück.
+- **Identitätsnachweis bestanden:** REG aus + CFD_PO_HART=1 reproduziert den alten Lauf fern_vi0
+  **bitgenau** (alle 8 Zeilen). Beide Laufzeitschalter erreichen nachweislich den Device-Code.
+- Auslass: Flächenmittel-Anker ist Default, po_hart=1 ist der bitgenaue alte Zustand,
+  Reduktion summiert ρ−1 (vier Dekaden genauer).
+
+**MORGEN ZUERST — der Sponge-A/B (abgebrochen, nur 1 Messzeile):**
+    CFD_CASE=fernfeld CFD_SPONGE_N=32 CFD_T_END=0.08 CFD_SAMPLE_EVERY=250 CFD_RUN_NAME=fern_sponge ./bin/FluidX3D 1
+gegen den vorhandenen Kontrollarm `export/fern_regbc0/rauschen.csv`. Die Zone ist der letzte
+verbliebene UND der einzig messgestützte Weg (nur ν×1000 hat je gedämpft): 32 Zellen, Faktor 3000,
+quadratische Rampe, Boden ausgenommen, Λ = 3/16 bleibt erhalten. Leiter CPU/iGPU ist bestanden.
+Trägt die Zone, dann: langer Fahrzeuglauf mit CFD_SPONGE_N=32 neu.
+
+**Außerdem angestoßen:** zwei Hygiene-Prüfer (toter/unverdrahteter Code + Effektlosigkeit auf
+echten Pfaden) liefen beim Sitzungsende noch — Ergebnisse für die Codehygiene abwarten/einsammeln.
+
 ## Was läuft
 
 | | Stand |
