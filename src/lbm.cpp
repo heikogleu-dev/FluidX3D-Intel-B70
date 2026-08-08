@@ -118,12 +118,28 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif // GRAPHICS
 }
 
+// FORK -- Block-Tiling: Voreinstellungen. Default aus = bit-identisch zu Upstream.
+bool LBM_Domain::s_sparse_tiles_on = false;
+uint LBM_Domain::s_sparse_T = 8u;
+
 void LBM_Domain::allocate(Device& device) {
 	const ulong N = get_N();
-	fi = Memory<fpxx>(device, N, velocity_set, false);
+	// Bei aktivem Sparse zunaechst nur ein 1-Zell-Platzhalter: finalize_sparse_tiles() legt die echte
+	// sparse fi an. Grund ist kein Geschmack, sondern ein Treiberdefekt -- das Freigeben eines bereits
+	// allozierten 19-GB-fi-Buffers bringt den Intel-NEO mit CL_OUT_OF_RESOURCES zu Fall. Das Move-Assign
+	// in finalize gibt so nur den Platzhalter frei, was trivial ist.
+	fi = Memory<fpxx>(device, s_sparse_tiles_on ? 1ull : N, velocity_set, false);
 	rho = Memory<float>(device, N, 1u, true, true, 1.0f);
 	u = Memory<float>(device, N, 3u);
 	flags = Memory<uchar>(device, N);
+	if(s_sparse_tiles_on) { // Tile-Raster aufspannen; der Inhalt kommt erst in finalize_sparse_tiles()
+		sparse_tiles_x = ((uint)get_Nx()+s_sparse_T-1u)/s_sparse_T;
+		sparse_tiles_y = ((uint)get_Ny()+s_sparse_T-1u)/s_sparse_T;
+		sparse_tiles_z = ((uint)get_Nz()+s_sparse_T-1u)/s_sparse_T;
+		tile_slot = Memory<uint>(device, (ulong)sparse_tiles_x*sparse_tiles_y*sparse_tiles_z);
+	} else {
+		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
+	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
@@ -172,7 +188,69 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 #endif // PARTICLES
 
+	// FORK -- Block-Tiling: tile_slot ist per TS_P der LETZTE Parameter jedes fi-Kernels, muss also NACH
+	// allen anderen add_parameters angehaengt werden. Bei ausgeschaltetem Sparse ist TS_P leer, dann darf
+	// hier auch nichts gebunden werden -- sonst stimmt die Parameterzahl nicht mehr mit der Device-Seite
+	// ueberein, und das ist genau die Fehlerklasse, die still falsche Ergebnisse produziert.
+	if(s_sparse_tiles_on) {
+		// Multi-GPU + Sparse ist nicht validiert: die transfer_*_fi-Kernel bekaemen tile_slot hier nicht
+		// gebunden. Lieber laut abbrechen als still falsch rechnen.
+		if(get_D()>1u) print_error("Block-Tiling (CFD_SPARSE_TILES) ist nur fuer eine einzelne GPU validiert, hier laufen "+to_string(get_D())+" Domaenen.");
+		kernel_initialize.add_parameters(tile_slot);
+		kernel_stream_collide.add_parameters(tile_slot);
+		kernel_update_fields.add_parameters(tile_slot);
+#ifdef FORCE_FIELD
+		kernel_update_force_field.add_parameters(tile_slot);
+#endif // FORCE_FIELD
+	}
+
 	if(get_D()>1u) allocate_transfer(device);
+}
+
+void LBM_Domain::finalize_sparse_tiles() {
+	// Nach der Voxelisierung aufrufen: erst dann steht fest, welche Tiles voll solid sind.
+	// Eine Tile ist tot, wenn sie SAMT 2-Zell-Halo vollstaendig solid ist. Der Halo muss 2 sein, nicht 1:
+	// update_force_field liest via load_f die Nachbarn wand-adjazenter SOLID-Zellen, greift also bis zu
+	// zwei Zellen weit -- jede Zelle, die hoechstens 2 von Fluid entfernt ist, muss in einer aktiven Tile
+	// bleiben. Mit 1-Halo waeren die Kraefte an der Wand still falsch.
+	if(!s_sparse_tiles_on) return;
+	const uint Nx=(uint)get_Nx(), Ny=(uint)get_Ny(), Nz=(uint)get_Nz(), T=s_sparse_T;
+	const ulong n_tiles = (ulong)sparse_tiles_x*sparse_tiles_y*sparse_tiles_z;
+	auto IDX = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
+	std::vector<uint> slot(n_tiles, 0xFFFFFFFFu);
+	uint n_active = 0u;
+	for(uint tz=0u; tz<sparse_tiles_z; tz++) for(uint ty=0u; ty<sparse_tiles_y; ty++) for(uint tx=0u; tx<sparse_tiles_x; tx++) {
+		bool all_solid = true;
+		const int x0=(int)(tx*T)-2, x1=(int)(tx*T+T+1), y0=(int)(ty*T)-2, y1=(int)(ty*T+T+1), z0=(int)(tz*T)-2, z1=(int)(tz*T+T+1);
+		for(int z=z0; z<=z1&&all_solid; z++) for(int y=y0; y<=y1&&all_solid; y++) for(int x=x0; x<=x1&&all_solid; x++) {
+			if(x<0||x>=(int)Nx||y<0||y>=(int)Ny||z<0||z>=(int)Nz) continue; // Domaenenrand zaehlt nicht als Fluid
+			if((flags[IDX((uint)x,(uint)y,(uint)z)]&TYPE_S)==0u) all_solid = false;
+		}
+		// Slots werden ab 1 vergeben: Slot 0 ist ein PAPIERKORB. Grund: store_f schreibt nicht nur an den
+		// eigenen Index, sondern auch an die Indizes der Nachbarn. Eine Zelle in einer AKTIVEN Tile kann
+		// sehr wohl einen Nachbarn in einer toten Tile haben (sie ist dann selbst solid) -- und cell_base
+		// liefert fuer tote Tiles den Notfallwert 0. Zaehlte man die echten Slots ab 0, landeten diese
+		// Schreibzugriffe mitten in einer echten Tile und zerstoerten sie. Genau daran sind die ersten
+		// T=8- und T=4-Laeufe divergiert (Cd 18.4 bzw. 22.4), auch noch mit is_dead_tile-Ausstieg.
+		if(!all_solid) slot[(ulong)tx+(ulong)sparse_tiles_x*((ulong)ty+(ulong)sparse_tiles_y*tz)] = 1u + n_active++;
+	}
+	sparse_n_active = n_active;
+	for(ulong i=0ull; i<n_tiles; i++) tile_slot[i] = slot[i];
+	tile_slot.write_to_device();
+
+	const ulong sparse_cells = (ulong)(n_active+1u)*(ulong)T*T*T; // +1 fuer den Papierkorb-Slot 0
+	const double full_gb = (double)get_N()*velocity_set*sizeof(fpxx)/1e9;
+	const double sparse_gb = (double)sparse_cells*velocity_set*sizeof(fpxx)/1e9;
+	fi = Memory<fpxx>(device, sparse_cells, velocity_set, false); // Move-Assign gibt nur den Platzhalter frei
+	kernel_initialize.set_parameters(0u, fi);
+	kernel_stream_collide.set_parameters(0u, fi);
+	kernel_update_fields.set_parameters(0u, fi);
+#ifdef FORCE_FIELD
+	kernel_update_force_field.set_parameters(0u, fi);
+#endif // FORCE_FIELD
+	print_info("[SPARSE] "+to_string(n_active)+"/"+to_string(n_tiles)+" Tiles aktiv (T="+to_string(T)+") -> fi "
+		+to_string((float)sparse_gb,2u)+" GB statt "+to_string((float)full_gb,2u)+" GB, also "
+		+to_string((float)(full_gb-sparse_gb),2u)+" GB frei.");
 }
 
 void LBM_Domain::enqueue_initialize() { // call kernel_initialize
@@ -319,6 +397,7 @@ void LBM_Domain::voxelize_mesh_on_device(const Mesh* mesh, const uchar flag, con
 #ifdef SURFACE
 	kernel_voxelize_mesh.add_parameters(mass, massex);
 #endif // SURFACE
+	if(s_sparse_tiles_on) kernel_voxelize_mesh.add_parameters(tile_slot); // TS_P haengt tile_slot hinten an
 	p0.write_to_device();
 	p1.write_to_device();
 	p2.write_to_device();
@@ -465,6 +544,23 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_particles_N "+to_string(particles_N)+"ul"
 	"\n	#define def_particles_rho "+to_string(particles_rho)+"f"
 #endif // PARTICLES
+
+	// FORK -- Block-Tiling. index_f() wird per Makro auf index_f_impl(..., tile_slot) umgeschrieben, damit
+	// alle Aufrufstellen unveraendert bleiben; nur die Signaturen bekommen tile_slot ueber TS_P.
+	// AUS = beide Makros leer = der erzeugte Device-Code ist bit-identisch zu Upstream.
+	+(s_sparse_tiles_on ? (string)(
+		"\n	#define SPARSE_TILES"
+		"\n	#define def_TILE "+to_string(s_sparse_T)+"u"
+		"\n	#define def_TILES_X "+to_string(((uint)get_Nx()+s_sparse_T-1u)/s_sparse_T)+"u"
+		"\n	#define def_TILES_Y "+to_string(((uint)get_Ny()+s_sparse_T-1u)/s_sparse_T)+"u"
+		"\n	#define def_TILE_DEAD 4294967295u"
+		"\n	#define TS_P , const global uint* tile_slot"
+		"\n	#define TS_A , tile_slot"
+		"\n	#define index_f(n, i) index_f_impl((n), (i), tile_slot)"
+	) : (string)(
+		"\n	#define TS_P"
+		"\n	#define TS_A"
+	))
 ;}
 
 #ifdef GRAPHICS
@@ -977,6 +1073,10 @@ void LBM::run(const ulong steps, const ulong total_steps) { // initializes the L
 void LBM::update_fields() { // update fields (rho, u, T) manually
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_update_fields();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
+}
+
+void LBM::finalize_sparse_tiles() { // FORK: Block-Tiling abschliessen (no-op wenn ausgeschaltet)
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finalize_sparse_tiles();
 }
 
 void LBM::reset() { // reset simulation (takes effect in following run() call)

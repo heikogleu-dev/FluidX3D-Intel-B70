@@ -858,9 +858,53 @@ string opencl_c_container() { return R( // ########################## begin of O
 	return (b&0x80000000)>>16 | (e>112)*((((e-112)<<11)&0x7800)|m>>12) | ((e<113)&(e>100))*((((0x007FF800+m)>>(124-e))+1)>>1); // sign : normalized : denormalized (assume [-2,2])
 }
 
+)+"#ifdef SPARSE_TILES"+R(
+// FORK -- Block-Tiling (sparse solid). fi wird nur fuer AKTIVE Tiles alloziert; eine Tile gilt als tot,
+// wenn sie SAMT 2-Zell-Halo vollstaendig solid ist. Layout tile-major SoA:
+//     fi[ slot*(T^3*Q) + i*T^3 + local ],  slot = tile_slot[tile_id],  tot = 0xFFFFFFFF
+// Invariante: eine Fluidzelle hat NIE einen Nachbarn in einer toten Tile -- sonst waere deren Halo nicht
+// voll solid. Der 2-Halo (nicht 1) ist noetig, weil update_force_field via load_f die Nachbarn
+// wand-adjazenter SOLID-Zellen liest, also bis zu 2 Zellen weit.
+//
+// Der Trade ist vermessen und strukturell, nicht wegoptimierbar (zwei Anlaeufe brachten zusammen +5 %):
+// jeder Nachbarzugriff braucht einen zusaetzlichen tile_slot-Gather aus einem Buffer, der bei Streuzugriff
+// nicht in L1/L2 passt, und der Registerdruck senkt die Occupancy.
+//     T=8  : -40 % Durchsatz, 1,43 GB gespart      T=16 : -28 % Durchsatz, 0,77 GB gespart
+// Physikalisch bit-neutral (an der Kugel verifiziert). Default AUS -- es ist ein VRAM-gegen-Tempo-Regler
+// fuer Faelle, die sonst nicht in den Speicher passen, kein genereller Gewinn.
+ulong index_f_impl(const uxx n, const uint i, const global uint* tile_slot) {
+	const uint x = (uint)((ulong)n % (ulong)def_Nx);
+	const uint y = (uint)(((ulong)n / (ulong)def_Nx) % (ulong)def_Ny);
+	const uint z = (uint)((ulong)n / ((ulong)def_Nx*(ulong)def_Ny));
+	const uint tx = x/def_TILE, ty = y/def_TILE, tz = z/def_TILE;
+	const uint slot = tile_slot[tx + def_TILES_X*(ty + def_TILES_Y*tz)];
+	if(slot==def_TILE_DEAD) return 0ul; // tote Tile -> Papierkorb-Slot 0 (echte Slots zaehlen ab 1)
+	const uint loc = (x - tx*def_TILE) + def_TILE*((y - ty*def_TILE) + def_TILE*(z - tz*def_TILE));
+	return (ulong)slot*((ulong)def_TILE*def_TILE*def_TILE*def_velocity_set) + (ulong)i*((ulong)def_TILE*def_TILE*def_TILE) + (ulong)loc;
+}
+bool is_dead_tile(const uxx n, const global uint* tile_slot) { // true -> Tile gedroppt, fi-Zugriff verboten
+	const uint x = (uint)((ulong)n % (ulong)def_Nx);
+	const uint y = (uint)(((ulong)n / (ulong)def_Nx) % (ulong)def_Ny);
+	const uint z = (uint)((ulong)n / ((ulong)def_Nx*(ulong)def_Ny));
+	return tile_slot[(x/def_TILE) + def_TILES_X*((y/def_TILE) + def_TILES_Y*(z/def_TILE))]==def_TILE_DEAD;
+}
+// Richtungsunabhaengiger Teil des Index, damit load_f/store_f ihn 1x statt 10x pro Zelle rechnen.
+ulong cell_base(const uxx n, const global uint* tile_slot) {
+	const uint x = (uint)((ulong)n % (ulong)def_Nx);
+	const uint y = (uint)(((ulong)n / (ulong)def_Nx) % (ulong)def_Ny);
+	const uint z = (uint)((ulong)n / ((ulong)def_Nx*(ulong)def_Ny));
+	const uint tx = x/def_TILE, ty = y/def_TILE, tz = z/def_TILE;
+	const uint slot = tile_slot[tx + def_TILES_X*(ty + def_TILES_Y*tz)];
+	if(slot==def_TILE_DEAD) return 0ul; // tote Tile -> Papierkorb-Slot 0; Schreibzugriffe an Nachbarindizes
+	                                     // in toten Tiles landen so harmlos statt in einer echten Tile
+	const uint loc = (x - tx*def_TILE) + def_TILE*((y - ty*def_TILE) + def_TILE*(z - tz*def_TILE));
+	return (ulong)slot*((ulong)def_TILE*def_TILE*def_TILE*def_velocity_set) + (ulong)loc;
+}
+)+"#else"+R(
 )+R(ulong index_f(const uxx n, const uint i) { // 64-bit indexing for DDFs
 	return (ulong)i*def_N+(ulong)n; // SoA (>2x faster on GPUs)
 }
+)+"#endif"+R( // SPARSE_TILES
 )+R(float c(const uint i) { // avoid constant keyword by encapsulating data in function which gets inlined by compiler
 	const float c[3u*def_velocity_set] = {
 )+"#if defined(D2Q9)"+R(
@@ -1323,19 +1367,43 @@ string opencl_c_container() { return R( // ########################## begin of O
 }
 )+"#endif"+R( // TEMPERATURE
 
-)+R(void load_f(const uxx n, float* fhn, const global fpxx* fi, const uxx* j, const ulong t) {
+)+R(void load_f(const uxx n, float* fhn, const global fpxx* fi, const uxx* j, const ulong t TS_P) { // TS_P = ", const global uint* tile_slot" bei SPARSE_TILES, sonst leer
+)+"#ifdef SPARSE_TILES"+R( // Zellbasen zuerst sammeln: die abhaengigen tile_slot-Loads issuen dann zusammen statt seriell zu stallen
+	const ulong T3 = (ulong)def_TILE*def_TILE*def_TILE;
+	const ulong cbn = cell_base(n, tile_slot); // eigene Zelle -- einmal fuer alle 10 eigenen Zugriffe
+	ulong cbj[def_velocity_set]; // Nachbarbasen vorab (nur ungerade i belegt)
+	for(uint i=1u; i<def_velocity_set; i+=2u) cbj[i] = cell_base(j[i], tile_slot);
+	fhn[0] = load(fi, cbn); // Esoteric-Pull (i=0 -> +0)
+	for(uint i=1u; i<def_velocity_set; i+=2u) {
+		fhn[i   ] = load(fi, cbn    + (ulong)(t%2ul ? i    : i+1u)*T3);
+		fhn[i+1u] = load(fi, cbj[i] + (ulong)(t%2ul ? i+1u : i   )*T3);
+	}
+)+"#else"+R(
 	fhn[0] = load(fi, index_f(n, 0u)); // Esoteric-Pull
 	for(uint i=1u; i<def_velocity_set; i+=2u) {
 		fhn[i   ] = load(fi, index_f(n   , t%2ul ? i    : i+1u));
 		fhn[i+1u] = load(fi, index_f(j[i], t%2ul ? i+1u : i   ));
 	}
+)+"#endif"+R( // SPARSE_TILES
 }
-)+R(void store_f(const uxx n, const float* fhn, global fpxx* fi, const uxx* j, const ulong t) {
+)+R(void store_f(const uxx n, const float* fhn, global fpxx* fi, const uxx* j, const ulong t TS_P) {
+)+"#ifdef SPARSE_TILES"+R(
+	const ulong T3 = (ulong)def_TILE*def_TILE*def_TILE;
+	const ulong cbn = cell_base(n, tile_slot);
+	ulong cbj[def_velocity_set];
+	for(uint i=1u; i<def_velocity_set; i+=2u) cbj[i] = cell_base(j[i], tile_slot);
+	store(fi, cbn, fhn[0]); // Esoteric-Pull (i=0 -> +0)
+	for(uint i=1u; i<def_velocity_set; i+=2u) {
+		store(fi, cbj[i] + (ulong)(t%2ul ? i+1u : i   )*T3, fhn[i   ]);
+		store(fi, cbn    + (ulong)(t%2ul ? i    : i+1u)*T3, fhn[i+1u]);
+	}
+)+"#else"+R(
 	store(fi, index_f(n, 0u), fhn[0]); // Esoteric-Pull
 	for(uint i=1u; i<def_velocity_set; i+=2u) {
 		store(fi, index_f(j[i], t%2ul ? i+1u : i   ), fhn[i   ]);
 		store(fi, index_f(n   , t%2ul ? i    : i+1u), fhn[i+1u]);
 	}
+)+"#endif"+R( // SPARSE_TILES
 }
 
 )+"#ifdef SURFACE"+R(
@@ -1362,9 +1430,16 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef TEMPERATURE"+R(
 	, global fpxx* gi, const global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
+)+R( TS_P
 )+") {"+R( // initialize()
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute initialize() on halo
+)+"#ifdef SPARSE_TILES"+R(
+	// FORK: Zellen in toten Tiles duerfen fi NIE anfassen. cell_base() gibt fuer sie defensiv 0
+	// zurueck -- ohne diesen Ausstieg landen ihre Schreibzugriffe also in Slot 0 und ueberschreiben
+	// die Daten einer echten aktiven Tile. Genau daran ist der erste T=8-Lauf divergiert (Cd 18.4).
+	if(is_dead_tile(n, tile_slot)) return;
+)+"#endif"+R(
 	uchar flagsn = flags[n];
 	const uchar flagsn_bo = flagsn&TYPE_BO; // extract boundary flags
 	uxx j[def_velocity_set]; // neighbor indices
@@ -1426,7 +1501,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 		store_g(n, geq, gi, j7, 1ul);
 	}
 )+"#endif"+R( // TEMPERATURE
-	store_f(n, feq, fi, j, 1ul); // write to fi
+	store_f(n, feq, fi, j, 1ul TS_A); // write to fi
 } // initialize()
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
@@ -1461,9 +1536,16 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef TEMPERATURE"+R(
 	, global fpxx* gi, global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
+)+R( TS_P
 )+") {"+R( // stream_collide()
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute stream_collide() on halo
+)+"#ifdef SPARSE_TILES"+R(
+	// FORK: Zellen in toten Tiles duerfen fi NIE anfassen. cell_base() gibt fuer sie defensiv 0
+	// zurueck -- ohne diesen Ausstieg landen ihre Schreibzugriffe also in Slot 0 und ueberschreiben
+	// die Daten einer echten aktiven Tile. Genau daran ist der erste T=8-Lauf divergiert (Cd 18.4).
+	if(is_dead_tile(n, tile_slot)) return;
+)+"#endif"+R(
 	const uchar flagsn = flags[n]; // cache flags[n] for multiple readings
 	const uchar flagsn_bo=flagsn&TYPE_BO, flagsn_su=flagsn&TYPE_SU; // extract boundary and surface flags
 	if(flagsn_bo==TYPE_S||flagsn_su==TYPE_G) return; // if cell is solid boundary or gas, just return
@@ -1472,7 +1554,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	neighbors(n, j); // calculate neighbor indices
 
 	float fhn[def_velocity_set]; // local DDFs
-	load_f(n, fhn, fi, j, t); // perform streaming (part 2)
+	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
 	if(flagsn_bo==TYPE_MS) apply_moving_boundaries(fhn, j, u, flags); // apply Dirichlet velocity boundaries if necessary (reads velocities of only neighboring boundary cells, which do not change during simulation)
@@ -1632,7 +1714,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#endif"+R( // TRT
 
-	store_f(n, fhn, fi, j, t); // perform streaming (part 1)
+	store_f(n, fhn, fi, j, t TS_A); // perform streaming (part 1)
 } // stream_collide()
 
 )+"#ifdef SURFACE"+R(
@@ -1798,9 +1880,16 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef TEMPERATURE"+R(
 	, const global fpxx* gi, global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
+)+R( TS_P
 )+") {"+R( // update_fields()
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_fields() on halo
+)+"#ifdef SPARSE_TILES"+R(
+	// FORK: Zellen in toten Tiles duerfen fi NIE anfassen. cell_base() gibt fuer sie defensiv 0
+	// zurueck -- ohne diesen Ausstieg landen ihre Schreibzugriffe also in Slot 0 und ueberschreiben
+	// die Daten einer echten aktiven Tile. Genau daran ist der erste T=8-Lauf divergiert (Cd 18.4).
+	if(is_dead_tile(n, tile_slot)) return;
+)+"#endif"+R(
 	const uchar flagsn = flags[n];
 	const uchar flagsn_bo=flagsn&TYPE_BO, flagsn_su=flagsn&TYPE_SU; // extract boundary and surface flags
 	if(flagsn_bo==TYPE_S||flagsn_su==TYPE_G) return; // don't update fields for boundary or gas lattice points
@@ -1808,7 +1897,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	uxx j[def_velocity_set]; // neighbor indices
 	neighbors(n, j); // calculate neighbor indices
 	float fhn[def_velocity_set]; // local DDFs
-	load_f(n, fhn, fi, j, t); // perform streaming (part 2)
+	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
 	if(flagsn_bo==TYPE_MS) apply_moving_boundaries(fhn, j, u, flags); // apply Dirichlet velocity boundaries if necessary (reads velocities of only neighboring boundary cells, which do not change during simulation)
@@ -1870,14 +1959,20 @@ string opencl_c_container() { return R( // ########################## begin of O
 } // update_fields()
 
 )+"#ifdef FORCE_FIELD"+R(
-)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F) { // calculate force from the fluid on solid boundaries from fi directly
+)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_force_field() on halo
+)+"#ifdef SPARSE_TILES"+R(
+	// FORK: Zellen in toten Tiles duerfen fi NIE anfassen. cell_base() gibt fuer sie defensiv 0
+	// zurueck -- ohne diesen Ausstieg landen ihre Schreibzugriffe also in Slot 0 und ueberschreiben
+	// die Daten einer echten aktiven Tile. Genau daran ist der erste T=8-Lauf divergiert (Cd 18.4).
+	if(is_dead_tile(n, tile_slot)) return;
+)+"#endif"+R(
 	if((flags[n]&TYPE_BO)!=TYPE_S) return; // only continue for solid boundary cells
 	uxx j[def_velocity_set]; // neighbor indices
 	neighbors(n, j); // calculate neighbor indices
 	float fhn[def_velocity_set]; // local DDFs
-	load_f(n, fhn, fi, j, t); // perform streaming (part 2)
+	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 	float Fb=1.0f, fx=0.0f, fy=0.0f, fz=0.0f;
 	calculate_rho_u(fhn, &Fb, &fx, &fy, &fz); // abuse calculate_rho_u() method for calculating force
 	store3(F, n, 2.0f*Fb*(float3)(fx, fy, fz)); // 2x because fi are reflected on solid boundary cells (bounced-back)
@@ -2099,7 +2194,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 	};
 	return (uint)index_transfer_data[side_i];
 }
-)+R(void extract_fi(const uint a, const uint A, const uxx n, const uint side, const ulong t, global fpxx_copy* transfer_buffer, const global fpxx_copy* fi) {
+)+R(void extract_fi(const uint a, const uint A, const uxx n, const uint side, const ulong t, global fpxx_copy* transfer_buffer, const global fpxx_copy* fi TS_P) { // FORK: TS_P, sonst kennt index_f hier kein tile_slot
 	uxx j[def_velocity_set]; // neighbor indices
 	neighbors(n, j); // calculate neighbor indices
 	for(uint b=0u; b<def_transfers; b++) {
@@ -2108,7 +2203,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 		transfer_buffer[b*A+a] = fi[index]; // fpxx_copy allows direct copying without decompression+compression
 	}
 }
-)+R(void insert_fi(const uint a, const uint A, const uxx n, const uint side, const ulong t, const global fpxx_copy* transfer_buffer, global fpxx_copy* fi) {
+)+R(void insert_fi(const uint a, const uint A, const uxx n, const uint side, const ulong t, const global fpxx_copy* transfer_buffer, global fpxx_copy* fi TS_P) { // FORK: TS_P
 	uxx j[def_velocity_set]; // neighbor indices
 	neighbors(n, j); // calculate neighbor indices
 	for(uint b=0u; b<def_transfers; b++) {
@@ -2117,17 +2212,17 @@ string opencl_c_container() { return R( // ########################## begin of O
 		fi[index] = transfer_buffer[b*A+a]; // fpxx_copy allows direct copying without decompression+compression
 	}
 }
-)+R(kernel void transfer_extract_fi(const uint direction, const ulong t, global fpxx_copy* transfer_buffer_p, global fpxx_copy* transfer_buffer_m, const global fpxx_copy* fi) {
+)+R(kernel void transfer_extract_fi(const uint direction, const ulong t, global fpxx_copy* transfer_buffer_p, global fpxx_copy* transfer_buffer_m, const global fpxx_copy* fi TS_P) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
-	extract_fi(a, A, index_extract_p(a, direction), 2u*direction+0u, t, transfer_buffer_p, fi);
-	extract_fi(a, A, index_extract_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi);
+	extract_fi(a, A, index_extract_p(a, direction), 2u*direction+0u, t, transfer_buffer_p, fi TS_A);
+	extract_fi(a, A, index_extract_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi TS_A);
 }
-)+R(kernel void transfer__insert_fi(const uint direction, const ulong t, const global fpxx_copy* transfer_buffer_p, const global fpxx_copy* transfer_buffer_m, global fpxx_copy* fi) {
+)+R(kernel void transfer__insert_fi(const uint direction, const ulong t, const global fpxx_copy* transfer_buffer_p, const global fpxx_copy* transfer_buffer_m, global fpxx_copy* fi TS_P) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
-	insert_fi(a, A, index_insert_p(a, direction), 2u*direction+0u, t, transfer_buffer_p, fi);
-	insert_fi(a, A, index_insert_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi);
+	insert_fi(a, A, index_insert_p(a, direction), 2u*direction+0u, t, transfer_buffer_p, fi TS_A);
+	insert_fi(a, A, index_insert_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi TS_A);
 }
 
 )+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global float* rho, const global float* u, const global uchar* flags) {
@@ -2268,6 +2363,7 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex // argument order is important
 )+"#endif"+R( // SURFACE
+)+R( TS_P
 )+") {"+R( // voxelize_mesh()
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
@@ -2337,13 +2433,19 @@ string opencl_c_container() { return R( // ########################## begin of O
 			if((flagsn&TYPE_BO)==TYPE_S&&(flagsn&TYPE_XY)==(flag&TYPE_XY)) { // cell was previously marked solid
 				const float3 un = load3(u, n); // load previous velocity
 				if(un.x==u_set.x&&un.y==u_set.y&&un.z==u_set.z) { // velocity matched: cell belonged to the currently voxelized geometry
+)+"#ifndef SPARSE_TILES"+R(
+					// FORK: bei SPARSE_TILES ist fi zur Voxelisierungszeit noch der 1-Zell-Platzhalter --
+					// finalize_sparse_tiles() legt die echte sparse fi erst DANACH an, weil vorher gar nicht
+					// feststeht, welche Tiles tot sind. Ein store_f hierher schriebe ausserhalb des Puffers.
+					// Der Verzicht ist folgenlos: initialize() setzt anschliessend ohnehin alle DDFs auf f_eq.
 					if(set_u) { // reconstruct DDFs when solid cell is converted to fluid
 						uxx j[def_velocity_set]; // neighbor indices
 						neighbors(n, j); // calculate neighbor indices
 						float feq[def_velocity_set]; // f_equilibrium
 						calculate_f_eq(1.0f, un.x, un.y, un.z, feq); // use rhon=1 to prevent mass drift
-						store_f(n, feq, fi, j, t); // write to fi
+						store_f(n, feq, fi, j, t TS_A); // write to fi
 					}
+)+"#endif"+R( // SPARSE_TILES
 					flagsn = (flagsn&TYPE_BO)==TYPE_MS ? flagsn&~TYPE_MS : flagsn&~flag; // clear flag
 				} // else: don't change cell state
 			}

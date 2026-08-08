@@ -37,6 +37,12 @@ private:
 	Kernel kernel_update_fields; // reads DDFs and updates (rho, u, T) in device memory
 	Memory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device memory
 	ulong t_last_update_fields = max_ulong; // optimization to not call kernel_update_fields multiple times if (rho, u, T) are already up-to-date
+	// FORK -- Block-Tiling (sparse solid): fi nur fuer aktive Tiles allozieren. VRAM-gegen-Tempo-Regler,
+	// physikalisch bit-neutral. Default AUS -> tile_slot bleibt ein 1-Element-Platzhalter, die Makros
+	// TS_P/TS_A sind leer und der erzeugte Device-Code ist bit-identisch zu Upstream.
+	Memory<uint> tile_slot; // tile_id -> kompakter Slot; 0xFFFFFFFF = tote Tile
+	uint sparse_tiles_x = 0u, sparse_tiles_y = 0u, sparse_tiles_z = 0u;
+	uint sparse_n_active = 0u;
 #ifdef FORCE_FIELD
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)
@@ -67,6 +73,15 @@ private:
 	string device_defines(const Device_Info& device_info) const; // returns preprocessor constants for embedding in OpenCL C code
 
 public:
+	// FORK -- Block-Tiling. Statisch, weil das Setup den Schalter setzen muss, BEVOR der LBM-Konstruktor
+	// laeuft: bei aktivem Sparse wird fi zunaechst nur als 1-Zell-Platzhalter alloziert (ein spaeteres
+	// Free des vollen fi-Buffers bringt den Intel-Treiber mit CL_OUT_OF_RESOURCES zu Fall).
+	// finalize_sparse_tiles() legt die echte sparse fi an -- NACH der Voxelisierung, weil erst dann
+	// feststeht, welche Tiles voll solid sind.
+	static bool s_sparse_tiles_on; // CFD_SPARSE_TILES
+	static uint s_sparse_T;        // CFD_TILE: 8 = VRAM-lastig (-40 % Tempo, 1,43 GB), 16 = Tempo-lastig (-28 %, 0,77 GB)
+	void finalize_sparse_tiles();  // Tiles klassifizieren, sparse fi allozieren, Kernel neu binden
+
 	Memory<float> rho; // density of every cell
 	Memory<float> u; // velocity of every cell
 	Memory<uchar> flags; // flags of every cell
@@ -437,6 +452,7 @@ public:
 
 	void run(const ulong steps=max_ulong, const ulong total_steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
 	void update_fields(); // update fields (rho, u, T) manually
+	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
 	void reset(); // reset simulation (takes effect in following run() call)
 #ifdef FORCE_FIELD
 	void update_force_field(); // calculate forces from fluid on TYPE_S cells

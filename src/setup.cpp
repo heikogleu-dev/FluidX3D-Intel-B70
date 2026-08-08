@@ -116,6 +116,20 @@ void main_setup() {
 	const bool moving_ground = getenv("CFD_KUGEL_MG")==nullptr ? true : env_on("CFD_KUGEL_MG");
 	const float u_wall = moving_ground ? u_lat : 0.0f;
 
+	// Block-Tiling (sparse solid). MUSS vor dem LBM-Konstruktor gesetzt werden, weil allocate() dann fi
+	// nur als Platzhalter anlegt. VRAM-gegen-Tempo-Regler, physikalisch bit-neutral:
+	//   CFD_TILE=8  -> etwa -40 % Durchsatz, dafuer die groesste VRAM-Ersparnis
+	//   CFD_TILE=16 -> etwa -28 % Durchsatz, dafuer nur die halbe Ersparnis
+	// Lohnt sich nur, wenn ein Fall sonst nicht in den Speicher passt. An der Kugel ist der Gewinn
+	// klein, weil fast nichts voll solid ist -- der Nutzen liegt bei gefuellten Modellen.
+	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
+	if(LBM_Domain::s_sparse_tiles_on) {
+		const uint T = env_u("CFD_TILE", 8u);
+		if(T!=4u && T!=8u && T!=16u) print_error("CFD_TILE muss 4, 8 oder 16 sein (erhalten: "+to_string(T)+").");
+		LBM_Domain::s_sparse_T = T;
+		print_info("Block-Tiling AKTIV, T="+to_string(T)+" (VRAM sparen auf Kosten von Durchsatz)");
+	}
+
 	units.set_m_kg_s(D/dx, u_lat, 1.0f, D, si_u, si_rho);
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
@@ -224,6 +238,11 @@ void main_setup() {
 			lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		}
 	}
+
+	// Tiles erst JETZT klassifizieren: der Klassifizierer liest die Flags, und die Waende oben sind
+	// ebenfalls TYPE_S. Liefe finalize schon nach der Voxelisierung, klassifizierte es gegen ein
+	// Zwischenbild der Geometrie. Bei ausgeschaltetem Sparse ist der Aufruf ein No-op.
+	lbm.finalize_sparse_tiles();
 
 	// ---------------------------------------------------------------- Laufsteuerung
 	const float t_end    = env_f("CFD_T_END", 0.600f);      // physikalische Laufzeit [s]
