@@ -168,6 +168,51 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 		if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { lbm.flags[n] = TYPE_S|TYPE_X; filled++; }
 	}
 	print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert");
+
+	// ---------------------------------------------------------------- Hohlraum-Diagnose
+	// Der Void-Fill fuellt nur, was von aussen NICHT erreichbar ist. Ist die Schale irgendwo offen --
+	// Fensterausschnitte, Radhaeuser, Motorraumluefter --, laeuft die Flutung hinein und der Koerper
+	// bleibt innen hohl. Am 2026-08-08 im Schnittbild des Fahrzeugs sichtbar geworden: das hintere
+	// Drittel war innen Fluid. Diese Zaehlung sagt, WIE GROSS das ist, statt es dem Auge zu ueberlassen.
+	// Kriterium: eine Nicht-Solidzelle gilt als innenliegend, wenn sie in ALLEN DREI Achsen zwischen
+	// Solid eingeschlossen ist (links und rechts, vorn und hinten, oben und unten je ein Treffer).
+	// Das ist konservativ -- der Spalt unter dem Wagen ist in x und y eingeschlossen, in z aber nicht.
+	{
+		const ulong nbx = (ulong)(bx1-bx0+1), nby = (ulong)(by1-by0+1), nbz = (ulong)(bz1-bz0+1);
+		std::vector<uchar> enc((size_t)(nbx*nby*nbz), 0u); // Bit 0/1/2 = in x/y/z eingeschlossen
+		auto bidx = [&](const int x, const int y, const int z) { return (ulong)(x-bx0) + nbx*((ulong)(y-by0) + nby*(ulong)(z-bz0)); };
+		auto is_solid = [&](const int x, const int y, const int z) { return (lbm.flags[idx(x,y,z)]&TYPE_S)!=0u; };
+		for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) { // x-Achse
+			int first=-1, last=-1;
+			for(int x=bx0; x<=bx1; x++) if(is_solid(x,y,z)) { if(first<0) first=x; last=x; }
+			if(first>=0) for(int x=first; x<=last; x++) if(!is_solid(x,y,z)) enc[(size_t)bidx(x,y,z)] |= 1u;
+		}
+		for(int z=bz0; z<=bz1; z++) for(int x=bx0; x<=bx1; x++) { // y-Achse
+			int first=-1, last=-1;
+			for(int y=by0; y<=by1; y++) if(is_solid(x,y,z)) { if(first<0) first=y; last=y; }
+			if(first>=0) for(int y=first; y<=last; y++) if(!is_solid(x,y,z)) enc[(size_t)bidx(x,y,z)] |= 2u;
+		}
+		for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) { // z-Achse
+			int first=-1, last=-1;
+			for(int z=bz0; z<=bz1; z++) if(is_solid(x,y,z)) { if(first<0) first=z; last=z; }
+			if(first>=0) for(int z=first; z<=last; z++) if(!is_solid(x,y,z)) enc[(size_t)bidx(x,y,z)] |= 4u;
+		}
+		ulong hollow = 0ull; int hx0=1<<30, hx1=-1, hy0=1<<30, hy1=-1, hz0=1<<30, hz1=-1;
+		for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) {
+			if(enc[(size_t)bidx(x,y,z)]==7u) {
+				hollow++;
+				hx0=min(hx0,x); hx1=max(hx1,x); hy0=min(hy0,y); hy1=max(hy1,y); hz0=min(hz0,z); hz1=max(hz1,z);
+			}
+		}
+		ulong solid_cells = 0ull;
+		for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) if(is_solid(x,y,z)) solid_cells++;
+		if(hollow>0ull) {
+			print_warning("Hohlraum im Koerper: "+to_string(hollow)+" Fluidzellen liegen in allen drei Achsen zwischen Solid ("
+				+to_string(100.0f*(float)hollow/(float)max(1ull,solid_cells),1u)+" % des Solidvolumens), Bereich X["+to_string(hx0)+","+to_string(hx1)
+				+"] Y["+to_string(hy0)+","+to_string(hy1)+"] Z["+to_string(hz0)+","+to_string(hz1)+"]. Die Schale ist dort nach aussen offen --"
+				" der Void-Fill kann nur fuellen, was er nicht erreicht.");
+		} else print_info("Hohlraum-Pruefung: keine innenliegenden Fluidzellen, der Koerper ist massiv.");
+	}
 	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
 }
 
