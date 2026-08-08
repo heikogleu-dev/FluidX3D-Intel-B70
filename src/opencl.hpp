@@ -13,6 +13,7 @@
 #define CL_HPP_TARGET_OPENCL_VERSION 120 // macOS only supports OpenCL 1.2
 #endif // macOS
 #include <CL/opencl.hpp>
+#include <chrono> // FORK: fuer die Intel-#904-Warnung in Device::finish_queue()
 #include "utilities.hpp"
 using cl::Event;
 
@@ -332,7 +333,16 @@ public:
 	}
 	inline Device() {} // default constructor
 	inline void barrier(const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { cl_queue.enqueueBarrierWithWaitList(event_waitlist, event_returned); }
-	inline void finish_queue() { cl_queue.finish(); }
+	inline void finish_queue() {
+		// FORK (Intel Arc Pro B70): der NEO-Treiber kann in finish() haengen bleiben (Intel-Issue #904).
+		// Ein stiller Hang ist von "die Simulation rechnet halt lange" nicht zu unterscheiden -- deshalb
+		// eine Warnschwelle. Bewusst OHNE Env-Schalter und ohne Instrumentierung des Normalfalls:
+		// die Zeitmessung kostet nichts, die Warnung erscheint nur im Fehlerfall.
+		const auto t0 = std::chrono::steady_clock::now();
+		cl_queue.finish();
+		const double dt_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-t0).count();
+		if(dt_ms>10000.0) print_warning("finish_queue() on \""+info.name+"\" took "+to_string((float)dt_ms/1000.0f, 1u)+"s -- possible driver hang (Intel NEO issue #904).");
+	}
 	inline cl::Context get_cl_context() const { return info.cl_context; }
 	inline cl::Program get_cl_program() const { return cl_program; }
 	inline cl::CommandQueue get_cl_queue() const { return cl_queue; }
@@ -376,6 +386,18 @@ private:
 			if(device.info.memory_used>device.info.memory) print_error("Device \""+device.info.name+"\" does not have enough memory. Allocating another "+to_string((uint)(capacity()/1048576ull))+" MB would use a total of "+to_string(device.info.memory_used)+" MB / "+to_string(device.info.memory)+" MB.");
 			int error = 0;
 			is_zero_copy = allow_zero_copy&&host_buffer_exists&&device.info.uses_ram&&(!external_host_buffer||((ulong)host_buffer%4096ull==0ull&&capacity()%64ull==0ull));
+			// FORK 2026-05-19 (Intel Arc Pro B70, libigdrcl.so): bei Zero-Copy-Buffern oberhalb ~1 GB dreht der
+			// i915-USERPTR-ioctl endlos. Per Backtrace auf TID-14422 als Ursache verifiziert, nicht vermutet.
+			// ZEROCOPY_THRESHOLD_MB=<N> schaltet Zero-Copy nur fuer Buffer > N MB ab -> NEO macht dann eine
+			// regulaere Device-Allokation statt CL_MEM_USE_HOST_PTR. Ungesetzt = 0 = Upstream-Verhalten.
+			// Bewusst wertauswertend (atoi), nicht per Existenzpruefung: "=0" muss ausschalten heissen.
+			if(const char* zc = getenv("ZEROCOPY_THRESHOLD_MB")) {
+				const uint threshold_mb = (uint)max(0, atoi(zc));
+				if(threshold_mb>0u && is_zero_copy && (uint)(capacity()/1048576ull)>threshold_mb) {
+					print_info("Zero-copy disabled for this "+to_string((uint)(capacity()/1048576ull))+" MB buffer (ZEROCOPY_THRESHOLD_MB="+to_string(threshold_mb)+").");
+					is_zero_copy = false;
+				}
+			}
 			device_buffer = cl::Buffer( // if(is_zero_copy) { don't allocate extra memory on CPUs/iGPUs } else { allocate VRAM on GPUs }
 				device.get_cl_context(),
 				CL_MEM_READ_WRITE|((int)is_zero_copy*CL_MEM_USE_HOST_PTR)|((int)device.info.patch_intel_gpu_above_4gb<<23), // for Intel GPUs set flag CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL = (1<<23)
@@ -384,6 +406,10 @@ private:
 				&error
 			);
 			if(error==-61) print_error("Memory size is too large at "+to_string((uint)(capacity()/1048576ull))+" MB. Device \""+device.info.name+"\" accepts a maximum buffer size of "+to_string(device.info.max_global_buffer)+" MB.");
+			// FORK: die drei haeufigsten Allokationsfehler auf der B70 mit Klartext statt blosser Fehlernummer.
+			else if(error==-4) print_error("Device buffer allocation failed: CL_MEM_OBJECT_ALLOCATION_FAILURE (-4). \""+device.info.name+"\" is out of GPU memory ("+to_string((uint)(capacity()/1048576ull))+" MB requested, "+to_string(device.info.memory_used)+"/"+to_string(device.info.memory)+" MB used).");
+			else if(error==-5) print_error("Device buffer allocation failed: CL_OUT_OF_RESOURCES (-5). Driver resource exhaustion on \""+device.info.name+"\" ("+to_string((uint)(capacity()/1048576ull))+" MB requested).");
+			else if(error==-6) print_error("Device buffer allocation failed: CL_OUT_OF_HOST_MEMORY (-6). Host RAM allocation for OpenCL state failed ("+to_string((uint)(capacity()/1048576ull))+" MB requested). Often stale driver state -- try a cold cycle.");
 			else if(error) print_error("Device buffer allocation failed with error code "+to_string(error)+".");
 			device_buffer_exists = true;
 		}
@@ -626,6 +652,10 @@ private:
 		if(error==-48) print_error("There is no OpenCL kernel with name \""+name+"(...)\" in the OpenCL C code! Check spelling!");
 		if(error<-48&&error>-53) print_error("Parameters for OpenCL kernel \""+name+"(...)\" don't match between C++ and OpenCL C!");
 		if(error==-54) print_error("Workgrop size "+to_string((ulong)cl_range_local.get()[0])+" for OpenCL kernel \""+name+"(...)\" is invalid! Maximum supported workgroup size on "+device->info.name+" is "+to_string(device->info.max_workgroup_size)+".");
+		// FORK: Klartext fuer die drei Fehler, die auf der B70 tatsaechlich vorkommen.
+		if(error==-4) print_error("OpenCL kernel \""+name+"(...)\" failed: CL_MEM_OBJECT_ALLOCATION_FAILURE (-4). Device out of GPU memory.");
+		if(error==-5) print_error("OpenCL kernel \""+name+"(...)\" failed: CL_OUT_OF_RESOURCES (-5). Driver/device resource exhaustion.");
+		if(error==-6) print_error("OpenCL kernel \""+name+"(...)\" failed: CL_OUT_OF_HOST_MEMORY (-6). Host RAM allocation for OpenCL state failed -- often stale driver state, try a cold cycle.");
 		if(error!=0) print_error("OpenCL kernel \""+name+"(...)\" failed with error code "+to_string(error)+"!");
 	}
 	template<typename T> inline void link_parameter(const uint position, const Memory<T>& memory) {
@@ -646,7 +676,14 @@ public:
 		if(!device.is_initialized()) print_error("No OpenCL Device selected. Call Device constructor.");
 		this->name = name;
 		this->device = &device;
-		cl_kernel = cl::Kernel(device.get_cl_program(), name.c_str());
+		// FORK: Upstream prueft den Rueckgabefehler hier nicht. Ein Tippfehler im Kernelnamen oder eine
+		// nicht kompilierte Kernel-Definition liefert dann still ein leeres cl::Kernel-Objekt, und der
+		// Fehler faellt erst viel spaeter als unverstaendlicher Folgefehler auf. -48 sagt es sofort.
+		// Im alten Fork sass diese Pruefung im 3-Argument-Ctor und deckte deshalb nur einen Teil der
+		// Kernel ab; seit Upstream delegiert, gibt es nur noch diese eine Stelle -- sie deckt jetzt alle.
+		cl_int kernel_error = 0;
+		cl_kernel = cl::Kernel(device.get_cl_program(), name.c_str(), &kernel_error);
+		if(kernel_error!=0) check_for_errors(kernel_error);
 		link_parameters(0u, parameters...); // expand variadic template to link kernel parameters
 		set_ranges(N, (ulong)workgroup_size);
 		cl_queue = device.get_cl_queue();
