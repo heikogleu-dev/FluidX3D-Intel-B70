@@ -36,8 +36,12 @@ static bool env_on(const char* name) {
 static float env_f(const char* name, const float fallback) {
 	const char* v = getenv(name); return v==nullptr ? fallback : (float)atof(v);
 }
+// ★ KORREKTUR 2026-08-08 (Pruefer-Befund M1): hier stand `max(1, atoi(v))`. Damit war CFD_PO_FACES=0
+// nicht "kein Druck-Auslass", sondern Bit 1 = x_min = DER EINLASS. Ein Ausschalter, der einschaltet,
+// und zwar ausgerechnet die eine Flaeche, die man nie meint. Kein Clamp mehr; wo eine 0 wirklich
+// unzulaessig ist (Abtastweite), klemmt es die AUFRUFSTELLE -- dort weiss man, was 0 bedeuten wuerde.
 static uint env_u(const char* name, const uint fallback) {
-	const char* v = getenv(name); return v==nullptr ? fallback : (uint)max(1, atoi(v));
+	const char* v = getenv(name); return v==nullptr ? fallback : (uint)max(0, atoi(v));
 }
 
 // Konservative SAT-Voxelisierung (Akenine-Moeller, "Fast 3D Triangle-Box Overlap", 2001).
@@ -92,7 +96,12 @@ static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + (ulong)Nx*((ulong)y_slice + (ulong)Ny*(ulong)z);
 		int col;
-		if((L.flags[n]&(TYPE_S|TYPE_X))!=0u) col = 0x000000; // Solid
+		// ★ KORREKTUR 2026-08-08 (Pruefer-Befund M4): hier stand `(flags & (TYPE_S|TYPE_X)) != 0`.
+		// TYPE_MS -- die Markierung fuer FLUIDzellen neben einer bewegten Wand -- ist 0x03 und enthaelt
+		// damit TYPE_S. Die alte Maske malte also einen Saum aus Fluidzellen rund um Boden und Fahrzeug
+		// schwarz: das Diagnosebild log genau dort ueber die Geometrie, wo man am genauesten hinsieht.
+		// Richtig ist der Vergleich auf die BEIDEN Randbits: nur 0x01 allein ist Solid, 0x03 ist es nicht.
+		if((L.flags[n]&(TYPE_S|TYPE_E))==TYPE_S) col = 0x000000; // Solid (Boden oder Fahrzeug)
 		else {
 			const float ux=L.u.x[n], uy=L.u.y[n], uz=L.u.z[n];
 			// Skala relativ zur Anstroemung: 0.5*u_ref (blau) .. u_ref (weiss) .. 1.5*u_ref (rot)
@@ -208,7 +217,7 @@ static void main_setup_kugel() {
 	// klein, weil fast nichts voll solid ist -- der Nutzen liegt bei gefuellten Modellen.
 	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
 	if(LBM_Domain::s_sparse_tiles_on) {
-		const uint T = env_u("CFD_TILE", 8u);
+		const uint T = max(1u, env_u("CFD_TILE", 8u)); // Kantenlaenge 0 gibt es nicht
 		if(T!=8u && T!=16u && T!=32u && T!=64u) print_error("CFD_TILE muss 8, 16, 32 oder 64 sein (erhalten: "+to_string(T)+").");
 		LBM_Domain::s_sparse_T = T;
 		print_info("Block-Tiling AKTIV, T="+to_string(T)+" (VRAM sparen auf Kosten von Durchsatz)");
@@ -299,7 +308,7 @@ static void main_setup_kugel() {
 	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
 	print_info("Eine Durchspuelung = "+to_string(t_flush,4u)+" s; Default sind zwei davon.");
-	const uint  sample_every = env_u("CFD_SAMPLE_EVERY", 10u);
+	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 10u)); // 0 waere eine Endlosschleife -- hier klemmen, nicht im Helfer
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string run_name = getenv("CFD_RUN_NAME") ? string(getenv("CFD_RUN_NAME")) : string("kugel");
 	const string out_dir = get_exe_path()+"../export/"+run_name+"/";
@@ -419,7 +428,7 @@ static void main_setup_fahrzeug() {
 
 	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
 	if(LBM_Domain::s_sparse_tiles_on) {
-		const uint T = env_u("CFD_TILE", 8u);
+		const uint T = max(1u, env_u("CFD_TILE", 8u)); // Kantenlaenge 0 gibt es nicht
 		if(T!=8u && T!=16u && T!=32u && T!=64u) print_error("CFD_TILE muss 8, 16, 32 oder 64 sein (erhalten: "+to_string(T)+").");
 		LBM_Domain::s_sparse_T = T;
 	}
@@ -541,7 +550,7 @@ static void main_setup_fahrzeug() {
 	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
 	print_info("Eine Durchspuelung = "+to_string(t_flush,4u)+" s; Default sind zwei davon.");
-	const uint  sample_every = env_u("CFD_SAMPLE_EVERY", 10u);
+	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 10u)); // 0 waere eine Endlosschleife -- hier klemmen, nicht im Helfer
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f); // 0 = keine Slices
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug"))+"/";
@@ -595,8 +604,548 @@ static void main_setup_fahrzeug() {
 	_exit(0);
 }
 
-void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default) oder fahrzeug
+// =============================================================================================
+// FAHRZEUG MR2 -- DOPPEL-DOMAENE (grobes Fernfeld + feines Nahfeld)
+//
+// WARUM ES DIESEN FALL GIBT. Der Einzelgitter-Fahrzeugfall hat eine Versperrung von 38,4 %:
+// das Fahrzeug fuellt ueber ein Drittel des Kanalquerschnitts. Windkanalpraxis liegt unter 5 %,
+// die OpenFOAM-Referenz mr2v40H bei 1,93 %. Ein Cd aus 38,4 % Versperrung ist mit dieser
+// Referenz nicht vergleichbar, egal wie sauber der Rest gerechnet ist -- die Maskell-Korrektur
+// (ARC R&M 3400) laesst dort ein Cd zwischen 0,8 und 1,4 erwarten statt 0,599.
+// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand, ein Einzelgitter ueber die OpenFOAM-Box
+// haette bei 4 mm "1500x750x500 = 562 Mio Zellen". Das ist die Zellzahl bei 16 mm. Bei 4 mm waeren
+// es 6001x3001x2001 = 36 MILLIARDEN Zellen, also das 64-fache. Die Begruendung des Falls stand
+// damit auf einer falschen Rechnung -- sie wird durch die richtige nur staerker.
+//
+// GEOMETRIE. Die Maße stammen aus dem V1-Fahrzeugfall, wo sie durchgerechnet waren; Weltkoordinaten
+// nach V1-Konvention (Fahrzeugnase bei x = 0, Mittelebene y = 0, Fahrbahn z = 0). Details bei den
+// Zahlen weiter unten.
+//
+// KOPPLUNG. Einweg, grob -> fein: das Fernfeld schreibt jede grobe Zeitschrittdauer die (rho,u)
+// auf die fuenf Aussenflaechen der Nahfeld-Box (der Boden ist beiden gemeinsam), kubisch auf
+// feine Aufloesung interpoliert. Das Nahfeld rechnet dazwischen `ratio` Schritte. Der Auslass
+// des Nahfelds bleibt frei (Druckrand) -- sonst koennte der aufgeloeste Nachlauf nicht abstroemen.
+// Details und die Liste des bewusst NICHT Portierten stehen bei den Kernels in kernel.cpp.
+//
+// WAS DIESER AUFBAU NICHT LEISTET, ausdruecklich:
+//   * Die Rueckwirkung des Fahrzeugs auf das Fernfeld laeuft NUR ueber das grobe Gitter, in dem
+//     das Fahrzeug ebenfalls voxelisiert ist -- nicht ueber die aufgeloeste Nahfeld-Loesung.
+//   * Die Nahfeld-Raender liegen im GESTOERTEN Feld und werden als volles Dirichlet aus einer
+//     16-mm-Loesung vorgegeben: 0,23 m vor der Nase, 0,33 m neben der Flanke, 0,68 m ueber dem Dach.
+//     Der kurze Einlauf ist ABSICHT (Heiko) -- er wirkt der toten Stroemung in den unteren 5 bis
+//     20 mm entgegen. Ein Pruefer hat ihn am 2026-08-08 als groessten konstruktiven Hebel auf Cd
+//     benannt; das ist richtig gesehen und trotzdem so gewollt. Wer ihn verlaengern will, misst
+//     es ueber CFD_NEAR_OFF_X gegen den jetzigen Stand -- er "korrigiert" ihn nicht stillschweigend.
+//   * OpenFOAM hat auf Decke und Seiten zeroGradient, hier steht Freistrom-Dirichlet. Bei 2,74 %
+//     Versperrung wirkt das wie eine etwas weichere geschlossene Kanalwand; ueber Maskell geschaetzt
+//     unter 3 % auf Cd, eher zu hoch. Nicht gemessen.
+//
+// WAS DEN VERGLEICH MIT OPENFOAM VOR ALLEM BEGRENZT -- und das ist keine Randbedingung:
+// mr2v40H rechnet STATIONAeR mit RANS/k-omega-SST (constant/turbulenceProperties, foamRun mit
+// deltaT=1 als Pseudozeit). Hier laeuft instationaeres LBM mit Smagorinsky bei tau = 0,50003 und
+// ohne Wandmodell. Der Unterschied RANS gegen aufgeloeste Instationaritaet plus fehlende
+// Wandbehandlung ist bei einem Fahrzeug typisch 5 bis 15 % im Cd -- er dominiert alles andere
+// auf dieser Liste. Eine Abweichung in dieser Groessenordnung ist also KEIN Hinweis auf einen
+// Fehler im Aufbau. [selbst nachgelesen 2026-08-08]
+// =============================================================================================
+static void main_setup_fahrzeug_dd() {
+	// ---------------------------------------------------------------- Physik
+	const float si_u      = 30.0f;
+	const float si_rho    = 1.225f;
+	const float si_nu     = env_f("CFD_NU", 1.51e-5f); // ★ Referenzwert aus mr2v40H/constant/transportProperties.
+	                                                  // V1 rechnete mit 1.48e-5 und dokumentierte gleichzeitig 1.51e-5 --
+	                                                  // ein Widerspruch, der nie aufgeloest wurde. Hier gilt die Referenz.
+	const float si_length = 4.4364f;
+	const float A_ref     = 1.85f;
+	const float u_lat     = 0.075f;
+
+	// ratio ist der einzige Regler, der ueber die Kosten entscheidet: die groben Zellen skalieren
+	// mit 1/ratio^3 und die groben Schritte mit 1/ratio, das Fernfeld kostet also 1/ratio^4.
+	// Default 8 (dx_c = 32 mm): das Fernfeld ist damit exakt die OpenFOAM-Box UND verschwindet
+	// hinter dem Nahfeld. Gemessen 2026-08-08: B70 4648 MLUPs, iGPU 594 MLUPs (12,8 %).
+	// CFD_RATIO=4 halbiert die grobe Zellweite, verachtzehnfacht aber die Fernfeldkosten.
+	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
+	const float dx_f  = 0.001f*env_f("CFD_DX", 4.0f);
+	const float dx_c  = dx_f*(float)ratio;
+	const float dt_f  = u_lat*dx_f/si_u;
+	const float dt_c  = (float)ratio*dt_f;
+	const float nu_lat_f = si_nu*dt_f/(dx_f*dx_f);
+	const float nu_lat_c = si_nu*dt_c/(dx_c*dx_c);
+	const float tau_f = 3.0f*nu_lat_f + 0.5f, tau_c = 3.0f*nu_lat_c + 0.5f;
+
+	// ---------------------------------------------------------------- Fernfeld = OpenFOAM-Box
+	// Die Maße stammen aus dem V1-Fahrzeugfall (phase7g), wo sie durchgerechnet waren. Sie stehen hier
+	// PHYSIKALISCH statt in Zellen, damit dx frei bleibt; bei dx_f = 4 mm und ratio = 4 kommen die
+	// V1-Zellzahlen exakt zurueck (nachgerechnet 2026-08-08):
+	//   Fernfeld 12.2720 x 7.6640 x 8.8160 m / 16 mm = 768 x 480 x 552 = 203.5 M Zellen
+	//   Nahfeld   6.6560 x 2.4800 x 1.9360 m /  4 mm = 1665 x 621 x 485 = 501.5 M Zellen
+	//   Nahfeld-Fussabdruck grob: Ursprung (152, 162, 0), Ausdehnung (417, 156, 122)
+	// WARUM GENAU DIESE GROESSEN. Sie balancieren die beiden Geraete aus. Gemessen am 2026-08-08:
+	// B70 4648 MLUPs, iGPU 594 MLUPs. Vier feine Schritte kosten 0.432 s, ein grober 0.343 s -- das
+	// Fernfeld braucht 79 % der feinen Zeit und verschwindet damit gerade noch dahinter. Ein groesseres
+	// Fernfeld (etwa die volle OpenFOAM-Box bei 16 mm: 565 M Zellen) waere der Flaschenhals.
+	// Die Versperrung betraegt damit 2.74 % gegen 1.93 % bei OpenFOAM -- Windkanalpraxis liegt unter
+	// 5 %, und der Einzelgitter-Fall lag bei 38.4 %.
+	// ★ `(uint)(L/dx + 1.5f)` ist KEIN Runden: 8.0f/0.128f ergibt in float 62.499996, +1.5 sind
+	// 63.999996, und die Ganzzahl-Umwandlung schneidet auf 63 ab -- eine Zelle zu wenig, lautlos und
+	// nur bei bestimmten dx. Am 2026-08-08 im Kleinlauf aufgefallen, daher floor(x+0.5).
+	auto n_cells = [](const float len, const float dx) { return (uint)floor(len/dx + 0.5f) + 1u; };
+	const float far_Lx  = env_f("CFD_FAR_LX",  12.2720f), far_Ly  = env_f("CFD_FAR_LY",  7.6640f), far_Lz  = env_f("CFD_FAR_LZ",  8.8160f);
+	const float near_Lx = env_f("CFD_NEAR_LX",  6.6560f), near_Ly = env_f("CFD_NEAR_LY", 2.4800f), near_Lz = env_f("CFD_NEAR_LZ", 1.9360f);
+	// Weltkoordinaten nach V1-Konvention: die Fahrzeugnase liegt bei x = 0, der Einlass 0.6 Fahrzeug-
+	// laengen davor. Das ist BEWUSST kurz -- Heiko 2026-08-08: der geringe Einlaufweg wirkt der toten
+	// Stroemung in den unteren 5 bis 20 mm und der dadurch stagnierenden Unterbodenstroemung entgegen.
+	// Wer das fuer einen Fehler haelt und "korrigiert", macht den Unterboden wieder falsch.
+	const float far_x0  = env_f("CFD_FAR_X0", -0.6f*si_length);       // -2.66184 m
+	const float near_x0 = far_x0 + env_f("CFD_NEAR_OFF_X", 2.4320f);  // -0.22984 m, V1-Wert
+	const float veh_x0  = 0.0f;                                      // Nase
+	const float veh_x1  = veh_x0 + si_length;                        // Heck
+	// Das Fahrzeug steht AUF der Fahrbahn (Heiko-Vorgabe). V1 liess es 16 mm schweben.
+	const float veh_z0  = 0.001f*env_f("CFD_Z_OFFSET_MM", 0.0f);
+
+	const uint cNx = n_cells(far_Lx, dx_c), cNy = n_cells(far_Ly, dx_c), cNz = n_cells(far_Lz, dx_c);
+	const uint cex = n_cells(near_Lx, dx_c), cez = n_cells(near_Lz, dx_c);
+	// Deckungspunkt-Konvention: die Nahfeld-Ecke MUSS auf einem groben Gitterpunkt liegen und es muss
+	// fein = (grob-1)*ratio+1 gelten. Sonst faellt kein grober Punkt auf einen feinen, und die Ebene
+	// laege um einen Bruchteil einer Zelle verschoben -- ein Fehler, den weder eine Norm noch ein
+	// Kraftverlauf als solchen zeigt.
+	// y: die Box wird um die Mittelebene zentriert, NF_OY = (cNy-cey)/2. Damit das aufgeht, muss cey
+	// dieselbe Paritaet wie cNy haben. Bei den V1-Werten stimmt das (480 und 156, beide gerade);
+	// bei abweichendem dx wird cey um eins erhoeht statt die Symmetrie aufzugeben -- eine unsymmetrische
+	// Nahfeld-Box waere ein stiller Fehler in genau der Groesse, die hier am empfindlichsten ist.
+	uint cey = n_cells(near_Ly, dx_c);
+	if(((cNy^cey)&1u)!=0u) cey++;
+	const uint NF_OX = (uint)floor((near_x0-far_x0)/dx_c + 0.5f);
+	const uint NF_OY = (cNy-cey)/2u;
+	const uint NF_OZ = 0u; // Fahrbahn ist beiden Gittern gemeinsam
+	const float far_y0  = -0.5f*(float)(cNy-1u)*dx_c;   // Mittelebene y=0 in der Mitte des Fernfelds
+	const float far_y1  = -far_y0;
+	const float near_y0 = far_y0 + (float)NF_OY*dx_c;
+	const float near_z0 = 0.0f;
+
+	const uint fNx = (cex-1u)*ratio + 1u, fNy = (cey-1u)*ratio + 1u, fNz = (cez-1u)*ratio + 1u;
+
+	if(NF_OX+cex>cNx || NF_OY+cey>cNy || NF_OZ+cez>cNz) { print_error("Nahfeld ragt aus dem Fernfeld heraus."); _exit(1); }
+
+	// ---------------------------------------------------------------- Geraete
+	const vector<Device_Info>& devs = get_devices();
+	Device_Info dev_fine = select_device_with_most_flops(devs);
+	Device_Info dev_coarse = dev_fine;
+	{	// Grobgitter auf das schnellste ANDERE Geraet, das keine CPU ist.
+		float best = -1.0f;
+		for(uint i=0u; i<(uint)devs.size(); i++)
+			if(devs[i].id!=dev_fine.id && devs[i].is_gpu && devs[i].tflops>best) { best=devs[i].tflops; dev_coarse=devs[i]; }
+	}
+	if(getenv("CFD_DEV_FINE"))   dev_fine   = select_device_with_id(env_u("CFD_DEV_FINE",   0u), devs);
+	if(getenv("CFD_DEV_COARSE")) dev_coarse = select_device_with_id(env_u("CFD_DEV_COARSE", 0u), devs);
+	if(dev_coarse.id==dev_fine.id) print_warning("Nur EIN Geraet gefunden: beide Gitter teilen sich denselben Speicher. Das wird knapp.");
+
+	print_info("=================== Fahrzeug MR2, Doppel-Domaene ===================");
+	print_info("Fein  (Geraet "+to_string(dev_fine.id)+", "+dev_fine.name+"): "+to_string(fNx)+" x "+to_string(fNy)+" x "+to_string(fNz)
+		+" @ "+to_string(dx_f*1000.0f,2u)+" mm = "+to_string((float)((ulong)fNx*fNy*fNz)/1e6f,1u)+" M Zellen");
+	print_info("Grob  (Geraet "+to_string(dev_coarse.id)+", "+dev_coarse.name+"): "+to_string(cNx)+" x "+to_string(cNy)+" x "+to_string(cNz)
+		+" @ "+to_string(dx_c*1000.0f,2u)+" mm = "+to_string((float)((ulong)cNx*cNy*cNz)/1e6f,1u)+" M Zellen");
+	print_info("Fernfeld  x["+to_string(far_x0,3u)+";"+to_string(far_x0+(float)(cNx-1u)*dx_c,3u)+"] y["+to_string(far_y0,3u)+";"+to_string(far_y0+(float)(cNy-1u)*dx_c,3u)+"] z[0;"+to_string((float)(cNz-1u)*dx_c,3u)+"] m");
+	print_info("Nahfeld   x["+to_string(near_x0,3u)+";"+to_string(near_x0+(float)(fNx-1u)*dx_f,3u)+"] y["+to_string(near_y0,3u)+";"+to_string(near_y0+(float)(fNy-1u)*dx_f,3u)+"] z[0;"+to_string((float)(fNz-1u)*dx_f,3u)+"] m");
+	print_info("Nahfeld-Fussabdruck grob: Ursprung ("+to_string(NF_OX)+","+to_string(NF_OY)+","+to_string(NF_OZ)+"), Ausdehnung ("+to_string(cex)+","+to_string(cey)+","+to_string(cez)+")");
+	{
+		const float A_far = (float)(cNy-1u)*dx_c*(float)(cNz-1u)*dx_c;
+		print_info("Versperrung im Fernfeld: A_ref/A_quer = "+to_string(A_ref,3u)+"/"+to_string(A_far,2u)+" = "+to_string(100.0f*A_ref/A_far,2u)+" %  (OpenFOAM mr2v40H: 1.93 %)");
+		// Der kurze Einlauf ist ABSICHT (Heiko): er wirkt der toten Stroemung in den unteren 5 bis 20 mm
+		// und der dadurch stagnierenden Unterbodenstroemung entgegen. Das ist keine Nachlaessigkeit
+		// gegenueber OpenFOAM, sondern der Grund, warum die Kopplung ueberhaupt gebaut wurde.
+		print_info("Einlauf vor der Nase "+to_string((veh_x0-far_x0)/si_length,2u)+" L (bewusst kurz), Nachlauf hinter dem Heck "
+			+to_string((far_x0+(float)(cNx-1u)*dx_c-veh_x1)/si_length,2u)+" L  (OpenFOAM: 1.08 L / 3.33 L)");
+	}
+	print_info("tau_fein = "+to_string(tau_f,6u)+", tau_grob = "+to_string(tau_c,6u)+"  -- beide praktisch 0.5; TRT haelt die Wandlage trotzdem bei Lambda = 3/16.");
+	print_info("dt_fein = "+to_string(dt_f,8u)+" s, dt_grob = "+to_string(dt_c,7u)+" s, ratio = "+to_string(ratio));
+
+	// ---------------------------------------------------------------- Netze platzieren
+	// Zweimal gelesen, weil jede Domaene ihre eigenen Gitterkoordinaten hat.
+	auto place = [&](Mesh* m, const float dx, const float ox, const float oy, const float oz) {
+		const float3 bb0 = m->get_bounding_box_size();
+		m->scale((si_length/dx)/bb0.x);
+		const float3 bb = m->get_bounding_box_size(), ctr = m->get_bounding_box_center();
+		m->translate(float3((veh_x0-ox)/dx + 0.5f*bb.x - ctr.x,   // Nase auf Weltposition
+		                    (0.0f  -oy)/dx               - ctr.y, // Mittelebene auf y = 0
+		                    (veh_z0-oz)/dx + 0.5f*bb.z - ctr.z)); // Unterkante auf die Fahrbahn
+	};
+	Mesh* veh_f = read_stl(get_exe_path()+"../scenes/vehicle.stl"); place(veh_f, dx_f, near_x0, near_y0, near_z0);
+	Mesh* veh_c = read_stl(get_exe_path()+"../scenes/vehicle.stl"); place(veh_c, dx_c, far_x0,  far_y0,  0.0f);
+
+	// ---------------------------------------------------------------- Feines Gitter bauen
+	Units units_fine, units_coarse;
+	units_fine  .set_m_kg_s(si_length/dx_f, u_lat, 1.0f, si_length, si_u, si_rho);
+	units_coarse.set_m_kg_s(si_length/dx_c, u_lat, 1.0f, si_length, si_u, si_rho);
+	units = units_fine; // Kraefte kommen aus dem Nahfeld
+
+	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
+	if(LBM_Domain::s_sparse_tiles_on) {
+		const uint T = max(1u, env_u("CFD_TILE", 8u));
+		if(T!=8u && T!=16u && T!=32u && T!=64u) print_error("CFD_TILE muss 8, 16, 32 oder 64 sein.");
+		LBM_Domain::s_sparse_T = T;
+	}
+	{	// F-Box VOR dem Konstruktor: allocate() legt F sonst ueber die volle Domaene.
+		const uint M = 4u;
+		const uint x0=(uint)fmax(0.0f, veh_f->pmin.x-(float)M), x1=(uint)fmin((float)fNx-1.0f, veh_f->pmax.x+(float)M);
+		const uint y0=(uint)fmax(0.0f, veh_f->pmin.y-(float)M), y1=(uint)fmin((float)fNy-1.0f, veh_f->pmax.y+(float)M);
+		const uint z0=(uint)fmax(0.0f, veh_f->pmin.z-(float)M), z1=(uint)fmin((float)fNz-1.0f, veh_f->pmax.z+(float)M);
+		LBM_Domain::set_force_bbox(x0, y0, z0, x1-x0+1u, y1-y0+1u, z1-z0+1u);
+	}
+	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
+
+	// ---------------------------------------------------------------- Grobes Gitter bauen
+	// Block-Tiling und F-Box sind read-once und stehen nach dem ersten Konstruktor wieder auf aus;
+	// das Grobgitter bekommt hier ausdruecklich seine EIGENE F-Box und kein Tiling (bei 32 mm sind
+	// zu wenige Kacheln voll solid, als dass es sich lohnte).
+	{
+		const uint M = 4u;
+		const uint x0=(uint)fmax(0.0f, veh_c->pmin.x-(float)M), x1=(uint)fmin((float)cNx-1.0f, veh_c->pmax.x+(float)M);
+		const uint y0=(uint)fmax(0.0f, veh_c->pmin.y-(float)M), y1=(uint)fmin((float)cNy-1.0f, veh_c->pmax.y+(float)M);
+		const uint z0=(uint)fmax(0.0f, veh_c->pmin.z-(float)M), z1=(uint)fmin((float)cNz-1.0f, veh_c->pmax.z+(float)M);
+		LBM_Domain::set_force_bbox(x0, y0, z0, x1-x0+1u, y1-y0+1u, z1-z0+1u);
+	}
+	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
+
+	// ---------------------------------------------------------------- Voxelisieren, beide Gitter
+	// Das Fahrzeug MUSS auch im groben Gitter stehen. Sonst traegt das Fernfeld die Verdraengung nicht,
+	// und die Nahfeld-Raender bekaemen ungestoerte Anstroemung aufgepraegt -- der Wagen staende dann in
+	// einer Stroemung, die nicht weiss, dass er da ist.
+	lbm_f.voxelize_mesh_on_device(veh_f, TYPE_S|TYPE_X); lbm_f.flags.read_from_device();
+	sat_shell_and_void_fill(lbm_f, veh_f, fNx, fNy, fNz);
+	lbm_c.voxelize_mesh_on_device(veh_c, TYPE_S|TYPE_X); lbm_c.flags.read_from_device();
+	sat_shell_and_void_fill(lbm_c, veh_c, cNx, cNy, cNz);
+
+	// ---------------------------------------------------------------- Kontaktflaeche, beide Gitter
+	// Fahrzeugzellen auf z=0 werden Teil der Fahrbahn (TYPE_X weg, u = u_road). Begruendung ausfuehrlich
+	// im Einzelgitter-Fall weiter oben; sie gilt hier unveraendert und fuer beide Aufloesungen.
+	auto handover_contact = [&](LBM& L, const uint Nx, const uint Ny, const char* who) {
+		ulong contact = 0ull;
+		for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+			const ulong n = (ulong)x + (ulong)y*(ulong)Nx;
+			if((L.flags[n]&TYPE_X)!=0u) {
+				L.flags[n] &= (uchar)~TYPE_X;
+				L.u.x[n] = u_lat; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f;
+				contact++;
+			}
+		}
+		print_info(string(who)+": "+to_string(contact)+" Fahrzeugzellen auf z=0 an die Strasse uebergeben");
+	};
+	handover_contact(lbm_f, fNx, fNy, "Kontaktflaeche fein");
+	handover_contact(lbm_c, cNx, cNy, "Kontaktflaeche grob");
+
+	// ---------------------------------------------------------------- tatsaechliche Stirnflaeche
+	// ★ Pruefer-Befund 2026-08-08: place() skaliert die STL UNIFORM ueber die Laenge. Die STL ist aber
+	// 4,4341 m lang statt 4,4364 -- der Faktor 1,000524 streckt damit auch Breite und Hoehe um 0,05 %,
+	// obwohl die Hoehe vorher exakt stimmte. Dazu kommt die Voxelisierung. Cd wird hier auf A_ref = 1,85
+	// normiert (Projektkonvention, damit die Zahl mit OpenFOAM vergleichbar bleibt); die WIRKLICH
+	// voxelisierte Silhouette wird daneben ausgewiesen. Der Unterschied ist kein Rundungsfehler,
+	// sondern ein systematischer Versatz von Cd -- er gehoert sichtbar, nicht in eine Fussnote.
+	float A_eff = 0.0f;
+	{
+		ulong sil = 0ull;
+		for(uint z=0u; z<fNz; z++) for(uint y=0u; y<fNy; y++) {
+			for(uint x=0u; x<fNx; x++) {
+				if((lbm_f.flags[(ulong)x+((ulong)y+(ulong)z*(ulong)fNy)*(ulong)fNx]&TYPE_X)!=0u) { sil++; break; }
+			}
+		}
+		A_eff = (float)sil*dx_f*dx_f;
+		print_info("Stirnflaeche: A_ref = "+to_string(A_ref,4u)+" m2 (Projektkonvention, Normierung von Cd) gegen "
+			+to_string(A_eff,4u)+" m2 tatsaechlich voxelisiert ("+to_string(sil)+" Zellen, "
+			+to_string(100.0f*(A_eff/A_ref-1.0f),2u)+" % Abweichung). Cd waere auf A_eff um diesen Betrag kleiner.");
+		// Der Reifenlatsch ist hier NICHT mitgezaehlt (TYPE_X wurde dort entfernt) -- konsistent zu
+		// object_force(TYPE_S|TYPE_X), das ihn ebenfalls nicht mitsummiert.
+	}
+
+	// ---------------------------------------------------------------- Randbedingungen
+	// GROB: z=0 mitbewegte Fahrbahn, x- Einlass, x+ Druckauslass, y+-/z+ Freistrom.
+	// FEIN: z=0 mitbewegte Fahrbahn, x+ Druckauslass (der Nachlauf MUSS abstroemen koennen),
+	//       x-/y+-/z+ sind TYPE_E und werden jede grobe Zeitschrittdauer aus dem Fernfeld getrieben.
+	auto set_bcs = [&](LBM& L, const uint Nx, const uint Ny, const uint Nz) {
+		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+			const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+			if((L.flags[n]&TYPE_S)!=0u) continue; // Fahrzeug und bereits gesetzte Fahrbahnzellen in Ruhe lassen
+			if(z==0u) { L.flags[n] = TYPE_S; L.u.x[n] = u_lat; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f; }
+			else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { L.flags[n] = TYPE_E; L.u.x[n] = u_lat; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f; }
+			else { L.u.x[n] = u_lat; L.u.y[n] = 0.0f; L.u.z[n] = 0.0f; }
+		}
+	};
+	set_bcs(lbm_f, fNx, fNy, fNz);
+	set_bcs(lbm_c, cNx, cNy, cNz);
+	lbm_f.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f)); // Bit 2 = x_max
+	lbm_c.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f));
+	lbm_f.finalize_sparse_tiles();
+	lbm_c.finalize_sparse_tiles();
+
+	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN
+	// Nicht der Code oben wird berichtet, sondern der ZUSTAND danach: fuer jede der sechs Flaechen
+	// beider Gitter, welcher Typ dort wirklich steht und welche Geschwindigkeit vorgegeben ist.
+	// Der Unterschied ist wesentlich -- die Voxelisierung, die Kontaktflaechen-Uebergabe und der
+	// Druckauslass greifen alle in dieselben Zellen, und was am Ende steht, entscheidet die
+	// Reihenfolge. Eine Tabelle aus dem Speicher luegt darueber nicht.
+	{
+		auto census = [&](LBM& L, const uint Nx, const uint Ny, const uint Nz, const char* who) {
+			print_info(string("--- Randbedingungen ")+who+" -----------------------------------------");
+			const char* fname[6] = {"x- (Einlass) ", "x+ (Auslass) ", "y- (Seite)   ", "y+ (Seite)   ", "z- (Fahrbahn)", "z+ (Decke)   "};
+			for(uint f=0u; f<6u; f++) {
+				ulong n_solid=0ull, n_equil=0ull, n_veh=0ull, n_fluid=0ull, n_other=0ull;
+				double ux_sum=0.0; ulong ux_n=0ull;
+				const uint x0 = (f==0u)?0u:((f==1u)?Nx-1u:0u),           x1 = (f==0u)?0u:((f==1u)?Nx-1u:Nx-1u);
+				const uint y0 = (f==2u)?0u:((f==3u)?Ny-1u:0u),           y1 = (f==2u)?0u:((f==3u)?Ny-1u:Ny-1u);
+				const uint z0 = (f==4u)?0u:((f==5u)?Nz-1u:0u),           z1 = (f==4u)?0u:((f==5u)?Nz-1u:Nz-1u);
+				for(uint z=z0; z<=z1; z++) for(uint y=y0; y<=y1; y++) for(uint x=x0; x<=x1; x++) {
+					const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+					const uchar fl = L.flags[n];
+					if((fl&TYPE_X)!=0u) n_veh++;
+					const uchar bo = fl&(TYPE_S|TYPE_E);
+					if(bo==TYPE_S)      { n_solid++; ux_sum+=(double)L.u.x[n]; ux_n++; }
+					else if(bo==TYPE_E) { n_equil++; ux_sum+=(double)L.u.x[n]; ux_n++; }
+					else if(bo==0u)     { n_fluid++; }
+					else                { n_other++; } // TYPE_S und TYPE_E gleichzeitig -- gaebe es nicht geben duerfen
+				}
+				print_info(string("  ")+fname[f]+": Wand "+to_string(n_solid)+", Gleichgewicht "+to_string(n_equil)
+					+", freies Fluid "+to_string(n_fluid)+(n_other? (", UNKLAR "+to_string(n_other)) : string(""))
+					+(n_veh? (", davon Fahrzeug "+to_string(n_veh)) : string(""))
+					+" | mittleres u_x = "+to_string(ux_n? (float)(ux_sum/(double)ux_n) : 0.0f, 5u)+" (u_inf = "+to_string(u_lat,5u)+")");
+				if(n_other>0ull) print_warning(string(who)+" "+fname[f]+": Zellen mit TYPE_S UND TYPE_E gleichzeitig.");
+				if(n_fluid>0ull && f!=1u) print_warning(string(who)+" "+fname[f]+": "+to_string(n_fluid)+" Zellen ohne Randbedingung -- dort rechnet der Loeser periodisch ueber den Rand.");
+			}
+		};
+		census(lbm_c, cNx, cNy, cNz, "Fernfeld");
+		census(lbm_f, fNx, fNy, fNz, "Nahfeld");
+		print_info("Erwartung: Fahrbahn z- = Wand mit u_x = u_inf (mitbewegt); alle uebrigen Flaechen Gleichgewicht.");
+		print_info("Im Nahfeld werden x-, y+-, z+ jeden groben Schritt aus dem Fernfeld getrieben; x+ bleibt Druckauslass.");
+	}
+
+	// ---------------------------------------------------------------- Kopplungsebenen
+	auto mk = [](const uint ox, const uint oy, const uint oz, const uint ea, const uint eb, const uint ax) {
+		PlaneSpec p; p.origin=uint3(ox,oy,oz); p.extent_a=ea; p.extent_b=eb; p.axis=ax; return p;
+	};
+	// Fuenf Flaechen: x-, x+, y-, y+, z+. Der Boden faellt weg (gemeinsame Fahrbahn).
+	// Die grobe Entnahmeebene liegt GENAU auf der zugehoerigen feinen Randebene -- das ist der
+	// ganze Sinn der Deckungspunkt-Konvention.
+	const PlaneSpec cp[5] = {
+		mk(NF_OX,           NF_OY,           NF_OZ,           cey, cez, 0u),
+		mk(NF_OX+cex-1u,    NF_OY,           NF_OZ,           cey, cez, 0u),
+		mk(NF_OX,           NF_OY,           NF_OZ,           cex, cez, 1u),
+		mk(NF_OX,           NF_OY+cey-1u,    NF_OZ,           cex, cez, 1u),
+		mk(NF_OX,           NF_OY,           NF_OZ+cez-1u,    cex, cey, 2u) };
+	const PlaneSpec fp[5] = {
+		mk(0u,        0u,        0u,        fNy, fNz, 0u),
+		mk(fNx-1u,    0u,        0u,        fNy, fNz, 0u),
+		mk(0u,        0u,        0u,        fNx, fNz, 1u),
+		mk(0u,        fNy-1u,    0u,        fNx, fNz, 1u),
+		mk(0u,        0u,        fNz-1u,    fNx, fNy, 2u) };
+	const char* face_name[5] = {"x-", "x+", "y-", "y+", "z+"};
+	// x+ (Index 1) wird NICHT getrieben: dort steht der Druckauslass des Nahfelds.
+	const bool drive_face[5] = {true, false, true, true, true};
+
+	// ---------------------------------------------------------------- Nachpruefen, bevor gerechnet wird
+	// Drei Dinge, die still falsch sein koennten und es dann fuer den ganzen Lauf blieben.
+	{
+		uint bad = 0u;
+		for(uint p=0u; p<5u; p++) { // (1) Deckungspunkt-Konvention je Ebene
+			const uint ea_exp = (cp[p].extent_a-1u)*ratio+1u, eb_exp = (cp[p].extent_b-1u)*ratio+1u;
+			if(ea_exp!=fp[p].extent_a || eb_exp!=fp[p].extent_b) {
+				print_error(string("Ebene ")+face_name[p]+": grob "+to_string(cp[p].extent_a)+"x"+to_string(cp[p].extent_b)
+					+" ergaebe fein "+to_string(ea_exp)+"x"+to_string(eb_exp)+", die feine Ebene ist aber "
+					+to_string(fp[p].extent_a)+"x"+to_string(fp[p].extent_b)+"."); bad++;
+			}
+		}
+		// (2) Die groben Entnahmeebenen duerfen das FAHRZEUG nicht schneiden -- sonst speiste eine
+		//     Fahrzeugzelle als vermeintliche Stroemung in den Nahfeld-Rand.
+		//     Die FAHRBAHN (z=0) dagegen liegt bewusst mit drin: NF_OZ = 0, die Ebenen x+- und y+-
+		//     enthalten also die Zeile z=0, und das sind mitbewegte Wandzellen mit rho=1 und
+		//     u = (u_road, 0, 0). Als Stuetzstelle fuer die feinen Zellen z=1..ratio-1 ist das genau
+		//     der richtige Wandwert -- sie werden mitgezaehlt und ausgewiesen, aber nicht beanstandet.
+		//     ★ Das gilt nur, solange der Boden mitbewegt ist. Wuerde er je auf Haftbedingung ohne
+		//     Mitbewegung umgestellt, speiste diese Zeile u=0 in den Nahfeld-Rand.
+		for(uint p=0u; p<5u; p++) {
+			ulong hit = 0ull, road = 0ull;
+			for(uint b=0u; b<cp[p].extent_b; b++) for(uint a=0u; a<cp[p].extent_a; a++) {
+				uint x=cp[p].origin.x, y=cp[p].origin.y, z=cp[p].origin.z;
+				if(cp[p].axis==0u)      { y+=a; z+=b; }
+				else if(cp[p].axis==1u) { x+=a; z+=b; }
+				else                    { x+=a; y+=b; }
+				const uchar fl = lbm_c.flags[(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx];
+				if((fl&TYPE_X)!=0u) hit++;
+				else if((fl&(TYPE_S|TYPE_E))==TYPE_S) road++;
+			}
+			if(hit>0ull) { print_warning(string("Grobe Entnahmeebene ")+face_name[p]+" schneidet das Fahrzeug in "+to_string(hit)+" Zellen. Die Nahfeld-Box ist dort zu eng."); bad++; }
+			if(road>0ull) print_info(string("Grobe Entnahmeebene ")+face_name[p]+" enthaelt "+to_string(road)+" Fahrbahnzellen (mitbewegte Wand, korrekte Stuetzstelle).");
+		}
+		// (3) Weltkoordinaten-Deckung der Ebenen, unabhaengig von den Indizes nachgerechnet.
+		const float dxy[5][2] = {{near_x0, far_x0+(float)cp[0].origin.x*dx_c}, {near_x0+(float)(fNx-1u)*dx_f, far_x0+(float)cp[1].origin.x*dx_c},
+		                         {near_y0, far_y0+(float)cp[2].origin.y*dx_c}, {near_y0+(float)(fNy-1u)*dx_f, far_y0+(float)cp[3].origin.y*dx_c},
+		                         {(float)(fNz-1u)*dx_f, (float)cp[4].origin.z*dx_c}};
+		for(uint p=0u; p<5u; p++) if(fabs(dxy[p][0]-dxy[p][1])>1e-4f) {
+			print_error(string("Ebene ")+face_name[p]+" liegt raeumlich auseinander: fein "+to_string(dxy[p][0],5u)+" m, grob "+to_string(dxy[p][1],5u)+" m."); bad++;
+		}
+		if(bad>0u) print_warning("Kopplungspruefung: "+to_string(bad)+" Beanstandung(en) -- siehe oben.");
+		else print_info("Kopplungspruefung: Deckungspunkte, Fahrzeugfreiheit und Weltlage aller fuenf Ebenen in Ordnung.");
+	}
+
+	// ---------------------------------------------------------------- Laufsteuerung
+	const float t_flush  = (far_x0+(float)(cNx-1u)*dx_c-far_x0)/si_u; // Durchspuelung des FERNfelds
+	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
+	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
+	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
+	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
+	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f);
+	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
+	create_folder(out_dir);
+	const float q_inf = 0.5f*si_rho*si_u*si_u;
+	print_info("Eine Fernfeld-Durchspuelung = "+to_string(t_flush,4u)+" s; Laufzeit "+to_string(t_end,3u)+" s = "
+		+to_string(n_outer)+" grobe x "+to_string(ratio)+" feine Schritte, Mittelung ab "+to_string(t_warmup,3u)+" s");
+
+	// ---------------------------------------------------------------- Initialisieren und Kopplung anlegen
+	lbm_f.run(0u); // nur initialisieren
+	lbm_c.run(0u);
+	ulong max_cp = 0ull;
+	for(uint p=0u; p<5u; p++) max_cp = max(max_cp, (ulong)cp[p].extent_a*(ulong)cp[p].extent_b);
+	lbm_c.alloc_coupling_planes(max_cp); // entnimmt
+	lbm_f.alloc_coupling_planes(max_cp); // empfaengt dieselben Ebenen
+
+	std::vector<float> face[5];
+	lbm_c.run(1u); // ein grober Schritt, damit ein Zustand zum Entnehmen existiert
+	for(uint p=0u; p<5u; p++) lbm_c.extract_plane_macros(cp[p], face[p]);
+
+	// ---------------------------------------------------------------- Zeitschleife
+	// Der grobe Schritt laeuft ASYNCHRON auf dem zweiten Geraet, waehrend das Nahfeld seine ratio
+	// Schritte rechnet.
+	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier stand "Verzug". Es ist ein VORLAUF. Vor der
+	// Schleife macht das grobe Gitter einen Schritt, danach wird entnommen; das Nahfeld durchlaeuft
+	// also das Intervall [k, k+1] mit dem groben Zustand an dessen ENDE. Am Intervallanfang eilt der
+	// Rand um dt_c voraus, am Ende stimmt er. Der Betrag ist derselbe -- bei dt_c = 4e-5 s wandert
+	// die Stroemung 1,2 mm, weniger als eine feine Zelle --, aber die Richtung war falsch beschrieben.
+	// Als Praediktor-Halteschema ist ein Vorlauf gegenueber einem Nachlauf eher guenstiger.
+	std::vector<double> ts, fx, fz, fx_c;
+	float slice_next = 0.0f;
+	Clock outer_clock; double t_acc = 0.0; ulong n_acc = 0ull;
+	const ulong verify_at2 = min(n_outer>0ull ? n_outer-1ull : 0ull, (ulong)env_u("CFD_DD_VERIFY_AT", 200u));
+	for(ulong outer=0ull; outer<n_outer; outer++) {
+		outer_clock.start();
+		lbm_c.run_async(1u);
+		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio);
+		lbm_f.run((ulong)ratio, n_outer*(ulong)ratio);
+
+		// ------------------------------------------------------------ Wirksamkeitsnachweis (einmal)
+		// "Laeuft" ist nicht "wirkt". Diese Pruefung beantwortet beides getrennt:
+		//  (A) KOMMT ES AN? An jedem Deckungspunkt (a und b beide Vielfache von ratio) ist die kubische
+		//      Interpolation die IDENTITAET. Der Nahfeld-Randwert muss dort also BIT-GENAU dem groben
+		//      Wert entsprechen, den der Host verschickt hat. Das prueft die ganze Kette in einem:
+		//      Entnahme-Kernel, Indexabbildung, Host-Transfer, Upload, Gewichte, Schreibpfad.
+		//  (B) BEWIRKT ES ETWAS? Waere die Kopplung ein No-op, stuenden die TYPE_E-Zellen exakt auf
+		//      ihrem Anfangswert u_x = u_lat. Die groesste Abweichung davon ist das Mass dafuer, dass
+		//      das Fernfeld tatsaechlich etwas ANDERES vorgibt als ungestoerten Freistrom.
+		//  (C) WIDERSPRECHEN SICH ZWEI FLAECHEN AN IHRER KANTE? Die fuenf feinen Ebenen ueberlappen sich
+		//      an den Kanten, und die spaeter aufgerufene ueberschreibt die fruehere. Diese Pruefung
+		//      deckt das MIT AB, ohne dass es dafuer eigenen Code braucht: die Kantenzellen der
+		//      x--Ebene werden anschliessend von y-/y+ erneut beschrieben; wenn der Vergleich der
+		//      x--Ebene gegen IHRE grobe Quelle danach noch bit-genau aufgeht, haben beide dasselbe
+		//      geschrieben. Gemessen am 2026-08-08: geht auf. Das war vorher nur ein Argument.
+		// TYPE_E-Zellen behalten rho/u ueber die Unterschritte unveraendert (stream_collide aktualisiert
+		// die Felder nur fuer Nicht-TYPE_E), die Werte hier sind also genau die geschriebenen.
+		// Zweimal geprueft, und das aus einem Grund: beim ERSTEN groben Schritt ist das Fernfeld noch
+		// ueberall Freistrom, dort kann (B) gar nichts anderes zeigen als "gleich u_inf" -- eine
+		// wirkungslose Kopplung waere von einer wirksamen nicht zu unterscheiden. (A) dagegen greift
+		// sofort. Der zweite Zeitpunkt liegt weit genug hinten, dass das Fernfeld das Fahrzeug spuert.
+		if(outer==0ull || outer==verify_at2) {
+			lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
+			for(uint p=0u; p<5u; p++) {
+				if(!drive_face[p]) continue;
+				ulong n_e=0ull, n_coin=0ull, n_bad=0ull, n_outlet_edge=0ull; float maxdev=0.0f, maxrel=0.0f;
+				uint bx=0u, by=0u, bz=0u; // Ort der ersten Abweichung -- eine Zahl allein sagt nicht, WO es klemmt
+				for(uint b=0u; b<fp[p].extent_b; b++) for(uint a=0u; a<fp[p].extent_a; a++) {
+					uint x=fp[p].origin.x, y=fp[p].origin.y, z=fp[p].origin.z;
+					if(fp[p].axis==0u)      { y+=a; z+=b; }
+					else if(fp[p].axis==1u) { x+=a; z+=b; }
+					else                    { x+=a; y+=b; }
+					const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)fNy)*(ulong)fNx;
+					if((lbm_f.flags[n]&(TYPE_S|TYPE_E))!=TYPE_E) continue; // Fahrbahn und Fahrzeug tragen hier nichts bei
+					const bool on_outlet = (x==fNx-1u); // Auslasskante -- siehe Begruendung unten
+					if(!on_outlet) { n_e++; maxrel = fmax(maxrel, fabs(lbm_f.u.x[n]-u_lat)/u_lat); }
+					if(a%ratio!=0u || b%ratio!=0u) continue; // kein Deckungspunkt -> hier ist die Interpolation nicht die Identitaet
+					// ★ Die Auslasskante wird GEZAEHLT, aber nicht bewertet, und zwar begruendet:
+					// apply_pressure_outlet schreibt rho und u auf x = fNx-1 in JEDEM Zeitschritt und damit
+					// NACH der Kopplung. Dort steht folglich der Auslasswert, nicht der geliftete.
+					// Nachgemessen am 2026-08-08: ohne diese Ausnahme meldete die Pruefung 15 Abweichungen
+					// auf den y-Flaechen und 21 auf z+ -- ausnahmslos bei x = fNx-1, also genau die Anzahl der
+					// Deckungspunkte dieser einen Kante. Das ist die gewollte Rangfolge: am Auslass gilt der Auslass.
+					if(on_outlet) { n_outlet_edge++; continue; }
+					{
+						n_coin++;
+						const ulong cb = ((ulong)(b/ratio)*(ulong)cp[p].extent_a + (ulong)(a/ratio))*4ull;
+						const float d = fmax(fmax(fabs(lbm_f.rho[n]-face[p][cb]), fabs(lbm_f.u.x[n]-face[p][cb+1ull])),
+						                     fmax(fabs(lbm_f.u.y[n]-face[p][cb+2ull]), fabs(lbm_f.u.z[n]-face[p][cb+3ull])));
+						maxdev = fmax(maxdev, d);
+						if(d>1.0e-6f) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
+					}
+				}
+				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)
+					+" Deckungspunkte (plus "+to_string(n_outlet_edge)+" auf der Auslasskante, dort gilt der Auslass); groesste Abweichung dort "+to_string(maxdev,9u)
+					+(n_bad? (" -- "+to_string(n_bad)+" ueber 1e-6, erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : " (identisch)")
+					+"; groesste Abweichung vom Freistrom "+to_string(100.0f*maxrel,2u)+" % von u_inf");
+				if(n_e==0ull) print_warning(string("Flaeche ")+face_name[p]+" hat KEINE TYPE_E-Zelle -- diese Kopplungsflaeche ist wirkungslos.");
+				if(maxrel<1.0e-6f) print_warning(string("Flaeche ")+face_name[p]+" steht exakt auf Freistrom -- das Fernfeld gibt dort (noch) nichts Eigenes vor.");
+			}
+		}
+
+		lbm_c.finish();
+		for(uint p=0u; p<5u; p++) lbm_c.extract_plane_macros(cp[p], face[p]);
+		t_acc += outer_clock.stop(); n_acc++;
+
+		if((outer+1ull)%(ulong)sample_every==0ull) {
+			lbm_f.update_force_field();
+			const float3 F = lbm_f.object_force(TYPE_S|TYPE_X);
+			lbm_c.update_force_field();
+			const float3 Fc = lbm_c.object_force(TYPE_S|TYPE_X);
+			const double t_si = (double)((float)(outer+1ull)*dt_c);
+			ts.push_back(t_si);
+			fx.push_back((double)units_fine.si_F(F.x));
+			fz.push_back((double)units_fine.si_F(F.z));
+			fx_c.push_back((double)units_coarse.si_F(Fc.x));
+			if(slice_dt>0.0f && (float)t_si>=slice_next) {
+				slice_next = (float)t_si + slice_dt;
+				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
+				lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
+				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir+"near_");
+				lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
+				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir+"far_");
+				print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
+			}
+		}
+	}
+	if(n_acc>0ull) print_info("Mittlere Zeit je grobem Schritt: "+to_string((float)(t_acc/(double)n_acc),4u)+" s ("+to_string(ratio)+" feine Schritte inklusive)");
+
+	// ---------------------------------------------------------------- Auswertung
+	{
+		std::ofstream f(out_dir+"forces.csv"); f.precision(8);
+		f << "time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N\n";
+		for(size_t i=0u; i<ts.size(); i++)
+			f << ts[i] << "," << fx[i] << "," << fz[i] << "," << fx[i]/((double)q_inf*A_ref) << "," << fz[i]/((double)q_inf*A_ref) << "," << fx_c[i] << "\n";
+		print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen)");
+	}
+	std::vector<double> cd, cz;
+	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
+		cd.push_back(fx[i]/((double)q_inf*A_ref)); cz.push_back(fz[i]/((double)q_inf*A_ref));
+	}
+	if(cd.size()<16u) { print_warning("Zu wenige Samples fuer eine belastbare Statistik."); _exit(0); }
+	double mcd=0.0, mcz=0.0;
+	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
+	mcd/=(double)cd.size(); mcz/=(double)cz.size();
+	print_info("---------------------------------------------------------------");
+	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
+	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
+	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
+	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
+	print_info("---------------------------------------------------------------");
+	_exit(0);
+}
+
+void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug oder fahrzeug_dd
 	const char* c = getenv("CFD_CASE");
-	if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
+	if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
+	else if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
 	else main_setup_kugel();
 }

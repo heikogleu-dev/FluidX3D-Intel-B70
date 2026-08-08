@@ -112,6 +112,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		fbx0=s_fbbox[0]; fby0=s_fbbox[1]; fbz0=s_fbbox[2]; fbnx=s_fbbox[3]; fbny=s_fbbox[4]; fbnz=s_fbbox[5];
 	} else { fbx0=0u; fby0=0u; fbz0=0u; fbnx=Nx; fbny=Ny; fbnz=Nz; }
 	for(uint i=0u; i<6u; i++) s_fbbox[i]=0u; // read-once: eine zweite Domaene erbt die Box nicht
+	// ★ 2026-08-08, beim Bau der Doppel-Domaene gefunden: das Block-Tiling wurde bis hier ueberall direkt
+	// aus den STATISCHEN Schaltern gelesen -- auch in finalize_sparse_tiles(), das erst LANGE nach dem
+	// Konstruktor laeuft. Mit zwei Domaenen ist das eine Falle: wer den Schalter zwischen den beiden
+	// Konstruktoren umlegt, aendert rueckwirkend das Verhalten der ERSTEN Domaene, deren fi dann als
+	// 1-Zellen-Platzhalter stehen bliebe. Deshalb jetzt genauso read-once wie die F-Bounding-Box:
+	// hier einmal in Domaenen-Felder uebernehmen, danach lesen ausschliesslich diese.
+	sparse_on = s_sparse_tiles_on;
+	sparse_T  = s_sparse_T;
+	s_sparse_tiles_on = false; // read-once: eine zweite Domaene erbt das Tiling nicht
 	string opencl_c_code;
 #ifdef GRAPHICS
 	graphics = Graphics(this);
@@ -141,14 +150,14 @@ void LBM_Domain::allocate(Device& device) {
 	// sparse fi an. Grund ist kein Geschmack, sondern ein Treiberdefekt -- das Freigeben eines bereits
 	// allozierten 19-GB-fi-Buffers bringt den Intel-NEO mit CL_OUT_OF_RESOURCES zu Fall. Das Move-Assign
 	// in finalize gibt so nur den Platzhalter frei, was trivial ist.
-	fi = Memory<fpxx>(device, s_sparse_tiles_on ? 1ull : N, velocity_set, false);
+	fi = Memory<fpxx>(device, sparse_on ? 1ull : N, velocity_set, false);
 	rho = Memory<float>(device, N, 1u, true, true, 1.0f);
 	u = Memory<float>(device, N, 3u);
 	flags = Memory<uchar>(device, N);
-	if(s_sparse_tiles_on) { // Tile-Raster aufspannen; der Inhalt kommt erst in finalize_sparse_tiles()
-		sparse_tiles_x = ((uint)get_Nx()+s_sparse_T-1u)/s_sparse_T;
-		sparse_tiles_y = ((uint)get_Ny()+s_sparse_T-1u)/s_sparse_T;
-		sparse_tiles_z = ((uint)get_Nz()+s_sparse_T-1u)/s_sparse_T;
+	if(sparse_on) { // Tile-Raster aufspannen; der Inhalt kommt erst in finalize_sparse_tiles()
+		sparse_tiles_x = ((uint)get_Nx()+sparse_T-1u)/sparse_T;
+		sparse_tiles_y = ((uint)get_Ny()+sparse_T-1u)/sparse_T;
+		sparse_tiles_z = ((uint)get_Nz()+sparse_T-1u)/sparse_T;
 		tile_slot = Memory<uint>(device, (ulong)sparse_tiles_x*sparse_tiles_y*sparse_tiles_z);
 	} else {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
@@ -210,7 +219,7 @@ void LBM_Domain::allocate(Device& device) {
 	// allen anderen add_parameters angehaengt werden. Bei ausgeschaltetem Sparse ist TS_P leer, dann darf
 	// hier auch nichts gebunden werden -- sonst stimmt die Parameterzahl nicht mehr mit der Device-Seite
 	// ueberein, und das ist genau die Fehlerklasse, die still falsche Ergebnisse produziert.
-	if(s_sparse_tiles_on) {
+	if(sparse_on) {
 		// Multi-GPU + Sparse ist nicht validiert: die transfer_*_fi-Kernel bekaemen tile_slot hier nicht
 		// gebunden. Lieber laut abbrechen als still falsch rechnen.
 		if(get_D()>1u) print_error("Block-Tiling (CFD_SPARSE_TILES) ist nur fuer eine einzelne GPU validiert, hier laufen "+to_string(get_D())+" Domaenen.");
@@ -230,14 +239,28 @@ void LBM_Domain::enqueue_apply_pressure_outlet() { // FORK: Druck-Auslass
 	kernel_apply_pressure_outlet.enqueue_run();
 }
 
+void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: Doppel-Domaene
+	if(max_plane_cells==0ull) { print_error("alloc_coupling_planes mit 0 Zellen."); return; }
+	coupling_max_plane_cells = max_plane_cells;
+	coupling_plane = Memory<float>(device, max_plane_cells*4ull, 1u);
+	// Ebenen-Parameter werden bei jedem Aufruf neu gesetzt; hier stehen Platzhalter, damit die
+	// Kernel-Objekte ueberhaupt mit der richtigen Signatur entstehen.
+	kernel_extract_plane_macros = Kernel(device, max_plane_cells, "extract_plane_macros",
+		rho, u, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u);
+	kernel_drive_boundary_cubic_lift = Kernel(device, max_plane_cells, "drive_boundary_cubic_lift",
+		rho, u, flags, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 4u);
+	print_info("Kopplungspuffer: "+to_string(max_plane_cells)+" Zellen a 4 floats = "
+		+to_string((float)(max_plane_cells*16ull)/1048576.0f,2u)+" MB auf "+device.info.name+".");
+}
+
 void LBM_Domain::finalize_sparse_tiles() {
 	// Nach der Voxelisierung aufrufen: erst dann steht fest, welche Tiles voll solid sind.
 	// Eine Tile ist tot, wenn sie SAMT 2-Zell-Halo vollstaendig solid ist. Der Halo muss 2 sein, nicht 1:
 	// update_force_field liest via load_f die Nachbarn wand-adjazenter SOLID-Zellen, greift also bis zu
 	// zwei Zellen weit -- jede Zelle, die hoechstens 2 von Fluid entfernt ist, muss in einer aktiven Tile
 	// bleiben. Mit 1-Halo waeren die Kraefte an der Wand still falsch.
-	if(!s_sparse_tiles_on) return;
-	const uint Nx=(uint)get_Nx(), Ny=(uint)get_Ny(), Nz=(uint)get_Nz(), T=s_sparse_T;
+	if(!sparse_on) return;
+	const uint Nx=(uint)get_Nx(), Ny=(uint)get_Ny(), Nz=(uint)get_Nz(), T=sparse_T;
 	const ulong n_tiles = (ulong)sparse_tiles_x*sparse_tiles_y*sparse_tiles_z;
 	auto IDX = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
 	std::vector<uint> slot(n_tiles, 0xFFFFFFFFu);
@@ -420,7 +443,7 @@ void LBM_Domain::voxelize_mesh_on_device(const Mesh* mesh, const uchar flag, con
 #ifdef SURFACE
 	kernel_voxelize_mesh.add_parameters(mass, massex);
 #endif // SURFACE
-	if(s_sparse_tiles_on) kernel_voxelize_mesh.add_parameters(tile_slot); // TS_P haengt tile_slot hinten an
+	if(sparse_on) kernel_voxelize_mesh.add_parameters(tile_slot); // TS_P haengt tile_slot hinten an
 	p0.write_to_device();
 	p1.write_to_device();
 	p2.write_to_device();
@@ -583,11 +606,11 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// FORK -- Block-Tiling. index_f() wird per Makro auf index_f_impl(..., tile_slot) umgeschrieben, damit
 	// alle Aufrufstellen unveraendert bleiben; nur die Signaturen bekommen tile_slot ueber TS_P.
 	// AUS = beide Makros leer = der erzeugte Device-Code ist bit-identisch zu Upstream.
-	+(s_sparse_tiles_on ? (string)(
+	+(sparse_on ? (string)(
 		"\n	#define SPARSE_TILES"
-		"\n	#define def_TILE "+to_string(s_sparse_T)+"u"
-		"\n	#define def_TILES_X "+to_string(((uint)get_Nx()+s_sparse_T-1u)/s_sparse_T)+"u"
-		"\n	#define def_TILES_Y "+to_string(((uint)get_Ny()+s_sparse_T-1u)/s_sparse_T)+"u"
+		"\n	#define def_TILE "+to_string(sparse_T)+"u"
+		"\n	#define def_TILES_X "+to_string(((uint)get_Nx()+sparse_T-1u)/sparse_T)+"u"
+		"\n	#define def_TILES_Y "+to_string(((uint)get_Ny()+sparse_T-1u)/sparse_T)+"u"
 		"\n	#define def_TILE_DEAD 4294967295u"
 		"\n	#define TS_P , const global uint* tile_slot"
 		"\n	#define TS_A , tile_slot"
@@ -902,6 +925,58 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 	graphics = Graphics(this);
 #endif // GRAPHICS
 }
+// FORK Doppel-Domaene: Ein-Geraete-Konstruktor mit EXPLIZITEM Device_Info.
+// Der Standardweg (smart_device_selection) liefert immer das schnellste Geraet; fuer die gekoppelte
+// Rechnung brauchen wir zwei LBM-Instanzen auf zwei verschiedenen GPUs. Sonst identisch zum
+// Ein-Geraete-Pfad oben (D=1, keine Halos, kein Offset).
+LBM::LBM(const uint3 N, const float nu, const Device_Info& device_info, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho) {
+	this->Nx = N.x; this->Ny = N.y; this->Nz = N.z;
+	this->Dx = 1u; this->Dy = 1u; this->Dz = 1u;
+	const vector<Device_Info> device_infos(1u, device_info);
+	sanity_checks_constructor(device_infos, this->Nx, this->Ny, this->Nz, 1u, 1u, 1u, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
+	lbm_domain = new LBM_Domain*[1u];
+	lbm_domain[0] = new LBM_Domain(device_info, this->Nx, this->Ny, this->Nz, 1u, 1u, 1u, 0, 0, 0, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
+	{
+		Memory<float>** buffers_rho = new Memory<float>*[1u];
+		buffers_rho[0] = &(lbm_domain[0]->rho);
+		rho = Memory_Container(this, buffers_rho, "rho");
+	} {
+		Memory<float>** buffers_u = new Memory<float>*[1u];
+		buffers_u[0] = &(lbm_domain[0]->u);
+		u = Memory_Container(this, buffers_u, "u");
+	} {
+		Memory<uchar>** buffers_flags = new Memory<uchar>*[1u];
+		buffers_flags[0] = &(lbm_domain[0]->flags);
+		flags = Memory_Container(this, buffers_flags, "flags");
+	}
+#ifdef FORCE_FIELD
+	{
+		Memory<float>** buffers_F = new Memory<float>*[1u];
+		buffers_F[0] = &(lbm_domain[0]->F);
+		F = Memory_Container(this, buffers_F, "F");
+	}
+#endif // FORCE_FIELD
+#ifdef SURFACE
+	{
+		Memory<float>** buffers_phi = new Memory<float>*[1u];
+		buffers_phi[0] = &(lbm_domain[0]->phi);
+		phi = Memory_Container(this, buffers_phi, "phi");
+	}
+#endif // SURFACE
+#ifdef TEMPERATURE
+	{
+		Memory<float>** buffers_T = new Memory<float>*[1u];
+		buffers_T[0] = &(lbm_domain[0]->T);
+		T = Memory_Container(this, buffers_T, "T");
+	}
+#endif // TEMPERATURE
+#ifdef PARTICLES
+	particles = &(lbm_domain[0]->particles);
+#endif // PARTICLES
+#ifdef GRAPHICS
+	graphics = Graphics(this);
+#endif // GRAPHICS
+}
 LBM::~LBM() {
 #ifdef GRAPHICS
 	camera.allow_rendering = false;
@@ -1052,7 +1127,7 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 	initialized = true;
 }
 
-void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time step
+void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_collide to perform one LBM time step
 #ifdef SURFACE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
@@ -1087,7 +1162,9 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_integrate_particles(); // intgegrate particles forward in time and couple particles to fluid
 	communicate_particles(); // communicate_F() is not required in do_time_step()
 #endif // PARTICLES
-	if(get_D()==1u) for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue(); // this additional domain synchronization barrier is only required in single-GPU, as communication calls already provide all necessary synchronization barriers in multi-GPU
+	// FORK: sync_single_gpu=false ueberspringt diese Barriere -- dann wartet run_async() nicht, und der Aufrufer
+	// setzt die Barriere selbst per finish(). Im Mehr-Domaenen-Fall liefern die communicate_*-Aufrufe die Barrieren ohnehin.
+	if(sync_single_gpu && get_D()==1u) for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue(); // this additional domain synchronization barrier is only required in single-GPU, as communication calls already provide all necessary synchronization barriers in multi-GPU
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->increment_time_step();
 }
 
@@ -1111,6 +1188,19 @@ void LBM::run(const ulong steps, const ulong total_steps) { // initializes the L
 		info.update(clock.stop());
 	}
 	if(get_D()>1u) for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue(); // wait for everything to finish (multi-GPU only)
+}
+
+// FORK Doppel-Domaene: `steps` Zeitschritte in die Warteschlange stellen und SOFORT zurueckkehren.
+// Damit rechnet die Coarse-Domaene auf der iGPU, waehrend der Host die Ebenen liftet und die Fine-Domaene
+// auf der dGPU ihre r Unterschritte macht. Wer danach rho/u/flags/fi liest, MUSS vorher finish() rufen.
+void LBM::run_async(const ulong steps) {
+	if(!initialized) { print_error("LBM::run_async vor der Initialisierung aufgerufen. Erst run() einmal rufen, dann run_async."); return; }
+	info.append(steps, max_ulong, get_t());
+	for(ulong i=1ull; i<=steps; i++) do_time_step(false);
+}
+
+void LBM::finish() { // FORK: Barriere ueber alle Warteschlangen dieser LBM-Instanz
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
 }
 
 void LBM::update_fields() { // update fields (rho, u, T) manually
@@ -1252,6 +1342,81 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 void LBM::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
 	if(get_D()!=1u) { print_warning("Druck-Auslass: nur fuer eine einzelne Domaene validiert, uebersprungen."); return; }
 	lbm_domain[0]->set_pressure_outlet_faces(face_mask, rho_out);
+}
+
+// =====================================================================================
+// FORK -- Doppel-Domaene: Host-Seite der Kopplung grob -> fein.
+// Die ausfuehrliche Begruendung des Verfahrens (und die Liste dessen, was bewusst fehlt)
+// steht bei den Kernels in kernel.cpp unter "Doppel-Domaene: Kopplung grobes Fernfeld".
+// =====================================================================================
+void LBM::alloc_coupling_planes(const ulong max_plane_cells) {
+	if(get_D()!=1u) { print_error("Doppel-Domaenen-Kopplung: nur fuer je eine Domaene je LBM-Instanz gebaut."); return; }
+	if(!initialized) { print_error("alloc_coupling_planes vor der Initialisierung. Erst run(1) rufen."); return; }
+	lbm_domain[0]->alloc_coupling_planes(max_plane_cells);
+}
+
+// ★ Pruefer-Befund 2026-08-08: Eine Ebene, die aus der Domaene ragt, wickelt STILL um. Der Kernel prueft
+// nur n>=def_N; ein Ueberlauf in x oder y bleibt darunter und landet einfach in der naechsten Zellzeile
+// bzw. -ebene. Also kein Absturz, sondern richtige Werte an falschen Zellen -- genau die Fehlerklasse,
+// die weder eine Norm noch ein Kraftverlauf sichtbar macht. Deshalb hier, host-seitig, vollstaendig gefasst.
+bool LBM::plane_fits(const PlaneSpec& plane, const char* who) const {
+	uint na=0u, nb=0u, nn=0u, oa=0u, ob=0u, on=0u; // Ausdehnung/Ursprung entlang a, entlang b, entlang der Normalen
+	if(plane.axis==0u)      { na=Ny; nb=Nz; nn=Nx; oa=plane.origin.y; ob=plane.origin.z; on=plane.origin.x; }
+	else if(plane.axis==1u) { na=Nx; nb=Nz; nn=Ny; oa=plane.origin.x; ob=plane.origin.z; on=plane.origin.y; }
+	else if(plane.axis==2u) { na=Nx; nb=Ny; nn=Nz; oa=plane.origin.x; ob=plane.origin.y; on=plane.origin.z; }
+	else { print_error(string(who)+": Ebenenachse "+to_string(plane.axis)+" gibt es nicht (erlaubt sind 0, 1, 2)."); return false; }
+	if(plane.extent_a==0u || plane.extent_b==0u) { print_error(string(who)+": Ebene mit Ausdehnung 0."); return false; }
+	if(on>=nn || (ulong)oa+(ulong)plane.extent_a>(ulong)na || (ulong)ob+(ulong)plane.extent_b>(ulong)nb) {
+		print_error(string(who)+": Ebene ragt aus der Domaene. Ursprung ("+to_string(plane.origin.x)+","+to_string(plane.origin.y)+","+to_string(plane.origin.z)
+			+"), Ausdehnung "+to_string(plane.extent_a)+"x"+to_string(plane.extent_b)+", Achse "+to_string(plane.axis)
+			+", Domaene "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+".");
+		return false;
+	}
+	return true;
+}
+
+void LBM::extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf) {
+	LBM_Domain* dom = lbm_domain[0];
+	const ulong n_plane = (ulong)plane.extent_a*(ulong)plane.extent_b;
+	if(!plane_fits(plane, "extract_plane_macros")) return;
+	if(dom->coupling_max_plane_cells==0ull) { print_error("extract_plane_macros ohne alloc_coupling_planes."); return; }
+	if(n_plane>dom->coupling_max_plane_cells) { print_error("extract_plane_macros: Ebene mit "+to_string(n_plane)+" Zellen passt nicht in den Puffer ("+to_string(dom->coupling_max_plane_cells)+")."); return; }
+	dom->kernel_extract_plane_macros.set_ranges(n_plane);
+	dom->kernel_extract_plane_macros.set_parameters(3u, plane.axis,
+		plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b);
+	dom->kernel_extract_plane_macros.enqueue_run();
+	dom->finish_queue();
+	host_buf.resize(n_plane*4ull);
+	dom->coupling_plane.read_from_device(0ull, n_plane*4ull); // nur den belegten Anfang zurueckholen
+	for(ulong i=0ull; i<n_plane*4ull; i++) host_buf[i] = dom->coupling_plane[i];
+}
+
+void LBM::drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio) {
+	LBM_Domain* dom = lbm_domain[0];
+	const ulong n_coarse = (ulong)coarse_a*(ulong)coarse_b;
+	// ratio=0 waere im Kernel eine Ganzzahldivision durch null (undefiniert), coarse_a=0 liesse
+	// (coarse_a-1u)*ratio als uint unterlaufen und die Konventionspruefung unten durchgehen.
+	if(ratio==0u || coarse_a==0u || coarse_b==0u) { print_error("drive_boundary_from_coarse: ratio="+to_string(ratio)+", grobe Ausdehnung "+to_string(coarse_a)+"x"+to_string(coarse_b)+" -- keines davon darf 0 sein."); return; }
+	if(!plane_fits(fine_plane, "drive_boundary_from_coarse")) return;
+	if(dom->coupling_max_plane_cells==0ull) { print_error("drive_boundary_from_coarse ohne alloc_coupling_planes."); return; }
+	if(n_coarse>dom->coupling_max_plane_cells) { print_error("drive_boundary_from_coarse: grobe Ebene passt nicht in den Puffer."); return; }
+	if((ulong)coarse_face.size()<n_coarse*4ull) { print_error("drive_boundary_from_coarse: grobe Ebene zu klein ("+to_string((ulong)coarse_face.size())+" < "+to_string((ulong)(n_coarse*4ull))+")."); return; }
+	// Deckungspunkt-Konvention pruefen. Stimmt sie nicht, laege die interpolierte Ebene raeumlich
+	// verschoben auf dem Rand -- ein Fehler, den kein Kraftverlauf als solchen zeigen wuerde.
+	if(fine_plane.extent_a!=(coarse_a-1u)*ratio+1u || fine_plane.extent_b!=(coarse_b-1u)*ratio+1u) {
+		print_error("drive_boundary_from_coarse: Ausdehnungen passen nicht zusammen. Grob "+to_string(coarse_a)+"x"+to_string(coarse_b)
+			+" bei ratio="+to_string(ratio)+" verlangt fein "+to_string((coarse_a-1u)*ratio+1u)+"x"+to_string((coarse_b-1u)*ratio+1u)
+			+", bekommen "+to_string(fine_plane.extent_a)+"x"+to_string(fine_plane.extent_b)+".");
+		return;
+	}
+	for(ulong i=0ull; i<n_coarse*4ull; i++) dom->coupling_plane[i] = coarse_face[i];
+	dom->coupling_plane.write_to_device(0ull, n_coarse*4ull);
+	dom->kernel_drive_boundary_cubic_lift.set_ranges((ulong)fine_plane.extent_a*(ulong)fine_plane.extent_b);
+	dom->kernel_drive_boundary_cubic_lift.set_parameters(4u, fine_plane.axis,
+		fine_plane.origin.x, fine_plane.origin.y, fine_plane.origin.z, fine_plane.extent_a, fine_plane.extent_b,
+		coarse_a, coarse_b, ratio);
+	dom->kernel_drive_boundary_cubic_lift.enqueue_run();
+	dom->finish_queue();
 }
 
 void LBM::reset() { // reset simulation (takes effect in following run() call)

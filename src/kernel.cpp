@@ -1998,6 +1998,127 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
 } // apply_pressure_outlet()
 
+// =====================================================================================
+// FORK -- Doppel-Domaene: Kopplung grobes Fernfeld -> feines Nahfeld.
+//
+// ZWECK. Der Fahrzeugfall braucht zweierlei, das sich in EINEM Gitter widerspricht: feine
+// Aufloesung am Fahrzeug und einen Querschnitt, der gross genug ist, dass die Versperrung
+// unter der Windkanalpraxis von 5 % bleibt. Mit einem Gitter kostet die zweite Forderung
+// die erste. Zwei Gitter loesen das: ein grobes, weites Fernfeld traegt die Aussenstroemung,
+// ein feines Nahfeld um das Fahrzeug bekommt seine Raender aus dem Fernfeld vorgeschrieben.
+//
+// VERFAHREN. Pro Fernfeld-Zeitschritt (dt_c = ratio*dt_f):
+//   1. extract_plane_macros liest (rho, u) auf den fuenf Fernfeld-Ebenen, die genau auf den
+//      Aussenflaechen der Nahfeld-Box liegen (der Boden z=0 ist beiden gemeinsam, kein Rand).
+//   2. drive_boundary_cubic_lift interpoliert diese Ebene kubisch auf Nahfeld-Aufloesung und
+//      schreibt sie in die TYPE_E-Randzellen des Nahfelds.
+//   3. Das Nahfeld rechnet `ratio` Schritte, dann von vorn.
+// Die Interpolation ist die 4-Punkt-Lagrange-Formel aus Lagrava/Latt/Chopard, JCP 231 (2012),
+// Gl. 38, mit den einseitigen 3-Punkt-Randformeln aus Gl. 39. Deckungspunkt-Konvention:
+// fine_extent = (coarse_extent - 1) * ratio + 1, d. h. jeder grobe Punkt faellt exakt auf einen
+// feinen -- fuer s = 0 ist die Interpolation die Identitaet.
+//
+// WAS BEWUSST NICHT DRIN IST -- und warum. Das volle Lagrava-Latt-Verfahren gibt zusaetzlich
+// den Nichtgleichgewichtsanteil f_neq mit einem Faktor omega_c/(r*omega_f) weiter und
+// dezimiert das feine Feld zurueck ins grobe. Beides ist hier absichtlich nicht portiert:
+//   * f_neq waere WIRKUNGSLOS. Die Nahfeld-Randzellen sind TYPE_E; stream_collide setzt dort
+//     f = f_eq(rho, u) (siehe Zeile mit "flagsn_bo==TYPE_E ? feq[i]"). Ein eingespritztes f_neq
+//     wuerde im selben Schritt ueberschrieben. Der alte Baum hat f_neq extrahiert, geliftet und
+//     skaliert -- und dann verworfen; gemessen an der Wirkung war das toter Code.
+//   * Die Rueckkopplung fein -> grob war im alten Baum am 2026-06-14 mit Begruendung abgeschaltet:
+//     das grobe Gitter (4x groeber) kann die aufgeloeste Nachlaufstroemung nicht aufnehmen, die
+//     dezimierten Daten wirkten als Barriere, um die das Fernfeld herumstroemte.
+// Die Kopplung ist damit EINWEG: das Fernfeld diktiert dem Nahfeld die Raender, nicht umgekehrt.
+// Das ist eine Naeherung, und sie ist es wert, benannt zu werden: die Versperrung des Fahrzeugs
+// wirkt nur ueber das grobe Gitter zurueck, in dem das Fahrzeug ebenfalls voxelisiert ist.
+// =====================================================================================
+
+)+R(void cubic_lift_weights(const uint f, const uint ratio, const uint c_ext, int* idx, float* w) {
+	// 4-Punkt-Lagrange-Gewichte fuer die Position f auf dem feinen Gitter (Lagrava Gl. 38).
+	// c_ext = Zahl der groben Stuetzstellen auf dieser Achse. Am Rand, wo vier Stuetzstellen nicht
+	// verfuegbar sind, fallen wir auf die einseitige 3-Punkt-Formel (Gl. 39) bzw. auf linear zurueck.
+	// Alle vier Zweige sind Lagrange-Basen, summieren sich also exakt zu 1 -- ein konstantes Feld
+	// bleibt konstant, was der Test in der Verifikation ausnutzt.
+	const int ic = (int)(f/ratio); // Index der groben Stuetzstelle links davon
+	const int s  = (int)(f%ratio); // Unterteilung dazwischen; s==0 heisst: feiner Punkt IST grober Punkt
+	if(s==0) { idx[0]=idx[1]=idx[2]=idx[3]=ic; w[0]=1.0f; w[1]=w[2]=w[3]=0.0f; }
+	else {
+		const float tt = (float)s/(float)ratio;
+		const bool L = (ic==0), Rr = (ic+2>=(int)c_ext); // links/rechts fehlt eine Stuetzstelle
+		if(L&&!Rr)      { idx[0]=ic;   idx[1]=ic+1; idx[2]=ic+2; idx[3]=ic+2; w[0]=(tt-1.0f)*(tt-2.0f)*0.5f;       w[1]=-tt*(tt-2.0f);                       w[2]=tt*(tt-1.0f)*0.5f;             w[3]=0.0f; }
+		else if(Rr&&!L) { idx[0]=ic-1; idx[1]=ic;   idx[2]=ic+1; idx[3]=ic+1; w[0]=tt*(tt-1.0f)*0.5f;              w[1]=(tt+1.0f)*(1.0f-tt);                 w[2]=(tt+1.0f)*tt*0.5f;             w[3]=0.0f; }
+		else if(L&&Rr)  { idx[0]=ic;   idx[1]=ic+1; idx[2]=ic+1; idx[3]=ic+1; w[0]=1.0f-tt;                        w[1]=tt;                                  w[2]=0.0f;                          w[3]=0.0f; }
+		else            { idx[0]=ic-1; idx[1]=ic;   idx[2]=ic+1; idx[3]=ic+2; w[0]=-tt*(tt-1.0f)*(tt-2.0f)/6.0f;   w[1]=(tt+1.0f)*(tt-1.0f)*(tt-2.0f)*0.5f;  w[2]=-(tt+1.0f)*tt*(tt-2.0f)*0.5f;  w[3]=(tt+1.0f)*tt*(tt-1.0f)/6.0f; }
+	}
+	for(uint i=0u; i<4u; i++) { if(idx[i]<0) idx[i]=0; if(idx[i]>=(int)c_ext) idx[i]=(int)c_ext-1; }
+} // cubic_lift_weights()
+
+)+R(uxx plane_cell_index(const uint gid, const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z, const uint extent_a, const uint extent_b) {
+	// Bildet den flachen Ebenen-Index auf den Zellindex der Domaene ab. Gemeinsam benutzt, damit
+	// Auslesen und Einspeisen garantiert dieselbe Zuordnung verwenden -- ein Versatz zwischen beiden
+	// waere ein Fehler, den keine Norm und kein Kraftverlauf sichtbar machen wuerde.
+	const uint a_idx = gid % extent_a;
+	const uint b_idx = gid / extent_a;
+	uint x, y, z;
+	if(plane_axis==0u)      { x = origin_x;         y = origin_y+a_idx; z = origin_z+b_idx; } // X-normal: a=y, b=z
+	else if(plane_axis==1u) { x = origin_x+a_idx;   y = origin_y;       z = origin_z+b_idx; } // Y-normal: a=x, b=z
+	else                    { x = origin_x+a_idx;   y = origin_y+b_idx; z = origin_z;       } // Z-normal: a=x, b=y
+	return (uxx)x + (uxx)y*(uxx)def_Nx + (uxx)z*(uxx)def_Nx*(uxx)def_Ny;
+} // plane_cell_index()
+
+)+R(kernel void extract_plane_macros(const global float* rho, const global float* u, global float* out,
+	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
+	const uint extent_a, const uint extent_b) {
+	// Liest (rho, u_x, u_y, u_z) auf einer achsen-normalen Ebene in einen dichten Puffer.
+	// Liest die Makro-Felder DIREKT statt sie aus den DDFs zu rekonstruieren -- das setzt UPDATE_FIELDS
+	// voraus, weil rho/u sonst auf dem Stand der letzten update_fields()-Anforderung stehen.
+	// Der Aufrufer prueft das; hier waere die Pruefung nicht ausdrueckbar.
+	const uint gid = get_global_id(0);
+	if(gid>=extent_a*extent_b) return;
+	const ulong o = (ulong)gid*4ul;
+	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
+	if(n>=(uxx)def_N) { out[o]=1.0f; out[o+1ul]=0.0f; out[o+2ul]=0.0f; out[o+3ul]=0.0f; return; }
+	out[o+0ul] = rho[n];
+	out[o+1ul] = u[                 n];
+	out[o+2ul] = u[    def_N+(ulong)n];
+	out[o+3ul] = u[2ul*def_N+(ulong)n];
+} // extract_plane_macros()
+
+)+R(kernel void drive_boundary_cubic_lift(global float* rho, global float* u, const global uchar* flags,
+	const global float* coarse_plane,
+	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
+	const uint extent_a, const uint extent_b,
+	const uint coarse_a, const uint coarse_b, const uint ratio) {
+	// Kubische Interpolation der groben Ebene auf die feine Randebene, direkt in rho[]/u[] geschrieben.
+	// Lift und Einspeisung sind bewusst EIN Kernel: ein Zwischenpuffer in feiner Aufloesung waere
+	// mehrere hundert MB gross und wuerde nur weitergereicht.
+	const uint gid = get_global_id(0);
+	if(gid>=extent_a*extent_b) return;
+	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
+	if(n>=(uxx)def_N) return;
+	if((flags[n]&TYPE_BO)!=TYPE_E) return; // nur reine Gleichgewichts-Randzellen; Boden und Fahrzeug bleiben unberuehrt
+	int ia[4], ib[4]; float wa[4], wb[4];
+	cubic_lift_weights(gid % extent_a, ratio, coarse_a, ia, wa);
+	cubic_lift_weights(gid / extent_a, ratio, coarse_b, ib, wb);
+	float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+	for(uint jj=0u; jj<4u; jj++) for(uint ii=0u; ii<4u; ii++) {
+		const float wij = wa[ii]*wb[jj];
+		if(wij==0.0f) continue;
+		const ulong cb = ((ulong)ib[jj]*(ulong)coarse_a + (ulong)ia[ii])*4ul;
+		v[0] += wij*coarse_plane[cb+0ul];
+		v[1] += wij*coarse_plane[cb+1ul];
+		v[2] += wij*coarse_plane[cb+2ul];
+		v[3] += wij*coarse_plane[cb+3ul];
+	}
+	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
+	if(!(v[0]>0.5f&&v[0]<2.0f)) return;
+	if(!isfinite(v[1])||!isfinite(v[2])||!isfinite(v[3])) return;
+	rho[n] = v[0];
+	u[                 n] = v[1];
+	u[    def_N+(ulong)n] = v[2];
+	u[2ul*def_N+(ulong)n] = v[3];
+} // drive_boundary_cubic_lift()
+
 )+"#ifdef FORCE_FIELD"+R(
 )+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx

@@ -43,6 +43,11 @@ private:
 	Memory<uint> tile_slot; // tile_id -> kompakter Slot; 0xFFFFFFFF = tote Tile
 	uint sparse_tiles_x = 0u, sparse_tiles_y = 0u, sparse_tiles_z = 0u;
 	uint sparse_n_active = 0u;
+	// Read-once-Kopien der statischen Schalter, im Konstruktor uebernommen. Alles ausserhalb des
+	// Konstruktors liest AUSSCHLIESSLICH diese -- sonst aenderte ein Schalterwechsel zwischen zwei
+	// Domaenen rueckwirkend das Verhalten der ersten (finalize_sparse_tiles laeuft viel spaeter).
+	bool sparse_on = false;
+	uint sparse_T = 8u;
 	// FORK -- Druck-Auslass. Leer, solange set_pressure_outlet_faces() nicht gerufen wurde; der Kernel
 	// bleibt dann default-konstruiert und enqueue_apply_pressure_outlet() ist ein No-op.
 	// po_interior wird HOST-seitig bestimmt, nicht device-seitig aus einer Richtung abgeleitet: nur so
@@ -95,6 +100,17 @@ public:
 	// Lesen zurueckgesetzt (read-once), damit eine zweite Domaene nicht versehentlich dieselbe Box erbt.
 	static uint s_fbbox[6]; // {x0, y0, z0, nx, ny, nz}; nx==0 -> volle Domaene
 	static void set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz);
+
+	// FORK -- Doppel-Domaene: EIN Streifenpuffer, gross genug fuer die groesste vorkommende Ebene, plus
+	// zwei Kernel. Nur belegt, wenn LBM::alloc_coupling_planes() gerufen wurde; sonst bleibt alles unangetastet.
+	// Der Puffer haelt 4 floats je Zelle (rho, u_x, u_y, u_z). Grobe Ebenen sind klein -- ein paar hundert kB --,
+	// darum genuegt EIN Puffer fuer alle fuenf Flaechen nacheinander.
+	// Oeffentlich, weil die Kopplung von der LBM-Ebene aus gefahren wird und nicht von der Domaene.
+	Memory<float> coupling_plane;
+	ulong coupling_max_plane_cells = 0ull;
+	Kernel kernel_extract_plane_macros;
+	Kernel kernel_drive_boundary_cubic_lift;
+	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
 
 	static bool s_sparse_tiles_on; // CFD_SPARSE_TILES
 	static uint s_sparse_T;        // CFD_TILE: 8 = VRAM-lastig (-40 % Tempo, 1,43 GB), 16 = Tempo-lastig (-28 %, 0,77 GB)
@@ -240,6 +256,16 @@ public:
 
 
 
+// FORK Doppel-Domaene: achsen-normale Ebene in Zellkoordinaten einer Domaene.
+// axis: 0 = X-normal (Ebene spannt Y,Z), 1 = Y-normal (spannt X,Z), 2 = Z-normal (spannt X,Y).
+// extent_a laeuft ueber die ERSTE aufgespannte Achse, extent_b ueber die zweite.
+struct PlaneSpec {
+	uint3 origin;   // Zellindex der unteren Ecke
+	uint extent_a;  // Zellen entlang der ersten aufgespannten Achse
+	uint extent_b;  // Zellen entlang der zweiten aufgespannten Achse
+	uint axis;      // Normalenachse (0=x, 1=y, 2=z)
+};
+
 class LBM {
 private:
 	uint Nx=1u, Ny=1u, Nz=1u; // (global) lattice dimensions
@@ -249,7 +275,7 @@ private:
 	void sanity_checks_constructor(const vector<Device_Info>& device_infos, const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint Dy, const uint Dz, const float nu, const float fx, const float fy, const float fz, const float sigma, const float alpha, const float beta, const uint particles_N, const float particles_rho); // sanity checks on grid resolution and extension support
 	void sanity_checks_initialization(); // sanity checks during initialization on used extensions based on used flags
 	void initialize(); // write all data fields to device and call kernel_initialize
-	void do_time_step(); // call kernel_stream_collide to perform one LBM time step
+	void do_time_step(const bool sync_single_gpu=true); // call kernel_stream_collide to perform one LBM time step; sync_single_gpu=false laesst die Warteschlange offen (fuer run_async)
 
 	void communicate_field(const enum_transfer_field field, const uint bytes_per_cell);
 
@@ -468,12 +494,26 @@ public:
 	LBM(const uint3 N, const float nu, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
 	LBM(const uint3 N, const float nu, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
 	LBM(const uint3 N, const float nu, const float fx, const float fy, const float fz, const uint particles_N, const float particles_rho=1.0f); // compiles OpenCL C code and allocates memory
+	// FORK Doppel-Domaene: explizite Geraetewahl. smart_device_selection() nimmt immer das schnellste Geraet;
+	// fuer zwei LBM-Instanzen auf zwei VERSCHIEDENEN GPUs (Fine auf der dGPU, Coarse auf der iGPU) braucht es diesen Weg.
+	LBM(const uint3 N, const float nu, const Device_Info& device_info, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=1.0f);
 	~LBM();
 
 	void run(const ulong steps=max_ulong, const ulong total_steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
+	// FORK Doppel-Domaene: setzt `steps` Zeitschritte ohne Barriere in die Warteschlange und kehrt sofort zurueck.
+	// Der Aufrufer MUSS finish() rufen, bevor er ein Geraetepuffer liest. Erfordert einen vorherigen run() (Initialisierung).
+	void run_async(const ulong steps);
+	void finish(); // FORK: Barriere ueber alle Warteschlangen dieser LBM-Instanz
 	void update_fields(); // update fields (rho, u, T) manually
 	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out=1.0f); // FORK: Druck-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
+	// FORK -- Doppel-Domaene (Kopplung grob -> fein). Reihenfolge: einmal alloc_coupling_planes() auf BEIDEN
+	// Domaenen, danach je Fernfeld-Schritt extract_plane_macros() auf der groben und drive_boundary_from_coarse()
+	// auf der feinen Domaene. Beide erfordern einen vorherigen run() (Kernel brauchen initialisierte Puffer).
+	bool plane_fits(const PlaneSpec& plane, const char* who) const; // prueft, dass die Ebene ganz in der Domaene liegt
+	void alloc_coupling_planes(const ulong max_plane_cells);
+	void extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf); // liest (rho,u) einer Ebene in host_buf (4 floats/Zelle)
+	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
 	void reset(); // reset simulation (takes effect in following run() call)
 #ifdef FORCE_FIELD
 	void update_force_field(); // calculate forces from fluid on TYPE_S cells
