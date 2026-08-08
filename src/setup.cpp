@@ -469,6 +469,29 @@ static void main_setup_fahrzeug() {
 	sat_shell_and_void_fill(lbm, veh, Nx, Ny, Nz); // derselbe Voxelizer wie beim Kugelfall
 
 	// ---------------------------------------------------------------- Randbedingungen
+	// ---------------------------------------------------------------- Kontaktflaeche
+	// Fahrzeugzellen AUF der Bodenebene z=0 verlieren das TYPE_X-Bit und werden damit Teil der Strasse:
+	// sie bleiben solid, laufen mit u_road mit, und object_force(TYPE_S|TYPE_X) summiert sie NICHT mehr mit.
+	//
+	// Warum das noetig ist, gemessen: mit dem Fahrzeug auf dem Boden liegen 2694 Zellen mit TYPE_S|TYPE_X
+	// auf der Domaenen-RANDebene. Dort rechnet calculate_indices periodisch, load_f greift also ueber den
+	// Rand auf die gegenueberliegende Ebene. Zusammen mit den null- und einzelligen Fluidspalten an den
+	// vier Reifenaufstandsflaechen (2694/5142/3374 Schalenzellen in z=0/1/2) explodierte der Fall:
+	// Fz erreichte bei 2.8 ms -11.4 Millionen N, bei 3.8 ms stand nan in der Reihe, danach fror das Feld
+	// bei +343640 N ein. Das ist die auf die FP16C-Grenze gesaettigte DDF-Ablage dieser Zellen, keine Kraft.
+	//
+	// Der alte Baum machte dasselbe (setup.cpp:1909: TYPE_X-Zellen bei z=0 bekommen u_lat) -- nur liess er
+	// das Fahrzeug zusaetzlich 16 mm schweben. Auf dem Boden stehen ist die physikalisch richtigere Wahl,
+	// dann muss die Kontaktflaeche aber sauber an die Strasse uebergeben werden.
+	{
+		ulong contact = 0ull;
+		for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+			const ulong n = (ulong)x + (ulong)y*(ulong)Nx; // z = 0
+			if((lbm.flags[n]&TYPE_X)!=0u) { lbm.flags[n] &= (uchar)~TYPE_X; contact++; } // wird unten zu TYPE_S + u_road
+		}
+		print_info("Kontaktflaeche: "+to_string(contact)+" Fahrzeugzellen auf z=0 an die Strasse uebergeben (TYPE_X entfernt)");
+	}
+
 	// x- = Einlass, x+ = Auslass, ALLE y- und z-Flaechen = feste mitbewegte Waende (Heiko-Vorgabe).
 	// ★ 2026-08-08: vorher standen y+-, z+ auf TYPE_E-Freistrom. Damit prägten FUENF Flaechen die
 	// Geschwindigkeit auf, der Fall war massiv ueberbestimmt und es stroemte GAR NICHTS -- der
