@@ -10,8 +10,11 @@
 // erreichbar -- dort ist die Grenzschicht aufgeloest und es braucht kein Turbulenzmodell.
 //
 // Dies ist der Neuaufbau auf frischem Upstream (2026-08-08). Bewusst OHNE: Wandmodell,
-// NUT_PATH_A, Mozaffari-APG, Bodenclamp, Abloesesonde, Slice-Renderer. Die kommen einzeln
-// zurueck, jede erst dann, wenn eine Messung zeigt, dass sie eine Zahl veraendert.
+// NUT_PATH_A, Mozaffari-APG, Bodenpraegung, Abloesesonde. Die kommen einzeln zurueck, jede erst
+// dann, wenn eine Messung zeigt, dass sie eine Zahl veraendert.
+// ★ KORREKTUR 2026-08-08: hier stand auch "Slice-Renderer" auf dieser Liste -- der ist laengst da
+// (render_yslice, weiter unten) und hat am selben Tag den Motorraum sichtbar gemacht. Genau die
+// Drift zwischen Kopf und Code, die V1 unlesbar gemacht hat.
 //
 // Vier Messfehler des alten Baums sind hier an der Quelle behoben:
 //   1. CSV mit PUNKT als Dezimaltrennzeichen. Das deutsche Komma hat am 2026-08-08 einen
@@ -91,7 +94,7 @@ static double block_sem(const std::vector<double>& v, const uint nblocks) {
 // u und flags muessen vorher vom Device gelesen sein -- der Aufrufer entscheidet, wie oft das passiert,
 // denn es kostet einen vollen Transfer.
 static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uint y_slice,
-                          const float u2si, const float u_ref_si, const int t_ms, const string& dir) {
+                          const float u2si, const float u_ref_si, const int t_ms, const string& dir, const string& tag) {
 	Image img(Nx, Nz);
 	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + (ulong)Nx*((ulong)y_slice + (ulong)Ny*(ulong)z);
@@ -114,9 +117,10 @@ static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 		}
 		img.set_color(x, Nz-1u-z, col); // Bildzeile 0 ist oben, z waechst nach oben
 	}
-	const string sdir = dir+"slices/"; create_folder(sdir);
+	// ★ Heiko 2026-08-08: alle Ausgaben eines Laufs in EINEN Ordner, keine Unterordner. Der Name traegt
+	// die Zuordnung (nah/fern) und die Zeit in Millisekunden, damit die Dateien von selbst sortieren.
 	string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
-	write_png(sdir+"slice_y"+to_string(y_slice)+"_"+ms+"ms.png", &img);
+	write_png(dir+"schnitt_"+tag+"_"+ms+"ms.png", &img);
 }
 
 // SAT-Schale plus Void-Fill. Upstreams Ray-Paritaets-Voxelizer laesst achsparallele Ebenen loechrig
@@ -629,7 +633,7 @@ static void main_setup_fahrzeug() {
 		if(slice_dt>0.0f && (float)t_si>=slice_next) {
 			slice_next = (float)t_si + slice_dt;
 			lbm.u.read_from_device(); lbm.flags.read_from_device();
-			render_yslice(lbm, Nx, Ny, Nz, y_mid, si_u/u_lat, si_u, (int)((float)t_si*1000.0f+0.5f), out_dir);
+			render_yslice(lbm, Nx, Ny, Nz, y_mid, si_u/u_lat, si_u, (int)((float)t_si*1000.0f+0.5f), out_dir, "einzel");
 			print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
 		}
 	}
@@ -1067,9 +1071,23 @@ static void main_setup_fahrzeug_dd() {
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
 	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
-	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f);
+	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f); // alle 10 ms (Heiko); 0 = aus
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 	create_folder(out_dir);
+	// ★ Heiko 2026-08-08: eine Codesicherung MIT in den Lauf-Ordner. Damit laesst sich Monate spaeter
+	// noch feststellen, mit welchem Stand eine Zahl entstanden ist -- ohne Git-Archaeologie und ohne die
+	// Annahme, der Arbeitsbaum sei seither unveraendert.
+	{
+		const string src_dir = get_exe_path()+"../src/";
+		const string dst_dir = out_dir+"code/"; create_folder(dst_dir);
+		const char* files[6] = {"setup.cpp", "lbm.cpp", "lbm.hpp", "kernel.cpp", "defines.hpp", "opencl.hpp"};
+		for(uint i=0u; i<6u; i++) {
+			std::ifstream in(src_dir+files[i], std::ios::binary);
+			std::ofstream out(dst_dir+files[i], std::ios::binary);
+			if(in && out) out << in.rdbuf();
+		}
+		print_info("Codesicherung: "+dst_dir+" (setup, lbm, kernel, defines, opencl)");
+	}
 	const float q_inf = 0.5f*si_rho*si_u*si_u;
 	print_info("Eine Fernfeld-Durchspuelung = "+to_string(t_flush,4u)+" s; Laufzeit "+to_string(t_end,3u)+" s = "
 		+to_string(n_outer)+" grobe x "+to_string(ratio)+" feine Schritte, Mittelung ab "+to_string(t_warmup,3u)+" s");
@@ -1166,6 +1184,7 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<double> ts, fx, fz, fx_c;
 	float slice_next = 0.0f;
 	Clock outer_clock; double t_acc = 0.0; ulong n_acc = 0ull;
+	double Fx_prev = 1e300, Fz_prev = 1e300; uint n_frozen = 0u; // fuer den Einfrier-Test, siehe Zeitschleife
 	// ★ Pruefer-Befund 2026-08-08: die CSV entstand bisher ERST NACH der Schleife. Bei 2,5 Stunden
 	// Laufzeit heisst das: ein Abbruch durch Treiber, Speicher, Stromausfall oder Strg-C kostet
 	// SAEMTLICHE Samples. Jetzt wird jede Zeile sofort geschrieben und geleert -- die Datei ist damit
@@ -1174,11 +1193,34 @@ static void main_setup_fahrzeug_dd() {
 	std::ofstream fcsv(out_dir+"forces.csv"); fcsv.precision(8);
 	fcsv << "time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N\n" << std::flush;
 	const ulong verify_at2 = min(n_outer>0ull ? n_outer-1ull : 0ull, (ulong)env_u("CFD_DD_VERIFY_AT", 200u));
+
+	// ---------------------------------------------------------------- Leistungsindex und Phasenprofil
+	// ★ Aus V1 nachgezogen (Heiko), dort knowledge/performance.md. Zwei Groessen, die V2 bisher fehlten:
+	//
+	//  LEISTUNGSINDEX = Wandsekunden je physikalischer Sekunde. Kleiner ist besser. Er ist die einzige
+	//  Zahl, die ueber Aufloesungen und Gitterverhaeltnisse hinweg vergleichbar bleibt -- MLUPs sind es
+	//  nicht, weil sie die Zellzahl schon eingerechnet haben und bei zwei Domaenen ohnehin unbrauchbar
+	//  werden (die Konsolenanzeige mischt die grobe Zellzahl mit der feinen Schrittzeit).
+	//  V1-Referenz: Standardlauf 2026-06-23, dieselbe Konfiguration, Index ~12.000.
+	//
+	//  PHASENPROFIL: wo die Zeit WIRKLICH sitzt. V1s Lehre dazu steht in performance.md und ist teuer
+	//  bezahlt: ein Theorie-Audit suchte den Hebel im Async-Overlap, waehrend die groesste Quelle eine
+	//  96-MB-Verschwendung je Transfer war -- die Messung fand sie in Minuten, das Audit gar nicht.
+	//  Deshalb wird hier gemessen, nicht schaetzt.
+	auto t_now = []() { return std::chrono::steady_clock::now(); };
+	double ph_kopplung=0.0, ph_fein=0.0, ph_grob=0.0, ph_kraft=0.0, ph_schnitt=0.0; // Sekunden, seit dem letzten Bericht
+	ulong ph_n = 0ull;
+	auto wall_begin = t_now();
+	double t_phys_begin = 0.0;
+
 	for(ulong outer=0ull; outer<n_outer; outer++) {
 		outer_clock.start();
+		const auto _t0 = t_now();
 		lbm_c.run_async(1u);
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio);
+		const auto _t1 = t_now();
 		lbm_f.run((ulong)ratio, n_outer*(ulong)ratio);
+		const auto _t2 = t_now();
 
 		// ------------------------------------------------------------ Wirksamkeitsnachweis (einmal)
 		// "Laeuft" ist nicht "wirkt". Diese Pruefung beantwortet beides getrennt:
@@ -1244,9 +1286,15 @@ static void main_setup_fahrzeug_dd() {
 
 		lbm_c.finish();
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_c.extract_plane_macros(cp[p], face[p]); // nur die vier getriebenen Flaechen -- x+ ist Druckauslass, siehe oben
+		const auto _t3 = t_now();
 		t_acc += outer_clock.stop(); n_acc++;
+		ph_kopplung += std::chrono::duration<double>(_t1-_t0).count();
+		ph_fein     += std::chrono::duration<double>(_t2-_t1).count();
+		ph_grob     += std::chrono::duration<double>(_t3-_t2).count();
+		ph_n++;
 
 		if((outer+1ull)%(ulong)sample_every==0ull) {
+			const auto _t4 = t_now();
 			lbm_f.update_force_field();
 			const float3 F = lbm_f.object_force(TYPE_S|TYPE_X);
 			lbm_c.update_force_field();
@@ -1259,27 +1307,60 @@ static void main_setup_fahrzeug_dd() {
 			// danach fror das Feld ein. In LBM breitet sich ein nan aus und verschwindet nie wieder;
 			// Weiterrechnen waere nicht Geduld, sondern Verschwendung. Besonders wichtig, solange
 			// RHO_CLAMP fehlt und tau bei 0,50003 steht.
+			// ★★ NACHGESCHAERFT 2026-08-08, am eigenen Lauf gelernt: der NaN-Test allein REICHT NICHT.
+			// dd_lauf01 kippte bei 0,15 s NICHT in nan, sondern in die FP16C-Saettigung. Danach stand Fz bei
+			// exakt 343 063 N und Fx bei 172,478 N -- Abtastung fuer Abtastung BITGLEICH, endliche Zahlen,
+			// keine Warnung. Der Lauf lief zwei Stunden lang tot weiter. V1 fror am selben Punkt bei
+			// 343 640 N ein: praktisch derselbe Wert, also derselbe Mechanismus. Das ist keine Kraft,
+			// sondern die auf die Zahlenformatgrenze gelaufene DDF-Ablage.
+			// Drei Tests statt einem. Zwei bitgleiche Kraftwerte hintereinander gibt es in einer
+			// abgeloesten Stroemung nicht; drei sind ein Beweis.
 			{
 				const double Fxf = (double)units_coarse.si_F(Fc.x);
-				if(!std::isfinite(Fx_si) || !std::isfinite(Fz_si) || !std::isfinite(Fxf)) {
+				const double q_A = (double)q_inf*A_ref;
+				string grund = "";
+				if(!std::isfinite(Fx_si) || !std::isfinite(Fz_si) || !std::isfinite(Fxf)) grund = "die Kraft ist keine Zahl mehr";
+				else if(n_frozen>=2u) grund = "die Kraft steht seit drei Abtastungen BITGLEICH -- das Feld ist eingefroren (Zahlenformat gesaettigt)";
+				else if(t_si>0.02 && (fabs(Fx_si)>20.0*q_A || fabs(Fz_si)>20.0*q_A)) grund = "die Kraft ist unphysikalisch gross (|Cd| oder |Cz| ueber 20)";
+				if(grund!="") {
 					fcsv << std::flush; fcsv.close();
-					print_error("Divergenz bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
-						+"): die Kraft ist keine Zahl mehr. Lauf abgebrochen. Die CSV bis hierher steht in "
-						+out_dir+"forces.csv -- dort ist zu sehen, wann es kippt.");
+					print_error("Lauf gekippt bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
+						+"): "+grund+". Fx = "+to_string((float)Fx_si,3u)+" N, Fz = "+to_string((float)Fz_si,3u)
+						+" N. Abgebrochen. Die CSV bis hierher steht in "+out_dir+"forces.csv -- dort ist zu sehen, wann es kippt.");
 				}
+				n_frozen = (Fz_si==Fz_prev && Fx_si==Fx_prev) ? n_frozen+1u : 0u;
+				Fz_prev = Fz_si; Fx_prev = Fx_si;
 			}
 			const double Fx_far = (double)units_coarse.si_F(Fc.x);
 			ts.push_back(t_si); fx.push_back(Fx_si); fz.push_back(Fz_si); fx_c.push_back(Fx_far);
 			fcsv << t_si << "," << Fx_si << "," << Fz_si << "," << Fx_si/((double)q_inf*A_ref) << ","
 			     << Fz_si/((double)q_inf*A_ref) << "," << Fx_far << "\n" << std::flush; // sofort auf Platte, siehe oben
+			const auto _t5 = t_now();
 			if(slice_dt>0.0f && (float)t_si>=slice_next) {
 				slice_next = (float)t_si + slice_dt;
 				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
 				lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
-				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir+"near_");
+				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "nah");
 				lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
-				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir+"far_");
+				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "fern");
 				print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
+			}
+			ph_kraft += std::chrono::duration<double>(_t5-_t4).count();
+			ph_schnitt += std::chrono::duration<double>(t_now()-_t5).count();
+
+			// ---------------------------------------------------- Leistungsbericht
+			{
+				const double wall = std::chrono::duration<double>(t_now()-wall_begin).count();
+				const double phys = t_si - t_phys_begin;
+				const double idx  = phys>0.0 ? wall/phys : 0.0;
+				const double ges  = ph_kopplung+ph_fein+ph_grob+ph_kraft+ph_schnitt;
+				auto pct = [&](const double v) { return ges>0.0 ? to_string((float)(100.0*v/ges),1u) : string("0.0"); };
+				print_info("[LEISTUNG] Index = "+to_string((float)idx,0u)+" s_wall/s_phys (V1-Referenz ~12000, kleiner ist besser)"
+					+" | je grobem Schritt "+to_string((float)(ges/(double)max(1ull,ph_n)*1000.0),1u)+" ms");
+				print_info("[PHASEN]   Kopplung grob->fein "+pct(ph_kopplung)+" % | Nahfeld "+to_string(ratio)+" Schritte "+pct(ph_fein)
+					+" % | Fernfeld synchronisieren und entnehmen "+pct(ph_grob)+" % | Kraefte "+pct(ph_kraft)+" % | Schnitte "+pct(ph_schnitt)+" %");
+				ph_kopplung=ph_fein=ph_grob=ph_kraft=ph_schnitt=0.0; ph_n=0ull;
+				wall_begin = t_now(); t_phys_begin = t_si; // naechstes Fenster
 			}
 		}
 	}

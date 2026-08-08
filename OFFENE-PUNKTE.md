@@ -1,11 +1,15 @@
-# Offene Punkte — Stand 2026-08-08 abends
+# Offene Punkte — Stand 2026-08-08, spät abends
 
 Neuaufbau auf frischem Upstream `8986874`. Alles hier ist gemessen oder am Code belegt;
 Vermutungen sind als solche markiert.
 
-**Validierungsregel (Heiko, 2026-08-08):** Nicht mehr gegen den alten Fork validieren.
-Gültige Referenzen sind **OpenFOAM 13** (mr2v40H: Cd 0,599 / Cz −1,301) und die Literatur.
-Der alte Baum taugt nur noch dazu, Portierfehler zu finden — nie, um Physik zu bewerten.
+**Validierungsregel (Heiko):** Nicht gegen den alten Fork validieren. Gültige Referenzen sind
+**OpenFOAM 13** (`mr2v40H`: Cd 0,599 / Cz −1,301) und die Literatur. Der alte Baum taugt nur
+dazu, Portierfehler zu finden — nie, um Physik zu bewerten.
+
+**Iron Rule (Heiko, 2026-08-08):** Statt einer schriftlichen Vorhersage vor jedem Test gilt jetzt
+die **Verifikation der Codeänderung**: für jede Änderung nachweisen, dass sie im laufenden Binary
+steckt, dass ihr Pfad wirklich erreicht wird, und dass sie tut, was sie behauptet.
 
 ---
 
@@ -13,114 +17,135 @@ Der alte Baum taugt nur noch dazu, Portierfehler zu finden — nie, um Physik zu
 
 | | Stand |
 |---|---|
-| Kugelfall | läuft, portiertreu (Geometrie exakt reproduziert: R_eff 19,49 Z, A_eff +8,0 %) |
-| Fahrzeugfall | läuft technisch bei 4 mm, 501,5 M Zellen, 28.167 MB VRAM — **aber divergiert** |
+| Kugelfall | läuft; Validierung mit FP16C/TRT steht noch aus |
+| Fahrzeug, Einzelgitter | läuft, aber 38,4 % Versperrung → nicht mit OF13 vergleichbar |
+| **Fahrzeug, Doppel-Domäne** | **läuft, Versperrung 2,74 % — kippt aber bei ~0,15 s** |
 | SAT-Voxelizer + Void-Fill | portiert, verifiziert |
-| Sparse Tiling | portiert, an der Kugel bit-neutral (T=4/8/16) |
+| Sparse Tiling | portiert, an der Kugel bit-neutral; am Fahrzeug ungeprüft |
 | F-Bounding-Box | portiert, spart gemessen 4,07 GB |
 | Druck-Auslass | allgemein (alle 6 Flächen), drei Prüfer, drei Befunde behoben |
-| Slice-Export | portiert |
+| Slice-Export | portiert, alle 10 ms, alles in einem Lauf-Ordner |
+| Kopplung grob → fein | portiert, Wirksamkeit **bit-genau nachgewiesen** |
+| Leistungsindex + Phasenprofil | **neu, aus V1 nachgezogen** |
+
+**Leistung, gemessen 2026-08-08:** Index **≈ 9.100** s_wall/s_phys gegen V1s **~12.000** bei
+identischer Konfiguration — V2 ist rund **24 % schneller**, und das mit eingeschaltetem
+`UPDATE_FIELDS`, das V1 gar nicht hatte (kostet 10–15 %).
 
 ---
 
-## P0 — der Fahrzeugfall divergiert
+## P0 — der Doppel-Domänen-Lauf kippt bei 0,15 s
 
-**Symptom, gemessen** (`export/fz_kontakt/forces.csv`):
-Fz erreicht bei 2,8 ms **−11,4 Mio N**, dann `nan`, dann friert das Feld ein.
-Die früher berichteten +343.640 N sind der eingefrorene Rest, nicht die Ursache.
+**Gemessen** (`export/dd_lauf01/forces.csv`): Cd fällt vom Anlaufstoß 53,9 sauber über
+8,0 → 5,3 → 2,8 → 1,46 → 0,43 → 1,02 → 0,94. Dann, zwischen 0,141 s und 0,161 s:
 
-**Ursache, zwei Prüfer unabhängig:** Das Fahrzeug berührt den Boden; an den vier
-Reifenaufstandsflächen entstehen null- und einzellige Fluidspalte (2694 / 5142 / 3374
-Schalenzellen in z = 0/1/2). Halfway-Bounce-Back mit SRT ist dort instabil, weil
-**Λ = (τ−½)² = 1,1·10⁻⁹** — die effektive Wandposition wandert ins Fluid, ein
-einzelliger Spalt wird effektiv negativ breit.
+| Zeit | Cd | Cz |
+|---|---:|---:|
+| 0,141 s | 0,942 | −0,696 |
+| **0,161 s** | **0,169** | **336,398** |
+| 0,201 s | 0,169 | 336,398 |
 
-**Bereits erledigt:** Kontaktzellen bei z=0 verlieren das TYPE_X-Bit und gehen an die
-Straße über (2694 Zellen). Das behebt die Kraft-Buchhaltung, **nicht** die Instabilität.
+Fz steht danach auf **343.063 N**, Abtastung für Abtastung bitgleich. **V1 fror am selben Punkt
+bei 343.640 N ein** — praktisch dieselbe Zahl, also derselbe Mechanismus: keine Kraft, sondern
+die auf die FP16C-Grenze gelaufene DDF-Ablage.
+
+**Der NaN-Wächter hat das nicht gefangen** — die Werte sind endlich, nur eingefroren. Behoben:
+drei bitgleiche Abtastungen hintereinander gelten als Beweis, dazu ein Größentest (|Cd| oder
+|Cz| über 20).
+
+**Spur, aus den Schnitten:** Das **Fernfeld klingelt**, und zwar vom **Einlass** ausgehend. Bei
+51 ms ist es eine schmale, heftig oszillierende Säule bei x = 0; bei 151 ms füllen horizontale
+Streifen (Wechsel von Zeile zu Zeile in z, |u| zwischen unter 15 und über 45 m/s) die ganze
+Domäne. τ_c = 0,500007 — das grobe Gitter ist praktisch reibungsfrei, akustische Moden werden
+nicht gedämpft. Dieses Feld treibt vier der fünf Nahfeld-Ränder.
+
+Im Nahfeld läuft die Stagnation von hinten nach vorn durch (Heiko-Beobachtung am Schnitt).
 
 **Nächste Schritte, in dieser Reihenfolge:**
-1. `CFD_NU=0.16` → τ = 0,8, Λ = 0,09. Vier Minuten. Beantwortet definitiv, ob Λ die
-   Ursache ist. Physikalisch falsch, als Diagnose eindeutig.
-2. Falls bestätigt: **TRT mit Λ = 3/16**. Macht die Bounce-Back-Wandposition
-   viskositätsunabhängig — die eigentliche Antwort auf ein bodenberührendes Fahrzeug.
-   `//#define TRT` steht in `defines.hpp:11` bereit.
-3. **`RHO_CLAMP` nachziehen.** Fehlt im neuen Baum vollständig; der alte hatte es mit
-   ausdrücklichem Verweis auf den Kontaktpatch (ρ auf [0,5 ; 1,5]).
-
-**Nicht tun:** das Fahrzeug wieder anheben. Das Schweben war die Ursache der
-Geschwindigkeitsstagnation in den unteren Millimetern (Befund 2026-08-07) — es wäre
-Zukleben, nicht Lösen.
+1. **Isolieren:** leeres Fernfeld, kein Fahrzeug, keine Kopplung. Ringt ein leerer grober Kanal
+   schon, liegt es an Randbedingung und Viskosität des groben Gitters.
+2. **RHO_CLAMP** nachziehen. Jetzt akut, nicht mehr vorsorglich.
+3. Ein- und Auslassbehandlung des groben Gitters überarbeiten (siehe eigener Abschnitt unten).
 
 ---
 
-## P1 — fehlende Grundlagen, ohne die Zahlen nichts wert sind
+## P1 — Ein- und Auslass: die Analyse, die V1 nicht hatte
 
-- **Kein Kugellauf mit dem aktuellen Baum.** Der letzte ist von 10:51, also vor
-  UPDATE_FIELDS, vor den Tile-Änderungen, vor der Durchspülungs-Laufzeit. Die mehrfach
-  benutzte Aussage „die Kugel läuft mit demselben Code sauber" ist **nicht belegt**.
-- **Kugelvalidierung lief im falschen Zahlenformat.** FP16S statt FP16C (in
-  `defines.hpp` waren beide gesetzt, FP16S gewinnt im `#if defined`). Behoben, aber die
-  Validierung muss komplett wiederholt werden.
-- **Commit `3a265bf` änderte zwei Dinge gleichzeitig** — Bodenkontakt *und*
-  UPDATE_FIELDS. Aus den Daten nicht trennbar. Verstoß gegen die eigene Regel.
-- **Versperrung 38,4 %.** Querschnitt 4,819 m² gegen A_ref 1,85 m². Windkanalpraxis
-  liegt unter 5–10 %. Cd ist so nicht mit OF13 vergleichbar, unabhängig von P0.
-  Entweder Domäne quer vergrößern oder Seiten als Freistrom.
+Das ist kein Portierrückstand, sondern eine offene Frage, die im alten Baum nie gestellt wurde.
+
+**Einlass (beide Gitter), heute:** TYPE_E mit ρ = 1 und u = u_∞. `stream_collide` setzt dort
+`f = f_eq(ρ, u)` in jedem Schritt — ein voller Gleichgewichts-Reset, der den
+Nichtgleichgewichtsanteil verwirft. Bei τ ≈ 0,5 gibt es nichts, was die dadurch erzeugte
+akustische Störung dämpft; sie läuft in die Domäne und wird an den anderen Rändern reflektiert.
+Genau das zeigt der Fernfeld-Schnitt.
+
+**Auslass (beide Gitter), heute:** ρ fest auf 1,0, u aus der Innenzelle kopiert. Am **Nahfeld**
+sitzt dieser Rand **0,45 Fahrzeuglängen hinter dem Heck**, also mitten im Totwasser, und ist als
+einzige Fläche von der Kopplung ausgenommen. Der Basisdruck — bei einem Fahrzeug der größte
+Einzelbeitrag zu Cd — wird damit nicht vom Fernfeld bestimmt, sondern auf Freistromdichte
+fixiert.
+
+**Zu prüfende Wege, keiner davon heute belegt:**
+- Ein- und Auslass **nicht-reflektierend** machen (charakteristische Randbedingung, oder eine
+  Dämpfungszone über einige Zellen), statt hart vorzuschreiben.
+- Am groben Einlass die Störung gar nicht erst erzeugen: den Gleichgewichts-Reset durch eine
+  Bedingung ersetzen, die den Nichtgleichgewichtsanteil stehen lässt.
+- Am Nahfeld-Auslass ρ nicht fixieren, sondern extrapolieren — dann fehlt allerdings der
+  Druckanker, und der muss von woanders kommen.
 
 ---
 
-## P2 — Befunde der Prüfer vom 2026-08-08 am NEUEN Code, noch offen
+## P2 — Befunde der Prüfer vom 2026-08-08, noch offen
 
 | | Ort | Was |
 |---|---|---|
-| H1 | `kernel.cpp:2082` | `object_torque` liest F mit Voll-Domänen-Index, F ist bbox-groß → Out-of-Bounds. Latent (kein Aufrufer). Gleiches in den Graphics- und PARTICLES-Pfaden. |
-| H2 | `kernel.cpp:913` | Sparse Tiling: `update_force_field` läuft auf tief innenliegenden Solidzellen, deren Nachbarn in toten Tiles liegen → liest den Papierkorb-Slot 0. Bei **mitbewegten Wänden** steht dort `f_eq(1, u_lat)`, also Impuls ≠ 0. Kann Kräfte erzeugen, die es im dichten Pfad nicht gibt. **Bit-Neutralität am Fahrzeug ist ungeprüft.** |
-| H3 | `lbm.cpp:108` | F-BBox ohne Multi-Domain-Absicherung, interpretiert globale als lokale Koordinaten. Sparse Tiling bricht bei D>1 ab, die F-BBox nicht. |
-| M1 | `setup.cpp:39` | `env_u` klemmt auf ≥1 → `CFD_PO_FACES=0` heißt nicht „aus", sondern **x_min = der Einlass**. Widerspricht der eigenen Regel im Dateikopf. |
-| M4 | `setup.cpp:95` | **Slice zeichnet TYPE_MS-Fluidzellen als Solid** (`flags & (TYPE_S\|TYPE_X)`, und TYPE_MS = 0x03 enthält TYPE_S). Die Diagnosebilder lügen über die Geometrie. Richtig: `(flags & TYPE_BO) == TYPE_S`. |
-| M3 | `defines.hpp:32` | SUBGRID unmarkiert mit eingeschaltet; widerspricht dem Kommentar im Kugelfall, der sagt, bei Re = 100…1000 brauche es kein Turbulenzmodell. |
-| M2, M5, M6 | `setup.cpp`, `lbm.cpp` | Veraltete oder falsche Kommentare (5-mm-Default, F-BBox-Marge-Begründung, UPDATE_FIELDS-Latenz). |
-| B5 | `setup.cpp:440` | y-Halbzellen-Versatz des alten Baums fehlt (310,0 statt 310,5). **Gegengeprüft: die STL hat null Facetten in der Mittelebene, die Degeneration kann nicht auslösen.** Trotzdem eine Abweichung. |
+| G1 | `opencl.hpp` | Zero-Copy des groben u-Puffers (2,44 GB) liegt über der selbst dokumentierten 1-GB-Hangschwelle des i915-USERPTR-ioctl. Gegenmaßnahme `ZEROCOPY_THRESHOLD_MB` bewusst **nicht** gesetzt — die Konfiguration hat mehrfach alloziert und gerechnet. |
+| G4 | `lbm.cpp:995` | Speicher-Vorabprüfung rechnet F über die **volle** Domäne und ignoriert die Bounding-Box: 32.043 MB nominal gegen 32.767 MB verfügbar, real belegt 28,1 GB. Geht durch, aber knapp. |
+| U1 | `lbm.hpp:420` | `Memory_Container` für F rechnet mit der vollen Domänengröße, das darunterliegende `Memory` ist bbox-groß. `lbm.F[i]` liefe aus dem Puffer. Kein Aufrufer. |
+| U2 | `info.cpp` | Die Konsolenanzeige ist bei zwei LBM-Instanzen unbrauchbar (mischt grobe Zellzahl mit feiner Schrittzeit). Deshalb der eigene Leistungsindex. |
+| M1 | `setup.cpp` | Nach der Voxelisierung wird nur `flags` zurückgelesen, nicht `u`. Heute folgenlos (das Fahrzeug steht); dokumentiert an der Stelle. |
+| M2 | `defines.hpp` | `VOLUME_FORCE` ist aktiv, tut aber nachweislich nichts (keine Volumenkraft übergeben, F nur auf Solidzellen). Abschalten spart Rechenzeit. |
+| B5 | `setup.cpp` | y-Halbzellen-Versatz des alten Baums fehlt. **Gegengeprüft: die STL hat null Facetten in der Mittelebene**, die Degeneration kann nicht auslösen. |
 
 ---
 
-## P3 — noch zu portieren
+## P3 — noch zu portieren, nach Bedeutung
 
-1. **Wandmodell Xue/Lu.** Spalding-Inversion nach u_τ (Newton, 5 Iterationen),
-   τ_w = ρu_τ², als Bodyforce auf die wandnahen Fluidzellen. Vorlage:
-   `../FluidX3D/src/kernel.cpp` (`apply_wall_model_xuelu`).
-   **Ohne die Knöpfe, die am 2026-08-08 als nicht angeschlossen nachgewiesen wurden:**
-   `WM_WALL_FRAME` (Aktivliste enthält nur den Körper, nie die Wände),
-   `wall_adj_flag` device-seitig (wird nie dereferenziert),
-   `WALL_VISC_BOOST_TARGET_BL_MM` (Tier-Sweep war bit-identisch).
-   Mozaffari-APG trägt gemessen 0,87 % zu Cd bei — Komplexität lohnt nicht.
-   **Erst nach P0**: das Wandmodell stabilisiert den Kontaktpatch nicht, das macht Λ.
-2. **Lagrava-Latt-4:1-Kopplung.** Zurückstellen, bis der Single-Domain-Fall eine
-   belastbare Zahl liefert — sonst weiß man bei einer Abweichung nicht, woher sie kommt.
-3. **NUT_PATH_A** — nur, wenn eine Messung zeigt, dass es etwas verändert. An der Kugel
-   war es wegen des Escudier-Caps (Mischweglänge 0,082 Zellen) praktisch inert.
+Grundlage ist die Prüfung in [V1-GEGEN-V2.md](V1-GEGEN-V2.md): **nur was in V1 nachweislich
+gewirkt hat**.
+
+1. **RHO_CLAMP** — jetzt P0, siehe oben.
+2. **Bodengeschwindigkeits-Prägung.** Cz −31 % in V1, der größte gemessene Einzelhebel dort —
+   und der am schlechtesten begründete. V1 selbst schreibt: „Möglicherweise ist die richtige
+   Antwort: ersatzlos entfernen." **Messen, nicht portieren.**
+3. **Mozaffari-APG** — −0,87 % auf Cd, gemessen. Gehört ins Fehlerbudget.
+4. **Druck-/Reibungs-Aufspaltung der Kraft** — die einzige Handhabe, um eine Cd-Abweichung
+   zwischen Form- und Reibungswiderstand zuzuordnen.
+5. **Ablösewinkel-Sonde θ_sep** — wirksame Diagnose mit eingebauter Gültigkeitsprüfung.
+6. **`CFD_DUMP_CL` / `CFD_DUMP_DEFINES`** (~20 Zeilen) — das Werkzeug gegen die teuerste
+   Fehlerklasse des Projekts.
+7. **Wandmodell Xue/Lu** — ohne die nachweislich toten Knöpfe. Am Fahrzeug nie isoliert vermessen.
+8. **NUT_PATH_A** — an der Kugel inert, am Fahrzeug nie vermessen.
 
 ---
 
 ## P4 — Validierung, die dem Projekt fehlt
 
 - **Kugel freistehend gegen die Standard-Widerstandskurve** (Clift/Grace/Weber) bei
-  Re_D = 100…1000. Die erste **externe** Referenz — bisher wurde nur gegen den eigenen
-  alten Baum und gegen OF13 validiert. `CFD_KUGEL_FREE=1` ist gebaut.
-  Vorher die Querausdehnung prüfen: bei nur 3 D ist die Versperrung 3,5 %.
-- **Sparse Tiling am Fahrzeug**: T = 8/16/32/64, Durchsatzverlust und VRAM-Ersparnis,
-  plus Bit-Neutralität (siehe H2).
+  Re_D = 100…1000. Die erste **externe** Referenz. Es gibt bis heute keinen Kugellauf mit TRT,
+  UPDATE_FIELDS und korrektem FP16C.
+- **Sparse Tiling am Fahrzeug**: T = 8/16/32/64, Durchsatz und VRAM, plus Bit-Neutralität.
 
 ---
 
-## Regeln, die sich heute bewährt haben
+## Regeln, die sich bewährt haben
 
-- **Immer nur eine Größe ändern.** Zweimal dagegen verstoßen, zweimal Zeit verloren.
+- **Verifikation der Codeänderung** statt Vorhersage: greift der Pfad, tut er das Behauptete?
+- **„Läuft" ist nicht „wirkt".** Der eingebaute Kopplungsnachweis prüft beides getrennt.
+- **Immer nur eine Größe ändern.** Mehrfach dagegen verstoßen, mehrfach Zeit verloren.
 - **Nach jedem Umbau den funktionierenden Gegenfall testen**, nicht nur den neuen.
-  So wurde der F-BBox-Konstruktorfehler gefunden (alle Kräfte exakt null).
-- **Slices von Anfang an mitlaufen lassen.** Ein Bild hat in einer Sekunde gezeigt, was
-  drei Läufe an Zahlen nicht gezeigt haben.
-- **Kontrollarm nicht vergessen.** Ein A/B ohne dritten Arm lädt zum Fehlschluss ein —
-  die „+1,35 % = der Erweiterungsstapel" waren so entstanden und falsch.
-- **Den richtigen Parameter variieren.** ν × 200 änderte Λ von 1,1e-9 auf 3,1e-5 —
-  beides faktisch null. Der Test war ungültig, der Schluss daraus falsch.
+- **Slices von Anfang an mitlaufen lassen.** Ein Bild hat den Motorraum und den Kipppunkt
+  gezeigt, den drei Läufe an Zahlen nicht gezeigt haben.
+- **Kontrollarm nicht vergessen.** Ein A/B ohne dritten Arm lädt zum Fehlschluss ein.
+- **Ein Wächter, der nur NaN kennt, ist kein Wächter.** Der teuerste Ausfall des Tages war
+  endlich, konstant und still.
