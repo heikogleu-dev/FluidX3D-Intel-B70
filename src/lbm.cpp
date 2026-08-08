@@ -237,6 +237,10 @@ void LBM_Domain::allocate(Device& device) {
 
 void LBM_Domain::enqueue_apply_pressure_outlet() { // FORK: Druck-Auslass
 	if(po_N_active==0u) return; // nicht konfiguriert -> nichts zu tun (kein Leerlauf-Dispatch)
+	// Reihenfolge ist tragend: erst den Akkumulator leeren, dann den Flaechenmittelwert bilden, dann
+	// anwenden. Alle drei auf derselben in-order-Warteschlange, also ohne zusaetzliche Barriere.
+	kernel_po_clear_mean.enqueue_run();
+	kernel_po_reduce_mean.enqueue_run();
 	kernel_apply_pressure_outlet.enqueue_run();
 }
 
@@ -525,6 +529,28 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define TYPE_X 0x40" // 0b01000000 // reserved type X
 	"\n	#define TYPE_Y 0x80" // 0b10000000 // reserved type Y
 
+	// FORK: REG_E(i) ist der Randwert einer TYPE_E-Zelle -- reines Gleichgewicht wie bisher, oder mit
+	// REGULARIZED_BOUNDARIES zusaetzlich der rekonstruierte Nichtgleichgewichtsanteil.
+	//
+	// ★★ ZWEI LEHREN VOM 2026-08-08 stecken in diesen paar Zeilen:
+	// (1) Das Makro war einmal der VOLLE 19-Richtungs-Ausdruck und expandierte 19-fach in die ternaere
+	//     Kollisionszeile. Der Intel-Uebersetzer blieb daran haengen; beim zweiten Mal fror der ganze
+	//     Rechner ein, weil der Desktop auf derselben GPU laeuft. Jetzt ist es ein Aufruf der kleinen
+	//     Funktion reg_fneq(), und der TYPE_E-Zweig ist in der Kollision herausgehoben.
+	// (2) Der Schalter ist eine LAUFZEIT-Entscheidung (CFD_REG_BC), keine Compile-Zeit-Entscheidung.
+	//     Damit liefert DASSELBE Binary mit CFD_REG_BC=0 exakt den alten OpenCL-Quelltext -- das ist
+	//     der bit-genaue Kontrollarm fuer jedes A/B, und zugleich der Rettungsanker, falls der
+	//     GPU-Uebersetzer am regularisierten Code doch wieder haengen sollte.
+#ifdef REGULARIZED_BOUNDARIES
+	+((getenv("CFD_REG_BC")==nullptr||!(getenv("CFD_REG_BC")[0]=='0'&&getenv("CFD_REG_BC")[1]=='\0')) ? (string)
+	"\n	#define REGULARIZED_BOUNDARIES"
+	"\n	#define REG_E(i) (feq[i]+reg_fneq(i, regf, Sxx, Syy, Szz, Sxy, Sxz, Syz, trS3))"
+	: (string)
+	"\n	#define REG_E(i) (feq[i])")
+	+
+#else
+	"\n	#define REG_E(i) (feq[i])"
+#endif // REGULARIZED_BOUNDARIES
 	"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
 	"\n	#define TYPE_BO 0x03" // 0b00000011 // any flag bit used for boundaries (temperature excluded)
 	"\n	#define TYPE_IF 0x18" // 0b00011000 // change from interface to fluid
@@ -1343,6 +1369,7 @@ bool LBM_Domain::collect_boundary_pairs(const uint face_mask, const string& wofu
 void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
 	po_rho = rho_out;
 	{ const char* v = getenv("CFD_PO_SIGMA"); po_sigma = v ? (float)fmax(0.0, fmin(1.0, atof(v))) : 1.0f; }
+	{ const char* v = getenv("CFD_PO_HART"); po_hart = (v && !(v[0]=='0'&&v[1]=='\0')) ? 1u : 0u; } // 1 = alter harter Rand, der Kontrollarm
 	std::vector<ulong> cells, interior;
 	if(!collect_boundary_pairs(face_mask, "Druck-Auslass", cells, interior)) return;
 	const uint N_po = (uint)cells.size();
@@ -1356,8 +1383,13 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 	for(uint i=0u; i<N_po; i++) { po_cells[i] = cells[i]; po_interior[i] = interior[i]; }
 	po_cells.write_to_device();
 	po_interior.write_to_device();
-	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, rho, po_cells, po_interior, N_po, po_rho, po_sigma);
-	print_info("Druck-Auslass: rho_out = "+to_string(po_rho,4u)+", Ankerrate sigma = "+to_string(po_sigma,4u)+" (1 = harte Klemme wie bisher, kleiner = weicher und weniger reflektierend), u aus der Innenzelle.");
+	po_mean = Memory<float>(device, 1ull);
+	kernel_po_clear_mean  = Kernel(device, 1ull, "po_clear_mean", po_mean);
+	kernel_po_reduce_mean = Kernel(device, (ulong)N_po, "po_reduce_mean", rho, po_interior, N_po, po_mean);
+	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, rho, po_cells, po_interior, N_po, po_rho, po_sigma, po_mean, po_hart);
+	print_info(po_hart ? ("Druck-Auslass: HARTE Klemme rho = "+to_string(po_rho,4u)+" je Zelle (CFD_PO_HART=1, der alte Zustand als Kontrollarm), u aus der Innenzelle.")
+		: ("Druck-Auslass: rho_out = "+to_string(po_rho,4u)+" als FLAECHENMITTEL verankert (Ankerrate sigma = "+to_string(po_sigma,4u)
+		+"), rho der Einzelzelle laeuft frei mit, u aus der Innenzelle. Der Druck ist damit global festgelegt, seine Verteilung ueber die Ebene aber nicht."));
 	// OFFEN, bewusst nicht hier geloest: ein echter Nichtgleichgewichts-Rand (Guo/Zheng/Shi 2002,
 	// f_i = f_eq(rho_b,u_b) + [f_i(n) - f_eq(rho_n,u_n)]) waere zweiter Ordnung statt erster. Er muesste
 	// fi am Rand NACH dem Streaming ueberschreiben, und in der Esoteric-Pull-Ablage gehoeren die Slots

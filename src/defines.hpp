@@ -25,6 +25,18 @@
 
 #define VOLUME_FORCE // enables global force per volume in one direction (equivalent to a pressure gradient); specified in the LBM class constructor; the force can be changed on-the-fly between time steps at no performance cost
 #define FORCE_FIELD // enables computing the forces on solid boundaries with lbm.update_force_field(); and enables setting the force for each lattice point independently (enable VOLUME_FORCE too); allocates an extra 12 Bytes/cell
+#define REGULARIZED_BOUNDARIES // ★ FORK 2026-08-08: TYPE_E-Raender setzen f = f_eq + f_neq statt nur f = f_eq.
+// Der reine Gleichgewichts-Reset legt alle 19 Verteilungen fest, wo hoechstens 5 zulaessig sind, und
+// verwirft damit jeden Schritt den gesamten Spannungstensor. Gemessen am leeren groben Kanal: die
+// Stoerung entsteht in der ersten Fluidzelle hinter der Einlassebene, und bei w -> 2 klingt sie nicht
+// ab, sondern wechselt jeden Schritt das Vorzeichen (Periode-2-Mode = die horizontalen Streifen im
+// Schnitt). Zwei Randaenderungen, die nur die vorgeschriebenen GROESSEN tauschten, halfen nicht.
+// f_neq kommt aus dem Scherratentensor ueber Differenzen des FELDES u[] -- nicht aus den Verteilungen
+// des Nachbarn, weil die unter Esoteric Pull teilweise diesem selbst gehoeren.
+// AUSKOMMENTIEREN stellt den alten Zustand bit-genau her (der Kontrollarm).
+#if defined(REGULARIZED_BOUNDARIES)&&!defined(D3Q19)
+#error "REGULARIZED_BOUNDARIES ist nur fuer D3Q19 gebaut (Gewichtszuordnung in reg_fneq und Achsnachbarn j[1..6]). Pruefer-Befund 2026-08-08: bei D3Q15 fehlt def_we, bei D3Q27 und D2Q9 sind die Gewichte falsch."
+#endif
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
 //#define SURFACE // enables free surface LBM: mark fluid cells with TYPE_F; at initialization the TYPE_I interface and TYPE_G gas domains will automatically be completed; allocates an extra 12 Bytes/cell

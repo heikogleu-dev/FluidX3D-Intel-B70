@@ -66,7 +66,10 @@ private:
 	bool collect_boundary_pairs(const uint face_mask, const string& wofuer, std::vector<ulong>& cells, std::vector<ulong>& interior);
 	uint fbx0=0u, fby0=0u, fbz0=0u, fbnx=0u, fbny=0u, fbnz=0u; // FORK: aktive F-Bounding-Box dieser Domaene
 	float po_rho = 1.0f; // vorgeschriebene Dichte am Auslass (LBM-Einheiten); 1.0 = Referenzdruck
-	float po_sigma = 1.0f; // Ankerrate: 1 = harte Klemme (bisheriger Zustand), kleiner = weicher, siehe Kernel
+	float po_sigma = 1.0f; // Ankerrate des Flaechenmittels gegen rho_out
+	uint po_hart = 0u;     // 1 = alter harter Rand je Zelle (CFD_PO_HART), der Kontrollarm
+	Memory<float> po_mean;   // Mittelwert der Dichte ueber die Innenzellen der Auslassebene, je Schritt neu
+	Kernel kernel_po_clear_mean, kernel_po_reduce_mean;
 #ifdef FORCE_FIELD
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)

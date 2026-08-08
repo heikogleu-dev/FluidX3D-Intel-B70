@@ -1547,6 +1547,28 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 
 
+)+"#ifdef REGULARIZED_BOUNDARIES"+R(
+)+R(float deriv_reg(const global float* u, const ulong off, const uxx jp, const uxx jm, const bool fp, const bool fm, const float u0) {
+	// Ableitung einer Geschwindigkeitskomponente entlang einer Achse, aus dem FELD u[].
+	// Zentral, wenn beide Nachbarn echtes Fluid sind; sonst einseitig; sonst null.
+	// Als Funktion und nicht als Makro: #define innerhalb des Kernel-Strings wuerde vom
+	// Host-Praeprozessor verschluckt, nicht vom OpenCL-Uebersetzer.
+	return fp&&fm ? 0.5f*(u[off+(ulong)jp]-u[off+(ulong)jm]) : (fp ? u[off+(ulong)jp]-u0 : (fm ? u0-u[off+(ulong)jm] : 0.0f));
+} // deriv_reg()
+
+)+R(float reg_fneq(const uint i, const float regf, const float Sxx, const float Syy, const float Szz, const float Sxy, const float Sxz, const float Syz, const float trS3) {
+	// f_neq_i = regf * w_i * (c_i . S . c_i - tr(S)/3) mit regf = -3*rho/w.
+	// Als KOMPAKTE Funktion statt des frueheren Riesen-Makros, das den vollen Ausdruck 19-fach in
+	// die ternaere Kollisionszeile expandierte. Zwei Fassungen davon haben den Intel-Uebersetzer
+	// aufgehaengt -- die zweite hat den ganzen Rechner eingefroren, weil der Desktop auf derselben
+	// GPU laeuft. Uebersetzerfreundlichkeit ist hier also Betriebssicherheit, kein Stil.
+	const float cxi=c(i), cyi=c(def_velocity_set+i), czi=c(2u*def_velocity_set+i);
+	const float cSc = fma(cxi*cxi, Sxx, fma(cyi*cyi, Syy, fma(czi*czi, Szz, 2.0f*fma(cxi*cyi, Sxy, fma(cxi*czi, Sxz, cyi*czi*Syz)))));
+	const float wi = (i==0u) ? def_w0 : ((i<=6u) ? def_ws : def_we);
+	return regf*wi*(cSc-trS3);
+} // reg_fneq()
+)+"#endif"+R( // REGULARIZED_BOUNDARIES
+
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
@@ -1694,6 +1716,49 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
 
+)+"#if defined(EQUILIBRIUM_BOUNDARIES)&&defined(REGULARIZED_BOUNDARIES)"+R(
+	// ★★ REGULARISIERTER GLEICHGEWICHTSRAND (Latt/Chopard 2006).
+	// Statt f = f_eq wird an TYPE_E-Zellen f = f_eq + f_neq gesetzt, mit
+	//    f_neq_i = -(3*rho*w_i/w) * [ c_i . S . c_i - tr(S)/3 ]
+	// aus Pi_neq = -(2*rho*c_s^2/w)*S und f_neq_i = (w_i/(2 c_s^4)) * Q_i : Pi_neq, c_s^2 = 1/3.
+	// Der reine Reset legt sonst alle 19 Verteilungen fest, wo hoechstens 5 zulaessig sind, und
+	// verwirft jeden Schritt den gesamten Spannungstensor.
+	//
+	// S kommt aus Differenzen des FELDES u[] -- nicht aus den Verteilungen des Nachbarn, weil die
+	// unter Esoteric Pull teilweise diesem selbst gehoeren und im selben Kernel-Start beschrieben
+	// werden. u[] dagegen ist vom Vorschritt fertig und wird hier nur gelesen.
+	//
+	// ★ OHNE HILFSFELDER, und das ist keine Kosmetik: die erste Fassung legte zusaetzlich zu den
+	// sechs bereits vorhandenen 19-Element-Feldern (fhn, feq, fhb, feb, Fin, j) noch du[9] und
+	// fneq_reg[19] an. Der Intel-Uebersetzer blieb daraufhin beim Erzeugen des Kernels haengen --
+	// reproduziert am 2026-08-08 mit 203 M UND mit 3 M Zellen, also am Kernel und nicht an der
+	// Groesse. Hier deshalb sechs Skalare und vollstaendig ausgerollte Komponenten.
+	float Sxx=0.0f, Syy=0.0f, Szz=0.0f, Sxy=0.0f, Sxz=0.0f, Syz=0.0f;
+	if(flagsn_bo==TYPE_E) {
+		// Nachbarn nur benutzen, wenn dort ECHTES Fluid steht (weder Solid noch Gleichgewichtsrand).
+		// Das faengt zugleich den periodischen Umschlag ab: nach aussen zeigt der Nachbar auf die
+		// gegenueberliegende Domaenenflaeche, und die ist selbst Rand.
+		const uchar b1=flags[j[1]]&TYPE_BO, b2=flags[j[2]]&TYPE_BO, b3=flags[j[3]]&TYPE_BO;
+		const uchar b4=flags[j[4]]&TYPE_BO, b5=flags[j[5]]&TYPE_BO, b6=flags[j[6]]&TYPE_BO;
+		const bool px=b1!=TYPE_S&&b1!=TYPE_E, mx=b2!=TYPE_S&&b2!=TYPE_E; // +x, -x
+		const bool py=b3!=TYPE_S&&b3!=TYPE_E, my=b4!=TYPE_S&&b4!=TYPE_E; // +y, -y
+		const bool pz=b5!=TYPE_S&&b5!=TYPE_E, mz=b6!=TYPE_S&&b6!=TYPE_E; // +z, -z
+		const float dxux=deriv_reg(u,      0ul, j[1], j[2], px, mx, uxn);
+		const float dxuy=deriv_reg(u,    def_N, j[1], j[2], px, mx, uyn);
+		const float dxuz=deriv_reg(u, 2ul*def_N, j[1], j[2], px, mx, uzn);
+		const float dyux=deriv_reg(u,      0ul, j[3], j[4], py, my, uxn);
+		const float dyuy=deriv_reg(u,    def_N, j[3], j[4], py, my, uyn);
+		const float dyuz=deriv_reg(u, 2ul*def_N, j[3], j[4], py, my, uzn);
+		const float dzux=deriv_reg(u,      0ul, j[5], j[6], pz, mz, uxn);
+		const float dzuy=deriv_reg(u,    def_N, j[5], j[6], pz, mz, uyn);
+		const float dzuz=deriv_reg(u, 2ul*def_N, j[5], j[6], pz, mz, uzn);
+		Sxx=dxux; Syy=dyuy; Szz=dzuz;
+		Sxy=0.5f*(dxuy+dyux); Sxz=0.5f*(dxuz+dzux); Syz=0.5f*(dyuz+dzuy);
+	}
+	const float trS3 = 0.33333334f*(Sxx+Syy+Szz);
+	const float regf = -3.0f*rhon/w; // `w` ist hier die RELAXATIONSRATE und verdeckt die Gewichtsfunktion w(i)
+)+"#endif"+R( // EQUILIBRIUM_BOUNDARIES && REGULARIZED_BOUNDARIES
+
 )+"#if defined(SRT)"+R(
 )+"#ifdef VOLUME_FORCE"+R(
 	const float c_tau = fma(w, -0.5f, 1.0f);
@@ -1702,7 +1767,15 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
-	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = flagsn_bo==TYPE_E ? feq[i] : fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
+	// ★ TYPE_E-Zweig HERAUSGEHOBEN statt als Ternaer in der Schleife: der fruehere Aufbau expandierte
+	// den Randausdruck 19-fach in die Kollisionszeile, daran blieb der Uebersetzer haengen. So sieht
+	// er zwei kleine, getrennte Schleifen. Nebeneffekt (Pruefer-Befund): die f_neq-Arbeit laeuft nur
+	// noch fuer Randzellen, vorher rechnete JEDE Zelle die 19 Terme unbedingt.
+	if(flagsn_bo==TYPE_E) {
+		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = REG_E(i); // f_eq bzw. f_eq + f_neq (regularisiert)
+	} else {
+		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
+	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#elif defined(TRT)"+R(
 	const float wp = w; // TRT: inverse of "+" relaxation time
@@ -1730,7 +1803,12 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(0.5f*wp, feq[i]-fhn[i]+feb[i]-fhb[i], fma(0.5f*wm, feq[i]-feb[i]-fhn[i]+fhb[i], fhn[i]+Fin[i])); // perform collision (TRT)
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
-	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = flagsn_bo==TYPE_E ? feq[i] : fma(0.5f*wp, feq[i]-fhn[i]+feb[i]-fhb[i], fma(0.5f*wm, feq[i]-feb[i]-fhn[i]+fhb[i], fhn[i]+Fin[i])); // perform collision (TRT)
+	// ★ TYPE_E-Zweig herausgehoben -- Begruendung wie im SRT-Zweig.
+	if(flagsn_bo==TYPE_E) {
+		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = REG_E(i); // f_eq bzw. f_eq + f_neq (regularisiert)
+	} else {
+		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(0.5f*wp, feq[i]-fhn[i]+feb[i]-fhb[i], fma(0.5f*wm, feq[i]-feb[i]-fhn[i]+fhb[i], fhn[i]+Fin[i])); // perform collision (TRT)
+	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#endif"+R( // TRT
 
@@ -1977,7 +2055,47 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	}
 } // update_fields()
 
-)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out, const float po_sigma) {
+// ★ FORK 2026-08-08: atomic_add_f stand bisher INNERHALB des FORCE_FIELD-Blocks und damit hinter
+// dem Druck-Auslass. Der braucht es jetzt fuer die Flaechenmittel-Reduktion, also hierher gezogen --
+// gleiche Definition, nur frueher und ohne die FORCE_FIELD-Bedingung.
+)+R(void atomic_add_f(volatile global float* addr, const float val) {
+)+"#if cl_nv_compute_capability>=20"+R( // use hardware-supported atomic addition on Nvidia GPUs with inline PTX assembly
+	float ret;)+"asm volatile(\"atom.global.add.f32\t%0,[%1],%2;\":\"=f\"(ret):\"l\"(addr),\"f\"(val):\"memory\");"+R(
+)+"#elif defined(__opencl_c_ext_fp32_global_atomic_add)"+R( // use hardware-supported atomic addition on some Intel GPUs
+	atomic_fetch_add_explicit((volatile global atomic_float*)addr, val, memory_order_relaxed);
+)+"#elif __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)"+R( // use hardware-supported atomic addition on some AMD GPUs
+	__builtin_amdgcn_global_atomic_fadd_f32(addr, val);
+)+"#else"+R( // fallback emulation: https://forums.developer.nvidia.com/t/atomicadd-float-float-atomicmul-float-float/14639/5
+	float old = val; while((old=atomic_xchg(addr, atomic_xchg(addr, 0.0f)+old))!=0.0f);
+)+"#endif"+R(
+}
+)+R(kernel void po_clear_mean(global float* po_mean) { // eine Arbeitseinheit, setzt den Akkumulator zurueck
+	if(get_global_id(0)==0u) po_mean[0] = 0.0f;
+} // po_clear_mean()
+
+)+R(kernel void po_reduce_mean(const global float* rho, const global ulong* po_interior, const uint N_po, global float* po_mean) {
+	// Mittelwert der Dichte ueber die INNENZELLEN der Auslassebene. Gleiche Bauart wie object_force:
+	// erst in lokalem Speicher zusammenfassen, dann eine atomare Addition je Arbeitsgruppe.
+	const uint gid = get_global_id(0);
+	const uint lid = get_local_id(0);
+	local float cache[cl_workgroup_size];
+	// ★ Es wird rho-1 summiert, nicht rho. Ein Pruefer hat den Fehler der atomaren Serie
+	// nachgerechnet: 4697 Beitraege von je 2,1e-4 auf einen Akkumulator, der bis 1,0 waechst, geben
+	// 1,2e-5 Fehler im Mittelwert -- das sind 1,4e-3 in cp gegen die 0,15, um die es geht. Mit der
+	// Abweichungsablage sind es 1e-9. Derselbe Kniff steht schon in calculate_rho_u
+	// ("add 1.0f last to avoid digit extinction effects").
+	cache[lid] = gid<N_po ? rho[po_interior[gid]]-1.0f : 0.0f;
+	barrier(CLK_LOCAL_MEM_FENCE);
+	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
+		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
+		barrier(CLK_LOCAL_MEM_FENCE);
+	}
+	// Kein !=0-Test: bei der Abweichungsablage ist eine exakt verschwindende Teilsumme moeglich und
+	// harmlos, aber sie zu ueberspringen waere es nicht -- der Beitrag dieser Gruppe fehlte dann.
+	if(lid==0u) atomic_add_f(&po_mean[0], cache[0]/(float)N_po);
+} // po_reduce_mean()
+
+)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
 	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
 	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
@@ -2001,11 +2119,31 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	//   R      0,981  0,919  0,726  0,526  0,339  0,167  0,092
 	// Der Anker bleibt erhalten: bei sigma = 0,02 ist die Zeitkonstante 50 Schritte = 2,0 ms gegen
 	// eine Durchspuelung von 0,409 s -- also 200-mal schneller als die Stroemung.
-	// sigma = 1 ist BIT-GENAU der bisherige Zustand und damit der Kontrollarm.
+	// ★ KORRIGIERT (Pruefer-Befund): hier stand "sigma = 1 ist bit-genau der bisherige Zustand".
+	// Mit dem Flaechenmittel-Anker stimmt das nicht mehr -- der Kontrollarm ist jetzt po_hart = 1,
+	// siehe unten. Und die R-Tabelle wurde in D1Q3 gemessen, wo die Auslassebene EINE Zelle hat und
+	// der Flaechenmittel-Anker in den Zell-Anker entartet; fuer den neuen Rand gilt sie nur fuer die
+	// ebenen-gleichfoermige Mode.
 	const uint gid = get_global_id(0);
 	if(gid>=N_po) return;
 	const ulong n = po_cells[gid], m = po_interior[gid];
-	rho[n] = fma(po_sigma, rho_out-rho[m], rho[m]);
+	// ★★ ANKER AUF DEN FLAECHENMITTELWERT, nicht auf jede Zelle. 2026-08-08.
+	// Vorher wurde rho JEDER Auslasszelle einzeln gegen rho_out gezogen. Beim Fahrzeug sitzt der feine
+	// Auslass 0,449 Fahrzeuglaengen hinter dem Heck, also im Totwasser -- dort erzwang rho_out = 1 auf
+	// 300 564 Zellen ein cp = 0, wo etwa -0,15 hingehoert. Der Basisdruck ist beim Fahrzeug der
+	// groesste Einzelbeitrag zu Cd; das ist ein systematischer Fehler, unabhaengig von jeder Akustik.
+	// Jetzt wird nur noch der MITTELWERT der Ebene verankert: rho_neu = rho_innen + sigma*(rho_out -
+	// <rho_innen>). Der Druck ist damit global festgelegt, seine VERTEILUNG ueber die Ebene aber frei.
+	// po_mean[0] traegt den ABWEICHUNGS-Mittelwert <rho-1>, nicht <rho> -- siehe po_reduce_mean.
+	//
+	// ★ KONTROLLARM, 2026-08-08 (Pruefer-Befund, und es war mein Fehler): mit dem Flaechenmittel ist
+	// sigma = 1 NICHT mehr der alte Zustand. Alt war rho[n] = (1-sigma)*rho[m] + sigma*rho_out, bei
+	// sigma = 1 also die harte Klemme. Neu ist es Nullgradient plus Versatz -- eine ANDERE Bedingung,
+	// und kein sigma-Wert bringt die alte zurueck. Der Kontrollarm war damit still verschwunden, und
+	// der Default lief im neuen Regime, ohne dass es jemandem aufgefallen waere.
+	// po_hart = 1 stellt den alten Rand bit-genau wieder her (CFD_PO_HART=1).
+	rho[n] = po_hart!=0u ? fma(po_sigma, rho_out-rho[m], rho[m])
+	                     : fma(po_sigma, (rho_out-1.0f)-po_mean[0], rho[m]);
 	u[                  n] = u[                  m];
 	u[    def_N+(ulong)n] = u[    def_N+(ulong)m];
 	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
@@ -2178,17 +2316,6 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	if(n>=(uxx)def_N) return; // execute reset_force_field() also on halo
 	store3_F(F, n, (float3)(0.0f, 0.0f, 0.0f)); // FORK: bbox-bewusst
 } // reset_force_field()
-)+R(void atomic_add_f(volatile global float* addr, const float val) {
-)+"#if cl_nv_compute_capability>=20"+R( // use hardware-supported atomic addition on Nvidia GPUs with inline PTX assembly
-	float ret;)+"asm volatile(\"atom.global.add.f32\t%0,[%1],%2;\":\"=f\"(ret):\"l\"(addr),\"f\"(val):\"memory\");"+R(
-)+"#elif defined(__opencl_c_ext_fp32_global_atomic_add)"+R( // use hardware-supported atomic addition on some Intel GPUs
-	atomic_fetch_add_explicit((volatile global atomic_float*)addr, val, memory_order_relaxed);
-)+"#elif __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)"+R( // use hardware-supported atomic addition on some AMD GPUs
-	__builtin_amdgcn_global_atomic_fadd_f32(addr, val);
-)+"#else"+R( // fallback emulation: https://forums.developer.nvidia.com/t/atomicadd-float-float-atomicmul-float-float/14639/5
-	float old = val; while((old=atomic_xchg(addr, atomic_xchg(addr, 0.0f)+old))!=0.0f);
-)+"#endif"+R(
-}
 )+R(kernel void object_center_of_mass(const global uchar* flags, const uchar flag_marker, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
