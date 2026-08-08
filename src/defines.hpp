@@ -21,6 +21,14 @@
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
 //#define SURFACE // enables free surface LBM: mark fluid cells with TYPE_F; at initialization the TYPE_I interface and TYPE_G gas domains will automatically be completed; allocates an extra 12 Bytes/cell
 //#define TEMPERATURE // enables temperature extension; set fixed-temperature cells with TYPE_T (similar to EQUILIBRIUM_BOUNDARIES); allocates an extra 32 (FP32) or 18 (FP16) Bytes/cell
+// FORK -- UPDATE_FIELDS direkt einschalten. Upstream leitet es nur aus SURFACE/PARTICLES/GRAPHICS ab;
+// ohne die drei schreibt stream_collide u und rho gar nicht, und beides ist dann nur so aktuell, wie
+// der Host explizit update_fields() ruft. Der Druck-Auslass extrapoliert aber u, und die Slices zeigen
+// u -- beide sahen ein bis CFD_SAMPLE_EVERY Schritte altes Feld. Jetzt schreibt stream_collide sie
+// jeden Schritt selbst. Kosten: rund 16 Byte/Zelle/Schritt mehr Schreibverkehr, dafuer entfaellt der
+// separate update_fields-Durchlauf. Netto etwa 10 bis 15 Prozent Durchsatz -- der Preis dafuer, dass
+// Rand und Diagnose nie auf veralteten Daten arbeiten.
+#define UPDATE_FIELDS
 #define SUBGRID // enables Smagorinsky-Lilly subgrid turbulence LES model to keep simulations with very large Reynolds number stable
 //#define PARTICLES // enables particles with immersed-boundary method (for 2-way coupling also activate VOLUME_FORCE and FORCE_FIELD; only supported in single-GPU)
 

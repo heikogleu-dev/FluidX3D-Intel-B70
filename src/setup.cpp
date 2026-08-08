@@ -209,7 +209,7 @@ static void main_setup_kugel() {
 	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
 	if(LBM_Domain::s_sparse_tiles_on) {
 		const uint T = env_u("CFD_TILE", 8u);
-		if(T!=4u && T!=8u && T!=16u) print_error("CFD_TILE muss 4, 8 oder 16 sein (erhalten: "+to_string(T)+").");
+		if(T!=8u && T!=16u && T!=32u && T!=64u) print_error("CFD_TILE muss 8, 16, 32 oder 64 sein (erhalten: "+to_string(T)+").");
 		LBM_Domain::s_sparse_T = T;
 		print_info("Block-Tiling AKTIV, T="+to_string(T)+" (VRAM sparen auf Kosten von Durchsatz)");
 	}
@@ -293,8 +293,12 @@ static void main_setup_kugel() {
 	lbm.finalize_sparse_tiles();
 
 	// ---------------------------------------------------------------- Laufsteuerung
-	const float t_end    = env_f("CFD_T_END", 0.600f);      // physikalische Laufzeit [s]
-	const float t_warmup = env_f("CFD_T_WARMUP", 0.200f);   // ab hier wird gemittelt [s]
+	// Laufzeit in DURCHSPUELUNGEN (Domaenenlaenge / Anstroemung) statt in Sekunden. Zwei als Default,
+	// solange diagnostiziert wird: die erste ist Anlauf, ueber die zweite wird gemittelt.
+	const float t_flush  = (float)Nx*dx/si_u;
+	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
+	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
+	print_info("Eine Durchspuelung = "+to_string(t_flush,4u)+" s; Default sind zwei davon.");
 	const uint  sample_every = env_u("CFD_SAMPLE_EVERY", 10u);
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string run_name = getenv("CFD_RUN_NAME") ? string(getenv("CFD_RUN_NAME")) : string("kugel");
@@ -314,12 +318,9 @@ static void main_setup_kugel() {
 	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
 		const ulong chunk = min((ulong)sample_every, n_steps-step);
 		lbm.run(chunk, n_steps);
-		// u/rho aus den DDFs auffrischen. Fuer die KRAEFTE ist das nicht noetig -- update_force_field
-		// liest fi direkt. Noetig ist es fuer den DRUCK-AUSLASS: der extrapoliert u aus der Innenzelle,
-		// und ohne diesen Aufruf saehe er ewig das Initialfeld u_lat und taete damit gar nichts.
-		// UPDATE_FIELDS ist in dieser Konfiguration nicht definiert (haengt an SURFACE/PARTICLES/
-		// GRAPHICS), stream_collide schreibt u also nicht selbst -- es muss explizit passieren.
-		lbm.update_fields();
+		// Kein update_fields() mehr noetig: UPDATE_FIELDS ist eingeschaltet (defines.hpp), stream_collide
+		// schreibt u und rho jeden Schritt selbst. Damit sieht der Druck-Auslass das aktuelle Innenfeld
+		// statt eines bis zu CFD_SAMPLE_EVERY Schritte alten -- und die Slices zeigen den echten Zustand.
 		lbm.update_force_field();
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
 		ts.push_back((double)((float)(step+chunk)*dt));
@@ -410,12 +411,16 @@ static void main_setup_fahrzeug() {
 	const float Lx = 6.660f, Ly = 2.484f, Lz = 1.940f;
 	const float bow_from_xmin = 0.22984f; // Fahrzeugnase liegt so weit hinter dem Einlass
 	const uint Nx = (uint)(Lx/dx + 0.5f), Ny = (uint)(Ly/dx + 0.5f), Nz = (uint)(Lz/dx + 0.5f);
-	const float z_offset_cells = 4.0f*0.004f/dx; // 16 mm ueber dem Boden, dx-unabhaengig
+	// Fahrzeug steht AUF dem Boden: Unterkante der STL auf die Bodenebene z=0. Der alte Baum liess es
+	// 16 mm schweben (4 Zellen bei 4 mm) -- ein rein numerischer Versatz ohne physikalische Entsprechung,
+	// der den Unterbodenspalt kuenstlich vergroessert und damit genau die Groesse verfaelscht, um die es
+	// beim Abtrieb geht. CFD_Z_OFFSET_MM stellt den alten Zustand her, falls man A/B fahren will.
+	const float z_offset_cells = 0.001f*env_f("CFD_Z_OFFSET_MM", 0.0f)/dx;
 
 	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
 	if(LBM_Domain::s_sparse_tiles_on) {
 		const uint T = env_u("CFD_TILE", 8u);
-		if(T!=4u && T!=8u && T!=16u) print_error("CFD_TILE muss 4, 8 oder 16 sein.");
+		if(T!=8u && T!=16u && T!=32u && T!=64u) print_error("CFD_TILE muss 8, 16, 32 oder 64 sein (erhalten: "+to_string(T)+").");
 		LBM_Domain::s_sparse_T = T;
 	}
 
@@ -477,8 +482,13 @@ static void main_setup_fahrzeug() {
 	lbm.finalize_sparse_tiles();
 
 	// ---------------------------------------------------------------- Lauf
-	const float t_end    = env_f("CFD_T_END", 0.500f);
-	const float t_warmup = env_f("CFD_T_WARMUP", 0.300f);
+	// Laufzeit in DURCHSPUELUNGEN statt in Sekunden: eine Durchspuelung = Domaenenlaenge / Anstroemung.
+	// Solange wir diagnostizieren, sind zwei der sinnvolle Default -- die erste ist Anlauf, ueber die
+	// zweite wird gemittelt. In Sekunden waere derselbe Wert bei jeder Domaenengroesse etwas anderes.
+	const float t_flush  = (float)Nx*dx/si_u;
+	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
+	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
+	print_info("Eine Durchspuelung = "+to_string(t_flush,4u)+" s; Default sind zwei davon.");
 	const uint  sample_every = env_u("CFD_SAMPLE_EVERY", 10u);
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f); // 0 = keine Slices
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
@@ -494,8 +504,7 @@ static void main_setup_fahrzeug() {
 	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
 		const ulong chunk = min((ulong)sample_every, n_steps-step);
 		lbm.run(chunk, n_steps);
-		lbm.update_fields();       // noetig fuer den Druck-Auslass (u) und fuer die Slices
-		lbm.update_force_field();
+		lbm.update_force_field();  // u/rho schreibt stream_collide selbst (UPDATE_FIELDS)
 		const float3 F = lbm.object_force(TYPE_S|TYPE_X);
 		const double t_si = (double)((float)(step+chunk)*dt);
 		ts.push_back(t_si); fx.push_back((double)units.si_F(F.x)); fz.push_back((double)units.si_F(F.z));
