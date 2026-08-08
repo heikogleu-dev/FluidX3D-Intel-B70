@@ -469,12 +469,18 @@ static void main_setup_fahrzeug() {
 	sat_shell_and_void_fill(lbm, veh, Nx, Ny, Nz); // derselbe Voxelizer wie beim Kugelfall
 
 	// ---------------------------------------------------------------- Randbedingungen
-	// Boden mitbewegt (Rollstrasse), Decke und Seiten Freistrom, x- Einlass, x+ Auslass.
+	// x- = Einlass, x+ = Auslass, ALLE y- und z-Flaechen = feste mitbewegte Waende (Heiko-Vorgabe).
+	// ★ 2026-08-08: vorher standen y+-, z+ auf TYPE_E-Freistrom. Damit prägten FUENF Flaechen die
+	// Geschwindigkeit auf, der Fall war massiv ueberbestimmt und es stroemte GAR NICHTS -- der
+	// 250-ms-Slice war ueber die ganze Domaene gleichfoermig, die PNGs bei 150/200/250 ms sogar
+	// byte-gleich gross. Der Kugelfall lief die ganze Zeit richtig, weil er mitbewegte Waende hat.
+	// Jetzt sind beide Faelle gleich aufgebaut: nur Ein- und Auslass sind TYPE_E.
 	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
 		if((lbm.flags[n]&(TYPE_S|TYPE_X))!=0u) continue;
-		if(z==0u) { lbm.flags[n] = TYPE_S; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; } // Rollstrasse
-		else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) {
+		if(z==0u || z==Nz-1u || y==0u || y==Ny-1u) {       // Boden, Decke, Seiten: mitbewegte Wand
+			lbm.flags[n] = TYPE_S; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+		} else if(x==0u || x==Nx-1u) {                     // Ein- und Auslass
 			lbm.flags[n] = TYPE_E; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		} else { lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
 	}
