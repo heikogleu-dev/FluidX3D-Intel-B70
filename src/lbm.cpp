@@ -1026,8 +1026,13 @@ void LBM::do_time_step() { // call kernel_stream_collide to perform one LBM time
 #ifdef SURFACE
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_surface_0();
 #endif // SURFACE
-	// FORK: u am Druck-Auslass VOR stream_collide neu extrapolieren -- der Rand muss die
-	// Geschwindigkeit des aktuellen Innenfeldes sehen, nicht die des vorigen Schritts.
+	// FORK: u am Druck-Auslass VOR stream_collide setzen.
+	// ★ EHRLICHE EINORDNUNG (Pruefer-Befund 2026-08-08): der Druckteil (rho=rho_out) wirkt jeden Schritt.
+	// Der Geschwindigkeitsteil dagegen ist innerhalb eines Chunks IDEMPOTENT -- u wird ohne UPDATE_FIELDS
+	// nur vom Host-Aufruf lbm.update_fields() aufgefrischt, also einmal pro CFD_SAMPLE_EVERY Schritten.
+	// Der Per-Schritt-Dispatch kauft dort nachweislich nichts; die Neumann-Bedingung hinkt um 1 bis
+	// CFD_SAMPLE_EVERY Schritte hinterher. Er bleibt trotzdem hier, weil er korrekt wird, sobald u
+	// haeufiger aufgefrischt wird -- aber er ist keine Begruendung fuer Aktualitaet.
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 #if defined(SURFACE) || defined(GRAPHICS)
@@ -1088,41 +1093,135 @@ void LBM::finalize_sparse_tiles() { // FORK: Block-Tiling abschliessen (no-op we
 }
 
 
-// FORK -- Druck-Auslass (Zou-He). Sammelt die TYPE_E-Zellen der angeforderten Aussenflaechen in eine
-// duenne Liste; apply_pressure_outlet extrapoliert dort jeden Schritt u aus der Innenzelle.
-// Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
-// WICHTIG: die Flags werden vom HOST gelesen, nicht vom Device. Zur Setup-Zeit ist der Host aktuell;
-// ein read_from_device() wuerde die gerade gesetzten Randbedingungen mit altem Stand ueberschreiben.
-void LBM_Domain::set_pressure_outlet_faces(const uint face_mask) {
-	if(face_mask==0u) { print_warning("set_pressure_outlet_faces: face_mask=0, nichts gesetzt."); return; }
-	std::vector<ulong> cells; std::vector<uchar> dirs;
-	auto add_face = [&](const uint dir_code, const uint x_lo, const uint x_hi, const uint y_lo, const uint y_hi, const uint z_lo, const uint z_hi) {
-		for(uint z=z_lo; z<=z_hi; z++) for(uint y=y_lo; y<=y_hi; y++) for(uint x=x_lo; x<=x_hi; x++) {
-			const ulong n = (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*(ulong)Nx*(ulong)Ny;
-			if((flags[n]&TYPE_E)!=0u) { cells.push_back(n); dirs.push_back((uchar)dir_code); } // nur TYPE_E; Solid bleibt unangetastet
-		}
+// FORK -- Druck-Auslass, allgemeine Fassung.
+//
+// WAS ES IST, ehrlich benannt: ein Gleichgewichtsrand mit VORGESCHRIEBENER DICHTE und aus dem Inneren
+// EXTRAPOLIERTER GESCHWINDIGKEIT. Jeden Schritt vor stream_collide wird an den Auslasszellen
+// rho = rho_out gesetzt und u aus der zugehoerigen Innenzelle kopiert (Nullgradient). Die TYPE_E-Logik
+// in stream_collide macht daraus f = f_eq(rho_out, u_extrapoliert).
+// Das ist NICHT das Zou-He-Schema: Zou-He rekonstruiert die unbekannten Verteilungen aus den bekannten
+// ueber den Nichtgleichgewichts-Anteil. Hier wird f_neq am Rand verworfen. Der Rand ist damit erster
+// Ordnung und leicht ueberdaempft -- aber er ist stabil, allgemein und nachpruefbar. Ein echter
+// Nichtgleichgewichts-Rand muesste fi in der Esoteric-Pull-Ablage ueberschreiben und braucht eine
+// eigene Validierungskampagne; siehe die Notiz am Ende dieser Funktion.
+//
+// Bits im face_mask: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
+//
+// WICHTIG: die Flags werden vom HOST gelesen. Zur Setup-Zeit ist der Host aktuell; ein
+// read_from_device() wuerde die gerade gesetzten Randbedingungen mit altem Stand ueberschreiben.
+void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
+	if(face_mask==0u) { print_warning("Druck-Auslass: face_mask=0, nichts gesetzt."); return; }
+	po_rho = rho_out;
+	const ulong NxNy = (ulong)Nx*(ulong)Ny;
+	auto IDX = [&](const int x, const int y, const int z) { return (ulong)x + (ulong)y*(ulong)Nx + (ulong)z*NxNy; };
+	auto is_fluid = [&](const int x, const int y, const int z) { // echte Innenzelle: weder Rand noch Solid
+		if(x<0||x>=(int)Nx||y<0||y>=(int)Ny||z<0||z>=(int)Nz) return false;
+		// TYPE_BO existiert nur device-seitig; host-seitig ist die Maske TYPE_S|TYPE_E.
+		// HINWEIS: TYPE_G (Gas) und TYPE_I (Interface) gelten hier als Fluid. Solange SURFACE aus ist,
+		// koennen sie nicht auftreten (lbm.cpp bricht sonst beim Sanity-Check ab). Wird SURFACE je
+		// eingeschaltet, muesste die Maske erweitert werden -- sonst extrapoliert der Auslass aus einer Gaszelle.
+		return (flags[IDX(x,y,z)]&(TYPE_S|TYPE_E))==0u;
 	};
-	if(face_mask&2u)  add_face(0u, Nx-1u, Nx-1u, 0u, Ny-1u, 0u, Nz-1u);
-	if(face_mask&1u)  add_face(1u, 0u, 0u, 0u, Ny-1u, 0u, Nz-1u);
-	if(face_mask&8u)  add_face(2u, 0u, Nx-1u, Ny-1u, Ny-1u, 0u, Nz-1u);
-	if(face_mask&4u)  add_face(3u, 0u, Nx-1u, 0u, 0u, 0u, Nz-1u);
-	if(face_mask&32u) add_face(4u, 0u, Nx-1u, 0u, Ny-1u, Nz-1u, Nz-1u);
-	if(face_mask&16u) add_face(5u, 0u, Nx-1u, 0u, Ny-1u, 0u, 0u);
+	// Welche Flaechen sind angefordert? Reihenfolge = Bitreihenfolge, Vorzeichen = einwaerts.
+	const bool f_xmin=(face_mask&1u)!=0u, f_xmax=(face_mask&2u)!=0u;
+	const bool f_ymin=(face_mask&4u)!=0u, f_ymax=(face_mask&8u)!=0u;
+	const bool f_zmin=(face_mask&16u)!=0u, f_zmax=(face_mask&32u)!=0u;
+
+	std::vector<ulong> cells, interior;
+	ulong n_composite=0ull, n_fallback=0ull, n_skipped=0ull, n_degenerate=0ull, n_on_face=0ull;
+	// Jede Randzelle GENAU EINMAL: ueber alle Zellen laufen und pruefen, ob sie auf einer der
+	// angeforderten Flaechen liegt. Der frueher benutzte Weg (pro Flaeche sammeln) trug Kanten- und
+	// Eckzellen mehrfach ein -- zwei Work-Items schrieben dann dieselbe Zelle, Reihenfolge undefiniert.
+	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+		const ulong n = IDX((int)x,(int)y,(int)z);
+		if((flags[n]&TYPE_E)==0u) continue; // nur TYPE_E; Solid und Fluid bleiben unangetastet
+		int dx=0, dy=0, dz=0; // zusammengesetzte EINWAERTS-Richtung
+		bool on_face = false; // ob die Zelle ueberhaupt auf einer angeforderten Flaeche liegt
+		if(f_xmin && x==0u)      { dx += 1; on_face = true; }
+		if(f_xmax && x==Nx-1u)   { dx -= 1; on_face = true; }
+		if(f_ymin && y==0u)      { dy += 1; on_face = true; }
+		if(f_ymax && y==Ny-1u)   { dy -= 1; on_face = true; }
+		if(f_zmin && z==0u)      { dz += 1; on_face = true; }
+		if(f_zmax && z==Nz-1u)   { dz -= 1; on_face = true; }
+		if(!on_face) continue; // liegt wirklich auf keiner angeforderten Flaeche
+		n_on_face++;
+		// ★ 2026-08-08, von einem unabhaengigen Pruefer gefunden: die Flaechenzugehoerigkeit MUSS getrennt
+		// von der Richtung bestimmt werden. Bei einer Dimension der Ausdehnung 1 gilt x==0 UND x==Nx-1
+		// gleichzeitig; sind beide Bits dieser Achse gesetzt, heben sich +1 und -1 zu null auf. Die
+		// vorige Fassung pruefte nur (dx==0&&dy==0&&dz==0) und verwarf solche Zellen STILL -- sie wurden
+		// nicht einmal gezaehlt, und die Ausgabe meldete vollstaendige Behandlung. Reproduziert an
+		// 1x6x6 mit face_mask=7: 6 Zellen verloren, keine Warnung.
+		if(dx==0 && dy==0 && dz==0) { n_degenerate++; continue; } // gegenueberliegende Flaechen bei Dicke 1
+		// 1. Versuch: ein Schritt entlang der zusammengesetzten Richtung. Fuer eine Kante (zwei Flaechen)
+		//    ist das die Diagonale und landet damit im Inneren, nicht auf der jeweils anderen Flaeche.
+		if(is_fluid((int)x+dx, (int)y+dy, (int)z+dz)) {
+			cells.push_back(n); interior.push_back(IDX((int)x+dx,(int)y+dy,(int)z+dz)); n_composite++;
+			continue;
+		}
+		// 2. Versuch: naechster echter Fluidnachbar in der 26er-Nachbarschaft, kuerzeste Distanz zuerst.
+		int bx=0,by=0,bz=0; int best=99;
+		for(int oz=-1; oz<=1; oz++) for(int oy=-1; oy<=1; oy++) for(int ox=-1; ox<=1; ox++) {
+			if(ox==0&&oy==0&&oz==0) continue;
+			const int d2 = ox*ox+oy*oy+oz*oz;
+			if(d2>=best) continue;
+			if(is_fluid((int)x+ox,(int)y+oy,(int)z+oz)) { best=d2; bx=ox; by=oy; bz=oz; }
+		}
+		if(best<99) { cells.push_back(n); interior.push_back(IDX((int)x+bx,(int)y+by,(int)z+bz)); n_fallback++; }
+		else n_skipped++; // voellig eingeschlossen -> gar kein Auslass, auslassen statt raten
+	}
 	const uint N_po = (uint)cells.size();
-	if(N_po==0u) { print_warning("set_pressure_outlet_faces: keine TYPE_E-Zellen auf den angeforderten Flaechen gefunden."); return; }
+	if(N_po==0u) { print_warning("Druck-Auslass: keine TYPE_E-Zellen auf den angeforderten Flaechen gefunden."); return; }
+
+	// --- Selbstpruefung.
+	// ★ 2026-08-08: die erste Fassung dieser Pruefung war TAUTOLOGISCH -- Eindeutigkeit und
+	// "Innenzelle ist Fluid" sind durch die Sammelschleife bereits konstruktiv garantiert (je Zelle
+	// hoechstens ein push_back; jede Innenzelle kam durch is_fluid). Sie konnte nie ausloesen und war
+	// damit reine Beruhigung. Ein unabhaengiger Pruefer hat das nachgewiesen.
+	// Was WIRKLICH brechen kann, ist die VOLLSTAENDIGKEIT: dass jede Zelle auf einer angeforderten
+	// Flaeche auch irgendwo landet -- zugeordnet, uebersprungen oder degeneriert. Genau daran ist der
+	// oben behobene Defekt vorbeigelaufen. Diese Bilanz wird jetzt geprueft.
+	{
+		if((ulong)N_po + n_skipped + n_degenerate != n_on_face) {
+			print_error("Druck-Auslass: Bilanz stimmt nicht -- "+to_string((uint)n_on_face)+" Zellen auf den Flaechen, aber nur "
+				+to_string(N_po)+" zugeordnet + "+to_string((uint)n_skipped)+" uebersprungen + "+to_string((uint)n_degenerate)+" degeneriert. Es gehen Zellen still verloren.");
+		}
+		// Die konstruktiv garantierten Eigenschaften trotzdem pruefen -- nicht fuer heute, sondern als
+		// Regressionsschutz, falls jemand die Sammelschleife umbaut. Dass sie heute nie auslesen, ist
+		// kein Argument gegen sie, solange man nicht glaubt, sie wuerden etwas beweisen.
+		std::vector<ulong> sorted_cells = cells;
+		std::sort(sorted_cells.begin(), sorted_cells.end());
+		if(std::adjacent_find(sorted_cells.begin(), sorted_cells.end())!=sorted_cells.end())
+			print_error("Druck-Auslass: mindestens eine Randzelle kommt mehrfach vor -- konkurrierende Schreibzugriffe.");
+		for(uint i=0u; i<N_po; i++) {
+			if((flags[interior[i]]&(TYPE_S|TYPE_E))!=0u) print_error("Druck-Auslass: Innenzelle "+to_string(interior[i])+" ist selbst Rand oder Solid.");
+			if(interior[i]==cells[i]) print_error("Druck-Auslass: Innenzelle zeigt auf sich selbst.");
+		}
+	}
+	// Bit 1 ist x_min und damit ueblicherweise der EINLASS. Wer ihn als Auslass anfordert, verliert
+	// stillschweigend die Zustroembedingung: u wird dort dann extrapoliert statt auf u_inf gehalten.
+	if((face_mask&1u)!=0u) print_warning("Druck-Auslass: face_mask enthaelt x_min. Das ist normalerweise der EINLASS -- dort wird u jetzt extrapoliert statt vorgegeben.");
+
 	po_N_active = N_po;
-	po_cells = Memory<ulong>(device, (ulong)N_po);
-	po_dirs  = Memory<uchar>(device, (ulong)N_po);
-	for(uint i=0u; i<N_po; i++) { po_cells[i] = cells[i]; po_dirs[i] = dirs[i]; }
+	po_cells    = Memory<ulong>(device, (ulong)N_po);
+	po_interior = Memory<ulong>(device, (ulong)N_po);
+	for(uint i=0u; i<N_po; i++) { po_cells[i] = cells[i]; po_interior[i] = interior[i]; }
 	po_cells.write_to_device();
-	po_dirs.write_to_device();
-	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, po_cells, po_dirs, N_po, Nx, Ny);
-	print_info("Druck-Auslass: "+to_string(N_po)+" Zellen aktiv (face_mask=0x"+to_string(face_mask)+"), u wird jeden Schritt neu extrapoliert.");
+	po_interior.write_to_device();
+	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, rho, po_cells, po_interior, N_po, po_rho);
+	print_info("Druck-Auslass: "+to_string(N_po)+" Zellen (face_mask=0x"+to_string(face_mask)+", rho_out="+to_string(po_rho,4u)+")."
+		+" Innenzelle direkt: "+to_string((uint)n_composite)+", ueber Nachbarsuche: "+to_string((uint)n_fallback)
+		+(n_skipped? (", ohne Fluidnachbar uebersprungen: "+to_string((uint)n_skipped)) : string(""))
+		+(n_degenerate? (", degeneriert (Dimension der Dicke 1): "+to_string((uint)n_degenerate)) : string(""))+".");
+	// OFFEN, bewusst nicht hier geloest: ein echter Nichtgleichgewichts-Rand (Guo/Zheng/Shi 2002,
+	// f_i = f_eq(rho_b,u_b) + [f_i(n) - f_eq(rho_n,u_n)]) waere zweiter Ordnung statt erster. Er muesste
+	// fi am Rand NACH dem Streaming ueberschreiben, und in der Esoteric-Pull-Ablage gehoeren die Slots
+	// einer Zelle teilweise ihren Nachbarn -- ein Fehler dort erzeugt still falsche Ergebnisse statt
+	// eines Absturzes. Das braucht eine eigene Validierung und nicht denselben Commit.
 }
 
-void LBM::set_pressure_outlet_faces(const uint face_mask) {
-	if(get_D()!=1u) { print_warning("set_pressure_outlet_faces: nur fuer eine einzelne Domaene, uebersprungen."); return; }
-	lbm_domain[0]->set_pressure_outlet_faces(face_mask);
+void LBM::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
+	if(get_D()!=1u) { print_warning("Druck-Auslass: nur fuer eine einzelne Domaene validiert, uebersprungen."); return; }
+	lbm_domain[0]->set_pressure_outlet_faces(face_mask, rho_out);
 }
 
 void LBM::reset() { // reset simulation (takes effect in following run() call)

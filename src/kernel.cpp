@@ -1958,32 +1958,25 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	}
 } // update_fields()
 
-)+R(kernel void apply_pressure_outlet(global float* u, const global ulong* po_cells, const global uchar* po_dirs, const uint N_po, const uint Nx, const uint Ny) {
-	// FORK -- Druck-Auslass. Kopiert u aus der inneren Nachbarzelle in die Randzelle (Nullgradient,
-	// also Neumann auf u). Zusammen mit rho = 1.0 und der TYPE_E-Logik in stream_collide ergibt das
-	// einen effektiven Zou-He-Auslass: Dirichlet auf den Druck, Neumann auf die Geschwindigkeit.
+)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out) {
+	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
+	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
+	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
 	//
-	// Warum das noetig ist: ein blosser TYPE_E-Auslass mit aufgepraegtem u_lat erzwingt BEIDE Groessen
-	// und ueberbestimmt den Ausfluss. Am Kugelfall macht das gemessen 9,5 % in Cz aus (2,8 sigma) --
-	// darum kommt der Rand mit, und nicht aus Prinzip.
+	// Die Innenzelle kommt FERTIG vom Host, statt hier aus einer Richtung abgeleitet zu werden. Grund:
+	// eine Zelle auf zwei Auslassflaechen (Kante) oder dreien (Ecke) hat keine eindeutige Richtung, und
+	// ein Schritt entlang einer davon landet wieder auf dem Rand. Der Host loest das einmal und prueft
+	// es nach; hier bleibt nur noch ein Kopiervorgang, an dem nichts schiefgehen kann.
 	//
-	// po_dirs: 0 = +x auswaerts (Inneres bei n-1), 1 = -x, 2 = +y, 3 = -y, 4 = +z, 5 = -z.
+	// Jede Randzelle kommt genau einmal in der Liste vor -- vom Host geprueft. Ohne das schrieben zwei
+	// Work-Items dieselbe Zelle, und welches zuletzt gewinnt, ist undefiniert.
 	const uint gid = get_global_id(0);
 	if(gid>=N_po) return;
-	const ulong n = po_cells[gid];
-	ulong n_int;
-	switch(po_dirs[gid]) {
-		case 0u: n_int = n - 1ul;                 break;
-		case 1u: n_int = n + 1ul;                 break;
-		case 2u: n_int = n - (ulong)Nx;           break;
-		case 3u: n_int = n + (ulong)Nx;           break;
-		case 4u: n_int = n - (ulong)Nx*(ulong)Ny; break;
-		case 5u: n_int = n + (ulong)Nx*(ulong)Ny; break;
-		default: return;
-	}
-	u[                  n] = u[                  n_int];
-	u[    def_N+(ulong)n] = u[    def_N+(ulong)n_int];
-	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)n_int];
+	const ulong n = po_cells[gid], m = po_interior[gid];
+	rho[n] = rho_out;
+	u[                  n] = u[                  m];
+	u[    def_N+(ulong)n] = u[    def_N+(ulong)m];
+	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
 } // apply_pressure_outlet()
 
 )+"#ifdef FORCE_FIELD"+R(

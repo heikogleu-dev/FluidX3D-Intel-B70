@@ -86,8 +86,12 @@ void main_setup() {
 	// ---------------------------------------------------------------- Physik
 	const float si_u   = 30.0f;                          // Anstroemung und Bodengeschwindigkeit [m/s]
 	const float si_rho = 1.225f;                         // ISA Meereshoehe [kg/m^3]
-	// ν per Env fuer die Validierung gegen die Standard-Widerstandskurve: bei Re_D = 100..1000 ist
-	// die Grenzschicht mit ~6 Zellen aufgeloest und tau = 0.53..0.58 liegt weit weg von 0.5.
+	// ν per Env fuer die Validierung gegen die Standard-Widerstandskurve.
+	// ★ KORREKTUR 2026-08-08 (Gutachter-Befund, selbst nachgerechnet): tau ist NICHT "0.53..0.58".
+	// Bei dx=12mm und u_lat=0.075 gilt tau = 0.5844 bei Re_D=100, aber nur **0.5084** bei Re_D=1000.
+	// Der obere Wert liegt damit sehr nah an 0.5, wo die effektive Wandposition des SRT-Bounce-Back
+	// stark viskositaetsabhaengig wird (Ginzburg/Verhaeghe/d'Humieres 2008) -- der effektive
+	// Kugelradius verschiebt sich also mit tau. Wer bei Re=1000 misst, misst das mit.
 	// Damit lassen sich Voxelisierung, Bounce-Back und Kraftintegration isoliert pruefen.
 	// Der Defaultwert ist die Luft bei 20 Grad C. (Der alte Baum hatte hier 1.48e-5 stehen und
 	// gleichzeitig 1.51e-5 dokumentiert -- ein Widerspruch, der nie aufgeloest wurde.)
@@ -229,23 +233,36 @@ void main_setup() {
 	print_info("Effektive Stirnflaeche: x"+to_string(A_eff_ratio,4u)+" = +"+to_string(100.0f*(A_eff_ratio-1.0f),1u)+" % gegenueber nominal");
 
 	// ---------------------------------------------------------------- Randbedingungen
+	// CFD_KUGEL_FREE=1: y+-, z+- werden FREISTROM (TYPE_E) statt mitbewegte Waende. Dann steht die Kugel
+	// frei, ohne Bodeneffekt und ohne Kanalblockage -- die Voraussetzung, um gegen die
+	// Standard-Widerstandskurve (Clift/Grace/Weber) zu messen. Der Bodeneffekt bei h/D = 0,167 senkt Cd
+	// um rund 20 % und macht jeden Literaturvergleich sinnlos.
+	const bool free_stream = env_on("CFD_KUGEL_FREE");
 	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
 		if((lbm.flags[n]&(TYPE_S|TYPE_X))!=0u) continue;           // Kugel unangetastet
-		if(z==0u || z==Nz-1u || y==0u || y==Ny-1u) {               // Boden, Decke, Seitenwaende
+		if(!free_stream && (z==0u || z==Nz-1u || y==0u || y==Ny-1u)) { // Boden, Decke, Seitenwaende
 			lbm.flags[n] = TYPE_S; lbm.u.x[n] = u_wall; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
-		} else if(x==0u || x==Nx-1u) {                             // Ein- und Auslass
+		} else if(x==0u || x==Nx-1u || (free_stream && (z==0u || z==Nz-1u || y==0u || y==Ny-1u))) {
 			lbm.flags[n] = TYPE_E; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		} else {
 			lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
 		}
 	}
+	if(free_stream) print_info("FREISTROM: y+- und z+- sind TYPE_E statt Wand -- Kugel steht frei, kein Bodeneffekt");
 
-	// Druck-Auslass an x+ (Zou-He). Ohne ihn erzwingt der blosse TYPE_E-Rand sowohl Druck als auch
-	// Geschwindigkeit und ueberbestimmt den Ausfluss. Gemessen macht das 9,5 % in Cz aus (2,8 sigma,
-	// Vergleich alter Baum gegen neuen am 2026-08-08) -- deshalb kommt er mit. Nach der
-	// Randbedingungs-Schleife aufrufen: er sammelt genau die TYPE_E-Zellen, die dort gesetzt wurden.
-	lbm.set_pressure_outlet_faces(2u); // Bit 2 = x_max
+	// Druck-Auslass an x+. NICHT Zou-He -- siehe die ausfuehrliche Einordnung bei
+	// LBM_Domain::set_pressure_outlet_faces. Es ist ein Gleichgewichtsrand mit vorgeschriebener Dichte
+	// und extrapolierter Geschwindigkeit. Echtes Zou-He ist fuer D3Q19 gar nicht eindeutig definiert:
+	// es braucht hoechstens vier einwaerts zeigende Links, eine ebene D3Q19-Flaeche hat fuenf
+	// (Maier/Bernard/Grunau, Phys. Fluids 8, 1996).
+	// Ohne diesen Rand erzwingt der blosse TYPE_E-Auslass Druck UND Geschwindigkeit und ueberbestimmt
+	// den Ausfluss. Nach der Randbedingungs-Schleife aufrufen: er sammelt die dort gesetzten TYPE_E-Zellen.
+	// CFD_PO_FACES ueberschreibt die Maske. Default 2 = nur x_max. Im Freistrom-Fall lassen sich damit
+	// auch die Seitenflaechen als Auslass fahren (0x3E = x_max + y+- + z+-) -- das ist zugleich der Test,
+	// ob Kanten und Ecken sauber behandelt werden, denn dort liegt eine Zelle auf zwei oder drei Flaechen.
+	const uint po_faces = env_u("CFD_PO_FACES", 2u);
+	lbm.set_pressure_outlet_faces(po_faces, env_f("CFD_PO_RHO", 1.0f));
 
 	// Tiles erst JETZT klassifizieren: der Klassifizierer liest die Flags, und die Waende oben sind
 	// ebenfalls TYPE_S. Liefe finalize schon nach der Voxelisierung, klassifizierte es gegen ein

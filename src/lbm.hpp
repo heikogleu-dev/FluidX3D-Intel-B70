@@ -43,12 +43,17 @@ private:
 	Memory<uint> tile_slot; // tile_id -> kompakter Slot; 0xFFFFFFFF = tote Tile
 	uint sparse_tiles_x = 0u, sparse_tiles_y = 0u, sparse_tiles_z = 0u;
 	uint sparse_n_active = 0u;
-	// FORK -- Druck-Auslass (Zou-He). Leer, solange set_pressure_outlet_faces() nicht gerufen wurde;
-	// der Kernel bleibt dann default-konstruiert und enqueue_apply_pressure_outlet() ist ein No-op.
-	Memory<ulong> po_cells; // duenn besetzte Zellindizes der Auslassflaechen
-	Memory<uchar> po_dirs;  // Auswaertsrichtung je Zelle (0..5)
+	// FORK -- Druck-Auslass. Leer, solange set_pressure_outlet_faces() nicht gerufen wurde; der Kernel
+	// bleibt dann default-konstruiert und enqueue_apply_pressure_outlet() ist ein No-op.
+	// po_interior wird HOST-seitig bestimmt, nicht device-seitig aus einer Richtung abgeleitet: nur so
+	// sind Kanten und Ecken (Zelle liegt auf zwei oder drei Auslassflaechen) sauber loesbar, und nur so
+	// laesst sich vorab pruefen, dass jede Innenzelle wirklich Fluid ist und jede Randzelle genau einmal
+	// vorkommt. Die frueher gespeicherte Richtung (po_dirs) konnte beides nicht.
+	Memory<ulong> po_cells;    // Randzellen, jede genau einmal
+	Memory<ulong> po_interior; // zugehoerige echte Innenzelle, aus der extrapoliert wird
 	Kernel kernel_apply_pressure_outlet;
 	uint po_N_active = 0u;
+	float po_rho = 1.0f; // vorgeschriebene Dichte am Auslass (LBM-Einheiten); 1.0 = Referenzdruck
 #ifdef FORCE_FIELD
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)
@@ -118,7 +123,7 @@ public:
 	void enqueue_stream_collide(); // call kernel_stream_collide to perform one LBM time step
 	void enqueue_update_fields(); // update fields (rho, u, T) manually
 	void enqueue_apply_pressure_outlet(); // FORK: Druck-Auslass, No-op ohne konfigurierte Flaechen
-	void set_pressure_outlet_faces(const uint face_mask); // FORK: TYPE_E-Zellen der Aussenflaechen sammeln und Kernel bauen
+	void set_pressure_outlet_faces(const uint face_mask, const float rho_out); // FORK: TYPE_E-Zellen der Aussenflaechen sammeln und Kernel bauen
 #ifdef SURFACE
 	void enqueue_surface_0();
 	void enqueue_surface_1();
@@ -461,7 +466,7 @@ public:
 	void run(const ulong steps=max_ulong, const ulong total_steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
 	void update_fields(); // update fields (rho, u, T) manually
 	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
-	void set_pressure_outlet_faces(const uint face_mask); // FORK: Zou-He-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
+	void set_pressure_outlet_faces(const uint face_mask, const float rho_out=1.0f); // FORK: Druck-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
 	void reset(); // reset simulation (takes effect in following run() call)
 #ifdef FORCE_FIELD
 	void update_force_field(); // calculate forces from fluid on TYPE_S cells
