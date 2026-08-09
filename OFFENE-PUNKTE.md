@@ -180,7 +180,56 @@ gewirkt hat**.
 
 ---
 
-## ★★ P0-NEU, 2026-08-09: das Fernfeld auf der iGPU ist nicht vertrauenswürdig
+## ★★ ZURÜCKGEZOGEN und richtiggestellt, 2026-08-09: die Geräte rechnen NICHT unterschiedlich
+
+**Hier stand: „das Fernfeld auf der iGPU ist nicht vertrauenswürdig, die iGPU rechnet oberhalb
+~1 GB Puffergröße falsch." Das war falsch.** Heiko hat den Schluss angezweifelt und einen
+isolierten Beweis verlangt — zu Recht.
+
+**Der isolierte Test** (`werkzeuge/puffertest.cpp`, kein LBM, keine Physik): Puffer von 256 MB bis
+3 GB anlegen, mit bekanntem Muster füllen, einen trivialen Kernel `a[i] += 1` darüber laufen
+lassen, zurückholen und **jedes einzelne Element** prüfen.
+
+| Gerät | 256 MB … 3 GB |
+|---|---|
+| CPU (Core Ultra 9 285K) | **null Fehler** |
+| B70 | **null Fehler** |
+| iGPU (Intel Graphics) | **null Fehler** |
+
+Auch bei 2 328 MB — genau der Größe des Fernfeld-u-Puffers — und bei 3 GB. Die 1-GB-Schwelle des
+i915-USERPTR-ioctl war eine plausible, aber falsche Spur.
+
+## Was wirklich dahintersteckt: das Klingeln macht das Fernfeld gerätereproduzierbar-UNfähig
+
+Der beobachtete Unterschied ist echt, hat aber eine andere Ursache. **Das Fernfeld bei 16 mm ist
+instabil** (τ = 0,5000071, das Klingeln aus dem Einlass). Zwei Geräte unterscheiden sich legitim in
+Vektorisierung, Reduktionsreihenfolge und FP16C-Rundung — und eine Instabilität **verstärkt diese
+Unterschiede exponentiell**. Die Belege, alle konsistent:
+
+| Fall | Stabilität | B70 gegen iGPU |
+|---|---|---|
+| Kugel (3 Mio Zellen) | stabil | **identisch** |
+| Fernfeld 32 mm | schwächeres Klingeln | **identisch** |
+| Fernfeld 16 mm, ohne Zone | starkes Klingeln | 1,000 gegen 0,925 |
+| Fernfeld 16 mm, **mit Zone N=64** | gedämpft | 1,016 gegen 1,005 — deutlich näher |
+
+Die Dämpfung verkleinert die Divergenz genau so, wie es die Verstärkungs-Erklärung verlangt.
+
+**Was das praktisch heißt:**
+1. **Die Geräte sind in Ordnung.** Kein Wächter nötig, keine Konfigurationsänderung aus diesem Grund.
+2. **Geräte-Reproduzierbarkeit ist ein brauchbares Stabilitätsmaß.** Läuft eine Konfiguration auf
+   zwei Geräten auf dasselbe Ergebnis, ist sie stabil; driftet sie, klingelt sie. Das ist billiger
+   als jede Spektralanalyse und sollte als Prüfung erhalten bleiben.
+3. **Der dd-Absturz bei 0,15 s bleibt dem Klingeln zugeordnet**, nicht der Hardware — die
+   ursprüngliche Analyse steht unverändert.
+
+**Lehre für mich:** ich hatte eine plausible Spur (die dokumentierte 1-GB-Warnung) und habe sie für
+den Beweis gehalten. Der Unterschied zwischen „passt zur Vermutung" und „ist nachgewiesen" ist
+genau das, worauf dieses Projekt sonst besteht.
+
+---
+
+## (überholt, siehe oben) ★★ P0-NEU, 2026-08-09: das Fernfeld auf der iGPU ist nicht vertrauenswürdig
 
 **Gefunden vom neuen Wandwirksamkeits-Nachweis** (Hygiene 2) — er war für V1s No-op-Fehlerklasse
 gebaut und hat stattdessen das hier aufgedeckt.
