@@ -185,7 +185,8 @@ void LBM_Domain::allocate(Device& device) {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
 	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
-	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz);
+	rho_clamp_hits = Memory<uint>(device, 2ull);
+	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
 #ifdef FORCE_FIELD

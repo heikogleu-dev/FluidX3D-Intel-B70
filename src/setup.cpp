@@ -234,7 +234,31 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
 }
 
-static // ---------------------------------------------------------------------------- Lauf-Sicherung
+static // ---------------------------------------------------------------------------- Dichte-Klemme berichten
+// ★★ Heikos Einwand 2026-08-09: "rho clamp ist doch auch nur ne Kruecke die man benoetigt wenn der
+// Code falsch ist oder etwas falsch parametrisiert ist." Richtig -- in einem korrekten Low-Mach-LBM
+// liegt rho bei 1 +- 0,02. Deshalb ist der Zaehler wichtiger als die Klemme selbst: er sagt, ob ein
+// Lauf ueberhaupt ein Ergebnis ist. Bleibt er null, war die Klemme ein nie ausloesender Waechter.
+// Ist er gross, rechnete der Lauf stellenweise auf einem geklemmten, also verfaelschten Feld.
+void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
+#ifdef RHO_CLAMP
+	ulong u=0ull, o=0ull; L.rho_clamp_hits_total(u, o);
+	summe += u+o;
+	print_info(string("  RHO_CLAMP ")+wo+": "+to_string(u+o)+" Treffer (untere Grenze "+to_string(u)+", obere "+to_string(o)+")");
+#else
+	(void)L; (void)wo; (void)summe;
+#endif // RHO_CLAMP
+}
+void dichteklemme_fazit(const ulong summe) {
+#ifdef RHO_CLAMP
+	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben.");
+	else print_warning("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen: rho hat den physikalischen Bereich verlassen. Dieser Lauf rechnete stellenweise auf einem GEKLEMMTEN Feld und ist kein belastbares Ergebnis -- die Ursache liegt im Betriebspunkt (fehlende Volumenviskositaet bei w gegen 2), nicht in der Klemme.");
+#else
+	(void)summe;
+#endif // RHO_CLAMP
+}
+
+// ---------------------------------------------------------------------------- Lauf-Sicherung
 // ★★ Heiko 2026-08-09: MIT JEDEM LAUF eine vollstaendige Sicherung in den Export-Ordner.
 // Zweck: Monate spaeter noch feststellen koennen, mit WELCHEM Stand eine Zahl entstanden ist --
 // ohne Git-Archaeologie und ohne die Annahme, der Arbeitsbaum sei seither unveraendert.
@@ -671,6 +695,7 @@ void main_setup_kugel() {
 	sd = sqrt(sd/(double)cd_w.size());
 
 	print_info("---------------------------------------------------------------");
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab t = "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd_w.size())+" Samples:");
 	print_info("  Cd (nominale Flaeche)   = "+to_string((float)mcd,4u)+"     Cz = "+to_string((float)mcz,4u));
 	print_info("  Cd (effektive Flaeche)  = "+to_string((float)(mcd/(double)A_eff_ratio),4u)
@@ -913,6 +938,7 @@ static void main_setup_fahrzeug() {
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
 	print_info("---------------------------------------------------------------");
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OF13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OF13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
@@ -1633,6 +1659,7 @@ static void main_setup_fahrzeug_dd() {
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
 	print_info("---------------------------------------------------------------");
+	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h); berichte_dichteklemme(lbm_c, "Fernfeld", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");

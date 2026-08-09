@@ -1581,7 +1581,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 } // reg_fneq()
 )+"#endif"+R( // REGULARIZED_BOUNDARIES
 
-)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // main LBM kernel
+)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
 )+"#endif"+R( // FORCE_FIELD
@@ -1618,6 +1618,17 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
+)+"#ifdef RHO_CLAMP"+R(
+	// ★ ZAEHLEN, nicht nur klemmen. Heikos Einwand 2026-08-09: die Klemme ist eine Kruecke, wenn der
+	// Code oder die Parametrierung falsch ist -- richtig. Ein Treffer heisst: rho hat den
+	// physikalischen Bereich verlassen, die Rechnung war dort schon kaputt, und die Klemme hat nur
+	// die Explosion u = j/rho verhindert. Bleibt der Zaehler ueber den ganzen Lauf NULL, ist die
+	// Klemme das, was sie sein soll: ein nie ausloesender Waechter. Sonst ist der Lauf kein Ergebnis.
+	// Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- der lautlose No-op,
+	// den dieses Projekt jagt, in meiner eigenen Klemme.
+	if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]);
+	else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]);
+)+"#endif"+R(
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
 		rhon = rho[               n]; // apply preset velocity/density

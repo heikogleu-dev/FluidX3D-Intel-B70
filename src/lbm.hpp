@@ -133,6 +133,12 @@ public:
 	// Bewusst OHNE Selbstruecksetzung (anders als s_fbbox/s_sparse_tiles_on): das Setup setzt den
 	// Wert ausdruecklich VOR JEDEM Konstruktor. Read-once waere hier falsch herum gewesen, denn
 	// lbm_f wird ZUERST gebaut -- die Zone haette also genau die falsche Domaene erwischt.
+	// ★★ RHO_CLAMP-Zaehler. Heiko 2026-08-09: "rho clamp ist doch auch nur ne Kruecke die man
+	// benoetigt wenn der Code falsch ist" -- richtig. Deshalb MUSS messbar sein, ob und wie oft sie
+	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
+	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
+	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
+	Memory<uint> rho_clamp_hits; // [0] = untere Grenze getroffen, [1] = obere
 	static uint s_sponge_n;  // 0 = aus; Zonenbreite in Zellen (CFD_SPONGE_N)
 	static float s_sponge_a; // Viskositaetsfaktor am Rand (CFD_SPONGE_A)
 	static float s_sponge_wmin; // untere Klemme fuer w in der Zone (CFD_SPONGE_WMIN)
@@ -523,6 +529,18 @@ public:
 	LBM(const uint3 N, const float nu, const Device_Info& device_info, const float fx=0.0f, const float fy=0.0f, const float fz=0.0f, const float sigma=0.0f, const float alpha=0.0f, const float beta=0.0f, const uint particles_N=0u, const float particles_rho=1.0f);
 	~LBM();
 
+	// ★ Zugriff auf die RHO_CLAMP-Zaehler aller Domaenen. Sitzt in LBM_Domain, gebraucht wird er in
+	// der Huelle -- ohne diese Zahl ist ein Lauf kein Ergebnis (siehe berichte_dichteklemme).
+	void rho_clamp_hits_total(ulong& unten, ulong& oben) {
+		unten = 0ull; oben = 0ull;
+#ifdef RHO_CLAMP
+		for(uint d=0u; d<get_D(); d++) {
+			lbm_domain[d]->rho_clamp_hits.read_from_device();
+			unten += (ulong)lbm_domain[d]->rho_clamp_hits[0];
+			oben  += (ulong)lbm_domain[d]->rho_clamp_hits[1];
+		}
+#endif // RHO_CLAMP
+	}
 	void run(const ulong steps=max_ulong, const ulong total_steps=max_ulong); // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
 	// FORK Doppel-Domaene: setzt `steps` Zeitschritte ohne Barriere in die Warteschlange und kehrt sofort zurueck.
 	// Der Aufrufer MUSS finish() rufen, bevor er ein Geraetepuffer liest. Erfordert einen vorherigen run() (Initialisierung).
