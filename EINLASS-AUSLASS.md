@@ -220,3 +220,75 @@ ginge nur über einen zusätzlichen Pass mit ~90 MB Zwischenpuffer.
   allein durch die Reihenfolge zweier Codezeilen, nirgends dokumentiert.
 - `setup.cpp` unterdrückt die Warnung „Zellen ohne Randbedingung" ausgerechnet für die
   Auslassfläche.
+
+---
+
+# Nachtrag 2026-08-09 vormittags — die Daempfungszone traegt
+
+## Der A/B, vier Arme, gleiches Binary, Kontrollarm bitgenau
+
+| bei 0,08 s | Streuung | >10 % | u_max |
+|---|---:|---:|---:|
+| AUS (Kontrollarm) | 0,0719 | 12,1 % | 2,618 |
+| Sponge N = 8 | 0,0716 | 14,6 % | 1,852 |
+| Sponge N = 32 | 0,0650 | 13,8 % | 0,571 |
+| **Sponge N = 64** | **0,0555** | **10,3 %** | **0,484** |
+| Sponge N = 32 + ν×10 | 0,0592 | 11,2 % | 0,574 |
+
+Die Zone skaliert **monoton mit der Breite**. Bei 40 ms ist N = 64 um **88 %** besser als der
+Kontrollarm (0,0047 gegen 0,0400); die ν×1000-Messung vom Vortag brachte an derselben Stelle nur
+37 %. Die Zone ist der deutlich staerkere Hebel.
+
+## Der lange Lauf: N = 64 traegt bis 0,20 s
+
+| t [s] | Streuung | >10 % | u_max |
+|---|---:|---:|---:|
+| 0.08 | 0.0555 | 10.2 % | 0.484 |
+| 0.10 | 0.0716 | 16.1 % | 0.514 |
+| 0.12 | 0.0792 | 18.3 % | 0.572 |
+| 0.14 | 0.0848 | 20.0 % | 0.639 |
+| 0.15 | 0.0873 | 20.8 % | 0.657 |
+| 0.18 | 0.0933 | 22.7 % | 0.687 |
+| 0.20 | 0.0963 | 23.6 % | 0.691 |
+
+**u_max saettigt bei ~0,69 und laeuft nicht davon**, die Streuungszuwaechse werden monoton kleiner
+(0,0895 → 0,0915 → 0,0933 → 0,0949 → 0,0963). Das ist ein beschraenkter Zustand. Zum Vergleich:
+der Kontrollarm hatte u_max = 2,6 bereits bei 0,08 s.
+
+**Warum u_max und nicht die Streuung das entscheidende Mass ist:** der Fahrzeuglauf ist nicht an
+der Streuung gestorben, sondern daran, dass die DDF-Ablage auf die FP16C-Grenze gelaufen ist
+(Fz bitgleich eingefroren bei 343.063 N). Dafuer sind die Extremwerte verantwortlich, nicht der
+Effektivwert. u_max von 2,6 auf 0,66 bei 0,15 s ist genau der Hebel gegen die Saettigung.
+
+## Die Kombination mit ν×1000 ist explodiert — ein Konstruktionsfehler von mir
+
+| | τ | w |
+|---|---|---|
+| wie gebaut | 0,5000071 | 1,999972 |
+| + Zone ×3000 | 0,52 | 1,918 |
+| **ν×1000 + Zone ×3000** | **21,8** | **0,046** |
+
+**Die beiden Regler multiplizieren sich** — Basis-ν mal 1000, in der Zone nochmal mal 3000, macht
+3 · 10⁶ und damit ν_lat = 7,1. w gegen null heisst τ gegen unendlich: das ist keine
+Navier-Stokes-Naeherung mehr. Der Lauf war bis 0,10 s spektakulaer ruhig (u_max 0,137, zwanzigmal
+besser als die Zone allein) und ist dann mit sauberer Exponentialrate (e-Faltung 16 ms) explodiert.
+Der Groessenwaechter hat ihn korrekt abgefangen (`Fernfeld allein ist auseinandergelaufen`).
+
+**Lehre:** zwei Multiplikatoren, die sich unbemerkt zu 3 · 10⁶ aufmultiplizieren, sind genau die
+Falle, vor der dieses Projekt sonst warnt. Ein Klemmwaechter auf das resultierende w gehoert dazu.
+
+## Ein zurueckgenommener Test
+
+Mein ν×10-Arm war **wertlos**: er schiebt w von 1,999972 auf 1,999716 — der Spiegel bleibt ein
+Spiegel. Die 9 %, die er brachte, sind Rauschen, keine Physik. Die Hypothese "das Innere ist der
+Begrenzer" ist damit weder bestaetigt noch widerlegt. Was der ν×1000-Arm zeigt: das Innere
+**traegt** bei (bis 0,10 s war er zwanzigmal ruhiger), aber die Heilung ist schlimmer als die
+Krankheit.
+
+## Offen, bevor die Zone an den Fahrzeugfall darf
+
+1. **Die Zone muss pro Domaene schaltbar sein.** Heute ist `CFD_SPONGE_N` global und traefe im
+   Doppel-Domaenen-Fall BEIDE Gitter. Im Nahfeld werden vier der fuenf Raender von der Kopplung
+   getrieben — eine Zone dort daempfte genau das Signal weg, das das Fernfeld hineinreicht.
+2. **Klemmwaechter auf w**, siehe oben.
+
