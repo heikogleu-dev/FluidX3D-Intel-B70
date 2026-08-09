@@ -539,6 +539,15 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define SRT"
 #elif defined(TRT)
 	"\n	#define TRT"
+	// ★★ LAMBDA ALS LAUFZEITPARAMETER, 2026-08-09. Bisher stand 0.1875f hart im Kernel.
+	// Gerechnet (von-Neumann, D3Q19, tau+ = 0,5000071, u_lat = 0,075):
+	//   Lambda = 3/16  -> tau- = 26409, max|Eigenwert| = 1,005543, e-Faltung 181 Schritte
+	//   Lambda = 1/4   -> praktisch unveraendert (w- ist laengst null) -- der Umbau brachte NICHTS
+	//   SRT            -> max|Eigenwert| = 1,003480, e-Faltung 288 Schritte  (GEMESSEN 2,6x besser)
+	//   Lambda = 9,1e-8 (w- = 1,95) -> max|Eigenwert| = 1,000485, e-Faltung 2062 Schritte
+	// SRT ist der Sonderfall Lambda = (tau-1/2)^2. Ein Knopf deckt damit ALLE Operatoren ab, und
+	// ungesetzt bleibt der Quelltext bit-identisch zum bisherigen Stand.
+	+"\n	#define def_lambda "+to_string(getenv("CFD_LAMBDA")!=nullptr?(float)atof(getenv("CFD_LAMBDA")):0.1875f, 12u)+"f"
 #endif // TRT
 
 	"\n	#define TYPE_S 0x01" // 0b00000001 // (stationary or moving) solid boundary

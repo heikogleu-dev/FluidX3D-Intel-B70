@@ -1015,13 +1015,25 @@ static void main_setup_fahrzeug_dd() {
 	// nur bei bestimmten dx. Am 2026-08-08 im Kleinlauf aufgefallen, daher floor(x+0.5).
 	auto n_cells = [](const float len, const float dx) { return (uint)floor(len/dx + 0.5f) + 1u; };
 	const float far_Lx  = env_f("CFD_FAR_LX",  12.2720f), far_Ly  = env_f("CFD_FAR_LY",  7.6640f), far_Lz  = env_f("CFD_FAR_LZ",  8.8160f);
-	const float near_Lx = env_f("CFD_NEAR_LX",  6.6560f), near_Ly = env_f("CFD_NEAR_LY", 2.4800f), near_Lz = env_f("CFD_NEAR_LZ", 1.9360f);
+	// ★★ AUF GANZE GROBE ZELLEN SCHNAPPEN, 2026-08-09. Die V1-Werte gehen bei dx_c = 16 mm glatt auf
+	// (416 / 155 / 121 grobe Zellen), bei jeder anderen Aufloesung nicht: bei 18 mm werden daraus
+	// 369,78 / 137,78 / 107,56. Die Deckungskonvention fein = (grob-1)*ratio + 1 verlangt aber, dass
+	// Boxlaenge UND Versatz ganzzahlige Vielfache von dx_c sind -- sonst liegen die Entnahmeebenen
+	// raeumlich auseinander. Genau das hat die Kopplungspruefung bei dx = 4,5 mm gefangen: fein
+	// 6,43016 m gegen grob 6,42816 m, also 2 mm bzw. 0,44 feine Zellen. Der Lauf wurde zu Recht
+	// verweigert. Mit dem Schnappen ist die Konfiguration AUFLOESUNGSUNABHAENGIG -- Voraussetzung
+	// fuer jede Gitterstudie, und die brauchen wir ohnehin.
+	auto auf_grobe_zelle = [&](const float L) { return dx_c*(float)max(1, (int)floor(L/dx_c + 0.5f)); };
+	const float near_Lx = auf_grobe_zelle(env_f("CFD_NEAR_LX",  6.6560f));
+	const float near_Ly = auf_grobe_zelle(env_f("CFD_NEAR_LY", 2.4800f));
+	const float near_Lz = auf_grobe_zelle(env_f("CFD_NEAR_LZ", 1.9360f));
 	// Weltkoordinaten nach V1-Konvention: die Fahrzeugnase liegt bei x = 0, der Einlass 0.6 Fahrzeug-
 	// laengen davor. Das ist BEWUSST kurz -- Heiko 2026-08-08: der geringe Einlaufweg wirkt der toten
 	// Stroemung in den unteren 5 bis 20 mm und der dadurch stagnierenden Unterbodenstroemung entgegen.
 	// Wer das fuer einen Fehler haelt und "korrigiert", macht den Unterboden wieder falsch.
 	const float far_x0  = env_f("CFD_FAR_X0", -0.6f*si_length);       // -2.66184 m
-	const float near_x0 = far_x0 + env_f("CFD_NEAR_OFF_X", 2.4320f);  // -0.22984 m, V1-Wert
+	const float near_off_x = auf_grobe_zelle(env_f("CFD_NEAR_OFF_X", 2.4320f)); // ebenfalls auf ganze grobe Zellen
+	const float near_x0 = far_x0 + near_off_x;  // -0.22984 m bei dx_c = 16 mm, V1-Wert
 	const float veh_x0  = 0.0f;                                      // Nase
 	const float veh_x1  = veh_x0 + si_length;                        // Heck
 	// Das Fahrzeug steht AUF der Fahrbahn (Heiko-Vorgabe). V1 liess es 16 mm schweben.

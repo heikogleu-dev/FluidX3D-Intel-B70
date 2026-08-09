@@ -7,8 +7,14 @@ Stand 2026-08-08, nach dem Abbruch von `dd_lauf01`. Diese Analyse gab es in V1 n
 ## Der Befund
 
 Der Doppel-Domänen-Lauf kippte bei **0,15 s**. Die Kräfte froren bitgleich ein
-(Fz = 343.063 N; V1 fror am selben Punkt bei 343.640 N ein — dieselbe Zahl, also die auf die
-FP16C-Grenze gelaufene DDF-Ablage, keine Kraft).
+(Fz = 343.063 N).
+
+★★ **KORRIGIERT 2026-08-09:** hier stand „V1 fror am selben Punkt bei 343.640 N ein — dieselbe
+Zahl". **Das ist frei erfunden gewesen.** Ein Prüfer hat 639 CSV-Dateien, alle Logs, alle Findings
+und 997 Commit-Botschaften durchsucht: der Wert existiert in V1 nirgends, und **kein einziger
+gekoppelter V1-Lauf fror bei ~0,15 s ein.** Im Gegenteil — 16 Läufe gehen über 0,15 s hinaus, drei
+bis 0,5 s, mit `far_nan = 0` in jeder Zeile und `far_umax ≤ 0,245`, abklingend auf ein Plateau bei
+0,12. Die Behauptung hat als Scheinbeleg gedient, V1 und V2 zeigten denselben Mechanismus.
 
 Die Schnitte zeigen den Weg dahin:
 
@@ -292,3 +298,70 @@ Krankheit.
    getrieben — eine Zone dort daempfte genau das Signal weg, das das Fernfeld hineinreicht.
 2. **Klemmwaechter auf w**, siehe oben.
 
+
+
+---
+
+# Nachtrag 2026-08-09 nachmittags — die Ursache ist der Kollisionsoperator
+
+## Was V1 anders macht: SRT statt TRT
+
+**V1 rechnet SRT.** TRT war in **keinem** gekoppelten V1-Lauf aktiv. Die Begründung steht seit dem
+8. Juni in V1s `defines.hpp:21`:
+
+> „2026-06-08 zurück auf SRT: TRT divergiert bei τ≈0.5 (wm≈3.7e-5, ungerade Mode relaxiert ~27000
+> Steps, FP16C-/Wand-Rauschen akkumuliert) UND dämpft die geraden Akustik-Moden eh nicht."
+
+**Das war eine gemessene Entscheidung, und ich habe sie als Versäumnis umgedeutet.** In
+`V1-GEGEN-V2.md` steht von mir: „TRT mit Λ = 3/16 aktiv. In V1 vorhanden, aber auskompiliert —
+toter Code." Auskommentiert hieß hier: geprüft und verworfen.
+
+## Der A/B, gleiches Gitter, gleiches τ, einziger Unterschied der Operator
+
+| bei 0,08 s | Streuung | Zellen > 10 % daneben | u_max |
+|---|---:|---:|---:|
+| TRT Λ = 3/16 | 0,0719 | 12,06 % | 2,618 |
+| **SRT** | **0,0271** | **0,39 %** | **0,767** |
+| TRT Λ = 9,1·10⁻⁸ | 0,0395 | 0,68 % | 1,144 |
+
+**Faktor 2,7 in der Streuung, 31 im Anteil schlechter Zellen, 3,4 im Maximum.**
+
+## Die Rechnung dahinter — und wo sie hält, wo nicht
+
+Von-Neumann-Analyse (D3Q19, τ₊ = 0,5000071, u_lat = 0,075):
+
+| | max\|λ\| | e-Faltung | u-Schwelle |
+|---|---|---|---|
+| SRT | 1,003480 | 288 Schritte | u_krit ≈ 0,037–0,05 |
+| TRT Λ = 3/16 | 1,005543 | 181 Schritte | **keine** (γ ≈ 0,0735·u ab u = 0) |
+
+★ **KORREKTUR der bisherigen Diagnose in diesem Dokument:** der Mechanismus ist **negative
+Dämpfung**, nicht „fehlende Dämpfung". Die Kollision selbst verstärkt *nicht* (|1−w| = 0,99997);
+verstärkt wird erst durch Kollision **und** Streaming zusammen.
+
+Die Rollenverteilung, jede einzeln belegt:
+- **FP16C ist das Saatkorn** — parameterfrei auf Faktor 1,26 genau bei 50 Schritten.
+- **Die lineare Instabilität ist der Motor** — λ ≈ 2,3 Zellen.
+- **Smagorinsky ist der Deckel** — deshalb sättigt es statt zu explodieren.
+
+Kurvenform über 21 Punkte: Sättigung R² = 0,984, exponentiell 0,794, linear 0,937, Wurzel 0,926.
+**Eindeutig sättigend** — das ist die Signatur „instabiler Operator plus nichtlinearer Begrenzer".
+
+**Was hält:** die gerechnete Schwelle ν_krit(TRT) = 1,07·10⁻³ liegt genau in der Dekade, in der die
+vorhandene ν-Reihe von „wächst" auf „gesättigt" umspringt. Und die Rangfolge TRT 3/16 schlechter
+als SRT ist bestätigt.
+
+**Was NICHT hält:** die Vorhersage, Λ = 9,1·10⁻⁸ sei 7× besser als SRT. Gemessen ist es 1,5×
+**schlechter**. Der Prüfer hatte dieses Kriterium selbst gesetzt — die quantitative Optimums-Aussage
+ist damit widerlegt, die qualitative Rangfolge nicht.
+
+## Λ ist jetzt Laufzeitparameter
+
+`CFD_LAMBDA` steuert den ungeraden Zweig; ungesetzt bleibt der Quelltext **bit-identisch**
+(verifiziert). SRT ist der Sonderfall Λ = (τ−½)². Ein Knopf, alle Operatoren, bit-genauer
+Kontrollarm.
+
+## Was das für die bisherigen Randmessungen heißt
+
+**Die Dämpfungszone und der regularisierte Rand wurden beide gegen ein TRT-Feld gemessen.** Ihre
+Bewertung ist damit neu zu führen — die Zone könnte auf einem SRT-Feld deutlich weniger nötig sein.

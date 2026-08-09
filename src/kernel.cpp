@@ -1820,7 +1820,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#elif defined(TRT)"+R(
 	const float wp = w; // TRT: inverse of "+" relaxation time
-	const float wm = 1.0f/(0.1875f/(1.0f/w-0.5f)+0.5f); // TRT: inverse of "-" relaxation time wm = 1.0f/(0.1875f/(3.0f*nu)+0.5f), nu = (1.0f/w-0.5f)/3.0f;
+	const float wm = 1.0f/(def_lambda/(1.0f/w-0.5f)+0.5f); // TRT: inverse of "-" relaxation time wm = 1.0f/(0.1875f/(3.0f*nu)+0.5f), nu = (1.0f/w-0.5f)/3.0f;
 )+"#ifdef VOLUME_FORCE"+R(
 	const float c_taup=fma(wp, -0.25f, 0.5f), c_taum=fma(wm, -0.25f, 0.5f); // source: https://arxiv.org/pdf/1901.08766.pdf
 	float Fib[def_velocity_set]; // F_bar
