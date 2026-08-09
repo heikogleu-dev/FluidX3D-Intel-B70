@@ -124,6 +124,18 @@ public:
 	Kernel kernel_drive_boundary_cubic_lift;
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
 
+	// ★★ Daempfungszone -- PRO DOMAENE, und das ist keine Kosmetik. Vorpruefung 2026-08-09:
+	// die Zone wurde aus device_defines() direkt per getenv gelesen und traf damit JEDE LBM-Instanz.
+	// Im Doppel-Domaenen-Fall waere sie im NAHFELD gelandet, wo zwischen Einlassflaeche und
+	// Fahrzeugnase nur 57,5 Zellen liegen -- eine 64-Zellen-Zone haette die Nase um 7 Zellen
+	// UEBERDECKT und die Staupunktstroemung durch Faktor 145 bis 751 laufen lassen. Cd waere
+	// bedeutungslos gewesen. Auch N=32 rettet das nicht (dann 100 mm vor der Nase, mitten im Stau).
+	// Bewusst OHNE Selbstruecksetzung (anders als s_fbbox/s_sparse_tiles_on): das Setup setzt den
+	// Wert ausdruecklich VOR JEDEM Konstruktor. Read-once waere hier falsch herum gewesen, denn
+	// lbm_f wird ZUERST gebaut -- die Zone haette also genau die falsche Domaene erwischt.
+	static uint s_sponge_n;  // 0 = aus; Zonenbreite in Zellen (CFD_SPONGE_N)
+	static float s_sponge_a; // Viskositaetsfaktor am Rand (CFD_SPONGE_A)
+	static float s_sponge_wmin; // untere Klemme fuer w in der Zone (CFD_SPONGE_WMIN)
 	static bool s_sparse_tiles_on; // CFD_SPARSE_TILES
 	static uint s_sparse_T;        // CFD_TILE: 8 = VRAM-lastig (-40 % Tempo, 1,43 GB), 16 = Tempo-lastig (-28 %, 0,77 GB)
 	void finalize_sparse_tiles();  // Tiles klassifizieren, sparse fi allozieren, Kernel neu binden

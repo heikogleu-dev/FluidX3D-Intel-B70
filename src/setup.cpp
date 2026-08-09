@@ -284,6 +284,13 @@ static void main_setup_kugel() {
 	}
 
 	units.set_m_kg_s(D/dx, u_lat, 1.0f, D, si_u, si_rho);
+	// ★ Die Daempfungszone gibt es in diesem Fall NICHT, und das wird GESAGT statt still geschluckt:
+	// die Zone rampt am DOMAENENRAND, und hier sind y+/y- und z+ mitbewegte Waende -- eine Zone dort
+	// verdickte kuenstlich die Wandgrenzschichten. Sinnvoll ist sie nur in fernfeld und fahrzeug_dd,
+	// dort nur am groben Gitter. Ein still wirkungsloser Schalter waere genau die Fehlerklasse,
+	// die dieses Projekt sonst jagt.
+	if(env_u("CFD_SPONGE_N", 0u)>0u) print_warning("CFD_SPONGE_N ist gesetzt, wird in diesem Fall aber NICHT angewandt (die Zone rampt am Domaenenrand, dort stehen hier mitbewegte Waende). Nur fernfeld und fahrzeug_dd nutzen sie.");
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; // alle drei, damit keine Instanz einen Wert der vorigen erbt
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=============== Kugel im Kanal (Neuaufbau auf Upstream 8986874) ===============");
@@ -520,6 +527,13 @@ static void main_setup_fahrzeug() {
 	}
 
 	units.set_m_kg_s(si_length/dx, u_lat, 1.0f, si_length, si_u, si_rho);
+	// ★ Die Daempfungszone gibt es in diesem Fall NICHT, und das wird GESAGT statt still geschluckt:
+	// die Zone rampt am DOMAENENRAND, und hier sind y+/y- und z+ mitbewegte Waende -- eine Zone dort
+	// verdickte kuenstlich die Wandgrenzschichten. Sinnvoll ist sie nur in fernfeld und fahrzeug_dd,
+	// dort nur am groben Gitter. Ein still wirkungsloser Schalter waere genau die Fehlerklasse,
+	// die dieses Projekt sonst jagt.
+	if(env_u("CFD_SPONGE_N", 0u)>0u) print_warning("CFD_SPONGE_N ist gesetzt, wird in diesem Fall aber NICHT angewandt (die Zone rampt am Domaenenrand, dort stehen hier mitbewegte Waende). Nur fernfeld und fahrzeug_dd nutzen sie.");
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; // alle drei, damit keine Instanz einen Wert der vorigen erbt
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
@@ -858,6 +872,18 @@ static void main_setup_fahrzeug_dd() {
 		const uint z0=(uint)fmax(0.0f, veh_f->pmin.z-(float)M), z1=(uint)fmin((float)fNz-1.0f, veh_f->pmax.z+(float)M);
 		LBM_Domain::set_force_bbox(x0, y0, z0, x1-x0+1u, y1-y0+1u, z1-z0+1u);
 	}
+	// ★★ DAEMPFUNGSZONE AM NAHFELD: AUSDRUECKLICH AUS, und das ist eine harte Aussage.
+	// Vorpruefung 2026-08-09, nachgerechnet aus der STL-Lage: zwischen der Einlassflaeche x- und der
+	// Fahrzeugnase liegen nur 57,5 Zellen (230 mm) -- der Nahfeld-Einlauf ist bewusst kurz gehalten.
+	// Eine 64-Zellen-Zone UEBERDECKTE die Nase um 7 Zellen, und die Staupunktstroemung davor liefe
+	// durch Faktor 145 (x=50), 422 (x=40), 751 (x=32). Auch N=32 rettet nichts: dann bleiben 100 mm
+	// vor der Nase, mitten im Staugebiet. Seitlich verengte N=64 die freie Breite auf 1,97 m bei
+	// 1,84 m Fahrzeugbreite -- ein virtueller Kanal 68 mm neben der breitesten Stelle.
+	// Dazu kommt das urspruengliche Argument: vier der fuenf Nahfeld-Raender werden von der Kopplung
+	// GETRIEBEN, und die Uebergabe geschieht in der EINEN Randzellschicht. Bei N=64 haette diese Zelle
+	// den Faktor 2906 -- die Kopplung wuerde genau an ihrer Eintrittsstelle verschmiert.
+	// Es gibt also KEINE vertretbare Zonenbreite am Nahfeld. Deshalb hier hart auf null.
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; // alle drei, damit keine Instanz einen Wert der vorigen erbt
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
 
 	// ---------------------------------------------------------------- Grobes Gitter bauen
@@ -871,6 +897,15 @@ static void main_setup_fahrzeug_dd() {
 		const uint z0=(uint)fmax(0.0f, veh_c->pmin.z-(float)M), z1=(uint)fmin((float)cNz-1.0f, veh_c->pmax.z+(float)M);
 		LBM_Domain::set_force_bbox(x0, y0, z0, x1-x0+1u, y1-y0+1u, z1-z0+1u);
 	}
+	// ★ Daempfungszone NUR am Fernfeld. Dort ist Platz: Abstand Rand -> naechste Kopplungs-Entnahmeebene
+	// betraegt x- 152, x+ 199, y+- 162, z+ 430 Zellen. N=64 laesst ueberall >= 88 Zellen Luft.
+	// Obergrenze N <= 120 (dann noch 32 Zellen Abstand zur Entnahmeebene x-); N=32/64 sind komfortabel.
+	// Bewusst NACH lbm_f gesetzt und ohne Selbstruecksetzung: lbm_f wird ZUERST konstruiert, ein
+	// read-once haette die Zone also genau der falschen Domaene gegeben.
+	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
+	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
+	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f);
+	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 kaeme im Fernfeld der Kopplungs-Entnahmeebene x- (152 Zellen) zu nahe.");
 	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
 
 	// ---------------------------------------------------------------- Voxelisieren, beide Gitter
@@ -1437,6 +1472,15 @@ static void main_setup_fernfeld() {
 		const float3 bb = veh->get_bounding_box_size(), ctr = veh->get_bounding_box_center();
 		veh->translate(float3((0.0f-far_x0)/dx + 0.5f*bb.x - ctr.x, (0.0f-far_y0)/dx - ctr.y, 0.5f*bb.z - ctr.z));
 	}
+	// ★ Daempfungszone -- im Diagnosefall das eine Gitter. Gemessen 2026-08-09: N=64 traegt bis
+	// 0,20 s, u_max saettigt bei 0,69 gegen 2,6 des Kontrollarms. Grenze nach oben: N <= 120,
+	// darueber kaeme die Zone den Kopplungs-Entnahmeebenen des dd-Falls zu nahe (x- hat 152 Zellen).
+	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
+	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
+	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f);
+	// ★ Nachpruefer-Befund 2026-08-09: die Obergrenze stand hier nur im Kommentar, geprueft wurde sie
+	// nur im dd-Fall. Damit lief CFD_SPONGE_N=400 im Diagnosefall ungeprueft durch.
+	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 ist nicht vorgesehen (im dd-Fall kaeme die Zone der Kopplungs-Entnahmeebene x- bei 152 Zellen zu nahe; der Diagnosefall bleibt vergleichbar).");
 	LBM lbm(uint3(Nx, Ny, Nz), nu_lat);
 	if(mit_fahrzeug) {
 		lbm.voxelize_mesh_on_device(veh, TYPE_S|TYPE_X); lbm.flags.read_from_device();

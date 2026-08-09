@@ -1733,7 +1733,26 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 			const float sr = 1.0f-(float)sd/(float)def_sponge_n; // 1 am Rand, 0 innen
 			const float nu_l = fma(1.0f/w, 0.33333334f, -0.16666667f); // nu aus dem aktuellen w
 			const float nu_s = nu_l*fma(sr*sr, def_sponge_a-1.0f, 1.0f);
-			w = 1.0f/fma(3.0f, nu_s, 0.5f);
+			// ★★ KLEMME. Sie muss HIER stehen und nicht auf dem Host, weil nu_l oben aus dem bereits
+			// von SUBGRID veraenderten w zurueckgerechnet wird: der Faktor trifft nu_0 + nu_t, und nu_t
+			// kennt der Host nicht. (Den REIN LAMINAREN Anteil kennt er sehr wohl und meldet ihn beim
+			// Start -- der Fall nu x1000 mal Zone x3000 aus dem 2026-08-09 waere schon dort aufgefallen.
+			// Diese Klemme faengt den Anteil ab, der erst zur Laufzeit aus der Wirbelviskositaet kommt.)
+			//
+			// ★ KORRIGIERT nach Nachpruefung 2026-08-09: hier stand eine STABILITAETS-Begruendung
+			// ("sqrt(2*nu_lat) ist die Diffusionsstrecke, darueber verlangt die Kollision einen
+			// Transport, den das Streaming nicht liefert"). Das ist physikalisch falsch -- LBM ist fuer
+			// 0 < w < 2 stabil, grosse tau sind ueberdaempft, aber stabil (im Grenzfall w->0 findet
+			// einfach keine Kollision statt, also reine Advektion). nu_lat <= 0,5 ist KEINE
+			// Stabilitaetsschranke.
+			//
+			// Die tragfaehige Begruendung ist GENAUIGKEIT: die in Chapman-Enskog vernachlaessigten
+			// Terme gehen mit (tau-1/2)^2. tau=1 -> 0,25; tau=2 -> 2,25 (Faktor 9, vertretbar);
+			// tau=21,8 (die gemessene Explosion) -> 453, also das 1800-fache von tau=1. Die Klemme ist
+			// ein Genauigkeitsdeckel, kein Stabilitaetsschutz. w >= 0,5 heisst tau <= 2.
+			// TRT bleibt konsistent: wp und wm werden weiter unten aus DIESEM w gebildet, Lambda = 3/16
+			// gilt also auch in der Zone.
+			w = fmax(1.0f/fma(3.0f, nu_s, 0.5f), def_sponge_wmin);
 		}
 	}
 )+"#endif"+R( // SPONGE

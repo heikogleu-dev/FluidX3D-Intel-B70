@@ -118,6 +118,24 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Konstruktoren umlegt, aendert rueckwirkend das Verhalten der ERSTEN Domaene, deren fi dann als
 	// 1-Zellen-Platzhalter stehen bliebe. Deshalb jetzt genauso read-once wie die F-Bounding-Box:
 	// hier einmal in Domaenen-Felder uebernehmen, danach lesen ausschliesslich diese.
+	// ★ Daempfungszone: Sperre und Wirksamkeitsmeldung.
+	if(s_sponge_n>0u) {
+		// def_Nx/def_Ny/def_Nz im Sponge-Block sind DOMAENENmasse inklusive Halo -- mit mehreren
+		// Domaenen rampte die Zone an jeder inneren Domaenengrenze. Bis das auf globale Koordinaten
+		// umgestellt ist, wird das hart verweigert statt lautlos falsch gerechnet.
+		if(get_D()!=1u) print_error("Daempfungszone (CFD_SPONGE_N) ist nur fuer eine Domaene gebaut; mit D>1 rampte sie an jeder inneren Domaenengrenze.");
+		// ★ Nachpruefer-Befund: fuer n gab es eine Schranke, fuer a und wmin keine. CFD_SPONGE_WMIN=2.5
+		// erzwaenge ueber fmax ein w>2, also NEGATIVE effektive Viskositaet und sofortige Explosion;
+		// ein negatives a machte nu_s<0. Beides jetzt hart abgewiesen statt lautlos gerechnet.
+		if(!(s_sponge_wmin>0.0f && s_sponge_wmin<2.0f)) print_error("CFD_SPONGE_WMIN muss echt zwischen 0 und 2 liegen (w>=2 bedeutet negative Viskositaet).");
+		if(s_sponge_a<1.0f) print_error("CFD_SPONGE_A unter 1 wuerde die Viskositaet in der Zone SENKEN statt anheben (negativ sogar nu<0).");
+		// Was die Zone laminar bewirkt, VOR dem Lauf hinschreiben -- eine Klemme, die still zuschlaegt,
+		// waere genau der lautlose No-op, den dieses Projekt sonst jagt.
+		const float nu_rand = nu*s_sponge_a, tau_rand = 0.5f+3.0f*nu_rand, w_rand = 1.0f/tau_rand;
+		print_info("Daempfungszone: "+to_string(s_sponge_n)+" Zellen, Faktor "+to_string(s_sponge_a,1u)+" am Rand (quadratische Rampe, Boden ausgenommen).");
+		print_info("  laminar am Rand: nu "+to_string(nu,8u)+" -> "+to_string(nu_rand,6u)+", tau "+to_string(tau_rand,4u)+", w "+to_string(w_rand,4u)+" (Klemme bei w = "+to_string(s_sponge_wmin,3u)+")");
+		if(w_rand<s_sponge_wmin) print_warning("Die Klemme greift schon LAMINAR (w = "+to_string(w_rand,4u)+" unter "+to_string(s_sponge_wmin,3u)+") -- die Zone ist schwaecher als eingestellt. Faktor senken oder CFD_SPONGE_WMIN bewusst absenken.");
+	}
 	sparse_on = s_sparse_tiles_on;
 	sparse_T  = s_sparse_T;
 	s_sparse_tiles_on = false; // read-once: eine zweite Domaene erbt das Tiling nicht
@@ -142,6 +160,9 @@ uint LBM_Domain::s_fbbox[6] = {0u,0u,0u,0u,0u,0u};
 void LBM_Domain::set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz) {
 	s_fbbox[0]=x0; s_fbbox[1]=y0; s_fbbox[2]=z0; s_fbbox[3]=nx; s_fbbox[4]=ny; s_fbbox[5]=nz;
 }
+uint LBM_Domain::s_sponge_n = 0u;
+float LBM_Domain::s_sponge_a = 3000.0f;
+float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
 uint LBM_Domain::s_sparse_T = 8u;
 
@@ -540,10 +561,15 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// darf nicht kuenstlich verdickt werden. V1s wirksame Klemmschicht war der harte Vorlaeufer
 	// dieser Idee -- gleicher Ort, aber als f-Reset statt als Viskositaet.
 	// Nur emittiert, wenn CFD_SPONGE_N gesetzt ist; ohne die Variable ist der Quelltext bit-identisch.
-	+((getenv("CFD_SPONGE_N")!=nullptr&&atoi(getenv("CFD_SPONGE_N"))>0) ? (string)
+	// ★ Aus den STATIKEN, nicht aus getenv -- siehe die Begruendung bei ihrer Deklaration in lbm.hpp.
+	// Das Setup setzt sie vor jedem Konstruktor; damit ist die Zone pro Domaene schaltbar, und die
+	// Auswertung der Umgebungsvariablen laeuft ueber env_u/env_f im Setup, die den WERT auswerten
+	// (CFD_SPONGE_N=0 heisst aus) statt nur auf das Literal "0" zu pruefen.
+	+((s_sponge_n>0u) ? (string)
 	"\n	#define SPONGE"
-	"\n	#define def_sponge_n "+to_string((uint)atoi(getenv("CFD_SPONGE_N")))+"u"
-	"\n	#define def_sponge_a "+to_string(getenv("CFD_SPONGE_A")!=nullptr?(float)atof(getenv("CFD_SPONGE_A")):3000.0f,1u)+"f"
+	"\n	#define def_sponge_n "+to_string(s_sponge_n)+"u"
+	"\n	#define def_sponge_a "+to_string(s_sponge_a,4u)+"f" // 4 Nachkommastellen: bei kleinen a war 1 Stelle irrefuehrend
+	"\n	#define def_sponge_wmin "+to_string(s_sponge_wmin,4u)+"f"
 	: (string)"")
 	// FORK: REG_E(i) ist der Randwert einer TYPE_E-Zelle -- reines Gleichgewicht wie bisher, oder mit
 	// REGULARIZED_BOUNDARIES zusaetzlich der rekonstruierte Nichtgleichgewichtsanteil.
