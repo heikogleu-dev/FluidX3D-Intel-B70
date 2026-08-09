@@ -611,6 +611,11 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 #else
 	"\n	#define REG_E(i) (feq[i])"
 #endif // REGULARIZED_BOUNDARIES
+	#ifdef RHO_CLAMP
+	"\n	#define RHO_CLAMP"
+	"\n	#define RHO_CLAMP_MIN "+to_string(RHO_CLAMP_MIN,4u)+"f"
+	"\n	#define RHO_CLAMP_MAX "+to_string(RHO_CLAMP_MAX,4u)+"f"
+#endif // RHO_CLAMP
 	"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
 	"\n	#define TYPE_BO 0x03" // 0b00000011 // any flag bit used for boundaries (temperature excluded)
 	"\n	#define TYPE_IF 0x18" // 0b00011000 // change from interface to fluid

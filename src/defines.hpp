@@ -7,7 +7,7 @@
 #define D3Q19 // choose D3Q19 velocity set for 3D; allocates 93 (FP32) or 55 (FP16) Bytes/cell; (default)
 //#define D3Q27 // choose D3Q27 velocity set for 3D; allocates 125 (FP32) or 71 (FP16) Bytes/cell
 
-//#define SRT // choose single-relaxation-time LBM collision operator; (default)
+#define SRT // choose single-relaxation-time LBM collision operator; (default)
 // ★ FORK 2026-08-08: TRT statt SRT. Bei SRT sind tau und Lambda=(tau-0.5)^2 gekoppelt; Lambda=3/16
 // (die viskositaetsunabhaengige Bounce-Back-Wandposition, Ginzburg/d'Humieres PRE 68, 066614) verlangte
 // tau=0.933, also Re_L=576 -- bei realistischem Re also prinzipiell unerreichbar. Gemessen lag Lambda
@@ -16,7 +16,7 @@
 // Belegt durch einen A/B mit Kontrollarm: bei tau=0.8 (Lambda=0.09) laeuft der Fall stabil (0 nan),
 // bei tau=0.50003 divergiert er reproduzierbar (Fz -11.4 Mio N, 7 nan). TRT setzt Lambda fest auf 3/16,
 // unabhaengig von nu UND vom Smagorinsky-nu_t.
-#define TRT // choose two-relaxation-time LBM collision operator
+//#define TRT // choose two-relaxation-time LBM collision operator
 
 //#define FP16S // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to range-shifted IEEE-754 FP16; number conversion is done in hardware; all arithmetic is still done in FP32
 #define FP16C // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to more accurate custom FP16C format; number conversion is emulated in software; all arithmetic is still done in FP32
@@ -37,6 +37,15 @@
 #if defined(REGULARIZED_BOUNDARIES)&&!defined(D3Q19)
 #error "REGULARIZED_BOUNDARIES ist nur fuer D3Q19 gebaut (Gewichtszuordnung in reg_fneq und Achsnachbarn j[1..6]). Pruefer-Befund 2026-08-08: bei D3Q15 fehlt def_we, bei D3Q27 und D2Q9 sind die Gewichte falsch."
 #endif
+// ★★ RHO_CLAMP -- Dichte-Limiter in calculate_rho_u, VOR der Division u = j/rho.
+// Aus V1 nachgezogen 2026-08-09. V1 hat ihn am 2026-06-25 gegen den Druckdipol ueber dem bewegten
+// Boden eingefuehrt; V2 hatte ihn nicht, und der dd-Lauf starb bei 0,003 s mit NaN.
+// Grenzen physikalisch-universell (low-Ma: rho = 1 +- 0,02), triggert nur bei grober Instabilitaet.
+// Wieviele Zellen er wirklich trifft, meldet der Waechter zur Laufzeit -- eine still greifende
+// Klemme waere genau der lautlose No-op, den dieses Projekt jagt.
+#define RHO_CLAMP
+#define RHO_CLAMP_MIN 0.5f
+#define RHO_CLAMP_MAX 1.5f
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
 //#define SURFACE // enables free surface LBM: mark fluid cells with TYPE_F; at initialization the TYPE_I interface and TYPE_G gas domains will automatically be completed; allocates an extra 12 Bytes/cell

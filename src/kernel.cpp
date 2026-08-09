@@ -1146,6 +1146,18 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	uy = f[ 3]-f[ 4]+f[ 7]-f[ 8]+f[11]-f[12]+f[14]-f[13]+f[17]-f[18]+f[19]-f[20]+f[21]-f[22]+f[24]-f[23]+f[25]-f[26];
 	uz = f[ 5]-f[ 6]+f[ 9]-f[10]+f[11]-f[12]+f[16]-f[15]+f[18]-f[17]+f[19]-f[20]+f[22]-f[21]+f[23]-f[24]+f[25]-f[26];
 )+"#endif"+R( // D3Q27
+)+"#ifdef RHO_CLAMP"+R(
+	// ★★ DICHTE-KLEMME, aus V1 nachgezogen 2026-08-09. Sie steht HIER, vor der Division -- das ist
+	// der ganze Punkt: u = j/rho explodiert, sobald rho gegen null oder negativ laeuft. Geklemmt wird
+	// rho, geteilt wird durch das GEKLEMMTE rho; der Impuls j = rho*u bleibt damit erhalten.
+	// V1 hat sie am 2026-06-25 gegen den Druckdipol ueber dem bewegten Boden eingefuehrt und
+	// dokumentiert sie als DEN Fix dafuer. V2 hatte sie nicht -- und der Doppel-Domaenen-Lauf ist
+	// am 2026-08-09 bei 0,003 s mit NaN gestorben, also an genau diesem Mechanismus.
+	// Die Grenzen sind physikalisch universell, kein Fallknopf: bei kleiner Machzahl ist rho = 1 +- 0,02,
+	// die Klemme greift also NUR bei grober numerischer Instabilitaet. Ein gesundes Feld bleibt
+	// bit-identisch -- genau das macht sie als Waechter brauchbar.
+	rho = fmin(RHO_CLAMP_MAX, fmax(RHO_CLAMP_MIN, rho));
+)+"#endif"+R( // RHO_CLAMP
 	*rhon = rho;
 	*uxn = ux/rho;
 	*uyn = uy/rho;
