@@ -231,7 +231,145 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
 }
 
-static void main_setup_kugel() {
+static // ---------------------------------------------------------------------------- Mitbewegte Waende pruefen
+// ★★ WARUM DIESE FUNKTION MEHR TUT ALS FLAGS ZAEHLEN -- die Lehre aus V1, 2026-08-09 nachgeprueft.
+//
+// V1s Bodengeschwindigkeit war ein VOLLSTAENDIGES No-op (V1-Commit 2f705ba). Der Guard lautete dort
+// `if((fn & TYPE_BO) != 0u) return;` -- und weil TYPE_MS == TYPE_BO == 0x03 ist, sprang die Funktion
+// fuer genau die Zellen heraus, fuer die sie gedacht war. Die FLAGS waren dabei alle korrekt gesetzt;
+// V1s eigener Commit nennt "Lage z=1 hat 101250 Zellen mit 0x03".
+//
+// Ein Audit, der nur Flags und Wand-u zaehlt, haette diesen Fehler also MIT VOLLER PUNKTZAHL
+// bestanden. Er prueft die beiden EINGAENGE von apply_moving_boundaries und keinen einzigen AUSGANG.
+// Deshalb kommen hier zwei Nachweise dazu:
+//
+//  (A) DER IMPULSTERM SELBST, host-seitig nachgerechnet. apply_moving_boundaries addiert je Link zu
+//      einem soliden Nachbarn -6*w_i*(c_i . u_wand). Fuer eine Fluidzelle auf z=1 ueber einer in +x
+//      laufenden Fahrbahn sind die soliden Links (0,0,-1), (+-1,0,-1), (0,+-1,-1) -- und bei VIER
+//      davon ist c_i . u_wand exakt null. Der senkrechte Link uebertraegt GAR NICHTS. Der gesamte
+//      Uebertrag haengt an den beiden xz-Diagonalen (+-1,0,-1) mit w = 1/36:
+//         2 * 6 * (1/36) * u_lat = u_lat/3  pro Schritt.
+//      Eine Flag-Zaehlung sieht davon nichts. Gezaehlt wird deshalb, wie viele MS-Zellen einen
+//      Beitrag von EXAKT NULL haben -- das faengt jede Aenderung an Geschwindigkeitssatz oder
+//      Wandorientierung, die den Uebertrag geometrisch totlegt.
+//
+//  (B) DER NACHWEIS DURCH DEN KERNEL HINDURCH (pruefe_wandwirksamkeit, weiter unten). Nur der faengt
+//      den V1-Fall. Er nutzt aus, dass u_wand = u_lat = u_inf ist: eine INTAKTE mitbewegte Wand
+//      erzeugt damit GAR KEINE Grenzschicht, u_x muss ueber der Fahrbahn auf u_inf stehenbleiben.
+//      Eine ruhende Wand baut sofort ein Defizit auf -- und zwar nicht diffusionsbegrenzt, sondern
+//      mit u_lat/3 pro Schritt.
+void audit_bewegte_waende(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float dx, const float u_lat, const char* wo, const bool bodenkontakt_erwartet) {
+	L.flags.read_from_device();
+	// ★ ABGEWOGEN, nicht uebersehen: ausgewertet wird von u nur die Ebene z = 0, und die liegt wegen
+	// des SoA-Layouts kontiguierlich am Pufferanfang -- ein Teil-Read spart im Fahrzeugfall 6,02 GB.
+	// Den gibt es aber nur auf Memory, nicht auf dem Memory_Container, ueber den L.u laeuft. Fuer eine
+	// EINMALIGE Diagnose (rund 0,6 s bei 10 GB/s) eine Kernklasse zu erweitern, die jeder Puffer
+	// benutzt, ist das Risiko nicht wert. Bleibt bewusst der volle Lesevorgang.
+	L.u.read_from_device();
+	const uchar VEH = (uchar)(TYPE_S|TYPE_X);
+	const uchar MS  = (uchar)(TYPE_S|TYPE_E); // TYPE_MS ist nur geraeteseitig 0x03
+	ulong n_veh=0ull, n_veh_z0=0ull, n_contact=0ull, n_road_z0=0ull, n_road_moving=0ull;
+	ulong n_road_still_fluid=0ull; // ruhende Wandzelle MIT Fluidnachbar darueber -- nur das ist ein Fehler
+	ulong n_ms_z1=0ull, n_fluid_z1=0ull, n_ms_total=0ull, n_ms_ohne_impuls=0ull;
+	uint z_min_veh = Nz;
+	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		const uchar fl = L.flags[n];
+		if(fl==VEH) { n_veh++; if(z<z_min_veh) z_min_veh=z; if(z==0u) n_veh_z0++; }
+		if((fl&(TYPE_S|TYPE_E))==MS) n_ms_total++;
+		if(z==0u && (fl&(TYPE_S|TYPE_E))==TYPE_S) {
+			n_road_z0++;
+			if(L.u.x[n]!=0.0f) n_road_moving++;
+			else {
+				// ★ Eine stillstehende Wandzelle ist NUR dann ein Fehler, wenn ueber ihr ueberhaupt
+				// Fluid steht. initialize() nullt u fuer Solidzellen mit ausschliesslich soliden
+				// Nachbarn (kernel.cpp) -- unter dem Reifenlatsch ist das Bauart, kein Defekt.
+				const ulong n1 = (ulong)x + ((ulong)y + (ulong)Ny)*(ulong)Nx; // z=1
+				if((L.flags[n1]&TYPE_S)==0u) n_road_still_fluid++;
+			}
+		}
+		if(z==1u) {
+			const bool ms = (fl&(TYPE_S|TYPE_E))==MS;
+			if(ms) n_ms_z1++;
+			if((fl&(TYPE_S|TYPE_E))==0u || ms) n_fluid_z1++;
+			const ulong n0 = (ulong)x + (ulong)y*(ulong)Nx;
+			if(fl==VEH && (L.flags[n0]&(TYPE_S|TYPE_E))==TYPE_S) n_contact++;
+			// ★ (A) Impulsterm nachrechnen: nur die xz-Diagonalen zur Fahrbahn tragen.
+			if(ms && (L.flags[n0]&(TYPE_S|TYPE_E))==TYPE_S) {
+				float beitrag = 0.0f;
+				for(int ddx=-1; ddx<=1; ddx++) { // Links (ddx,0,-1); w = 1/36 fuer ddx!=0, 1/18 fuer ddx==0
+					const int xn = (int)x+ddx; if(xn<0 || xn>=(int)Nx) continue;
+					const ulong nn = (ulong)xn + (ulong)y*(ulong)Nx; // z=0
+					if((L.flags[nn]&(TYPE_S|TYPE_E))!=TYPE_S) continue;
+					const float w_i = (ddx==0) ? (1.0f/18.0f) : (1.0f/36.0f);
+					beitrag += fabs(6.0f*w_i*(float)ddx*L.u.x[nn]); // c_i . u = ddx*u_x
+				}
+				if(beitrag==0.0f) n_ms_ohne_impuls++;
+			}
+		}
+	}
+	const float erwartet = u_lat/3.0f;
+	print_info(string("--- Mitbewegte Waende, ")+wo+" ---");
+	if(n_veh>0ull) {
+		print_info("  Koerperzellen (flags == 0x41, genau die zaehlt object_force): "+to_string(n_veh)
+			+"; unterste bei z = "+to_string(z_min_veh)+" ("+to_string((float)z_min_veh*dx*1000.0f,1u)+" mm ueber der Fahrbahn)");
+		print_info("  Direkter Aufstand: "+to_string(n_contact)+" Koerperzellen auf z = 1 sitzen unmittelbar auf einer Fahrbahnzelle"
+			+(bodenkontakt_erwartet ? "" : " (hier KEINER erwartet -- der Koerper schwebt bauartgemaess)"));
+	}
+	print_info("  Fahrbahn z = 0: "+to_string(n_road_z0)+" Wandzellen, davon "+to_string(n_road_moving)+" mit u_x != 0");
+	print_info("  Mitbewegte Wand: "+to_string(n_ms_z1)+" von "+to_string(n_fluid_z1)+" Fluidzellen auf z = 1 tragen TYPE_MS;"
+		+" im ganzen Gitter "+to_string(n_ms_total));
+	print_info("  Impulsuebertrag je MS-Bodenzelle: erwartet "+to_string(erwartet,5u)+" pro Schritt (nur die beiden xz-Diagonalen tragen,"
+		+" der senkrechte Link ueberhaupt nicht); Zellen mit Beitrag EXAKT NULL: "+to_string(n_ms_ohne_impuls));
+	if(n_veh_z0>0ull) print_warning(string(wo)+": es liegen noch Koerperzellen auf z = 0 -- die Uebergabe an die Strasse hat nicht gegriffen.");
+	if(bodenkontakt_erwartet && n_contact==0ull) print_warning(string(wo)+": KEIN direkter Aufstand -- der Wagen schwebt.");
+	if(n_road_still_fluid>0ull) print_warning(string(wo)+": "+to_string(n_road_still_fluid)+" Fahrbahnzellen MIT Fluid darueber stehen still.");
+	if(n_road_z0>0ull && n_ms_z1==0ull) print_warning(string(wo)+": KEINE TYPE_MS-Zelle ueber der Fahrbahn -- der mitbewegte Boden ist wirkungslos.");
+	if(n_ms_ohne_impuls>0ull) print_warning(string(wo)+": "+to_string(n_ms_ohne_impuls)+" MS-Bodenzellen bekommen einen Impulsterm von EXAKT NULL.");
+}
+
+// ★★ (B) DER NACHWEIS DURCH DEN KERNEL. Der einzige, der V1s Fehlerklasse faengt: dort waren alle
+// Flags korrekt, nur der Konsument sprang heraus. Ausgenutzt wird, dass u_wand = u_lat = u_inf ist --
+// eine intakte mitbewegte Wand erzeugt KEINE Grenzschicht. Gemessen wird eine z-Saeule weit vor dem
+// Koerper; steht dort u_x auf u_inf, ueberträgt die Wand wirklich Impuls. Faellt es ab, ist die Wand
+// effektiv eine ruhende Platte -- egal was die Flags sagen.
+void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float u_lat, const char* wo) {
+	(void)Nz;
+	L.u.read_from_device(); L.flags.read_from_device();
+	// ★ DIE MESSSAEULE MUSS FREI STEHEN. Erster Versuch nahm x = Nx/20 fest -- im Fahrzeugfall lief die
+	// Saeule damit DURCH DEN WAGEN (Profil z5 = z6 = 0,000, weil das Solidzellen sind), und die
+	// Warnung feuerte gegen die eigene Messstelle statt gegen die Wand. Gefunden im Regressionslauf
+	// 2026-08-09. Jetzt werden mehrere Stellen stromauf durchprobiert und die erste genommen, deren
+	// Saeule z = 1..7 vollstaendig Fluid ist; findet sich keine, wird das GESAGT statt gewarnt.
+	uint xs=0u, ys=Ny/2u; bool frei=false;
+	for(uint k=1u; k<=8u && !frei; k++) {
+		const uint xt = max(4u, (Nx*k)/40u); // 2,5 %, 5 %, ... der Laenge -- alles weit stromauf
+		bool ok=true;
+		for(uint z=1u; z<8u && ok; z++) {
+			const ulong n = (ulong)xt + ((ulong)ys + (ulong)z*(ulong)Ny)*(ulong)Nx;
+			// ★★ MASKE, NICHT NUR DAS BIT. Nach flags.read_from_device() tragen wandnahe FLUIDZELLEN
+			// TYPE_MS = 0x03, und darin steckt das TYPE_S-Bit. Ein Test auf (flags & TYPE_S) haelt
+			// also jede mitbewegte Fluidzelle fuer solid -- und weil z = 1 ueber der Fahrbahn genau
+			// das ist, scheiterte JEDE Saeule sofort und der Nachweis meldete "keine freie Saeule".
+			// Dieselbe Falle wurde in render_yslice schon einmal gefunden; ich bin trotzdem wieder
+			// hineingelaufen. Solid ist ausschliesslich (flags & (TYPE_S|TYPE_E)) == TYPE_S.
+			if((L.flags[n]&(TYPE_S|TYPE_E))==TYPE_S) ok=false; // echte Wand oder Koerper -- Saeule unbrauchbar
+		}
+		if(ok) { xs=xt; frei=true; }
+	}
+	if(!frei) { print_info(string("  Wandwirksamkeit ")+wo+": keine freie Messsaeule stromauf gefunden -- Nachweis uebersprungen (KEIN Befund ueber die Wand)."); return; }
+	string profil=""; float u_min=1e30f;
+	for(uint z=1u; z<8u; z++) {
+		const ulong n = (ulong)xs + ((ulong)ys + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		const float r = L.u.x[n]/u_lat; u_min = fmin(u_min, r);
+		profil += (z>1u?", ":"")+string("z")+to_string(z)+"="+to_string(r,3u);
+	}
+	print_info(string("  Wandwirksamkeit ")+wo+" bei x="+to_string(xs)+", y="+to_string(ys)+" (u_x/u_inf): "+profil);
+	if(u_min<0.90f) print_warning(string(wo)+": ueber der mitbewegten Fahrbahn faellt u_x auf "+to_string(u_min,3u)
+		+" von u_inf ab. Bei u_wand = u_inf darf es KEINE Grenzschicht geben -- die Wand uebertraegt keinen Impuls (genau V1s Fehlerbild).");
+}
+
+void main_setup_kugel() {
 	// ---------------------------------------------------------------- Physik
 	const float si_u   = 30.0f;                          // Anstroemung und Bodengeschwindigkeit [m/s]
 	const float si_rho = 1.225f;                         // ISA Meereshoehe [kg/m^3]
@@ -391,9 +529,18 @@ static void main_setup_kugel() {
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
+	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
+	// Bei CFD_KUGEL_MG=0 (statische Waende) oder CFD_KUGEL_FREE=1 (Freistrom statt Waenden) ist
+	// n_ms == 0 die KORREKTE Erwartung -- dann wird der Audit uebersprungen statt falsch zu warnen.
+	// Ein Audit, der nach einer bewussten Umschaltung Alarm schlaegt, wird beim zweiten Mal ignoriert.
+	if(moving_ground && !free_stream) audit_bewegte_waende(lbm, Nx, Ny, Nz, dx, u_lat, "Kugelkanal", false);
 	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
 		const ulong chunk = min((ulong)sample_every, n_steps-step);
 		lbm.run(chunk, n_steps);
+		// ★ EINMALIG nach dem ersten Rechen-Abschnitt: der Nachweis DURCH den Kernel. Nur er faengt
+		// V1s Fehlerklasse (alle Flags korrekt, aber der Konsument sprang heraus) -- siehe die
+		// Begruendung bei pruefe_wandwirksamkeit().
+		if(step==0ull) pruefe_wandwirksamkeit(lbm, Nx, Ny, Nz, u_lat, "Kugelkanal");
 		// Kein update_fields() mehr noetig: UPDATE_FIELDS ist eingeschaltet (defines.hpp), stream_collide
 		// schreibt u und rho jeden Schritt selbst. Damit sieht der Druck-Auslass das aktuelle Innenfeld
 		// statt eines bis zu CFD_SAMPLE_EVERY Schritte alten -- und die Slices zeigen den echten Zustand.
@@ -637,9 +784,14 @@ static void main_setup_fahrzeug() {
 	std::vector<double> ts, fx, fz;
 	float slice_next = 0.0f;
 	lbm.run(0u, n_steps);
+	audit_bewegte_waende(lbm, Nx, Ny, Nz, dx, u_lat, "Fahrzeug, Einzelgitter", true);
 	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
 		const ulong chunk = min((ulong)sample_every, n_steps-step);
 		lbm.run(chunk, n_steps);
+		// ★ EINMALIG nach dem ersten Rechen-Abschnitt: der Nachweis DURCH den Kernel. Nur er faengt
+		// V1s Fehlerklasse (alle Flags korrekt, aber der Konsument sprang heraus) -- siehe die
+		// Begruendung bei pruefe_wandwirksamkeit().
+		if(step==0ull) pruefe_wandwirksamkeit(lbm, Nx, Ny, Nz, u_lat, "Fahrzeug, Einzelgitter");
 		lbm.update_force_field();  // u/rho schreibt stream_collide selbst (UPDATE_FIELDS)
 		const float3 F = lbm.object_force(TYPE_S|TYPE_X);
 		const double t_si = (double)((float)(step+chunk)*dt);
@@ -1153,45 +1305,8 @@ static void main_setup_fahrzeug_dd() {
 	//      auf EXAKTE Gleichheit (kernel.cpp, object_force). Fahrzeug ist 0x41, die uebergebene
 	//      Aufstandsflaeche 0x01 -- sie faellt damit aus der Summe. Hier wird beides ausgezaehlt.
 	{
-		auto audit = [&](LBM& L, const uint Nx, const uint Ny, const uint Nz, const float dx, const char* who) {
-			L.flags.read_from_device(); L.u.read_from_device();
-			const uchar VEH = (uchar)(TYPE_S|TYPE_X);
-			// TYPE_MS ist nur geraeteseitig definiert (lbm.cpp emittiert 0x03); host-seitig ist es TYPE_S|TYPE_E.
-			const uchar MS = (uchar)(TYPE_S|TYPE_E);
-			ulong n_veh=0ull, n_veh_z0=0ull, n_contact=0ull, n_road_z0=0ull, n_road_moving=0ull;
-			ulong n_ms_z1=0ull, n_fluid_z1=0ull, n_ms_total=0ull;
-			uint z_min_veh = Nz;
-			for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
-				const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
-				const uchar fl = L.flags[n];
-				if(fl==VEH) { n_veh++; if(z<z_min_veh) z_min_veh=z; if(z==0u) n_veh_z0++; }
-				if((fl&(TYPE_S|TYPE_E))==MS) n_ms_total++;
-				if(z==0u) {
-					if((fl&(TYPE_S|TYPE_E))==TYPE_S) { n_road_z0++; if(L.u.x[n]!=0.0f) n_road_moving++; }
-				}
-				if(z==1u) {
-					if((fl&(TYPE_S|TYPE_E))==MS) n_ms_z1++;
-					if((fl&(TYPE_S|TYPE_E))==0u || (fl&(TYPE_S|TYPE_E))==MS) n_fluid_z1++;
-					// Direkter Bodenkontakt: Fahrzeugzelle auf z=1 unmittelbar ueber einer Fahrbahnzelle
-					const ulong n0 = (ulong)x + (ulong)y*(ulong)Nx;
-					if(fl==VEH && (L.flags[n0]&(TYPE_S|TYPE_E))==TYPE_S) n_contact++;
-				}
-			}
-			print_info(string("--- Bodenkontakt und mitbewegte Wand, ")+who+" ---");
-			print_info("  Fahrzeugzellen (flags == 0x41, genau die zaehlt object_force): "+to_string(n_veh)
-				+"; unterste bei z = "+to_string(z_min_veh)+" ("+to_string((float)z_min_veh*dx*1000.0f,1u)+" mm ueber der Fahrbahn)");
-			print_info("  Fahrzeugzellen auf z = 0: "+to_string(n_veh_z0)+" (muss 0 sein -- sie wurden an die Strasse uebergeben)");
-			print_info("  Direkter Aufstand: "+to_string(n_contact)+" Fahrzeugzellen auf z = 1 sitzen unmittelbar auf einer Fahrbahnzelle");
-			print_info("  Fahrbahn z = 0: "+to_string(n_road_z0)+" Wandzellen, davon "+to_string(n_road_moving)+" mit u_x != 0");
-			print_info("  Mitbewegte Wand: "+to_string(n_ms_z1)+" von "+to_string(n_fluid_z1)+" Fluidzellen auf z = 1 tragen TYPE_MS"
-				+" (nur diese bekommen den Krueger-Impulsterm); im ganzen Gitter "+to_string(n_ms_total));
-			if(n_veh_z0>0ull) print_warning(string(who)+": es liegen noch Fahrzeugzellen auf z = 0 -- die Uebergabe an die Strasse hat nicht gegriffen.");
-			if(n_contact==0ull) print_warning(string(who)+": KEIN direkter Aufstand -- der Wagen schwebt.");
-			if(n_road_moving!=n_road_z0) print_warning(string(who)+": "+to_string(n_road_z0-n_road_moving)+" Fahrbahnzellen stehen still.");
-			if(n_ms_z1==0ull) print_warning(string(who)+": KEINE TYPE_MS-Zelle ueber der Fahrbahn -- der mitbewegte Boden ist wirkungslos.");
-		};
-		audit(lbm_f, fNx, fNy, fNz, dx_f, "Nahfeld");
-		audit(lbm_c, cNx, cNy, cNz, dx_c, "Fernfeld");
+		audit_bewegte_waende(lbm_f, fNx, fNy, fNz, dx_f, u_lat, "Nahfeld", true);
+		audit_bewegte_waende(lbm_c, cNx, cNy, cNz, dx_c, u_lat, "Fernfeld", true);
 	}
 	ulong max_cp = 0ull;
 	for(uint p=0u; p<5u; p++) max_cp = max(max_cp, (ulong)cp[p].extent_a*(ulong)cp[p].extent_b);
@@ -1526,9 +1641,17 @@ static void main_setup_fernfeld() {
 	csv << "time_s,u_mittel_rel,u_streuung_rel,u_max_rel,anteil_ueber_10prozent\n" << std::flush;
 	float slice_next = 0.0f;
 	lbm.run(0u);
+	// ★ Vorpruefer-Befund 2026-08-09: auch der Fernfeld-Diagnosefall hat eine mitbewegte Fahrbahn
+	// (z = 0, unbedingt, unabhaengig von CFD_FERN_VEH) -- er gehoert also mitgeprueft. Genau in
+	// diesem Fall wurde die Daempfungszone vermessen.
+	audit_bewegte_waende(lbm, Nx, Ny, Nz, dx, u_lat, "Fernfeld allein", false);
 	for(ulong step=0ull; step<n_steps; step+=(ulong)sample_every) {
 		const ulong chunk = min((ulong)sample_every, n_steps-step);
 		lbm.run(chunk, n_steps);
+		// ★ EINMALIG nach dem ersten Rechen-Abschnitt: der Nachweis DURCH den Kernel. Nur er faengt
+		// V1s Fehlerklasse (alle Flags korrekt, aber der Konsument sprang heraus) -- siehe die
+		// Begruendung bei pruefe_wandwirksamkeit().
+		if(step==0ull) pruefe_wandwirksamkeit(lbm, Nx, Ny, Nz, u_lat, "Fernfeld allein");
 		lbm.u.read_from_device(); lbm.flags.read_from_device();
 		double s1=0.0, s2=0.0; ulong nf=0ull, nbad=0ull; float umax=0.0f;
 		for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
