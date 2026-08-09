@@ -1,6 +1,9 @@
 #include "setup.hpp"
 #include <fstream>
 #include <cstring>
+#include <filesystem>
+#include <cstdio>
+extern char** environ;
 
 // =============================================================================================
 // KUGEL IM KANAL MIT MITBEWEGTEM BODEN
@@ -231,7 +234,65 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
 }
 
-static // ---------------------------------------------------------------------------- Mitbewegte Waende pruefen
+static // ---------------------------------------------------------------------------- Lauf-Sicherung
+// ★★ Heiko 2026-08-09: MIT JEDEM LAUF eine vollstaendige Sicherung in den Export-Ordner.
+// Zweck: Monate spaeter noch feststellen koennen, mit WELCHEM Stand eine Zahl entstanden ist --
+// ohne Git-Archaeologie und ohne die Annahme, der Arbeitsbaum sei seither unveraendert.
+//
+// Drei Dinge waren an der Vorgaengerfassung falsch, alle behoben:
+//  (1) Sie lief NUR im Doppel-Domaenen-Fall. Jetzt in allen vier.
+//  (2) Sie zaehlte SECHS Dateien von Hand auf -- von neunzehn. kernel.hpp, utilities.hpp, units.hpp,
+//      main.cpp, shapes.*, info.*, setup.hpp fehlten alle. Eine neu angelegte Quelldatei waere still
+//      aus der Sicherung gefallen, und niemand haette es gemerkt. Jetzt wird das VERZEICHNIS
+//      durchlaufen: was in src/ liegt, wird gesichert, ohne Liste, die veralten kann.
+//  (3) Sie sicherte den Quelltext, aber nicht den ZUSTAND: kein Commit, kein Hinweis darauf, ob der
+//      Baum schmutzig war, keine Umgebungsvariablen. Genau die entscheiden aber ueber das Ergebnis.
+void sichere_lauf(const string& out_dir, const string& fall) {
+	const string dst = out_dir+"code/";
+	std::error_code ec; std::filesystem::create_directories(dst, ec);
+	// --- alle Quelldateien, per Verzeichnisdurchlauf statt Handliste
+	uint n_files = 0u; ulong n_bytes = 0ull;
+	const string src_dir = get_exe_path()+"../src/";
+	for(const auto& e : std::filesystem::directory_iterator(src_dir, ec)) {
+		if(!e.is_regular_file()) continue;
+		const string ext = e.path().extension().string();
+		if(ext!=".cpp" && ext!=".hpp" && ext!=".h" && ext!=".c") continue;
+		std::filesystem::copy_file(e.path(), dst+e.path().filename().string(),
+			std::filesystem::copy_options::overwrite_existing, ec);
+		if(!ec) { n_files++; n_bytes += (ulong)e.file_size(ec); }
+	}
+	for(const char* b : {"make.sh", "makefile"}) // Uebersetzungsvorschrift gehoert dazu
+		std::filesystem::copy_file(get_exe_path()+"../"+b, dst+b, std::filesystem::copy_options::overwrite_existing, ec);
+	// --- Zustandsbericht
+	auto ausgabe_von = [](const string& cmd)->string {
+		string r; FILE* f = popen(cmd.c_str(), "r"); if(!f) return "(nicht ermittelbar)";
+		char buf[4096]; while(fgets(buf, sizeof(buf), f)) r += buf; pclose(f);
+		while(!r.empty() && (r.back()=='\n'||r.back()=='\r')) r.pop_back();
+		return r.empty() ? string("(leer)") : r;
+	};
+	const string repo = "cd '"+get_exe_path()+"..' && ";
+	const string commit = ausgabe_von(repo+"git rev-parse HEAD 2>/dev/null");
+	const string schmutz = ausgabe_von(repo+"git status --porcelain 2>/dev/null");
+	std::ofstream m(dst+"LAUF.txt");
+	m << "Lauf-Sicherung\n==============\n\n";
+	m << "Fall            : " << fall << "\nOrdner          : " << out_dir << "\n";
+	m << "Gesichert       : " << n_files << " Quelldateien, " << (n_bytes/1024ull) << " kB\n\n";
+	m << "Git-Commit      : " << commit << "\n";
+	m << "Arbeitsbaum     : " << (schmutz=="(leer)" ? "SAUBER -- der Commit oben beschreibt den Code vollstaendig"
+		: "SCHMUTZIG -- der Commit allein reicht NICHT, siehe aenderungen.diff") << "\n";
+	if(schmutz!="(leer)") m << "\nGeaenderte Dateien:\n" << schmutz << "\n";
+	m << "\nUmgebung (alle CFD_*, sie entscheiden ueber das Ergebnis):\n";
+	uint n_env = 0u;
+	for(char** e = environ; *e; e++) if(strncmp(*e, "CFD_", 4)==0) { m << "  " << *e << "\n"; n_env++; }
+	if(n_env==0u) m << "  (keine gesetzt -- alle Vorgabewerte)\n";
+	m.close();
+	// --- bei schmutzigem Baum den vollstaendigen Unterschied mitsichern; nur so ist der Lauf reproduzierbar
+	if(schmutz!="(leer)") { string cmd = repo+"git diff HEAD > '"+dst+"aenderungen.diff' 2>/dev/null"; if(system(cmd.c_str())){} }
+	print_info("Lauf-Sicherung: "+dst+" ("+to_string(n_files)+" Quelldateien, LAUF.txt mit Commit und Umgebung"
+		+(schmutz=="(leer)" ? ", Baum sauber)" : ", Baum SCHMUTZIG -> aenderungen.diff)"));
+}
+
+// ---------------------------------------------------------------------------- Mitbewegte Waende pruefen
 // ★★ WARUM DIESE FUNKTION MEHR TUT ALS FLAGS ZAEHLEN -- die Lehre aus V1, 2026-08-09 nachgeprueft.
 //
 // V1s Bodengeschwindigkeit war ein VOLLSTAENDIGES No-op (V1-Commit 2f705ba). Der Guard lautete dort
@@ -245,8 +306,10 @@ static // ----------------------------------------------------------------------
 //
 //  (A) DER IMPULSTERM SELBST, host-seitig nachgerechnet. apply_moving_boundaries addiert je Link zu
 //      einem soliden Nachbarn -6*w_i*(c_i . u_wand). Fuer eine Fluidzelle auf z=1 ueber einer in +x
-//      laufenden Fahrbahn sind die soliden Links (0,0,-1), (+-1,0,-1), (0,+-1,-1) -- und bei VIER
-//      davon ist c_i . u_wand exakt null. Der senkrechte Link uebertraegt GAR NICHTS. Der gesamte
+//      laufenden Fahrbahn zeigen FUENF Links nach z-1: (0,0,-1), (+-1,0,-1), (0,+-1,-1) -- D3Q19 hat
+//      keine Raumdiagonalen. Bei DREI davon ist c_i . u_wand exakt null (der senkrechte und die
+//      beiden yz-Diagonalen). Der senkrechte Link uebertraegt also GAR NICHTS.
+//      (Zahlen berichtigt nach Nachpruefung: hier stand "sechs Links, vier null".) Der gesamte
 //      Uebertrag haengt an den beiden xz-Diagonalen (+-1,0,-1) mit w = 1/36:
 //         2 * 6 * (1/36) * u_lat = u_lat/3  pro Schritt.
 //      Eine Flag-Zaehlung sieht davon nichts. Gezaehlt wird deshalb, wie viele MS-Zellen einen
@@ -271,6 +334,7 @@ void audit_bewegte_waende(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 	ulong n_veh=0ull, n_veh_z0=0ull, n_contact=0ull, n_road_z0=0ull, n_road_moving=0ull;
 	ulong n_road_still_fluid=0ull; // ruhende Wandzelle MIT Fluidnachbar darueber -- nur das ist ein Fehler
 	ulong n_ms_z1=0ull, n_fluid_z1=0ull, n_ms_total=0ull, n_ms_ohne_impuls=0ull;
+	float abw_max = 0.0f; // groesste relative Abweichung des Impulsterms vom Sollwert
 	uint z_min_veh = Nz;
 	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
@@ -285,7 +349,12 @@ void audit_bewegte_waende(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 				// Fluid steht. initialize() nullt u fuer Solidzellen mit ausschliesslich soliden
 				// Nachbarn (kernel.cpp) -- unter dem Reifenlatsch ist das Bauart, kein Defekt.
 				const ulong n1 = (ulong)x + ((ulong)y + (ulong)Ny)*(ulong)Nx; // z=1
-				if((L.flags[n1]&TYPE_S)==0u) n_road_still_fluid++;
+				// ★★ ZUM ZWEITEN MAL DIESELBE FALLE, und diesmal im selben Commit, der sie feierte:
+				// hier stand (flags & TYPE_S) == 0. Eine mitbewegte FLUIDZELLE traegt aber TYPE_MS =
+				// 0x03, und 0x03 & TYPE_S ist nicht null -- sie galt also als "kein Fluid", und die
+				// Warnung war im Inneren der Fahrbahn praktisch tot. Fluid ist alles, was NICHT
+				// (flags & (TYPE_S|TYPE_E)) == TYPE_S ist.
+				if((L.flags[n1]&(TYPE_S|TYPE_E))!=TYPE_S) n_road_still_fluid++;
 			}
 		}
 		if(z==1u) {
@@ -305,6 +374,7 @@ void audit_bewegte_waende(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 					beitrag += fabs(6.0f*w_i*(float)ddx*L.u.x[nn]); // c_i . u = ddx*u_x
 				}
 				if(beitrag==0.0f) n_ms_ohne_impuls++;
+				else { const float rel = fabs(beitrag-u_lat/3.0f)/(u_lat/3.0f); if(rel>abw_max) abw_max=rel; }
 			}
 		}
 	}
@@ -319,8 +389,19 @@ void audit_bewegte_waende(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 	print_info("  Fahrbahn z = 0: "+to_string(n_road_z0)+" Wandzellen, davon "+to_string(n_road_moving)+" mit u_x != 0");
 	print_info("  Mitbewegte Wand: "+to_string(n_ms_z1)+" von "+to_string(n_fluid_z1)+" Fluidzellen auf z = 1 tragen TYPE_MS;"
 		+" im ganzen Gitter "+to_string(n_ms_total));
-	print_info("  Impulsuebertrag je MS-Bodenzelle: erwartet "+to_string(erwartet,5u)+" pro Schritt (nur die beiden xz-Diagonalen tragen,"
-		+" der senkrechte Link ueberhaupt nicht); Zellen mit Beitrag EXAKT NULL: "+to_string(n_ms_ohne_impuls));
+	print_info("  Impulsuebertrag je MS-Bodenzelle: Soll "+to_string(erwartet,5u)+" pro Schritt; groesste Abweichung "
+		+to_string(100.0f*abw_max,2u)+" %; Zellen mit Beitrag EXAKT NULL: "+to_string(n_ms_ohne_impuls));
+	// ★ Nachpruefer-Befund: vorher wurde der Sollwert nur HINGESCHRIEBEN und nichts verglichen -- eine
+	// Fahrbahn mit halber oder doppelter Geschwindigkeit haette den Nachweis ohne Befund bestanden.
+	if(abw_max>0.02f) print_warning(string(wo)+": der Impulsterm weicht um bis zu "+to_string(100.0f*abw_max,2u)
+		+" % vom Sollwert u_lat/3 ab -- die Wandgeschwindigkeit stimmt nicht (Randzellen mit zwei Wandflaechen sind ausgenommen).");
+	print_info("  Koerperzellen auf z = 0: "+to_string(n_veh_z0)+" (muss 0 sein -- sie wurden an die Strasse uebergeben)");
+	print_info("  Fahrbahnzellen ohne Bewegung: "+to_string(n_road_z0-n_road_moving)+", davon MIT Fluid darueber: "+to_string(n_road_still_fluid)
+		+" (nur die zweite Zahl ist ein Fehler -- unter dem Reifenlatsch ist Stillstand Bauart)");
+	// ★ Nachpruefer-Befund: die Fahrbahn koennte auch GANZ fehlen. Dann ist n_road_z0 = 0, und ohne
+	// diesen Fall haette KEINE einzige Warnung gefeuert -- ein Wirksamkeitsnachweis, der bei
+	// fehlender Wand gruenes Licht gibt.
+	if(n_road_z0==0ull) print_warning(string(wo)+": es gibt ueberhaupt KEINE Fahrbahnzelle auf z = 0.");
 	if(n_veh_z0>0ull) print_warning(string(wo)+": es liegen noch Koerperzellen auf z = 0 -- die Uebergabe an die Strasse hat nicht gegriffen.");
 	if(bodenkontakt_erwartet && n_contact==0ull) print_warning(string(wo)+": KEIN direkter Aufstand -- der Wagen schwebt.");
 	if(n_road_still_fluid>0ull) print_warning(string(wo)+": "+to_string(n_road_still_fluid)+" Fahrbahnzellen MIT Fluid darueber stehen still.");
@@ -358,15 +439,20 @@ void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz,
 		if(ok) { xs=xt; frei=true; }
 	}
 	if(!frei) { print_info(string("  Wandwirksamkeit ")+wo+": keine freie Messsaeule stromauf gefunden -- Nachweis uebersprungen (KEIN Befund ueber die Wand)."); return; }
-	string profil=""; float u_min=1e30f;
+	string profil=""; float u_min=1e30f, u_max=-1e30f;
 	for(uint z=1u; z<8u; z++) {
 		const ulong n = (ulong)xs + ((ulong)ys + (ulong)z*(ulong)Ny)*(ulong)Nx;
-		const float r = L.u.x[n]/u_lat; u_min = fmin(u_min, r);
+		const float r = L.u.x[n]/u_lat; u_min = fmin(u_min, r); u_max = fmax(u_max, r);
 		profil += (z>1u?", ":"")+string("z")+to_string(z)+"="+to_string(r,3u);
 	}
 	print_info(string("  Wandwirksamkeit ")+wo+" bei x="+to_string(xs)+", y="+to_string(ys)+" (u_x/u_inf): "+profil);
+	// ★ Nachpruefer-Befund: der Test war EINSEITIG. Der Sollwert ist exakt 1,000 -- eine Wand, die
+	// 30 % zu schnell laeuft (Skalenfehler, doppeltes u_lat, falsche Einheitenumrechnung), erzeugte
+	// einen Ueberschuss und waere NIE gemeldet worden. Jetzt wird in beide Richtungen geprueft.
 	if(u_min<0.90f) print_warning(string(wo)+": ueber der mitbewegten Fahrbahn faellt u_x auf "+to_string(u_min,3u)
 		+" von u_inf ab. Bei u_wand = u_inf darf es KEINE Grenzschicht geben -- die Wand uebertraegt keinen Impuls (genau V1s Fehlerbild).");
+	if(u_max>1.10f) print_warning(string(wo)+": u_x steigt auf "+to_string(u_max,3u)
+		+" von u_inf -- die Wand ist zu SCHNELL oder es steht eine Versperrung im Weg.");
 }
 
 void main_setup_kugel() {
@@ -518,6 +604,7 @@ void main_setup_kugel() {
 	const string run_name = getenv("CFD_RUN_NAME") ? string(getenv("CFD_RUN_NAME")) : string("kugel");
 	const string out_dir = get_exe_path()+"../export/"+run_name+"/";
 	create_folder(out_dir);
+	sichere_lauf(out_dir, "kugel"); // ★ Heiko 2026-08-09: Sicherung MIT JEDEM Lauf, in allen vier Faellen
 
 	const float A_nom = (float)M_PI*(0.5f*D)*(0.5f*D);
 	const float q_inf = 0.5f*si_rho*si_u*si_u;
@@ -540,7 +627,10 @@ void main_setup_kugel() {
 		// ★ EINMALIG nach dem ersten Rechen-Abschnitt: der Nachweis DURCH den Kernel. Nur er faengt
 		// V1s Fehlerklasse (alle Flags korrekt, aber der Konsument sprang heraus) -- siehe die
 		// Begruendung bei pruefe_wandwirksamkeit().
-		if(step==0ull) pruefe_wandwirksamkeit(lbm, Nx, Ny, Nz, u_lat, "Kugelkanal");
+		// ★ Nachpruefer-Befund: dieser Aufruf stand OHNE den Guard, den (A) hat. Mit CFD_KUGEL_MG=0
+		// steht die Wand bewusst still, es entsteht eine echte Grenzschicht -- und der Nachweis warnte
+		// bei JEDEM solchen Lauf. Genau die Sorte Warnung, die man nach dem zweiten Mal ignoriert.
+		if(step==0ull && moving_ground && !free_stream) pruefe_wandwirksamkeit(lbm, Nx, Ny, Nz, u_lat, "Kugelkanal");
 		// Kein update_fields() mehr noetig: UPDATE_FIELDS ist eingeschaltet (defines.hpp), stream_collide
 		// schreibt u und rho jeden Schritt selbst. Damit sieht der Druck-Auslass das aktuelle Innenfeld
 		// statt eines bis zu CFD_SAMPLE_EVERY Schritte alten -- und die Slices zeigen den echten Zustand.
@@ -777,6 +867,7 @@ static void main_setup_fahrzeug() {
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug"))+"/";
 	create_folder(out_dir);
+	sichere_lauf(out_dir, "fahrzeug"); // ★ Heiko 2026-08-09: Sicherung MIT JEDEM Lauf, in allen vier Faellen
 	const float q_inf = 0.5f*si_rho*si_u*si_u;
 	const uint y_mid = Ny/2u;
 	print_info("Laufzeit "+to_string(t_end,3u)+" s = "+to_string(n_steps)+" Schritte, Mittelung ab "+to_string(t_warmup,3u)+" s");
@@ -1261,20 +1352,7 @@ static void main_setup_fahrzeug_dd() {
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f); // alle 10 ms (Heiko); 0 = aus
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 	create_folder(out_dir);
-	// ★ Heiko 2026-08-08: eine Codesicherung MIT in den Lauf-Ordner. Damit laesst sich Monate spaeter
-	// noch feststellen, mit welchem Stand eine Zahl entstanden ist -- ohne Git-Archaeologie und ohne die
-	// Annahme, der Arbeitsbaum sei seither unveraendert.
-	{
-		const string src_dir = get_exe_path()+"../src/";
-		const string dst_dir = out_dir+"code/"; create_folder(dst_dir);
-		const char* files[6] = {"setup.cpp", "lbm.cpp", "lbm.hpp", "kernel.cpp", "defines.hpp", "opencl.hpp"};
-		for(uint i=0u; i<6u; i++) {
-			std::ifstream in(src_dir+files[i], std::ios::binary);
-			std::ofstream out(dst_dir+files[i], std::ios::binary);
-			if(in && out) out << in.rdbuf();
-		}
-		print_info("Codesicherung: "+dst_dir+" (setup, lbm, kernel, defines, opencl)");
-	}
+	sichere_lauf(out_dir, "fahrzeug_dd");
 	const float q_inf = 0.5f*si_rho*si_u*si_u;
 	print_info("Eine Fernfeld-Durchspuelung = "+to_string(t_flush,4u)+" s; Laufzeit "+to_string(t_end,3u)+" s = "
 		+to_string(n_outer)+" grobe x "+to_string(ratio)+" feine Schritte, Mittelung ab "+to_string(t_warmup,3u)+" s");
@@ -1395,6 +1473,15 @@ static void main_setup_fahrzeug_dd() {
 		// sofort. Der zweite Zeitpunkt liegt weit genug hinten, dass das Fernfeld das Fahrzeug spuert.
 		if(outer==0ull || outer==verify_at2) {
 			lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
+			// ★★ Nachpruefer-Befund 2026-08-09, und der schmerzhafteste: der Wirksamkeitsnachweis der
+			// mitbewegten Wand lief in ALLEN Faellen -- NUR NICHT HIER. Also ausgerechnet nicht im
+			// Produktionsfall, aus dem Cd und Cz gegen OpenFOAM fallen; die anderen drei sind
+			// Diagnosefaelle. Und er kostet hier NULL zusaetzliche Rueckwaerts-Reads, weil u und flags
+			// in der Zeile darueber ohnehin schon geholt werden. Meine Commit-Botschaft sagte
+			// "in allen vier Faellen" und meinte damit nur den statischen Teil.
+			// ★ NUR das Nahfeld hier. Das Fernfeld laeuft ASYNCHRON (run_async weiter oben) und ist an
+			// dieser Stelle noch nicht fertig -- sein Nachweis steht nach lbm_c.finish().
+			if(outer==0ull) pruefe_wandwirksamkeit(lbm_f, fNx, fNy, fNz, u_lat, "Nahfeld");
 			for(uint p=0u; p<5u; p++) {
 				if(!drive_face[p]) continue;
 				ulong n_e=0ull, n_coin=0ull, n_bad=0ull, n_outlet_edge=0ull; float maxdev=0.0f, maxrel=0.0f;
@@ -1435,6 +1522,12 @@ static void main_setup_fahrzeug_dd() {
 		}
 
 		lbm_c.finish();
+		// ★★ HIER und nicht frueher, und das hat der Nachweis selbst aufgedeckt: erst stand er oben im
+		// Pruefblock -- also ZWISCHEN lbm_c.run_async() und lbm_c.finish(). Damit wurde das grobe u
+		// gelesen, WAEHREND sein Schritt noch lief, und das Profil kam als gleichfoermige 0,836 heraus
+		// (dasselbe Gitter allein gerechnet liefert 1,000). Ein Wettlauf, kein physikalischer Befund --
+		// erkennbar daran, dass das Profil ueber alle z KONSTANT war statt zur Freistroemung anzusteigen.
+		if(outer==0ull) pruefe_wandwirksamkeit(lbm_c, cNx, cNy, cNz, u_lat, "Fernfeld");
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_c.extract_plane_macros(cp[p], face[p]); // nur die vier getriebenen Flaechen -- x+ ist Druckauslass, siehe oben
 		const auto _t3 = t_now();
 		t_acc += outer_clock.stop(); n_acc++;
@@ -1631,6 +1724,7 @@ static void main_setup_fernfeld() {
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f);
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fernfeld"))+"/";
 	create_folder(out_dir);
+	sichere_lauf(out_dir, "fernfeld"); // ★ Heiko 2026-08-09: Sicherung MIT JEDEM Lauf, in allen vier Faellen
 	print_info("Laufzeit "+to_string(t_end,4u)+" s = "+to_string(n_steps)+" Schritte (eine Durchspuelung = "+to_string(t_flush,4u)+" s)");
 
 	// RAUSCHMASS. Nicht das Auge entscheidet, sondern eine Zahl: die Standardabweichung von u_x

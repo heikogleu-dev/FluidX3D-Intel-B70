@@ -177,3 +177,43 @@ gewirkt hat**.
 - **Kontrollarm nicht vergessen.** Ein A/B ohne dritten Arm lädt zum Fehlschluss ein.
 - **Ein Wächter, der nur NaN kennt, ist kein Wächter.** Der teuerste Ausfall des Tages war
   endlich, konstant und still.
+
+---
+
+## ★★ P0-NEU, 2026-08-09: das Fernfeld auf der iGPU ist nicht vertrauenswürdig
+
+**Gefunden vom neuen Wandwirksamkeits-Nachweis** (Hygiene 2) — er war für V1s No-op-Fehlerklasse
+gebaut und hat stattdessen das hier aufgedeckt.
+
+**Der Befund.** Dasselbe Fernfeld (768 × 480 × 552 @ 16 mm), derselbe Code, dieselbe Schrittzahl,
+gemessen als u_x/u_∞ über der mitbewegten Fahrbahn:
+
+| Gerät / Modus | Profil z = 1…7 |
+|---|---|
+| **B70** | 1,020 · 1,003 · 1,000 · 1,000 · 1,000 · 1,000 · 1,000 |
+| **iGPU, Zero-Copy an** (Default) | 0,976 · 0,912 · 0,925 · 0,923 · 0,923 · 0,922 · 0,922 |
+| **iGPU, Zero-Copy aus** (`ZEROCOPY_THRESHOLD_MB=512`) | **−1,617 · −2,581 · −2,570 · −2,574 · …** |
+
+**Kontrolle, die den Verdacht eingrenzt:** derselbe Vergleich am **Kugelfall** (3 Mio Zellen,
+u-Puffer 36 MB) liefert auf beiden Geräten **identische** Werte (1,011 · 0,999 · 0,998 …). Der
+Fehler tritt also nur bei den **großen** Puffern auf — der Fernfeld-u-Puffer ist 2 328 MB.
+
+Das passt zur bereits notierten Warnung G1: Zero-Copy über der selbst dokumentierten 1-GB-Schwelle
+des i915-USERPTR-ioctl.
+
+**Warum das ernst ist:** im Doppel-Domänen-Fall läuft das **grobe Gitter auf der iGPU**
+(`dev_coarse` = zweitbeste GPU). Das Fernfeld treibt vier der fünf Nahfeld-Ränder. Jede
+Fahrzeugzahl aus dem dd-Fall hängt also an diesem Pfad.
+
+**Was NICHT geklärt ist** — und das ist wichtig, bevor jemand Schlüsse zieht:
+- Ob die **Rechnung** falsch ist oder nur der **Rücklesevorgang**. Beide gemessenen iGPU-Zustände
+  sind Host-Lesevorgänge; ein device-seitiges Maß (z. B. `object_force`) wurde noch nicht verglichen.
+- Ob die negativen Werte bei abgeschaltetem Zero-Copy den wahren Feldzustand zeigen (dann rechnet
+  die iGPU falsch) oder einen kaputten Kopiervorgang (dann rechnet sie vielleicht richtig).
+- Beide Gitter zusammen auf die B70 zu legen scheitert am Speicher (28 GB + 2,4 GB), der direkte
+  Gegentest ist so also nicht möglich.
+
+**Nächste Schritte:** (1) ein device-seitiges Maß über beide Geräte vergleichen, um Rechnung von
+Rücklesevorgang zu trennen; (2) den Fernfeld-Fall auf der iGPU mit kleinerem Gitter fahren, bis die
+Puffer unter 1 GB liegen, und sehen, ob der Fehler verschwindet; (3) bis dahin **keine
+dd-Ergebniszahl als belastbar behandeln**.
