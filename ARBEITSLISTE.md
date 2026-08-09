@@ -12,14 +12,41 @@ Unterboden.
 
 ---
 
+## Block 0 — zwei Tests, die fast nichts kosten und die Reihenfolge ändern könnten
+
+Beide kamen aus der Gegenprüfung und ziehen an der Wurzel der Blöcke A und C.
+
+**0A. y⁺ am Fahrzeug MESSEN statt korrelieren.**
+Die Zahl 137 ist eine Plattenkorrelation bei x = L, **nie gemessen**. `update_force_field` liefert
+die echte τ_w-Verteilung — **ein einziges Sample eines vorhandenen Laufs** ergibt das reale
+y⁺-Histogramm. Kosten: ein Readback.
+*Warum zuerst:* die ganze Wandmodell- und Kanalplanung steht auf dieser einen ungemessenen Zahl.
+
+**0B. Fahrzeuglauf bei dx = 6 mm.**
+Das Modell aus dem Kanalplan sagt: es gibt **genau eine** Gitterweite, bei der ein Lauf ohne
+Wandmodell zufällig das richtige c_f liefert — δ/dx = 10,5, am Fahrzeug **dx ≈ 6,4 mm**. Unser
+4-mm-Gitter liegt auf der falschen Seite. Ein 6-mm-Lauf ist **billiger als der aktuelle** und prüft
+die Vorhersage direkt am Zielobjekt, ohne Kanal und ohne Wandmodell.
+*Trifft es zu, ist das ein starker Hinweis, dass der aktuelle Cd-Fehler wesentlich am fehlenden
+Wandmodell hängt — und wir hätten es für den Preis eines Laufs gezeigt.*
+
+---
+
 ## Block A — Messgrundlage schaffen (billig, macht alles andere erst bewertbar)
 
 **A1. Turbulenter Kanal bauen** (`main_setup_kanal`, `CFD_CASE=kanal`).
 Wandnormale z, periodisch in x/y, ruhende Wände, Antrieb über `VOLUME_FORCE` (endlich ein Nutzen —
 bisher warnt jeder Start, dass die Kraft null ist). **Feste Durchflussrate, nicht feste Kraft** —
 sonst läuft der Arm ohne Wandmodell auf feinen Gittern in den Überschall und ist still falsch.
-*Warum zuerst:* erste externe Referenz des Projekts überhaupt. Der Fahrzeug-Betriebspunkt als Kanal
-ist **Re_τ = 5186, N = 38, 288 000 Zellen, 19 MB, eine Minute.**
+*Warum wichtig:* erste externe Referenz des Projekts überhaupt. Der Fahrzeug-Betriebspunkt als Kanal
+ist **N = 38, 286 000 Zellen, 19 MB, 31–60 s**.
+★ **KORRIGIERT nach Gegenprüfung:** y⁺₁ und δ/dx sind **keine zwei Bedingungen** —
+y⁺₁·(2δ/dx) = Re_τ, also 137·2·16,7 = **4576**. Bei Re_τ = 5186 trifft man nur eines von beiden.
+Und die −60 % gehören zu N = 34; bei N = 38 sind es **−69 %**. Details in `WANDMODELL.md`.
+★ **Der Kollisionsoperator muss vorher entschieden werden:** der Wandversatz beträgt bei einem
+Log-Profil ~0,25 Zellen = **50 % des Wandabstands der ersten Zelle** (gemessen, D2Q9-TRT-Poiseuille).
+Kontrollarm SRT gegen TRT kostet 60 s, `CFD_LAMBDA` existiert.
+★ **FP16C muss mitgeprüft werden** — der Kanal muss in derselben Genauigkeit laufen wie das Fahrzeug.
 
 **A2. Die Messvorrichtung validieren, bevor irgendetwas gemessen wird.**
 Zwei unabhängige τ_w (Kraftbilanz f·δ gegen Impulsaustausch aus `object_force`) müssen auf wenige
@@ -30,11 +57,15 @@ Prozent übereinstimmen. Gesamtspannungsbilanz muss exakt 1 − z/δ ergeben (To
 Erwartung, hergeleitet: **c_f ∝ 1/N²**, bei Fahrzeugauflösung rund **−60 %** gegen DNS. Und es gibt
 genau **eine** Gitterweite, bei der es zufällig stimmt — Gitterglück, keine Physik.
 *Warum wichtig:* ohne diesen Ausgangspunkt lässt sich später keine Verbesserung dem Wandmodell
-zuordnen. Leiter bei Re_τ = 2000, vier Sprossen, ~1,7 h. Feinste Sprosse bei Re_τ = 5186 (4,1 h bei
-2400 MLUP/s) **fällt raus** — 2,5-h-Grenze; bei den gemessenen 4648 MLUP/s neu prüfen.
+zuordnen. **Haltbare Leiter (2,5-h-Grenze, beide Durchsätze): N = 38 / 54 / 76 / 108** — zusammen unter 4 h
+für alle Arme. N = 152 verletzt sie bei 2400 MLUP/s, N = 216 und 304 immer. **Kein Checkpoint im
+Code** — ein Lauf über 2,5 h ist nicht teilbar.
+★ Der geplante dritte Arm (van Driest) ist am Zielpunkt **widerlegt**: bei y⁺ = 137 leistet er
+**1,0 %**. Der informative dritte Arm wäre **SUBGRID ganz aus**.
 
-**A4. Referenzdaten beschaffen und ablegen** (Lee & Moser 2015 Re_τ 5186 und 1000, Hoyas & Jiménez
-2006 Re_τ 2003). In `referenz/` mit Quellenangabe.
+**A4. Referenzdaten ablegen.** Lee & Moser 2015 (`turbulence.oden.utexas.edu/channel2015/data/`),
+Re_τ 5186/1995/1000. Daraus bereits berechnet: **U_b⁺ = 24,104, c_f = 3,4424·10⁻³** bei Re_τ = 5186.
+Hoyas & Jiménez ist **entbehrlich** — Lee & Moser deckt Re_τ = 1995 mit demselben Format ab.
 
 ---
 
@@ -61,7 +92,7 @@ Fahrzeug den Kanal? V2 lässt es aufsitzen, V1 ließ es 16 mm schweben — Gegen
 
 ## Block C — Wandmodell, nach dem Entwurfsfehler neu aufzusetzen
 
-**C1. Den Kopplungsmechanismus neu entwerfen.** Die Gegenprüfung hat den Regelkreis widerlegt:
+**C1. Den Kopplungsmechanismus neu entwerfen.** Vollständige Begründung in `WANDMODELL.md`. Die Gegenprüfung hat den Regelkreis widerlegt:
 `update_force_field` misst `2·Σ c_i f_i^in`, die Ladd-Korrektur ist **nicht enthalten**. Der wahre
 Übertrag ist F_wahr = F_gemessen − u_w/3 — der Regler sieht seinen eigenen Eingriff nicht und läuft
 in einen Offset in Höhe des ganzen Effekts. **Das ist V1s Fehlerklasse mit umgekehrtem Vorzeichen.**

@@ -1,0 +1,203 @@
+# Wandmodell und Kanalvalidierung — Wissensstand
+
+Stand 2026-08-09. Zwei Planungen, beide von unabhängigen Agenten **bis auf Codetiefe gegengeprüft**.
+Beide hatten tragende Fehler, die vor der ersten Codezeile gefunden wurden. Dieses Dokument hält
+fest, was gilt — nicht, was geplant war.
+
+---
+
+## Warum überhaupt ein Wandmodell
+
+Erste Fluidzelle bei **y⁺ ≈ 137** (Nahfeld, dx = 4 mm), im Fernfeld ~547. Halfway-Bounce-Back setzt
+voraus, dass diese Zelle die viskose Unterschicht auflöst (y⁺ < 5) — sie verfehlt das um Faktor 137.
+Wandaufgelöst wäre 29 µm statt 4 mm nötig, also ~10⁶-mal mehr Zellen. Die Wandschubspannung wird
+dadurch rechnerisch um **Faktor ~4,7** unterschätzt.
+
+**★ ABER: y⁺ = 137 ist nie gemessen worden.** Es ist eine Plattenkorrelation bei x = L.
+`update_force_field` liefert die echte τ_w-Verteilung — **ein einziges Sample eines vorhandenen
+Laufs** ergibt das reale y⁺-Histogramm und ersetzt die ganze Korrelationskette. Das gehört gemacht,
+bevor eine große Validierung darauf aufgebaut wird.
+
+**Der indirekte Hebel ist der wichtige:** Reibungswiderstand ist beim PKW nur ~10 % von Cd
+(Connolly et al. 2024: „approximately 90 % coming from the pressure component"). 10 % τ_w-Fehler
+sind ~1 % Cd. Entscheidend ist der Weg über den **Ablösepunkt** — Larsson et al. 2016, §3.2:
+„the cumulative loss of near-wall momentum in the upstream boundary layer determines the point of
+separation". Zu wenig τ_w ⇒ Grenzschicht zu energiereich ⇒ Ablösung zu spät ⇒ Cd zu klein.
+Eine publizierte Transferfunktion „X % τ_w → Y % Cd" existiert **nicht**.
+
+---
+
+## Die Auslegung, und was die Gegenprüfung davon übrig lässt
+
+Empfohlen war: **Reichardt + Slip-Velocity-Bounce-Back + Signed-Distance-Feld + Abtastung 2 Zellen
+von der Wand + kein van Driest.** Die Ankopplung über eine effektive Viskosität scheidet aus
+(Ponsin & Lozano 2025, Phys. Fluids 37, 095101: Slip-Velocity-BB ist für komplexe Geometrie der
+robusteste Weg).
+
+### ★★ Der Regelkreis ist WIDERLEGT — der zentrale Entwurfsfehler
+
+Vorgeschlagen war, auf die **gemessene** Impulsaustauschkraft zu regeln, weil Doppelzählung dann
+strukturell unmöglich sei. **Das stimmt nicht.**
+
+`update_force_field` (`src/kernel.cpp`) misst `2·Σ c_i f_i^in` — der eigene Kommentar sagt
+*„2x because fi are reflected on solid boundary cells (bounced-back)"*. **Die Ladd-Korrektur ist
+nicht enthalten.** Der wahre Übertrag ist
+
+> **F_wahr = F_gemessen − u_w/3**
+
+Der Regler sieht seinen eigenen Eingriff nicht und läuft in einen Offset **in Höhe des gesamten
+Wandmodell-Effekts**. Das ist V1s Fehlerklasse (modelliertes τ_BB subtrahieren) mit umgekehrtem
+Vorzeichen.
+
+### Weitere Befunde der Gegenprüfung
+
+| | |
+|---|---|
+| **Der Vorfaktor 1/3 gilt nur für die ebene achsparallele Wand** | Gemessen über Wandorientierungen: eben 0,333 · 45°-Treppe 0,667 · Raumdiagonale 0,500 · konvexe Kante 1,167 — **Faktor 3,5 Schwankung**. An Kanten zusätzlich ein **wandnormaler** Eintrag (Transpiration), den kein Tangentialregler wegregeln kann. Auf einer voxelisierten Karosserie sind Treppen und Kanten die Mehrheit |
+| **Die Newton-Form ist unterspezifiziert** | „Newton in ln(y⁺)" mit **linearem** Residuum divergiert: 4·10¹³⁸ bzw. NaN nach drei Schritten. Nur **Log-Log-Residuum mit Startwert √Y** liefert 1,8·10⁻¹³. Und `-cl-finite-math-only` macht NaN zu undefiniertem Verhalten |
+| **Der GAIN=0-Kontrollarm testet nichts** | Bei u_w = 0 ist die Markierbedingung `u != 0` nicht erfüllt → kein TYPE_MS → der Pfad läuft gar nicht. Er muss **unbedingt** markieren |
+| **Reglerzeitkonstante 4 Größenordnungen zu schnell** | Er würde auf momentane Turbulenzfluktuationen einrasten statt auf den Mittelwert. Braucht Zeitfilterung über 10²–10³ Schritte |
+| **Keine Klemme auf u_w** | Weder im Kernel noch vorgesehen. Ein divergierender Regler schreibt beliebig große Wandgeschwindigkeiten |
+
+### Die Falle, ohne die das Modell ein lautloser No-op wäre
+
+**Fahrzeug-Solidzellen haben u = 0.** `initialize` und `update_moving_boundaries` setzen TYPE_MS
+**nur**, wenn ein solider Nachbar `u != 0` hat. Also ist am Fahrzeug **kein TYPE_MS gesetzt**, und
+`apply_moving_boundaries` läuft dort **nie**. Ohne eine unbedingte Markierung hätten wir exakt V1s
+teuerste Fehlerklasse reproduziert.
+
+Und: **`object_force` vergleicht auf exakte Gleichheit** (`flags[n]==0x41`). Jedes zusätzliche
+Flag-Bit auf Fahrzeug-Solidzellen löscht sie **lautlos** aus Cd und Cz. Markierung gehört auf die
+Fluidseite oder in einen eigenen Puffer.
+
+### Erfreulich: die Ankopplung selbst ist winzig
+
+`apply_moving_boundaries` **ist** bereits der Ladd/Krüger-Slip-Velocity-Bounce-Back und liest die
+Wandgeschwindigkeit aus dem gewöhnlichen `u`-Feld am **Solid**-Index. Der Eingriff besteht darin,
+u_w dort hineinzuschreiben — **keine Änderung an `stream_collide`**. Zweite Aufrufstelle in
+`update_fields` mitdenken.
+
+### Smagorinsky
+
+ν_t/ν ≈ **290** in der Wandzelle (mit Wandabstand 0,5 und einseitigem Gradienten; unter
+Log-Gesetz-Annahme 40). Smagorinsky ist dort **O(y⁰)** — die Wirbelviskosität verschwindet an der
+Wand nicht, WALE und σ wären O(y³).
+
+**Aber die naheliegende Folgerung ist falsch:** τ_eff bleibt selbst bei ν_t/ν = 290 bei **0,508**.
+Die Wandzelle ist auch mit „dominanter" Wirbelviskosität praktisch reibungsfrei. **Die Wandspannung
+wird vom Bounce-Back-Impulsaustausch getragen, nicht vom SGS-Modell** — also von genau dem Term,
+der oben falsch gemessen wird.
+
+Zhou & Bae (JCP 507, 112948): bei identischem Wandmodell variiert die Ablöseblase über verschiedene
+SGS-Modelle von ~0 bis über 0,35 L — die Streuung übersteigt den DNS-Wert selbst, und Smagorinsky
+sagt auf mittlerem Gitter **gar keine Ablösung** voraus.
+
+---
+
+## Der turbulente Kanal als externe Referenz
+
+### Was die Gegenprüfung korrigiert
+
+**Das Argument für Re_τ = 5186 ist zirkulär.** y⁺₁ und δ/dx sind **keine zwei Bedingungen**:
+
+> y⁺₁ · (2δ/dx) = [u_τ·(dx/2)/ν] · (2δ/dx) = u_τ·δ/ν = **Re_τ**
+
+137 · 2 · 16,7 = **4576** — das *ist* Re_τ. Bei Re_τ = 5186 trifft man nur **eines** von beiden:
+y⁺₁ = 137 ⟹ δ/dx = 18,9, oder δ/dx = 16,7 ⟹ y⁺₁ = 155.
+
+**Und die −60 % gehören zu N = 34, nicht zu y⁺₁ = 137.** Beim geplanten N = 38 sind es **−69 %**.
+
+### Der Ausgangspunkt ohne Wandmodell — Herleitung bestätigt
+
+Aus (ν+ν_t)·dU/dy = u_τ²(1−y/δ) mit ν_t = (C_sΔ)²|dU/dy| folgt U_b⁺ = **1,1543·N** und
+
+> **c_f = 1,502/N² — jede Halbierung von dx viertelt das c_f**
+
+Konstante unabhängig reproduziert: 0,76421222/(18√2) = 0,030021, C_s = 0,1733.
+
+**★ Die wichtigste Folgerung, die der Plan selbst nicht gezogen hat:** es gibt genau **eine**
+Gitterweite, bei der es zufällig stimmt — **N = 21, δ/dx = 10,5, y⁺₁ = 246**. Am Fahrzeug entspricht
+das **dx ≈ 6,4 mm**. Das eigene Modell sagt also, dass unser 4-mm-Produktionsgitter auf der
+*falschen* Seite liegt und ein **gröberes** zufällig richtig wäre. Ein Fahrzeuglauf bei 6 mm ist
+**billiger als der aktuelle** und prüft das direkt am Zielobjekt — ohne Kanal, ohne Wandmodell.
+
+**Vorbehalt:** die Herleitung setzt **null aufgelöste Reynoldsspannung** voraus. Sie ist eine
+**Schranke, keine Prognose**; publizierte c_f-Fehler bei diesen Auflösungen liegen bei 10–30 %.
+
+### Weitere Korrekturen
+
+- Der Geschwindigkeits-Clamp sitzt bei **Ma = 1,0** (`def_c = 1/√3 = c_s`), nicht darunter.
+  Ma_bulk ist 0,865, nicht 0,91. Er greift über die **Kanalmitte** schon ab N ≈ 107.
+  Die operative Schranke ist die **Kompressibilität**, nicht der Clamp.
+- **CFR ist nicht zwingend** und teurer als gedacht: N = 152 geht von 2,13 h auf **14,19 h**.
+- τ_eff ist **0,5016** (47× ν durch Smagorinsky), nicht 0,50003. Der freie Knopf ist **Λ, nicht τ**.
+- **van Driest leistet bei y⁺ = 137 genau 1,0 %.** Der geplante dritte Arm ist am Zielpunkt
+  empirisch widerlegt. Der informative dritte Arm wäre **SUBGRID ganz aus**.
+- **Kein Checkpoint/Restart im Code** — ein Lauf über 2,5 h ist nicht teilbar.
+
+### Der Wandversatz, gemessen statt argumentiert
+
+Ein Prüfer hat D2Q9-TRT-Poiseuille in doppelter Genauigkeit nachgebaut:
+
+| | Wandversatz |
+|---|---|
+| Λ = 3/16 | **0,00000** (Theorem bestätigt) |
+| Λ = 0,09 (SRT bei τ = 0,8) | −0,0068 Zellen |
+| Λ = 1,09·10⁻⁹ (SRT bei τ = 0,50003) | −0,0130 Zellen |
+
+Gesetz: u_slip = (2/3)(3/16−Λ)·|u''|. Für die laminare Parabel ist der Versatz harmlos —
+**für ein logarithmisches Profil aber ~0,25 Zellen = 50 % des Wandabstands der ersten Zelle.**
+y⁺₁ wäre effektiv ~205 statt 137: ein systematischer Bias **direkt in der gemessenen Größe**.
+SRT gegen TRT muss vor dem ersten Lauf entschieden werden; der Kontrollarm kostet 60 s
+(`CFD_LAMBDA` existiert bereits).
+
+Umgekehrt: **der Kanal kann das Λ-Problem des Fahrzeugs nicht reproduzieren** — dort ist es akut
+wegen der ein- bis nullzelligen Spalte an den Reifenaufstandsflächen (Fehler O(1)), der Kanal ist
+19 Zellen breit (Fehler O(1/19)).
+
+### Die haltbare Leiter (2,5-h-Grenze, beide Durchsätze)
+
+| N | δ/dx | y⁺₁ | Zellen | B70 @4648 | @2400 |
+|---|---|---|---|---|---|
+| **38** | 19 | **137** | 286 k | 31 s | 60 s |
+| 54 | 27 | 96 | 809 k | 2,1 min | 4,0 min |
+| 76 | 38 | 68 | 2,22 M | 8,1 min | 15,6 min |
+| 108 | 54 | 48 | 6,34 M | 33 min | 63 min |
+
+N = 152 verletzt die Grenze bei 2400 MLUP/s; N = 216 und 304 immer. **Alle Arme zusammen unter 4 h.**
+
+### Referenzdaten (URLs verifiziert, Daten heruntergeladen und ausgewertet)
+
+**Lee & Moser 2015**, JFM 774, 395 — `turbulence.oden.utexas.edu/channel2015/data/`,
+Re_τ = 5186 / 1995 / 1000 / 543 / 182. Daraus selbst berechnet: **U_b⁺ = 24,104, c_f = 3,4424·10⁻³**
+bei Re_τ = 5186. Hoyas & Jiménez 2006 ist **entbehrlich** (Lee & Moser deckt Re_τ = 1995 ab).
+
+### Was der Kanal nicht kann
+
+Er ist eine **Gleichgewichts-Grenzschicht ohne Druckgradient**. Er validiert, dass das Modell die
+richtige τ_w aufprägt und gitterunabhängig arbeitet — **nichts** über Nichtgleichgewicht,
+Druckanstieg, Ablösung. Und er testet **nicht** den Zweig, der am Auto das Problem ist:
+Wandnormale und Wandabstand auf einer voxelisierten STL, und das Verhalten in abgelösten Zonen.
+
+**Schriftlich VOR dem ersten Fahrzeuglauf:** Eine aufgeprägte Wandschubspannung ist eine **Senke**,
+kein wandwärtiger Impulstransport. Sie kann den Ablösepunkt unter Druckanstieg **nicht** nach hinten
+schieben — das gilt für Slip-BB genauso wie für V1s Körperkraft. Wer mehr erwartet, erklärt
+hinterher ein korrekt arbeitendes Modell für gescheitert.
+
+---
+
+## V1s Wandmodell — was es war und warum es nicht ankam
+
+Es war **kein Xue/Lu**, sondern eine **Spalding-Inversion mit Werner-Wengle-Startwert** (Formel und
+analytische Ableitung von einem Prüfer nachgerechnet und korrekt).
+
+| | |
+|---|---|
+| Ankopplung | **Body-Force-Senke, additiv zur ohnehin wirkenden Bounce-Back-Reibung** → Doppelzählung; `WM_STRESS_CORRECT` war das Pflaster dagegen und machte die Kraft ≈ 0. In 7 von 14 Fahrzeugskripten aktiv |
+| Abtastpunkt | 10 mm = **1,13·δ — außerhalb der Grenzschicht.** Es tastete die Außenströmung ab |
+| Über der Fahrbahn | **τ_w ≡ 0** — die Normalen kamen aus Device-Flags, in denen der Boden nicht stand |
+| Das Feld | `UPDATE_FIELDS` in V1 **nie definiert** → die Kraft rechnete auf einem bis zu **99 Schritte alten** Feld |
+| Gemessene Wirkung am Fahrzeug | **keine.** Ein abgebrochener visueller Vergleich, und eine später für ungültig erklärte τ_w-Messung |
+
+V1 wusste das teilweise selbst: in `wall-models.md` steht die Rechnung, dass die beiden
+Kawai-Larsson-Bedingungen auf diesen Gittern **um Faktor ~17 unvereinbar** sind.
