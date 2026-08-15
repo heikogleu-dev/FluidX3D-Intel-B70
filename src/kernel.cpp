@@ -1627,10 +1627,10 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 		const float utau = ut/up;
 		float tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut; // physikalische Klemme; Treffer werden gezaehlt
-		if(tw>tw_max) { tw = tw_max; if(zaehle) atomic_inc(&wf_hits[3]); }
+		if(tw>tw_max) { tw = tw_max; if(zaehle) atomic_inc(&wf_hits[3]); } // Slot 3: NUR tau-Klemme
 		tau_x = -def_wf_tau*tw*uxn/ut; // Widerstand GEGEN u_t (Han Gl. 15)
 		tau_y = -def_wf_tau*tw*uyn/ut;
-	} else if(zaehle) atomic_inc(&wf_hits[3]);
+	} else if(zaehle) atomic_inc(&wf_hits[4]); // Slot 4: u_t~0-Skips (Audit: vorher mit Slot 3 vermischt)
 	if(boden) { // einlaufende Diagonalen: 9=(+1,0,+1)/16=(-1,0,+1) und 11=(0,+1,+1)/18=(0,-1,+1)
 		const float a=fhn[9]; fhn[9]=fhn[16]+0.5f*tau_x; fhn[16]=a-0.5f*tau_x;
 		const float b=fhn[11]; fhn[11]=fhn[18]+0.5f*tau_y; fhn[18]=b-0.5f*tau_y;
@@ -1677,7 +1677,11 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 )+"#endif"+R( // MOVING_BOUNDARIES
 
 )+"#ifdef WANDFUNKTION"+R(
-	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E) apply_wall_function(fhn, j, flags, rho_clamp_hits, t, true);
+	// ★ Audit-Nacharbeit 3: TYPE_MS AUSGESCHLOSSEN. Vorher lief die WFB auch auf Zellen neben
+	// BEWEGTEN Waenden -- NACH apply_moving_boundaries, dessen Injektion der Tausch aufs falsche
+	// Linkpaar verschoben haette, und tau_w gegen das ABSOLUTE u_t. Bis die
+	// Relativgeschwindigkeits-Erweiterung kommt, ist die bewegte Wand hart ausgenommen.
+	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_wall_function(fhn, j, flags, rho_clamp_hits, t, true);
 )+"#endif"+R( // WANDFUNKTION
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
@@ -2123,6 +2127,9 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 } // possible types at the end of surface_3(): TYPE_F / TYPE_I / TYPE_G
 )+"#endif"+R( // SURFACE
 
+// ★ Audit-Befund 21 (latent, Kernel hat derzeit keine Aufrufer im Fork -- UPDATE_FIELDS liefert die
+// Felder im stream_collide): dieser Kernel kennt die WANDFUNKTION NICHT. Wer ihn wiederbelebt,
+// bekommt an WFB-Wandzellen rho/u aus den getauschten fi ohne die Spiegel-Logik -- erst nachziehen.
 )+R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
@@ -2536,6 +2543,9 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 
 )+"#ifdef PARTICLES"+R(
 )+"#ifdef FORCE_FIELD"+R(
+// ★ Audit-Befund 19 (latent, PARTICLES ist wegkompiliert): spread_force indiziert F mit dem
+// VOLLEN Gitterindex, nicht mit der F-Bounding-Box. Wer PARTICLES je einschaltet, muss hier
+// zuerst auf FBI-Indexierung umstellen (Muster: update_force_field), sonst schreibt es daneben.
 )+R(void spread_force(volatile global float* F, const float3 p, const float3 Fn) {
 	const float xa=p.x-0.5f+1.5f*(float)def_Nx, ya=p.y-0.5f+1.5f*(float)def_Ny, za=p.z-0.5f+1.5f*(float)def_Nz; // subtract lattice offsets
 	const uint xb=(uint)xa, yb=(uint)ya, zb=(uint)za; // integer casting to find bottom left corner

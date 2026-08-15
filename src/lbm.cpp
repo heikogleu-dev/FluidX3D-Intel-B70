@@ -125,6 +125,23 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ist nur fuer D3Q19 gebaut (feste Flaechennachbarn j[1..6]).");
 	if(s_wandfunktion) print_error("CFD_WANDFUNKTION ist nur fuer D3Q19 gebaut (feste Diagonalpaare 9/16, 11/18, 15/10, 17/12).");
 #endif // D3Q19
+#ifndef SUBGRID
+	// ★ Audit-Nacharbeit 2: mit abgeschaltetem SUBGRID (Kugel-Validierung!) war der Schalter ein
+	// lautloser No-Op -- jetzt harte Abweisung. Die WANDFUNKTION dagegen ist von SUBGRID unabhaengig
+	// und wird seit derselben Nacharbeit ausserhalb des SUBGRID-Blocks emittiert.
+	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu entfernen).");
+#endif // SUBGRID
+#ifndef TRT
+	// ★ Audit-Nacharbeit 4: CFD_LAMBDA liegt in der TRT-Emission -- unter SRT (aktueller Build) ist
+	// der Schalter TOT. Ein Lambda-A/B liefe bitgleich und ohne jede Meldung; deshalb die Ansage.
+	if(getenv("CFD_LAMBDA")!=nullptr) print_warning("CFD_LAMBDA ist gesetzt, aber der Build laeuft mit SRT -- der Schalter ist WIRKUNGSLOS (TRT in defines.hpp aktivieren).");
+#endif // TRT
+#ifdef UPDATE_FIELDS
+	// ★ Audit-Nacharbeit 8: im CFD_REG_BC-Arm liest deriv_reg u[] von Nachbarzellen, waehrend
+	// stream_collide unter UPDATE_FIELDS u[] im selben Kernellauf SCHREIBT -- Wettlauf, jedes
+	// REG-A/B waere nicht bitreproduzierbar. Default ist aus; wer ihn zieht, wird gewarnt.
+	if(getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) print_warning("CFD_REG_BC=1 unter UPDATE_FIELDS: deriv_reg liest u[] im Wettlauf mit dem Schreiber -- Ergebnisse sind NICHT bitreproduzierbar (Audit-Befund 8).");
+#endif // UPDATE_FIELDS
 	// ★ Daempfungszone: Sperre und Wirksamkeitsmeldung.
 	if(s_sponge_n>0u) {
 		// def_Nx/def_Ny/def_Nz im Sponge-Block sind DOMAENENmasse inklusive Halo -- mit mehreren
@@ -615,7 +632,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// Der Code bleibt (mathematisch korrekt, Erhaltung symbolisch bestaetigt) fuer Regimes mit
 	// ordentlichem tau; CFD_REG_BC=1 schaltet ihn ein.
 #ifdef REGULARIZED_BOUNDARIES
-	+((getenv("CFD_REG_BC")!=nullptr&&!(getenv("CFD_REG_BC")[0]=='0'&&getenv("CFD_REG_BC")[1]=='\0')) ? (string)
+	// Audit-Nacharbeit 15: atoi statt "alles ausser '0' ist an" -- CFD_REG_BC=false hiess vorher AN.
+	+((getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) ? (string)
 	"\n	#define REGULARIZED_BOUNDARIES"
 	"\n	#define REG_E(i) (feq[i]+reg_fneq(i, regf, Sxx, Syy, Szz, Sxy, Sxz, Syz, trS3))"
 	: (string)
@@ -629,7 +647,15 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define RHO_CLAMP_MIN "+to_string(RHO_CLAMP_MIN,4u)+"f"
 	"\n	#define RHO_CLAMP_MAX "+to_string(RHO_CLAMP_MAX,4u)+"f"
 #endif // RHO_CLAMP
-	"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
+	// ★ Audit-Nacharbeit 2: SGS_WANDFREI und WANDFUNKTION standen im #ifdef-SUBGRID-Block -- mit
+	// abgeschaltetem SUBGRID (die Kugel-Validierung verlangt das) waeren beide LAUTLOSE No-Ops
+	// gewesen. Jetzt ausserhalb emittiert; SGS_WANDFREI ohne SUBGRID ist sinnlos und wird im
+	// Konstruktor hart abgewiesen, die WFB ist von SUBGRID unabhaengig.
+	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
+	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
+	"\n	#define def_wf_Y "+to_string(0.5f/nu,8u)+"f"
+	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f" : (string)"")
+	+"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
 	"\n	#define TYPE_BO 0x03" // 0b00000011 // any flag bit used for boundaries (temperature excluded)
 	"\n	#define TYPE_IF 0x18" // 0b00011000 // change from interface to fluid
 	"\n	#define TYPE_IG 0x30" // 0b00110000 // change from interface to gas
@@ -687,16 +713,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 #endif // TEMPERATURE
 
 #ifdef SUBGRID
-	"\n	#define SUBGRID"
-	// ★ Test B (CFD_SGS_WANDFREI): nur emittiert wenn gesetzt -- ungesetzt ist der praeprozessierte
-	// Quelltext bit-identisch (dasselbe Muster wie SPONGE und CFD_REG_BC).
-	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
-	// ★ Wandfunktions-Bounce-Back (Han et al. 2021): nur emittiert wenn gesetzt; def_wf_Y = 0,5/nu
-	// (Abtastpunkt Wandzelle, y = 0,5 Gitter, MOLEKULARE Viskositaet); def_wf_tau schaltet den
-	// tau-Anteil (0 = nur Free-Slip-Tausch, der Zwischenarm aus Schritt 4 des Plans).
-	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
-	"\n	#define def_wf_Y "+to_string(0.5f/nu,8u)+"f"
-	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f" : (string)"")
+	"\n	#define SUBGRID"+(string)"" // Klebefuge: der Block muss als string enden (Audit-Nacharbeit 2 hat die Ternaere hier herausgezogen)
 #endif // SUBGRID
 
 #ifdef PARTICLES
@@ -1261,6 +1278,9 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	// Der Per-Schritt-Dispatch ist damit nicht Vorrat, sondern noetig: die Neumann-Bedingung sieht das
 	// Innenfeld des unmittelbar vorangegangenen Schritts. Der alte Kommentar war zu pessimistisch und
 	// widersprach dem, was setup.cpp an derselben Sache richtig beschreibt.
+	// ★ Audit-Nacharbeit 9 (E9): im dd-Fall tragen 1580 Zellen BEIDE Rollen (vi-Kante und po-Deckel/
+	// Seiten). Die Reihenfolge ist bewusst: erst Einlass, dann Auslass -- auf den Doppelzellen
+	// GEWINNT der Druck-Auslass. In-order-Queue je Domaene macht das deterministisch.
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_velocity_inlet(); // FORK: rho am Einlass mitlaufen lassen
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
@@ -1456,7 +1476,7 @@ bool LBM_Domain::collect_boundary_pairs(const uint face_mask, const string& wofu
 void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho_out) {
 	po_rho = rho_out;
 	{ const char* v = getenv("CFD_PO_SIGMA"); po_sigma = v ? (float)fmax(0.0, fmin(1.0, atof(v))) : 1.0f; }
-	{ const char* v = getenv("CFD_PO_HART"); po_hart = (v && !(v[0]=='0'&&v[1]=='\0')) ? 1u : 0u; } // 1 = alter harter Rand, der Kontrollarm
+	{ const char* v = getenv("CFD_PO_HART"); po_hart = (v && atoi(v)>0) ? 1u : 0u; } // 1 = alter harter Rand, der Kontrollarm (Audit-Nacharbeit 15: "false" zaehlte vorher als AN)
 	std::vector<ulong> cells, interior;
 	if(!collect_boundary_pairs(face_mask, "Druck-Auslass", cells, interior)) return;
 	const uint N_po = (uint)cells.size();

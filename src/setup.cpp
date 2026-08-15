@@ -406,14 +406,19 @@ void main_setup_kanal() {
 
 	// ---- Zeitschleife mit CFR-Regler und Ebenenstatistik
 	std::ofstream zcsv(out_dir+"kanal_zeit.csv"); zcsv.precision(8);
+	// ★ Audit-Nacharbeit 1 (hoch): unter WANDFUNKTION ist cf_impulsaustausch PRINZIPIELL UNGUELTIG --
+	// update_force_field setzt reine Reflexion voraus ("2x because fi are reflected"), die WFB
+	// ersetzt genau diese Links durch Tausch+tau. Das Kriterium "beide c_f-Wege gleich" gilt NUR
+	// im Arm ohne Wandfunktion. Der Planungsagent hatte diese Kennzeichnung angewiesen; sie fehlte.
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u) zcsv << "# ACHTUNG: cf_impulsaustausch unter WANDFUNKTION UNGUELTIG (Reflexionsannahme verletzt) -- nur cf_kraftbilanz zaehlt\n";
 	zcsv << "schritt,ett,Ub_lat,Ub_plus,f_lat,cf_kraftbilanz,cf_impulsaustausch\n" << std::flush;
 	const uint regel_alle = 100u;
 	float f_akt = f0, Ub_alt = Ub_ziel;
 	// Statistik-Akkumulatoren je z-Ebene (double, Host)
 	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0), suz(Nz,0.0); ulong n_stat=0ull;
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
-	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) {
-		lbm.run((ulong)regel_alle, n_steps);
+	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) { // Audit-Nacharbeit 18: letzter Chunk gekappt, vorher bis zu 99 Schritte Ueberzug
+		lbm.run(min((ulong)regel_alle, n_steps-step), n_steps); // run(steps, total) kappt selbst NICHT (2. Arg ist nur Laufzeitschaetzung)
 		// U_b und Ebenensummen aus u (Vollread -- bei diesen Groessen billig: N=38 -> 3,4 MB)
 		lbm.u.read_from_device();
 		double Ub=0.0; ulong nf=0ull;
@@ -428,11 +433,14 @@ void main_setup_kanal() {
 		const double Ub_plus = Ub/(double)utau_lat;
 		// ★ Relaminarisierungs-/Entgleisungswaechter
 		if(Ub_plus>200.0) { print_error("Kanal relaminarisiert oder entgleist: U_b+ = "+to_string((float)Ub_plus,1u)+" (ueber 200). Lauf wertlos."); }
+		// ★ Audit-Nacharbeit 12: tau_kraft aus dem f bilden, das in DIESEM Chunk gewirkt hat --
+		// vorher stand hier das frisch geregelte f_akt (Ein-Chunk-Versatz im cf_kraftbilanz).
+		const float f_wirk = f_akt;
 		// CFR-Regler
 		const float f_neu = f_akt + K*(float)((Ub_ziel-(float)Ub) + (Ub_alt-(float)Ub))*utau_lat*utau_lat/delta_lat/fmax(1e-12f,utau_lat);
 		Ub_alt=(float)Ub; f_akt=fmax(0.0f, f_neu); lbm.set_fx(f_akt);
 		// zwei unabhaengige tau_w
-		const double tau_kraft = (double)f_akt*(double)delta_lat;               // exakt: f*delta
+		const double tau_kraft = (double)f_wirk*(double)delta_lat;              // exakt: f*delta
 		lbm.update_force_field();
 		const float3 Fw = lbm.object_force(TYPE_S);                             // beide Waende
 		const double tau_mem = fabs((double)Fw.x)/(2.0*(double)Nx*(double)Ny);  // je Flaeche
@@ -467,9 +475,10 @@ void main_setup_kanal() {
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h); dichteklemme_fazit(h); }
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) { // Wirkpfad-Nachweis: Zaehler auslesen
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
-		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[2], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[3], sp=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[5];
+		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[2], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[3], sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[4], sp=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[5];
 		const ulong soll=(ulong)Nx*(ulong)Ny*2ull*(ulong)((n_steps+99ull)/100ull);
-		print_info("Wandfunktion-Wirkpfad: "+to_string(wz)+" gezaehlte Wandzellen-Updates (Soll "+to_string(soll)+"), tau-Klemme/Skips "+to_string(kl)+", Ein-Zellen-Spalte "+to_string(sp));
+		// Audit-Nacharbeit 11: Slot 3 = NUR tau-Klemme, Slot 4 = u_t~0-Skips (vorher vermischt)
+		print_info("Wandfunktion-Wirkpfad: "+to_string(wz)+" gezaehlte Wandzellen-Updates (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", Ein-Zellen-Spalte "+to_string(sp));
 		if(wz==0ull) print_error("Wandfunktion war eingeschaltet, aber der Wirkpfad-Zaehler ist NULL -- lautloser No-Op.");
 	}
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
@@ -803,6 +812,10 @@ void main_setup_kugel() {
 	// die dieses Projekt sonst jagt.
 	if(env_u("CFD_SPONGE_N", 0u)>0u) print_warning("CFD_SPONGE_N ist gesetzt, wird in diesem Fall aber NICHT angewandt (die Zone rampt am Domaenenrand, dort stehen hier mitbewegte Waende). Nur fernfeld und fahrzeug_dd nutzen sie.");
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; // alle drei, damit keine Instanz einen Wert der vorigen erbt
+	// ★ Audit-Nacharbeit 6/10: Wandfunktions-Statiken an JEDER Konstruktorstelle setzen; der Schalter
+	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=============== Kugel im Kanal (Neuaufbau auf Upstream 8986874) ===============");
@@ -1069,6 +1082,10 @@ static void main_setup_fahrzeug() {
 	// die dieses Projekt sonst jagt.
 	if(env_u("CFD_SPONGE_N", 0u)>0u) print_warning("CFD_SPONGE_N ist gesetzt, wird in diesem Fall aber NICHT angewandt (die Zone rampt am Domaenenrand, dort stehen hier mitbewegte Waende). Nur fernfeld und fahrzeug_dd nutzen sie.");
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; // alle drei, damit keine Instanz einen Wert der vorigen erbt
+	// ★ Audit-Nacharbeit 6/10: Wandfunktions-Statiken an JEDER Konstruktorstelle setzen; der Schalter
+	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
@@ -1391,7 +1408,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Einlauf vor der Nase "+to_string((veh_x0-far_x0)/si_length,2u)+" L (bewusst kurz), Nachlauf hinter dem Heck "
 			+to_string((far_x0+(float)(cNx-1u)*dx_c-veh_x1)/si_length,2u)+" L  (OpenFOAM: 1.08 L / 3.33 L)");
 	}
-	print_info("tau_fein = "+to_string(tau_f,6u)+", tau_grob = "+to_string(tau_c,6u)+"  -- beide praktisch 0.5; TRT haelt die Wandlage trotzdem bei Lambda = 3/16.");
+	print_info("Kollisionsoperator: SRT (TRT samt Lambda-Wandlage in defines.hpp auskommentiert -- gemessene Entscheidung 2026-08-09).");
 	print_info("dt_fein = "+to_string(dt_f,8u)+" s, dt_grob = "+to_string(dt_c,7u)+" s, ratio = "+to_string(ratio));
 
 	// ---------------------------------------------------------------- Netze platzieren
@@ -1438,6 +1455,10 @@ static void main_setup_fahrzeug_dd() {
 	// den Faktor 2906 -- die Kopplung wuerde genau an ihrer Eintrittsstelle verschmiert.
 	// Es gibt also KEINE vertretbare Zonenbreite am Nahfeld. Deshalb hier hart auf null.
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; // alle drei, damit keine Instanz einen Wert der vorigen erbt
+	// ★ Audit-Nacharbeit 6/10: Wandfunktions-Statiken an JEDER Konstruktorstelle setzen; der Schalter
+	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
 
 	// ---------------------------------------------------------------- Grobes Gitter bauen
@@ -1459,6 +1480,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; // Audit-Nacharbeit 10: Statik-Symmetrie auch vor lbm_c
 	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 kaeme im Fernfeld der Kopplungs-Entnahmeebene x- (152 Zellen) zu nahe.");
 	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
 
@@ -1466,11 +1488,12 @@ static void main_setup_fahrzeug_dd() {
 	// Das Fahrzeug MUSS auch im groben Gitter stehen. Sonst traegt das Fernfeld die Verdraengung nicht,
 	// und die Nahfeld-Raender bekaemen ungestoerte Anstroemung aufgepraegt -- der Wagen staende dann in
 	// einer Stroemung, die nicht weiss, dass er da ist.
-	// ★ Bewusste Asymmetrie (Pruefer-Befund 2026-08-08): hier wird nur flags zurueckgelesen, nicht u.
-	// Der Voxelisierungs-Kernel schreibt geraeteseitig AUCH u (die Koerpergeschwindigkeit), und
-	// initialize() laedt spaeter das Host-u hoch und ueberschreibt das bedingungslos. Heute folgenlos,
-	// weil das Fahrzeug steht und beide Seiten 0 sind. WER DEM FAHRZEUG JE EINE GESCHWINDIGKEIT GIBT,
-	// muss hier zusaetzlich u.read_from_device() rufen -- sonst ist sie lautlos weg, und initialize()
+	// ★ Audit-Nacharbeit 13 (ersetzt den faktisch falschen Kommentar von 2026-08-08): voxelize_mesh_
+	// on_device liest vor initialize() SELBST flags UND u zurueck (lbm.cpp, !initialized-Zweig) --
+	// die Behauptung "hier wird nur flags gelesen" stimmte nicht. Unveraendert wahr ist der Kern:
+	// initialize() laedt spaeter das Host-u hoch und ueberschreibt es bedingungslos; heute folgenlos,
+	// weil das Fahrzeug steht und beide Seiten 0 sind. Wer dem Fahrzeug je Geschwindigkeit gibt,
+	// muss die Reihenfolge Voxelisieren->initialize() neu pruefen -- sonst ist sie lautlos weg, und initialize()
 	// setzt dann auch kein TYPE_MS an der Fahrzeugwand, die Wand waere also nicht mitbewegt.
 	// Nicht vorsorglich eingebaut, weil das Ruecklesen von u 6 GB ueber PCIe kostet und heute nichts tut.
 	lbm_f.voxelize_mesh_on_device(veh_f, TYPE_S|TYPE_X); lbm_f.flags.read_from_device();
@@ -1943,12 +1966,14 @@ static void main_setup_fahrzeug_dd() {
 	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
 		cd.push_back(fx[i]/((double)q_inf*A_ref)); cz.push_back(fz[i]/((double)q_inf*A_ref));
 	}
+	// ★ Audit-Nacharbeit 14: y+ VOR dem Samples-Waechter messen -- vorher fiel die Messung bei
+	// kurzen Laeufen (<16 Kraft-Samples) mit dem _exit zusammen weg, obwohl sie unabhaengig davon ist.
+	if(env_u("CFD_YPLUS", 1u)>0u) messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld");
 	if(cd.size()<16u) { print_warning("Zu wenige Samples fuer eine belastbare Statistik."); _exit(0); }
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
 	print_info("---------------------------------------------------------------");
-		if(env_u("CFD_YPLUS", 1u)>0u) messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld");
 		{	// ★ Hygiene E6b: fx_c wurde den ganzen Lauf befuellt und nie gelesen. Jetzt als EIN Anker
 		// ausgewiesen: das Mittel der Fernfeld-Fahrzeugkraft AB WARMLAUF (derselbe Filter wie Cd/Cz --
 		// der Nachpruefer fand das Mittel ueber alles inkl. Anlaufstoss irrefuehrend, zu Recht).
@@ -2010,6 +2035,10 @@ static void main_setup_fernfeld() {
 	print_info("Randbedingungen wie im gekoppelten Fall: z- mitbewegte Fahrbahn, x- / y+- / z+ Gleichgewicht, x+ Druckauslass.");
 
 	const bool mit_fahrzeug = env_on("CFD_FERN_VEH");
+	// ★ Audit-Nacharbeit 5: die Kontaktflaechen-Uebergabe (Fz-Explosionsmechanismus, im dd-Fall
+	// gefixt) ist HIER nicht nachgezogen -- der Diagnosearm mit Fahrzeug kann sich selbst
+	// kontaminieren. Bis zum Nachzug wird das angesagt statt still gerechnet.
+	if(mit_fahrzeug) print_warning("CFD_FERN_VEH=1: Kontaktflaechen-Uebergabe ist im fernfeld-Fall NICHT implementiert (Audit-Befund 5) -- Fz-Werte dieses Diagnosearms nicht belastbar.");
 	Mesh* veh = nullptr;
 	if(mit_fahrzeug) {
 		veh = read_stl(get_exe_path()+"../scenes/vehicle.stl");
@@ -2115,6 +2144,8 @@ static void main_setup_fernfeld() {
 		}
 		if(!std::isfinite(sd) || sd>1.0) { print_error("Fernfeld allein ist auseinandergelaufen (Streuung "+to_string((float)sd,4u)+" von u_inf) bei t = "+to_string((float)t_si,4u)+" s."); }
 	}
+	// Audit-Nacharbeit 7: auch der fernfeld-Diagnosefall meldet die Dichte-Klemme.
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Fernfeld-Diagnose", h); dichteklemme_fazit(h); }
 	print_info("CSV: "+out_dir+"rauschen.csv");
 	_exit(0);
 }

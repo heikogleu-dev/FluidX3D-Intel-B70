@@ -221,7 +221,7 @@ int main(int argc, char* argv[]) {
 	// NICHTS uebrig, woran sich haette ablesen lassen, wo der Lauf steht. Bei Laeufen ueber Stunden
 	// ist das kein Komfortmangel, sondern der Unterschied zwischen Diagnose und Raten.
 	std::cout << std::unitbuf;
-	if(getenv("HEARTBEAT_DIAG")!=nullptr) heartbeat_starten();
+	if(getenv("HEARTBEAT_DIAG")!=nullptr&&atoi(getenv("HEARTBEAT_DIAG"))>0) heartbeat_starten(); // Audit-Nacharbeit 15: HEARTBEAT_DIAG=0 hiess vorher AN
 	info.allow_printing.lock();
 	main_arguments = get_main_arguments(argc, argv);
 	thread compute_thread(main_physics);
