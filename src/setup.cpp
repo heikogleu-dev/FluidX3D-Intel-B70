@@ -365,6 +365,9 @@ void main_setup_kanal() {
 	// Randbedingungen der uebrigen Faelle hier AUSDRUECKLICH inert -- sagen, nicht annehmen:
 	print_info("Kanal: kein TYPE_E, kein Druck-Auslass, keine Daempfungszone -- x/y sind PERIODISCH (Standard).");
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
+	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
+	{ const uint wf = env_u("CFD_WANDFUNKTION", 0u); LBM_Domain::s_wandfunktion = wf>0u; LBM_Domain::s_wf_tau = (wf==2u) ? 0.0f : 1.0f;
+	  if(wf>0u) print_info(string("Wandfunktion (Han et al. 2021): ")+(wf==2u?"NUR FREE-SLIP-TAUSCH (Zwischenarm)":"voll (Spalding, kappa=0,41, B=5,5)")); }
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
 	create_folder(out_dir);
 	sichere_lauf(out_dir, "kanal");
@@ -462,6 +465,13 @@ void main_setup_kanal() {
 	}
 	pcsv.close();
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h); dichteklemme_fazit(h); }
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u) { // Wirkpfad-Nachweis: Zaehler auslesen
+		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[2], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[3], sp=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[5];
+		const ulong soll=(ulong)Nx*(ulong)Ny*2ull*(ulong)((n_steps+99ull)/100ull);
+		print_info("Wandfunktion-Wirkpfad: "+to_string(wz)+" gezaehlte Wandzellen-Updates (Soll "+to_string(soll)+"), tau-Klemme/Skips "+to_string(kl)+", Ein-Zellen-Spalte "+to_string(sp));
+		if(wz==0ull) print_error("Wandfunktion war eingeschaltet, aber der Wirkpfad-Zaehler ist NULL -- lautloser No-Op.");
+	}
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
 	print_info("Referenz Lee & Moser 5186: U_b+ = 24,104, c_f = 3,4424e-3.");
 	_exit(0);
@@ -2014,6 +2024,10 @@ static void main_setup_fernfeld() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f);
+	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
+	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
+	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
+	LBM_Domain::s_wandfunktion = false;
 	// ★ Nachpruefer-Befund 2026-08-15: diese sechste Konstruktorstelle FEHLTE in der Verdrahtung von
 	// CFD_SGS_WANDFREI -- der Schalter waere im fernfeld-Fall still wirkungslos gewesen (die
 	// Commit-Behauptung "alle 5 Aufrufstellen" hatte schlicht falsch gezaehlt: es sind sechs).

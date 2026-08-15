@@ -1581,6 +1581,67 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 } // reg_fneq()
 )+"#endif"+R( // REGULARIZED_BOUNDARIES
 
+)+"#ifdef WANDFUNKTION"+R(
+float wf_spalding_uplus(const float Y) {
+	// Loese X*S(X) = Y fuer X = u+ (Spalding, kappa=0,41, B=5,5 wie Han et al. 2021, Gl. 16).
+	// Log-Log-Newton, Start sqrt(Y), FIX drei Iterationen ohne Konvergenzabfrage (Branch-Divergenz;
+	// Restfehler 1,8e-13, prueferverifiziert). X geklemmt auf <=100: kappa*X <= 41, exp davon ist
+	// FP32-sicher -- noetig, weil -cl-finite-math-only NaN/INF zu undefiniertem Verhalten macht.
+	const float kap=0.41f, emkB=0.010517092f; // exp(-kappa*B) mit B=5,5
+	float x = log(fmin(100.0f, sqrt(fmax(Y, 1e-12f))));
+	for(uint it=0u; it<3u; it++) {
+		const float X = fmin(100.0f, exp(x));
+		const float kX = kap*X, ekX = exp(kX);
+		const float S  = X + emkB*(ekX-1.0f-kX-0.5f*kX*kX-0.16666667f*kX*kX*kX);
+		const float Sp = 1.0f + emkB*kap*(ekX-1.0f-kX-0.5f*kX*kX);
+		const float g  = log(fmax(X*S, 1e-30f)) - log(fmax(Y, 1e-30f));
+		const float gp = 1.0f + X*Sp/S;
+		x -= g/gp;
+	}
+	return fmin(100.0f, exp(x));
+} // wf_spalding_uplus()
+void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, global uint* wf_hits, const ulong t, const bool zaehle) {
+	// ★★ WANDFUNKTIONS-BOUNCE-BACK nach Han/Ooka/Kikumoto 2021 (Fluid Dyn. Res. 53, 045506), fuer
+	// EBENE z-WAENDE (der Kanal; das Fahrzeug folgt mit den zellbasierten Facetten, C1b).
+	//
+	// KEIN "Bounce-Back plus Korrektur", sondern TAUSCH plus Abzug -- und das ist der ganze Punkt:
+	// an einer gitterparallelen Wand haengt der GESAMTE tangentiale BB-Widerstand an den vier
+	// Diagonallinks (der senkrechte traegt nichts, siehe audit_bewegte_waende). Die WFB ersetzt
+	// genau diese vier: erst die FREE-SLIP-Spiegelung (Tausch der beiden von der Wand einlaufenden
+	// Diagonalpartner -- entfernt den rauwandartigen BB-Widerstand), dann der Abzug von exakt
+	// (1/2)*tau_w je Link (setzt den modellierten Widerstand an dessen Stelle). Wer stattdessen auf
+	// den BB ADDIERT, doppelzaehlt -- V1s teuerste Fehlerklasse.
+	// Masse: Tausch + antisymmetrisches +- ist exakt erhaltend. Normalimpuls: unberuehrt.
+	// def_wf_tau = 0 ist der Zwischenarm "nur Tausch" (reiner Free-Slip, Schritt 4 des Plans).
+	const bool boden = (flags[j[6]]&TYPE_BO)==TYPE_S; // Solid unter der Zelle (-z)
+	const bool decke = (flags[j[5]]&TYPE_BO)==TYPE_S; // Solid ueber der Zelle (+z)
+	if(!boden&&!decke) return;
+	if(boden&&decke) { if(zaehle) atomic_inc(&wf_hits[5]); return; } // Spalt von 1 Zelle: unbehandelt, aber GEZAEHLT
+	float rhon, uxn, uyn, uzn;
+	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt, y = 0,5)
+	const float ut = sqrt(uxn*uxn+uyn*uyn);
+	float tau_x = 0.0f, tau_y = 0.0f;
+	if(ut>=1e-6f) {
+		const float Y  = ut*def_wf_Y; // = |u_t| * 0,5/nu
+		const float up = wf_spalding_uplus(Y);
+		const float utau = ut/up;
+		float tw = rhon*utau*utau;
+		const float tw_max = 0.5f*rhon*ut; // physikalische Klemme; Treffer werden gezaehlt
+		if(tw>tw_max) { tw = tw_max; if(zaehle) atomic_inc(&wf_hits[3]); }
+		tau_x = -def_wf_tau*tw*uxn/ut; // Widerstand GEGEN u_t (Han Gl. 15)
+		tau_y = -def_wf_tau*tw*uyn/ut;
+	} else if(zaehle) atomic_inc(&wf_hits[3]);
+	if(boden) { // einlaufende Diagonalen: 9=(+1,0,+1)/16=(-1,0,+1) und 11=(0,+1,+1)/18=(0,-1,+1)
+		const float a=fhn[9]; fhn[9]=fhn[16]+0.5f*tau_x; fhn[16]=a-0.5f*tau_x;
+		const float b=fhn[11]; fhn[11]=fhn[18]+0.5f*tau_y; fhn[18]=b-0.5f*tau_y;
+	} else { // Decke, einlaufend: 15=(+1,0,-1)/10=(-1,0,-1) und 17=(0,+1,-1)/12=(0,-1,-1)
+		const float a=fhn[15]; fhn[15]=fhn[10]+0.5f*tau_x; fhn[10]=a-0.5f*tau_x;
+		const float b=fhn[17]; fhn[17]=fhn[12]+0.5f*tau_y; fhn[12]=b-0.5f*tau_y;
+	}
+	if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[2]); // Wirkpfad-Zaehler, gegatet gegen uint-Ueberlauf
+} // apply_wall_function()
+)+"#endif"+R( // WANDFUNKTION
+
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
@@ -1615,6 +1676,9 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	if(flagsn_bo==TYPE_MS) apply_moving_boundaries(fhn, j, u, flags); // apply Dirichlet velocity boundaries if necessary (reads velocities of only neighboring boundary cells, which do not change during simulation)
 )+"#endif"+R( // MOVING_BOUNDARIES
 
+)+"#ifdef WANDFUNKTION"+R(
+	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E) apply_wall_function(fhn, j, flags, rho_clamp_hits, t, true);
+)+"#endif"+R( // WANDFUNKTION
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi

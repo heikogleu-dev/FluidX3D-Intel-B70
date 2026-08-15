@@ -123,6 +123,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Der Schalter ist Laufzeit, kein #error kann ihn fangen -- deshalb hart zur Laufzeit: die
 	// Wanderkennung benutzt die festen Flaechennachbarn j[1..6], die nur in D3Q19 stimmen.
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ist nur fuer D3Q19 gebaut (feste Flaechennachbarn j[1..6]).");
+	if(s_wandfunktion) print_error("CFD_WANDFUNKTION ist nur fuer D3Q19 gebaut (feste Diagonalpaare 9/16, 11/18, 15/10, 17/12).");
 #endif // D3Q19
 	// ★ Daempfungszone: Sperre und Wirksamkeitsmeldung.
 	if(s_sponge_n>0u) {
@@ -168,6 +169,8 @@ void LBM_Domain::set_force_bbox(const uint x0, const uint y0, const uint z0, con
 }
 uint LBM_Domain::s_sponge_n = 0u;
 float LBM_Domain::s_sponge_a = 3000.0f;
+float LBM_Domain::s_wf_tau = 1.0f;
+bool LBM_Domain::s_wandfunktion = false;
 bool LBM_Domain::s_sgs_wandfrei = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
@@ -192,7 +195,10 @@ void LBM_Domain::allocate(Device& device) {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
 	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
-	rho_clamp_hits = Memory<uint>(device, 2ull);
+	// 6 Slots: [0,1] RHO_CLAMP unten/oben, [2] Wandfunktion-Wirkpfad (gegatet t%100), [3] tau-Klemme/
+	// Skip, [5] Ein-Zellen-Spalt. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
+	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef WANDFUNKTION).
+	rho_clamp_hits = Memory<uint>(device, 6ull);
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
@@ -685,6 +691,12 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// ★ Test B (CFD_SGS_WANDFREI): nur emittiert wenn gesetzt -- ungesetzt ist der praeprozessierte
 	// Quelltext bit-identisch (dasselbe Muster wie SPONGE und CFD_REG_BC).
 	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
+	// ★ Wandfunktions-Bounce-Back (Han et al. 2021): nur emittiert wenn gesetzt; def_wf_Y = 0,5/nu
+	// (Abtastpunkt Wandzelle, y = 0,5 Gitter, MOLEKULARE Viskositaet); def_wf_tau schaltet den
+	// tau-Anteil (0 = nur Free-Slip-Tausch, der Zwischenarm aus Schritt 4 des Plans).
+	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
+	"\n	#define def_wf_Y "+to_string(0.5f/nu,8u)+"f"
+	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f" : (string)"")
 #endif // SUBGRID
 
 #ifdef PARTICLES

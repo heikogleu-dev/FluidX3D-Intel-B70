@@ -147,6 +147,8 @@ public:
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
+	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
+	static float s_wf_tau;      // 1 = volle WFB, 0 = nur Free-Slip-Tausch (Zwischenarm)
 	static uint s_sponge_n;  // 0 = aus; Zonenbreite in Zellen (CFD_SPONGE_N)
 	static float s_sponge_a; // Viskositaetsfaktor am Rand (CFD_SPONGE_A)
 	static float s_sponge_wmin; // untere Klemme fuer w in der Zone (CFD_SPONGE_WMIN)
