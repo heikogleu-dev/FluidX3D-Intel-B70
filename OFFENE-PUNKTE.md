@@ -11,6 +11,14 @@ dazu, Portierfehler zu finden — nie, um Physik zu bewerten.
 die **Verifikation der Codeänderung**: für jede Änderung nachweisen, dass sie im laufenden Binary
 steckt, dass ihr Pfad wirklich erreicht wird, und dass sie tut, was sie behauptet.
 
+**Iron Rule 2 (Heiko, 2026-08-15) — die Agenten-Pipeline:** Vor jeder nicht-trivialen
+Implementierung ein **Planungs-/Vorprüfagent** (ist der Befund real, ist der Ansatz richtig, was
+wird übersehen), nach der Implementierung ein **unabhängiger Prüfagent** gegen den Diff. Kein
+Messergebnis aus neuem Code gilt als Befund, bevor der Nachprüfer den Code bestätigt hat.
+Begründung aus der Erfahrung: die Vor-/Nachprüfung hat bei der Dämpfungszone, dem Wand-Audit und
+dem Wandmodell-Plan zusammen **über zwanzig eigene Fehler** gefunden, davon mehrere, die still
+falsche Ergebnisse produziert hätten.
+
 ---
 
 
