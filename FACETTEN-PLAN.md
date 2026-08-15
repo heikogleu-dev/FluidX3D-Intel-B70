@@ -167,3 +167,24 @@ Grenze im Plan und wird ggf. in Stufe 4 (Nebenachsen) adressiert.
    (gleiche BBox); dd-Bilanz vor Stufe 5-dd am realen Log nachweisen.
 8. Spalding-Iterationszahl als Define, Default je Fall (y⁺~140 → 3 Schritte reichen ~0,1 %).
 9. Stufe 5 ist eine SERIE von ≥6 B70-Läufen à ≤2,5 h — als Serie einplanen.
+
+---
+
+# Stufe-1-Messstand (2026-08-15)
+
+**Kanal-Anker (CPU, N=38): EXAKT bestanden** — 13.456 Facetten (= 2×116×58), alle Klassen 0,
+y_w Median/q10/q90 = 0,500/0,500/0,500. Die Exaktheitsvorhersage des Gegenprüfers (Punkte exakt
+auf z=−0,5, Jacobi rotiert nicht) ist bestätigt.
+
+**Fahrzeug 8 mm (iGPU, nur Diagnose):** 753.592 wandnahe Fluidzellen.
+- Klassen (VORLÄUFIGE Schwellen r21>0,1 / r10<0,02): K2 Kante 196.353 (26,1 %),
+  K4 y_w-Ausreißer 78.329 (10,4 %), Orientierungskonflikt 40.687 (5,4 %), K1/K3 = 0.
+  **Markiert gesamt 41,8 % → über der 30-%-Schwelle des Plans** ⇒ nächstes Häppchen ist
+  laut Plan Schwellenarbeit + 3³/5³/7³-Fenster-A/B aus den Histogrammen
+  (export/fac_veh8/facetten_histogramme.csv), KEIN Kernel-Eingriff vorher.
+- y_w: Median exakt 0,500, q10 0,188, q90 1,136 (Treppenstreuung wie von der Revision
+  vorhergesagt: Eckzellen ~0,35).
+- Winkel zur dominanten Achse: Median 16,7°, q90 39,4° — die Mehrheit der Karosserie ist
+  achsnah (Flächenfaktor 1/|n̂_a| bleibt dort nahe 1), die Kanten tragen die Ausreißer.
+
+0x41-Zellcensus vor/nach Facettenbau unverändert (Assertion grün) — object_force unberührt.
