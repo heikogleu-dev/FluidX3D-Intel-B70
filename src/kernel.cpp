@@ -1658,6 +1658,15 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 // daraus wird y+ gebildet -- und nur von Zellen, die wirklich >=1 Paar getauscht haben (Auflage 3).
 // Ausdrucksbaum bei n=ez wortgleich zur z-WFB -- der Kanal-Aequivalenznachweis kollabiert bitgenau
 // (2.0f*0.5f==1.0f, 1.0f*def_fac_Y==def_fac_Y, faca==1.0f => fmin(tw*1.0f,twmax)==tw).
+// Ein Tauschpaar mit linkweisem Gate (R1): nur wenn BEIDE Streaming-Urspruenge solid sind.
+// Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S schliesst TYPE_E und TYPE_MS linkweise aus.
+// Indizes sind an allen Aufrufstellen Literale -- der Uebersetzer inlinet ohne dynamische fhn-Indizierung.
+void fac_paar(float* fhn, const global uchar* flags, const uxx* j, const uint ip, const uint im,
+              const uint g1, const uint g2, const float taut, uint* getauscht) {
+	if(((flags[j[g1]]&TYPE_BO)==TYPE_S)&&((flags[j[g2]]&TYPE_BO)==TYPE_S)) {
+		const float fp_=fhn[ip]; fhn[ip]=fhn[im]+0.5f*taut; fhn[im]=fp_-0.5f*taut; (*getauscht)++;
+	}
+}
 void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
                    const global float* fac_geo, const global uint* fac_idx,
                    global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t) {
@@ -1690,34 +1699,33 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
 		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;
 		if(nz>0.0f) { // Boden (-z): einlaufend 9=(+1,0,+1)/16=(-1,0,+1), 11=(0,+1,+1)/18=(0,-1,+1)
-			FAC_PAAR(9,16,10,15,tau_x)
-			FAC_PAAR(11,18,12,17,tau_y)
+			fac_paar(fhn, flags, j, 9u, 16u, 10u, 15u, tau_x, &getauscht);
+			fac_paar(fhn, flags, j, 11u, 18u, 12u, 17u, tau_y, &getauscht);
 		} else {      // Decke (+z): 15=(+1,0,-1)/10=(-1,0,-1), 17=(0,+1,-1)/12=(0,-1,-1)
-			FAC_PAAR(15,10,16,9,tau_x)
-			FAC_PAAR(17,12,18,11,tau_y)
+			fac_paar(fhn, flags, j, 15u, 10u, 16u, 9u, tau_x, &getauscht);
+			fac_paar(fhn, flags, j, 17u, 12u, 18u, 11u, tau_y, &getauscht);
 		}
 	} else if(achse==0u) {
 		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;
 		const float tau_z = (ut>=1e-6f) ? -def_fac_tau*twe*utz/ut : 0.0f;
 		if(nx>0.0f) { // Wand bei -x: einlaufend 7=(+1,+1,0)/13=(+1,-1,0), 9=(+1,0,+1)/15=(+1,0,-1)
-			FAC_PAAR(7,13,8,14,tau_y)
-			FAC_PAAR(9,15,10,16,tau_z)
+			fac_paar(fhn, flags, j, 7u, 13u, 8u, 14u, tau_y, &getauscht);
+			fac_paar(fhn, flags, j, 9u, 15u, 10u, 16u, tau_z, &getauscht);
 		} else {      // Wand bei +x: 14=(-1,+1,0)/8=(-1,-1,0), 16=(-1,0,+1)/10=(-1,0,-1)
-			FAC_PAAR(14,8,13,7,tau_y)
-			FAC_PAAR(16,10,15,9,tau_z)
+			fac_paar(fhn, flags, j, 14u, 8u, 13u, 7u, tau_y, &getauscht);
+			fac_paar(fhn, flags, j, 16u, 10u, 15u, 9u, tau_z, &getauscht);
 		}
 	} else {
 		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
 		const float tau_z = (ut>=1e-6f) ? -def_fac_tau*twe*utz/ut : 0.0f;
 		if(ny>0.0f) { // Wand bei -y: einlaufend 7=(+1,+1,0)/14=(-1,+1,0), 11=(0,+1,+1)/17=(0,+1,-1)
-			FAC_PAAR(7,14,8,13,tau_x)
-			FAC_PAAR(11,17,12,18,tau_z)
+			fac_paar(fhn, flags, j, 7u, 14u, 8u, 13u, tau_x, &getauscht);
+			fac_paar(fhn, flags, j, 11u, 17u, 12u, 18u, tau_z, &getauscht);
 		} else {      // Wand bei +y: 13=(+1,-1,0)/8=(-1,-1,0), 18=(0,-1,+1)/12=(0,-1,-1)
-			FAC_PAAR(13,8,14,7,tau_x)
-			FAC_PAAR(18,12,17,11,tau_z)
+			fac_paar(fhn, flags, j, 13u, 8u, 14u, 7u, tau_x, &getauscht);
+			fac_paar(fhn, flags, j, 18u, 12u, 17u, 11u, tau_z, &getauscht);
 		}
 	}
-	#undef FAC_PAAR
 	if(getauscht>0u) { fac_tau_acc[fid] += tw; fac_tau_cnt[fid] += 1u; } // 1 Zelle = 1 Facette: kein Atomic noetig
 	else if(t%100ul==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
 	if(t%100ul==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)

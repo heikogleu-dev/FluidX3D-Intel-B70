@@ -2468,18 +2468,35 @@ void main_setup_facetten_test() {
 	// ---- T2: Mini-Domaene, Arm AUS vs Arm FACETTEN=2, 1 Schritt, Differenz-Lokalisierung.
 	print_info("C1b T2: 32x16x24, 45-Grad-Treppenboden, AUS vs NUR-TAUSCH nach 1 Schritt.");
 	const uint Nx=32u, Ny=16u, Nz=24u; const float nu_lat=0.01f;
-	auto treppe = [&](const uint x, const uint y, const uint z) { (void)y; return (int)z < (int)((x%8u)); }; // Periode 8 teilt Nx=32
+	auto treppe = [&](const uint x, const uint y, const uint z) { (void)y;
+		if(env_u("CFD_T2_FLACH",0u)>0u) return z==0u; // DIAGNOSE: Kanal-Geometrie im Mini-Format
+		return (int)z < (int)((x%8u)); }; // Periode 8 teilt Nx=32
 	auto init = [&](LBM& L) {
 		for(ulong n=0ull; n<L.get_N(); n++) {
 			uint x,y,z; L.coordinates(n,x,y,z);
-			if(z==Nz-1u||treppe(x,y,z)) { L.flags[n]=TYPE_S; L.u.x[n]=0.0f; }
-			else L.u.x[n]=0.05f; // tangentiale Anstroemung, damit u_t != 0
+			if(z==Nz-1u||treppe(x,y,z)) {
+				L.flags[n]=TYPE_S; L.u.x[n]=0.0f;
+				// ★ LEHRSTUECK (kostete eine Stunde Bisektion): der erste Fix gab den Wandzellen
+				// u!=0, um die Paarsymmetrie zu brechen -- initialize() machte damit ALLE
+				// Fluidnachbarn zu TYPE_MS, und genau die schliesst das Zellgate aus (MS-Guard,
+				// Audit-Befund 3). Der Facettenpfad lief keinen einzigen Schritt. Wandzellen
+				// bleiben u=0; die Sichtbarkeit des Tauschs liefert der ZWEITE Schritt (Phase 1
+				// ist bitgleich, Schritt 1 schreibt asymmetrische Kollisionswerte in die Slots).
+			} else L.u.x[n]=0.05f; // tangentiale Anstroemung, damit u_t != 0
 		}
 	};
-	std::vector<float> ua_x, ua_y, ua_z; std::vector<Facette> FF;
+	// ★ ZWEI Schritte, mit Begruendung: nach Aequilibrium-Init tragen die von Solidzellen
+	// stammenden Slots SYMMETRISCHE Werte (initialize baut Solid-Equilibrium mit u=0, beide
+	// Paarpartner sind wertgleich) -- der Tausch von Schritt 1 ist unsichtbar, die Arme sind nach
+	// Schritt 1 bitgleich (wird als Phase 1 MITGEPRUEFT). Erst Schritt 2 liest die asymmetrischen
+	// Kollisionswerte aus Schritt 1 -- der Tausch wird sichtbar und bleibt exakt zelllokal,
+	// WEIL die Felder bis dahin identisch waren.
+	std::vector<float> ua_x, ua_y, ua_z, ua1_x; std::vector<Facette> FF;
 	{ // Arm A: AUS
 		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_tau=1.0f;
-		LBM a(Nx,Ny,Nz,nu_lat); init(a); a.run(1u,1u); a.u.read_from_device();
+		LBM a(Nx,Ny,Nz,nu_lat); init(a); a.run(1u,2u); a.u.read_from_device();
+		ua1_x.resize(a.get_N()); for(ulong n=0ull; n<a.get_N(); n++) ua1_x[n]=a.u.x[n];
+		a.run(1u,2u); a.u.read_from_device();
 		ua_x.resize(a.get_N()); ua_y.resize(a.get_N()); ua_z.resize(a.get_N());
 		for(ulong n=0ull; n<a.get_N(); n++) { ua_x[n]=a.u.x[n]; ua_y[n]=a.u.y[n]; ua_z[n]=a.u.z[n]; }
 	}
@@ -2489,7 +2506,18 @@ void main_setup_facetten_test() {
 		LBM b(Nx,Ny,Nz,nu_lat); init(b);
 		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, string("./"), "T2-Treppe");
 		b.alloc_facetten(FF);
-		b.run(1u,1u); b.u.read_from_device();
+		b.run(1u,2u); b.u.read_from_device();
+		{ ulong d1=0ull; for(ulong n=0ull; n<b.get_N(); n++) if(ua1_x[n]!=b.u.x[n]) d1++;
+		  print_info("T2 Phase 1 (nach 1 Schritt): "+to_string(d1)+" u_x-Differenzen (Erwartung 0 -- Tausch wertgleich wegen Solid-Symmetrie)");
+		  if(d1>0ull) print_warning("Phase 1 nicht bitgleich -- Lokalisierung von Phase 2 gilt nur eingeschraenkt."); }
+		b.run(1u,2u); b.u.read_from_device();
+		b.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		b.lbm_domain[0]->fac_tau_n.read_from_device();
+		ulong swsum=0ull; for(ulong i=0ull;i<b.lbm_domain[0]->fac_N;i++) swsum+=(ulong)b.lbm_domain[0]->fac_tau_n[i];
+		print_info("T2-Slots: Wirkpfad[7]="+to_string((ulong)b.lbm_domain[0]->rho_clamp_hits[7])
+			+" ohnePaar[11]="+to_string((ulong)b.lbm_domain[0]->rho_clamp_hits[11])
+			+" Skips[9]="+to_string((ulong)b.lbm_domain[0]->rho_clamp_hits[9])
+			+" Tauschzellen-Beitraege="+to_string(swsum)+" (fac_N="+to_string(b.lbm_domain[0]->fac_N)+")");
 		// Host-Vorhersage: fuer jede AKTIVE Facette Gates auswerten
 		std::vector<uchar> erwartet(b.get_N(), 0u); // 1 = Differenz erlaubt (>=1 Paar offen)
 		for(const Facette& f : FF) {

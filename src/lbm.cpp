@@ -402,6 +402,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	fac_geo.write_to_device(); fac_idx.write_to_device(); fac_tau.write_to_device(); fac_tau_n.write_to_device();
 	kernel_stream_collide.set_parameters(fac_param_pos, fac_geo, fac_idx, fac_tau, fac_tau_n);
 	facetten_bound = true;
+	{ fac_idx.read_from_device(); ulong nn=0ull; for(ulong i=0ull;i<FN;i++) if(fac_idx[i]!=0xFFFFFFFFu) nn++;
+	  print_info("Facetten-Bindung: param_pos="+to_string(fac_param_pos)+", Readback non-NIL="+to_string(nn)); }
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
 }
