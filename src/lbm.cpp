@@ -141,6 +141,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif // SUBGRID
 	// R2-Nachpruefer: Ansage NACH den harten Abweisern (vorher stand "aktiv" eine Zeile vor dem exit)
 	if(s_sgs_wandfrei) print_info("SGS_WANDFREI aktiv: kein nu_t in Zellen mit solidem Flaechennachbarn (Wirkpfad-Zaehler Slot 6, Report am Laufende).");
+	if(getenv("CFD_SPALDING_IT")!=nullptr&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
 #ifndef TRT
 	// ★ Audit-Nacharbeit 4: CFD_LAMBDA liegt in der TRT-Emission -- unter SRT (aktueller Build) ist
 	// der Schalter TOT. Ein Lambda-A/B liefe bitgleich und ohne jede Meldung; deshalb die Ansage.
@@ -254,9 +255,11 @@ void LBM_Domain::allocate(Device& device) {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
 	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
-	// 8 Slots (Legende R2 nachgezogen): [0,1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (gegatet t%100),
-	// [3] NUR tau-Klemme, [4] NUR u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad
-	// (gegatet t%100), [7] frei. Achtung uint: nur 2 und 6 sind gegatet; 3/4/5 zaehlen jeden Schritt
+	// 12 Slots (Legende R3 nachgezogen, massgeblich ist lbm.hpp): [0,1] RHO_CLAMP, [2] WFB-Wirkpfad
+	// (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS-Wirkpfad (t%100),
+	// [7] Facetten-Wirkpfad (t%100), [8] Facetten-Klemmen (BEIDE, gegatet t%100 seit R3),
+	// [9] Facetten-Skips (gegatet t%100 seit R3), [10] reserviert, [11] ohne offenes Paar (t%100).
+	// Achtung uint: 3/4/5 zaehlen jeden Schritt
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
@@ -376,6 +379,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	ulong aktiv=0ull, ausgeschlossen=0ull;
 	for(const Facette& f : F) { if(f.klasse==0u) aktiv++; else ausgeschlossen++; }
 	if(aktiv==0ull) { print_error("alloc_facetten_domain: keine aktive Facette (alle markiert?)."); return; }
+	if(aktiv>=0xFFFFFFFFull) { print_error("alloc_facetten_domain: Facettenzahl kollidiert mit dem NIL-Sentinel."); return; }
 	fac_geo   = Memory<float>(device, 8ull*aktiv);
 	fac_idx   = Memory<uint>(device, FN);
 	fac_tau   = Memory<float>(device, 4ull*aktiv); // Layout: [4k]=tw, [4k+1..3]=Wandkraft x/y/z (Cd-Pfad E5)

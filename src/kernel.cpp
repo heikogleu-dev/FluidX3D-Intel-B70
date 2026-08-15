@@ -1689,11 +1689,11 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 		const float utau = ut/up;
 		tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut;
-		if(tw>tw_max) { tw = tw_max; atomic_inc(&hits[8]); } // Slot 8: Facetten-tau-Klemme
+		if(tw>tw_max) { tw = tw_max; if(t%100ul==0ul) atomic_inc(&hits[8]); } // Slot 8: Facetten-tau-Klemme (gegatet t%100 -- Audit R3: Fahrzeugmassstab wickelte ungegatet ueber)
 		const float twf = tw*faca; // R2-Flaechenfaktor
-		if(twf>tw_max) atomic_inc(&hits[8]); // Nachpruefer-Befund 2: auch die ZWEITklemme zaehlen (Slot 8 = beide) -- ab Stufe 3 (faca bis sqrt(3)) klemmt sie sonst lautlos
+		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // Zweitklemme, Slot 8 = beide (gegatet t%100 seit R3)
 		twe = fmin(twf, tw_max); // am Kanal faca==1: twf==tw, nach Erstklemme nie >tw_max -> bitgleich und zaehlerneutral
-	} else atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip (Tausch passiert trotzdem, wie z-WFB)
+	} else if(t%100ul==0ul) atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip, gegatet t%100 (Tausch passiert trotzdem, wie z-WFB)
 	uint getauscht = 0u; float fk_x=0.0f, fk_y=0.0f, fk_z=0.0f; // angewandte Wandkraft je Komponente (Cd-Pfad)
 	// Paartabelle FACETTEN-STUFE2.md Abschnitt B; Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S
 	// schliesst TYPE_E und TYPE_MS (0x03) linkweise aus. Paarreihenfolge: tangentiale Achsen aufsteigend.
@@ -1729,7 +1729,7 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 		}
 	}
 	if(getauscht>0u) { // 1 Zelle = 1 Facette: kein Atomic noetig; Layout 4 float: [0] tw physisch (y+), [1..3] angewandte Wandkraft (Cd-Reibung)
-		fac_tau_acc[4u*(uxx)fid] += tw; fac_tau_acc[4u*(uxx)fid+1u] += fk_x; fac_tau_acc[4u*(uxx)fid+2u] += fk_y; fac_tau_acc[4u*(uxx)fid+3u] += fk_z;
+		fac_tau_acc[4ul*(uxx)fid] += tw; fac_tau_acc[4ul*(uxx)fid+1ul] += fk_x; fac_tau_acc[4ul*(uxx)fid+2ul] += fk_y; fac_tau_acc[4ul*(uxx)fid+3ul] += fk_z;
 		fac_tau_cnt[fid] += 1u; }
 	else if(t%100ul==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
 	if(t%100ul==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)
@@ -2233,6 +2233,7 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 // ★ Audit-Befund 21 (latent, Kernel hat derzeit keine Aufrufer im Fork -- UPDATE_FIELDS liefert die
 // Felder im stream_collide): dieser Kernel kennt die WANDFUNKTION NICHT. Wer ihn wiederbelebt,
 // bekommt an WFB-Wandzellen rho/u aus den getauschten fi ohne die Spiegel-Logik -- erst nachziehen.
+// Dasselbe gilt seit Stufe 2 fuer FACETTEN-Zellen (Audit R3): auch deren Tausch+tau fehlt hier.
 )+R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important

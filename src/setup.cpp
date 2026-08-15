@@ -372,6 +372,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// 0,21/0,27/0,42 und Orientierungskonflikte 2,7/5,4/9,0 % fuer 3/5/7; 7^3 driftet y_w auf 0,617.
 	// Groessere Fenster sehen Kruemmung und Zweitflaechen, keine bessere Wand.
 	const int R = (int)min(3u, max(1u, env_u("CFD_FACETTEN_FENSTER", 1u))); // Radius: 1=3^3 (Default, geeicht), 2=5^3, 3=7^3
+	if(env_u("CFD_FACETTEN_FENSTER", 1u)>3u) print_warning("CFD_FACETTEN_FENSTER > 3 wird auf 3 geklemmt (Audit R3: vorher stille Klemme).");
 	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
 	std::vector<double> px(np_max), py(np_max), pz(np_max);
 	print_info(string("Facetten (")+wo+"): Fenster "+to_string(2*R+1)+"^3 (CFD_FACETTEN_FENSTER="+to_string((uint)R)+")");
@@ -481,6 +482,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				G[i].achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u);
 				// ★ Nachpruefer B3: y_w gegen die GEGLAETTETE Ebene neu (Plan A6) -- Schwerpunkt liegt in der Facette.
 				double ywn = (sx/l)*((double)x-(double)F[i].cx_)+(sy/l)*((double)y-(double)F[i].cy_)+(sz/l)*((double)z-(double)F[i].cz_);
+				if(ywn<0.0) G[i].klasse|=16u; // Audit R3: Orientierungskipp durch die Glaettung -- markieren, fabs darf ihn nicht verdecken
 				G[i].yw = (float)fabs(ywn);
 				G[i].klasse &= (uchar)~8u; if(G[i].yw<0.2f||G[i].yw>2.0f) G[i].klasse|=8u; // K4 neu bewerten
 			}
@@ -556,6 +558,8 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		const double Fx=(double)D->F[fbi], Fy=(double)D->F[fbi+FN], Fz=(double)D->F[fbi+2ull*FN];
 		double nxm=0.0, nym=0.0, nzm=0.0; bool kontaminiert=false;
 		if(fac) for(uint i=1u; i<19u; i++) {
+			// z hart geklemmt statt periodisch: beweisbar folgenlos, solange baue_facetten nur z in [1,Nz-2]
+			// belegt (Audit-R3-Notiz) -- ein kuenftiger z-periodischer Fall muss hier wickeln wie der Kernel.
 			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
 			const uint xn=wxp((int)x+FZ_C[i][0]), yn=wyp((int)y+FZ_C[i][1]);
 			if(xn<D->fbx0||yn<D->fby0||(uint)zn<D->fbz0||xn>=D->fbx0+D->fbnx||yn>=D->fby0+D->fbny||(uint)zn>=D->fbz0+D->fbnz) continue;
@@ -708,11 +712,14 @@ void main_setup_kanal() {
 		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];suz[z]+=pz_[z];} n_stat+=(ulong)Nx*Ny; }
 		// ★ Cd-Pfad: Akkumulator-Snapshot am Warmup-Ende, f_wirk-Mittel ab dort (K2-Referenz)
 		if(env_u("CFD_FACETTEN",0u)>0u&&step>=n_warm) {
-			if(fac_snap.empty()) { fac_snap_step=step;
+			// ★ Audit R3 (MITTEL): der Snapshot steht NACH lbm.run(chunk) bei step+chunk Schritten --
+			// vorher etikettierte fac_snap_step=step das Fenster einen Chunk zu frueh, und f_wirk des
+			// Snapshot-Chunks ging in die K2-Referenz ein, obwohl sein Delta nicht im Akkumulator liegt.
+			if(fac_snap.empty()) { fac_snap_step=step+chunk;
 				lbm.lbm_domain[0]->fac_tau.read_from_device();
 				fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
 				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+3ull]; } }
-			fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk;
+			else { fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk; }
 		}
 	}
 	// ---- Profil + Spannungsbilanz
@@ -769,8 +776,8 @@ void main_setup_kanal() {
 				+", Verhaeltnis "+to_string((float)(soll_rx!=0.0?FK.rx/soll_rx:0.0),4u)+"), Reibung y = "+to_string((float)FK.ry,9u));
 			print_info("Cd-Pfad Kanal: Druck x = "+to_string((float)FK.px,9u)+" (K3-Soll exakt 0), n_voll "+to_string(FK.n_voll)
 				+", projiziert "+to_string(FK.n_proj)+", unklar "+to_string(FK.n_unklar));
-			if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_warning("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab.");
-			if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_warning("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
+			if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert (Plan verlangt harten Fehler).");
+			if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
 		}
 	}
 	// Feld-Hash (FNV-1a ueber die u-Bitmuster) fuer den Bitvergleich der Aequivalenzarme
@@ -1440,7 +1447,7 @@ static void main_setup_fahrzeug() {
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
 	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
-	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (Stufe 2: kanal+facetten_test; kugel folgt).");
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
@@ -1829,7 +1836,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
 	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
-	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (Stufe 2: kanal+facetten_test; kugel folgt).");
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
 
 	// ---------------------------------------------------------------- Grobes Gitter bauen
@@ -2440,6 +2447,8 @@ static void main_setup_fernfeld() {
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // Re-Audit R2: s_wf_tau fehlte nur hier (6. Stelle)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
+	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) print_warning("CFD_FACETTEN_DIAG wird im fernfeld-Fall NICHT angewandt.");
 	// ★ Nachpruefer-Befund 2026-08-15: diese sechste Konstruktorstelle FEHLTE in der Verdrahtung von
 	// CFD_SGS_WANDFREI -- der Schalter waere im fernfeld-Fall still wirkungslos gewesen (die
 	// Commit-Behauptung "alle 5 Aufrufstellen" hatte schlicht falsch gezaehlt: es sind sechs).
@@ -2630,7 +2639,8 @@ void main_setup_facetten_test() {
 	{ // Arm B: FACETTEN=2 (reiner Tausch)
 		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_tau=0.0f;
 		LBM b(Nx,Ny,Nz,nu_lat); init(b);
-		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, string("./"), "T2-Treppe");
+		const string t2_dir = get_exe_path()+"../export/facetten_test/"; create_folder(t2_dir);
+		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, t2_dir, "T2-Treppe");
 		b.alloc_facetten(FF);
 		b.run(1u,2u); b.u.read_from_device();
 		{ ulong d1=0ull; for(ulong n=0ull; n<b.get_N(); n++) if(ua1_x[n]!=b.u.x[n]||ua1_x[n+b.get_N()]!=b.u.y[n]||ua1_x[n+2ull*b.get_N()]!=b.u.z[n]) d1++;
