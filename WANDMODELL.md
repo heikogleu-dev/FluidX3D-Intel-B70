@@ -277,3 +277,33 @@ Bounce-Back** repariert.
 konvergiert); das transitionale Regime ist ungetestet (läuft als Test A); und der
 Mechanismus-Entscheider ist **Test B: ν_t = 0 in der ersten Fluidlage** — fällt c_f deutlich, ist
 die „Rauheit" das SGS-Modell, nicht der Bounce-Back. Das bestimmt die Stellschraube des Wandmodells.
+
+## Nachtrag 2026-08-15 abends — WFB gebaut, Rauwand beseitigt, nächste Schicht frei
+
+**Umsetzung nach Plan** (Free-Slip-Tausch + ½τ_w-Abzug auf den vier Diagonalen, Spalding Log-Log-
+Newton, Schalter `CFD_WANDFUNKTION` 1=voll/2=nur Tausch, nur im Kanal verdrahtet). Alle Nachweise
+grün: Kontrollarm reproduziert Basislinie, Nur-Tausch-Arm liefert c_f = 0 (Free-Slip wie
+konstruiert), Wirkpfad-Zähler exakt, Klemmen 0.
+
+**Ergebnis der Leiter:**
+
+| N | c_f mit WFB | vorher (Rauwand) |
+|---|---:|---:|
+| 38 | 0,00107 | 0,01062 |
+| 54 | 0,00110 | 0,01121 |
+| 76 | 0,00109 | 0,00772 |
+| 108 | 0,00114 | 0,00761 |
+
+**Flach auf ±4 % — die Gitterunabhängigkeit ist erreicht, die Rauwand beseitigt.** Aber flach bei
+−68 % (Referenz 0,00344), und die Vorhersage „c_f steigt mit N" ist **widerlegt** (auch kein
+Mischweg-1/N²). Deutung: selbstkonsistenter turbulenzfreier Zustand — ohne aufgelöste Turbulenz
+transportiert nichts Impuls zur Wand, die Wandfunktion sieht zu langsames u_t und liefert die dazu
+passende, zu kleine Spannung. **Das Restproblem liegt im Inneren** (Turbulenz-Selbsterhaltung bei
+y⁺₁ = 137–500; Han et al. liefen bei 16–50, wo das Gitter Wirbel trägt).
+
+**Nächste Schritte:** (1) WFB um **Relativgeschwindigkeit** erweitern — die mitbewegte Fahrbahn ist
+ein gitterparalleler z-Wand-Fall, der tote Bodenstreifen damit der erste Fahrzeug-Einsatzort;
+(2) C1b zellbasierte Facetten für die Karosserie; (3) Abnahme am Fahrzeug: y⁺-Median 1122 → ~140,
+Verteilung schmal, Bodenstreifen-Zeitreihe flach; (4) Kanal-Turbulenzerhaltung als eigene Frage.
+Am Fahrzeug erzeugt die Geometrie die Turbulenz selbst — der glatte Kanal ist der Härtefall, nicht
+der Normalfall.
