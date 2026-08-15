@@ -316,6 +316,144 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 		+(schmutz=="(leer)" ? ", Baum sauber)" : ", Baum SCHMUTZIG -> aenderungen.diff)"));
 }
 
+// ---------------------------------------------------------------------------- Turbulenter Kanal
+// ★★ A1 der Arbeitsliste, 2026-08-15: die ERSTE EXTERNE REFERENZ des Projekts. Referenz ist
+// Lee & Moser 2015 (JFM 774, 395; turbulence.oden.utexas.edu/channel2015): bei Re_tau = 5186 ist
+// U_b+ = 24,104 und c_f = 3,4424e-3 (aus deren Profildatei selbst integriert, 2026-08-09).
+//
+// AUFBAU: Wandnormale z (wie die Fahrbahn), x und y periodisch (FluidX3D ist von Haus aus in allen
+// Achsen periodisch -- es wird schlicht KEIN Rand gesetzt), zwei ruhende Waende z=0 und z=Nz-1.
+// Antrieb ueber die Volumenkraft fx -- der erste Fall, der VOLUME_FORCE wirklich benutzt.
+//
+// ★ FESTE DURCHFLUSSRATE (CFR), nicht feste Kraft: der Arm ohne Wandmodell hat U_b+ = 1,154*N
+// (hergeleitet und gegengeprueft), bei fester Kraft laeuft er auf feinen Gittern in die
+// Kompressibilitaet (Ma_Mitte = 1 schon ab N ~ 107). Bei CFR ist U_b beschraenkt und die
+// BENOETIGTE Kraft ist die Messung: tau_w = f*delta exakt, c_f = 2*tau_w/U_b^2.
+// Regler (Benocci/Pinelli): f += K*[(U_ziel-U_b) + (U_b_alt-U_b)], alle 100 Schritte.
+//
+// ★ MESSVORRICHTUNG VOR MESSUNG (A2): zwei unabhaengige tau_w -- Kraftbilanz f*delta gegen
+// Impulsaustausch object_force/(2*Nx*Ny) -- muessen uebereinstimmen, und die Gesamtspannungsbilanz
+// muss 1 - z/delta ergeben. Beides braucht KEINE DNS-Datei und disqualifiziert einen kaputten
+// Aufbau, bevor irgendein Literaturvergleich Sinn ergibt.
+//
+// ★ RELAMINARISIERUNGS-WAECHTER: bei y+_1 = 137 ist der wandnahe Zyklus unaufgeloest; kippt die
+// LES ins Laminare, geht U_b+ gegen Re_tau/3 (~1700) und man misst das statt des Modells.
+// U_b+ > 200 => Abbruch mit Ansage (Gegenpruefer-Befund).
+void main_setup_kanal() {
+	// ---- Parameter. u_tau_lat = 0,003 fest (U_b ~ 0,072 nahe am Fahrzeug-u_lat 0,075).
+	const uint  N        = env_u("CFD_KANAL_N", 38u);        // Zellen ueber die VOLLE Kanalhoehe
+	const float Re_tau   = env_f("CFD_KANAL_RETAU", 5186.0f);
+	const float utau_lat = env_f("CFD_KANAL_UTAU", 0.003f);
+	const float Ub_plus_ziel = env_f("CFD_KANAL_UBPLUS", 24.104f); // Lee & Moser bei Re_tau 5186
+	const float ett      = env_f("CFD_KANAL_ETT", 80.0f);    // Wirbelumschlagzeiten gesamt
+	const float ett_warm = env_f("CFD_KANAL_WARM", 20.0f);   // davon verworfen
+	const float delta_lat = 0.5f*(float)N;
+	const float dxp      = 2.0f*Re_tau/(float)N;             // dx+ = Gitterweite in Wandeinheiten
+	const float nu_lat   = utau_lat/dxp;                     // aus dx+ = u_tau/nu (dx = 1)
+	const float Ub_ziel  = Ub_plus_ziel*utau_lat;            // Zielgeschwindigkeit (Gitter)
+	const float f0       = utau_lat*utau_lat/delta_lat;      // Startkraft: tau_w = f*delta exakt
+	const uint  Nx = ((uint)round(2.0f*3.14159265f*delta_lat)/2u)*2u; // 2*pi*delta, gerade
+	const uint  Ny = ((uint)round(3.14159265f*delta_lat)/2u)*2u;      // pi*delta
+	const uint  Nz = N+2u;                                   // + 2 Wandlagen
+	const float T_ett    = delta_lat/utau_lat;               // 1 Wirbelumschlag in Schritten
+	const ulong n_steps  = (ulong)(ett*T_ett);
+	const ulong n_warm   = (ulong)(ett_warm*T_ett);
+	print_info("Kanal: "+to_string(Nx)+" x "+to_string(Ny)+" x "+to_string(Nz)+" = "+to_string((ulong)Nx*Ny*Nz)
+		+" Zellen, Re_tau(Ziel) = "+to_string(Re_tau,0u)+", dx+ = "+to_string(dxp,1u)+", y+_1 = "+to_string(0.5f*dxp,1u));
+	print_info("Kanal: tau = "+to_string(0.5f+3.0f*nu_lat,7u)+", U_b(Ziel) = "+to_string(Ub_ziel,4u)
+		+", "+to_string(n_steps)+" Schritte ("+to_string(ett,0u)+" ETT, davon "+to_string(ett_warm,0u)+" Warmlauf)");
+	// Randbedingungen der uebrigen Faelle hier AUSDRUECKLICH inert -- sagen, nicht annehmen:
+	print_info("Kanal: kein TYPE_E, kein Druck-Auslass, keine Daempfungszone -- x/y sind PERIODISCH (Standard).");
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f;
+	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
+	create_folder(out_dir);
+	sichere_lauf(out_dir, "kanal");
+
+	LBM lbm(Nx, Ny, Nz, nu_lat, f0, 0.0f, 0.0f);
+	// ---- Waende + Anfangsfeld: Reichardt-Profil + divergenzfreie Stoerung (kein weisses Rauschen --
+	// bei tau nahe 0,5 sind akustische Moden praktisch ungedaempft, eine nicht divergenzfreie
+	// Stoerung klingelt sehr lange; die Lehre aus dem Fernfeld).
+	const float kappa=0.41f;
+	auto reichardt = [&](const float yp) {
+		return log(1.0f+kappa*yp)/kappa + 7.8f*(1.0f-exp(-yp/11.0f)-(yp/11.0f)*exp(-0.33f*yp));
+	};
+	for(ulong n=0ull; n<lbm.get_N(); n++) {
+		uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		if(z==0u || z==Nz-1u) { lbm.flags[n] = TYPE_S; continue; } // ruhende Waende, u bleibt 0
+		const float zw   = fmin((float)z-0.5f, (float)(Nz-1u)-0.5f-(float)z); // Wandabstand (Halfway)
+		const float up   = reichardt(zw*dxp);
+		const float zh   = ((float)z-0.5f)/delta_lat; // 0..2 ueber die Kanalhoehe
+		// Stromfunktions-Stoerung: u' = d(psi)/dz, w' = -d(psi)/dx -> exakt divergenzfrei in (x,z)
+		const float A = 0.10f*Ub_ziel, kx = 2.0f*3.14159265f/(float)Nx, ky2 = 2.0f*3.14159265f*2.0f/(float)Ny;
+		const float sz = sin(0.5f*3.14159265f*fmin(zh, 2.0f-zh));
+		lbm.u.x[n] = up*utau_lat + A*sz*sz*cos(kx*(float)x)*cos(ky2*(float)y);
+		lbm.u.z[n] = -A*kx/(0.5f*3.14159265f/delta_lat+1e-9f)*0.5f*sin(kx*(float)x)*sz*cos(ky2*(float)y);
+		lbm.u.y[n] = 0.0f;
+	}
+	{	// Ma-Kontrolle des Anfangsfelds -- eine ueberschnelle Zelle im Startfeld waere ein stiller
+		// Parameterfehler, der erst nach Minuten als Divergenz auffiele.
+		float umax=0.0f; for(ulong n=0ull;n<lbm.get_N();n++) umax=fmax(umax,fabs(lbm.u.x[n])+fabs(lbm.u.y[n])+fabs(lbm.u.z[n]));
+		print_info("Kanal: max|u| im Anfangsfeld = "+to_string(umax,4u)+" (Grenze c_s = 0,577)");
+		if(umax>0.4f) print_error("Anfangsfeld zu schnell (max|u| = "+to_string(umax,4u)+") -- CFD_KANAL_UTAU oder CFD_KANAL_UBPLUS pruefen.");
+	}
+	lbm.run(0u, n_steps); // initialisieren
+
+	// ---- Zeitschleife mit CFR-Regler und Ebenenstatistik
+	std::ofstream zcsv(out_dir+"kanal_zeit.csv"); zcsv.precision(8);
+	zcsv << "schritt,ett,Ub_lat,Ub_plus,f_lat,cf_kraftbilanz,cf_impulsaustausch\n" << std::flush;
+	const uint regel_alle = 100u;
+	float f_akt = f0, Ub_alt = Ub_ziel;
+	// Statistik-Akkumulatoren je z-Ebene (double, Host)
+	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0); ulong n_stat=0ull;
+	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
+	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) {
+		lbm.run((ulong)regel_alle, n_steps);
+		// U_b und Ebenensummen aus u (Vollread -- bei diesen Groessen billig: N=38 -> 3,4 MB)
+		lbm.u.read_from_device();
+		double Ub=0.0; ulong nf=0ull;
+		std::vector<double> pu(Nz,0.0), puu(Nz,0.0), pww(Nz,0.0), puw(Nz,0.0);
+		for(ulong n=0ull; n<lbm.get_N(); n++) {
+			uint x=0u,y=0u,z=0u; lbm.coordinates(n,x,y,z);
+			if(z==0u||z==Nz-1u) continue;
+			const double ux=(double)lbm.u.x[n], uz=(double)lbm.u.z[n];
+			Ub+=ux; nf++; pu[z]+=ux; puu[z]+=ux*ux; pww[z]+=uz*uz; puw[z]+=ux*uz;
+		}
+		Ub/=(double)nf;
+		const double Ub_plus = Ub/(double)utau_lat;
+		// ★ Relaminarisierungs-/Entgleisungswaechter
+		if(Ub_plus>200.0) { print_error("Kanal relaminarisiert oder entgleist: U_b+ = "+to_string((float)Ub_plus,1u)+" (ueber 200). Lauf wertlos."); }
+		// CFR-Regler
+		const float f_neu = f_akt + K*(float)((Ub_ziel-(float)Ub) + (Ub_alt-(float)Ub))*utau_lat*utau_lat/delta_lat/fmax(1e-12f,utau_lat);
+		Ub_alt=(float)Ub; f_akt=fmax(0.0f, f_neu); lbm.set_fx(f_akt);
+		// zwei unabhaengige tau_w
+		const double tau_kraft = (double)f_akt*(double)delta_lat;               // exakt: f*delta
+		lbm.update_force_field();
+		const float3 Fw = lbm.object_force(TYPE_S);                             // beide Waende
+		const double tau_mem = fabs((double)Fw.x)/(2.0*(double)Nx*(double)Ny);  // je Flaeche
+		const double cf_k = 2.0*tau_kraft/fmax(1e-30,Ub*Ub), cf_m = 2.0*tau_mem/fmax(1e-30,Ub*Ub);
+		zcsv << (step+regel_alle) << "," << (double)(step+regel_alle)/(double)T_ett << "," << Ub << ","
+		     << Ub_plus << "," << f_akt << "," << cf_k << "," << cf_m << "\n" << std::flush;
+		// Statistik erst nach dem Warmlauf akkumulieren
+		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];} n_stat+=(ulong)Nx*Ny; }
+	}
+	// ---- Profil + Spannungsbilanz
+	std::ofstream pcsv(out_dir+"kanal_profil.csv"); pcsv.precision(8);
+	pcsv << "z,yplus,Uplus,uu_plus,ww_plus,uw_plus,tau_gesamt_soll\n";
+	const double ut2=(double)utau_lat*(double)utau_lat;
+	for(uint z=1u; z<Nz-1u; z++) {
+		const double m=su[z]/(double)n_stat;
+		const double zw=fmin((double)z-0.5,(double)(Nz-1u)-0.5-(double)z);
+		pcsv << z << "," << zw*(double)dxp << "," << m/(double)utau_lat << ","
+		     << (suu[z]/(double)n_stat-m*m)/ut2 << "," << (sww[z]/(double)n_stat)/ut2 << ","
+		     << (suw[z]/(double)n_stat-m*0.0)/ut2 << "," << 1.0-zw/(double)delta_lat << "\n";
+	}
+	pcsv.close();
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h); dichteklemme_fazit(h); }
+	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
+	print_info("Referenz Lee & Moser 5186: U_b+ = 24,104, c_f = 3,4424e-3.");
+	_exit(0);
+}
+
 // ---------------------------------------------------------------------------- y+ messen statt korrelieren
 // ★★ 0A der Arbeitsliste, 2026-08-15. Die Zahl "y+ = 137" war eine PLATTENKORRELATION bei x = L --
 // nie gemessen. Auf ihr stand die ganze Wandmodell- und Kanalplanung. Diese Funktion misst sie.
@@ -1950,7 +2088,8 @@ void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug, fahrzeug
 	const char* c = getenv("CFD_CASE");
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
 	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).
-	if(c!=nullptr && string(c)=="fernfeld") main_setup_fernfeld();
+	if(c!=nullptr && string(c)=="kanal") main_setup_kanal();
+	else if(c!=nullptr && string(c)=="fernfeld") main_setup_fernfeld();
 	else if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
 	else if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
 	else main_setup_kugel();
