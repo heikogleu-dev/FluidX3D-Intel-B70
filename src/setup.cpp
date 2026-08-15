@@ -1223,6 +1223,7 @@ void main_setup_kugel() {
 
 	// ---------------------------------------------------------------- Zeitschleife
 	std::vector<double> ts, fx, fy, fz;
+	std::vector<double> fac_snap; ulong fac_snap_step=0ull; // Cd-Pfad
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
@@ -1254,6 +1255,11 @@ void main_setup_kugel() {
 		lbm.update_force_field();
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
 		ts.push_back((double)((float)(step+chunk)*dt));
+		// ★ Cd-Pfad: Akkumulator-Snapshot beim ersten Sample im Mittelungsfenster
+		if(env_u("CFD_FACETTEN",0u)>0u&&ts.back()>=(double)t_warmup&&fac_snap.empty()) { fac_snap_step=step+chunk;
+			lbm.lbm_domain[0]->fac_tau.read_from_device();
+			fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
+			for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+3ull]; } }
 		fx.push_back((double)units.si_F(F_lat.x));
 		fy.push_back((double)units.si_F(F_lat.y));
 		fz.push_back((double)units.si_F(F_lat.z));
@@ -1306,6 +1312,13 @@ void main_setup_kugel() {
 		if(se>=0.0) print_info("      "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)+"   (2 sigma = "+to_string((float)(200.0*se/mcd),3u)+" % von Cd)");
 	}
 	print_info("  Populations-Sigma des Momentansignals: +- "+to_string((float)sd,5u)+"  -- KEIN Fehlerbalken, nur zum Vergleich");
+	if(env_u("CFD_FACETTEN", 0u)==0u&&env_u("CFD_FAC_K4", 0u)>0u) { // K4: Neutralitaet des neuen Pfads im AUS-Arm
+		const std::vector<double> leer;
+		const FacKraft FK0 = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
+		const float3 Fo = lbm.object_force(TYPE_S|TYPE_X);
+		print_info("K4 (AUS-Arm): kraft_facetten Fx = "+to_string((float)FK0.px,6u)+" vs object_force Fx = "+to_string(Fo.x,6u)
+			+" (rel. Abw. "+to_string((float)(Fo.x!=0.0f?fabs(FK0.px/(double)Fo.x-1.0):0.0),8u)+", Soll < 1e-5)");
+	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe-2-Commit 3: Wirkpfad Ist=Soll + tau-Akkumulator an der Kugel
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
@@ -1318,6 +1331,17 @@ void main_setup_kugel() {
 		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[4ull*i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
 		if(ntau>0ull) print_info("Facetten-tau Kugel: "+to_string(ntau)+" Tauschzellen, mittleres tau_w = "+to_string((float)(stau/(double)ntau),9u));
 		print_info("ACHTUNG: Cd oben enthaelt den Impulsaustausch-Reibungsanteil -- an getauschten Links ist er ein PHANTOM (AUDIT-Befund 1 verallgemeinert). Fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
+		// ★ NEUER Cd-Pfad (K4/K5): Druck projiziert + Reibung exakt aus dem Fenster-Delta
+		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
+			const FacKraft FKu = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), n_steps-fac_snap_step, fac_snap);
+			// Cd-Normierung: dieselbe Kette wie die Zeitreihe (units.si_F, q_inf*A_nom)
+			const double cd_druck = (double)units.si_F((float)FKu.px)/((double)q_inf*(double)A_nom);
+			const double cd_reib  = (double)units.si_F((float)FKu.rx)/((double)q_inf*(double)A_nom);
+			print_info("Cd-Pfad Kugel: Cd_druck = "+to_string((float)cd_druck,4u)+", Cd_reibung = "+to_string((float)cd_reib,4u)
+				+", Summe = "+to_string((float)(cd_druck+cd_reib),4u)+" (nominale Flaeche)");
+			print_info("Cd-Pfad Kugel (LATTICE-Einheiten, Verschiebung zaehlt): Druck x = "+to_string((float)FKu.px,6u)
+				+", Reibung x = "+to_string((float)FKu.rx,6u)+" | n_voll "+to_string(FKu.n_voll)+", projiziert "+to_string(FKu.n_proj)+", unklar "+to_string(FKu.n_unklar));
+		}
 	}
 	print_info("---------------------------------------------------------------");
 
