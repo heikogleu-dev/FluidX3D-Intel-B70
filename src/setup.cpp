@@ -995,7 +995,11 @@ void main_setup_kugel() {
 static void main_setup_fahrzeug() {
 	const float si_u      = 30.0f;
 	const float si_rho    = 1.225f;
-	const float si_nu     = env_f("CFD_NU", 1.48e-5f);
+	// ★ Hygiene E4, 2026-08-15: hier stand 1,48e-5, waehrend fahrzeug_dd und fernfeld 1,51e-5
+	// benutzen -- ein A/B fahrzeug gegen fahrzeug_dd ohne gesetztes CFD_NU verglich damit STILL
+	// zwei Viskositaeten (Pruefer-Befund, zweifach bestaetigt). Jetzt ueberall die
+	// OpenFOAM-Referenzviskositaet. Der alte Wert ist per CFD_NU=1.48e-5 jederzeit zurueckholbar.
+	const float si_nu     = env_f("CFD_NU", 1.51e-5f);
 	const float si_length = 4.4364f;   // Fahrzeuglaenge laut STL-Konvention des Projekts
 	const float A_ref     = 1.85f;     // Projekt-Konvention; die STL misst 1.8597 (0.5 % groesser)
 	const float dx        = 0.001f*env_f("CFD_DX", 4.0f);
