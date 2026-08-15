@@ -390,6 +390,35 @@ void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const floa
 	print_info("  Histogramm: "+out_dir+"yplus_histogramm.csv");
 }
 
+// ---------------------------------------------------------------------------- Wandprofil ueber die ZEIT
+// ★★ B2 der Arbeitsliste, 2026-08-15. Der Wandwirksamkeits-Nachweis lief nur bei t = 0 und meldete
+// dort brav 1,001 -- der tote Bodenstreifen waechst aber erst ueber ~180 ms heran (Schnitt-Befund
+// von Heiko). Ein Nachweis, der nur den Anfangszustand prueft, ist fuer diese Fehlerklasse BLIND.
+// Deshalb: je Sample das u_x-Profil ueber der Fahrbahn an einer festen freien Saeule in die CSV.
+// Kosten: gelesen wird NUR die x-Komponente der untersten acht z-Ebenen -- die liegen im
+// SoA-Layout kontiguierlich am Pufferanfang (33 MB je Sample im Nahfeld statt 6 GB Vollread).
+bool finde_messsaeule(LBM& L, const uint Nx, const uint Ny, const uint Nz, uint& xs, uint& ys) {
+	(void)Nz; L.flags.read_from_device(); ys = Ny/2u;
+	for(uint k=1u; k<=8u; k++) {
+		const uint xt = max(4u, (Nx*k)/40u); bool ok=true;
+		for(uint z=1u; z<8u && ok; z++) {
+			const ulong n = (ulong)xt + ((ulong)ys + (ulong)z*(ulong)Ny)*(ulong)Nx;
+			if((L.flags[n]&(TYPE_S|TYPE_E))==TYPE_S) ok=false; // Maske, nicht Bit -- TYPE_MS traegt das S-Bit
+		}
+		if(ok) { xs=xt; return true; }
+	}
+	return false;
+}
+void schreibe_wandprofil(LBM& L, const uint Nx, const uint Ny, const uint xs, const uint ys, const float u_lat, const double t_si, std::ofstream& f) {
+	L.lbm_domain[0]->u.read_from_device_1d(0ull, (ulong)Nx*(ulong)Ny*8ull, 0); // nur u_x, z = 0..7
+	f << t_si;
+	for(uint z=1u; z<8u; z++) {
+		const ulong n = (ulong)xs + ((ulong)ys + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		f << "," << L.lbm_domain[0]->u.x[n]/u_lat;
+	}
+	f << "\n" << std::flush; // waehrend des Laufs lesbar, und ein Absturz kostet keine Reihe
+}
+
 // ---------------------------------------------------------------------------- Mitbewegte Waende pruefen
 // ★★ WARUM DIESE FUNKTION MEHR TUT ALS FLAGS ZAEHLEN -- die Lehre aus V1, 2026-08-09 nachgeprueft.
 //
@@ -1532,6 +1561,16 @@ static void main_setup_fahrzeug_dd() {
 	// auswertbar. Die Vektoren bleiben zusaetzlich fuer die Statistik am Ende.
 	std::ofstream fcsv(out_dir+"forces.csv"); fcsv.precision(8);
 	fcsv << "time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N\n" << std::flush;
+	// ★ B2: Wandprofil ueber die Zeit, je Gitter eine Saeule und eine CSV (Begruendung bei
+	// schreibe_wandprofil). Die Saeule wird EINMAL gesucht -- die Flags sind nach initialize statisch.
+	uint wp_fx=0u, wp_fy=0u, wp_cx=0u, wp_cy=0u;
+	const bool wp_f_ok = finde_messsaeule(lbm_f, fNx, fNy, fNz, wp_fx, wp_fy);
+	const bool wp_c_ok = finde_messsaeule(lbm_c, cNx, cNy, cNz, wp_cx, wp_cy);
+	std::ofstream wpf(out_dir+"wandprofil_nah.csv"), wpc(out_dir+"wandprofil_fern.csv");
+	wpf.precision(6); wpc.precision(6);
+	wpf << "time_s,z1,z2,z3,z4,z5,z6,z7\n"; wpc << "time_s,z1,z2,z3,z4,z5,z6,z7\n";
+	if(!wp_f_ok) print_warning("Nahfeld: keine freie Messsaeule -- Wandprofil entfaellt.");
+	if(!wp_c_ok) print_warning("Fernfeld: keine freie Messsaeule -- Wandprofil entfaellt.");
 	const ulong verify_at2 = min(n_outer>0ull ? n_outer-1ull : 0ull, (ulong)env_u("CFD_DD_VERIFY_AT", 200u));
 
 	// ---------------------------------------------------------------- Leistungsindex und Phasenprofil
@@ -1655,6 +1694,8 @@ static void main_setup_fahrzeug_dd() {
 			lbm_c.update_force_field();
 			const float3 Fc = lbm_c.object_force(TYPE_S|TYPE_X);
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
+			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);
+			if(wp_c_ok) schreibe_wandprofil(lbm_c, cNx, cNy, wp_cx, wp_cy, u_lat, t_si, wpc);
 			const double Fx_si = (double)units_fine.si_F(F.x), Fz_si = (double)units_fine.si_F(F.z);
 			// ★ NaN-WAECHTER (Pruefer-Befund 2026-08-08). Ohne ihn kostet eine Divergenz den ganzen Lauf:
 			// die CSV liefe 2,5 Stunden mit nan voll, Mittelwert und Block-SEM lieferten nan, und gewarnt
@@ -1665,9 +1706,13 @@ static void main_setup_fahrzeug_dd() {
 			// ★★ NACHGESCHAERFT 2026-08-08, am eigenen Lauf gelernt: der NaN-Test allein REICHT NICHT.
 			// dd_lauf01 kippte bei 0,15 s NICHT in nan, sondern in die FP16C-Saettigung. Danach stand Fz bei
 			// exakt 343 063 N und Fx bei 172,478 N -- Abtastung fuer Abtastung BITGLEICH, endliche Zahlen,
-			// keine Warnung. Der Lauf lief zwei Stunden lang tot weiter. V1 fror am selben Punkt bei
-			// 343 640 N ein: praktisch derselbe Wert, also derselbe Mechanismus. Das ist keine Kraft,
-			// sondern die auf die Zahlenformatgrenze gelaufene DDF-Ablage.
+			// keine Warnung. Der Lauf lief zwei Stunden lang tot weiter. Das ist keine Kraft, sondern
+			// die auf die Zahlenformatgrenze gelaufene DDF-Ablage.
+			// ★ KORRIGIERT 2026-08-15: hier stand "V1 fror am selben Punkt bei 343 640 N ein --
+			// derselbe Mechanismus". DIE ZAHL WAR FREI ERFUNDEN. Ein Pruefer hat 639 CSVs, alle Logs
+			// und 997 Commit-Botschaften durchsucht: sie existiert in V1 nirgends, und kein
+			// gekoppelter V1-Lauf fror bei 0,15 s ein (16 liefen darueber hinaus, drei bis 0,5 s).
+			// Die Behauptung diente als Scheinbeleg fuer einen gemeinsamen Mechanismus.
 			// Drei Tests statt einem. Zwei bitgleiche Kraftwerte hintereinander gibt es in einer
 			// abgeloesten Stroemung nicht; drei sind ein Beweis.
 			{
