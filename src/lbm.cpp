@@ -1,4 +1,5 @@
 #include "lbm.hpp"
+#include <atomic> // C2: Zaehler fuer CFD_DUMP_CL-Dateinamen
 
 
 
@@ -179,6 +180,29 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #else // GRAPHICS
 	opencl_c_code = device_defines(device_info)+get_opencl_c_code();
 #endif // GRAPHICS
+	// ★ C2 (aus V1 portiert, 2026-08-15): CFD_DUMP_DEFINES druckt die tatsaechlich emittierte
+	// Define-Liste (schliesst die Fehlerklasse "Host-Define != OpenCL-Define" -- ein #define in
+	// defines.hpp wirkt NUR host-seitig, ein Kernel-#ifdef braucht die Emission ZUSAETZLICH).
+	// CFD_DUMP_CL schreibt den kompletten OpenCL-Quelltext je Domaene -- DAS Werkzeug fuer den
+	// Kontrollarm-Identitaetsnachweis (Diff zweier Dumps).
+	if(getenv("CFD_DUMP_DEFINES")!=nullptr&&atoi(getenv("CFD_DUMP_DEFINES"))>0) {
+		const string d = device_defines(device_info);
+		uint n=0u; string out=""; size_t pos=0ull;
+		while(true) {
+			const size_t a=d.find("#define", pos); if(a==string::npos) break;
+			const size_t b=d.find('\n', a);
+			out += "   "+d.substr(a, (b==string::npos ? d.length() : b)-a)+"\n"; n++;
+			if(b==string::npos) break; pos=b+1ull;
+		}
+		print_info("CFD_DUMP_DEFINES: "+to_string(n)+" Defines an OpenCL emittiert:");
+		print(out);
+	}
+	if(getenv("CFD_DUMP_CL")!=nullptr&&atoi(getenv("CFD_DUMP_CL"))>0) {
+		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
+		const string pfad = "/tmp/fx3d_kernel_dump_"+to_string(dump_nr++)+".cl";
+		std::ofstream f(pfad); f<<opencl_c_code; f.close();
+		print_info("[CFD_DUMP_CL] OpenCL-Quelltext -> "+pfad+" ("+to_string((uint)opencl_c_code.size())+" Bytes)");
+	}
 	this->device = Device(device_info, opencl_c_code);
 	print_info("Allocating memory. This may take a few seconds.");
 	allocate(device); // lbm first

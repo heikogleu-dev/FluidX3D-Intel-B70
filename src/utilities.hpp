@@ -4664,4 +4664,18 @@ public:
 		}
 	}
 };
+// ★ C2/E2 (2026-08-15): Umgebungs-Schalter-Helfer, aus setup.cpp hierher gehoben, damit auch
+// lbm.cpp/main.cpp dieselbe Semantik nutzen. env_on: gesetzt UND nicht ""/"0"/"false"/"off" = an
+// (das Muster getenv(X)!=nullptr schaltet bei CFD_X=0 EIN -- die dokumentierte Falle).
+// env_u OHNE Klemme nach unten: CFD_X=0 muss 0 bedeuten (Pruefer-Befund M1, 2026-08-08).
+inline bool env_on(const char* name) {
+	const char* v = getenv(name); if(v==nullptr) return false;
+	return !(v[0]=='\0' || (v[0]=='0'&&v[1]=='\0') || strcmp(v,"false")==0 || strcmp(v,"off")==0);
+}
+inline float env_f(const char* name, const float fallback) {
+	const char* v = getenv(name); return v==nullptr ? fallback : (float)atof(v);
+}
+inline uint env_u(const char* name, const uint fallback) {
+	const char* v = getenv(name); return v==nullptr ? fallback : (uint)max(0, atoi(v));
+}
 #endif // UTILITIES_FILE

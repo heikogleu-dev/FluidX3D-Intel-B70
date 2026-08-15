@@ -33,22 +33,8 @@ extern char** environ;
 //   4. Alle Schalter werten ihren WERT aus. "CFD_X=0" heisst aus, nicht an.
 // =============================================================================================
 
-// Schalter-Helfer: gesetzt UND nicht ""/"0"/"false"/"off" = an.
-// Das Muster getenv(X)!=nullptr schaltet bei CFD_X=0 EIN -- im alten Baum an 60 Stellen so.
-static bool env_on(const char* name) {
-	const char* v = getenv(name); if(v==nullptr) return false;
-	return !(v[0]=='\0' || (v[0]=='0'&&v[1]=='\0') || strcmp(v,"false")==0 || strcmp(v,"off")==0);
-}
-static float env_f(const char* name, const float fallback) {
-	const char* v = getenv(name); return v==nullptr ? fallback : (float)atof(v);
-}
-// ★ KORREKTUR 2026-08-08 (Pruefer-Befund M1): hier stand `max(1, atoi(v))`. Damit war CFD_PO_FACES=0
-// nicht "kein Druck-Auslass", sondern Bit 1 = x_min = DER EINLASS. Ein Ausschalter, der einschaltet,
-// und zwar ausgerechnet die eine Flaeche, die man nie meint. Kein Clamp mehr; wo eine 0 wirklich
-// unzulaessig ist (Abtastweite), klemmt es die AUFRUFSTELLE -- dort weiss man, was 0 bedeuten wuerde.
-static uint env_u(const char* name, const uint fallback) {
-	const char* v = getenv(name); return v==nullptr ? fallback : (uint)max(0, atoi(v));
-}
+// Schalter-Helfer env_on/env_f/env_u: seit C2/E2 (2026-08-15) in utilities.hpp -- eine Semantik
+// fuer alle Uebersetzungseinheiten. Historie (Pruefer-Befund M1 zu env_u) steht dort.
 
 // Konservative SAT-Voxelisierung (Akenine-Moeller, "Fast 3D Triangle-Box Overlap", 2001).
 // Box = LBM-Zelle (Zentrum c, Halbweite h in Gittereinheiten) gegen Dreieck (V0,V1,V2).
