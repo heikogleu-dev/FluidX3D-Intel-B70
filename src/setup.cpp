@@ -524,6 +524,57 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	return F;
 }
 
+// ---------------------------------------------------------------------------- C1b: Cd-Auslesepfad (FACETTEN-CD-PFAD.md)
+// Hybride Zerlegung: DRUCK solid-seitig aus F per n-Projektion (Normalkomponente des Impuls-
+// austauschs bleibt an getauschten Links erster Ordnung gueltig), REIBUNG fluid-seitig exakt aus
+// dem komponentenweisen Akkumulator (Fenster-Delta / Schritte). Solidzellen ohne tauschenden
+// Facettennachbarn: voller F (dort gilt reiner BB). fbi-Formel WOERTLICH wie messe_yplus.
+struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; };
+FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uchar marker,
+                        const ulong fenster, const std::vector<double>& snap) {
+	L.update_force_field();
+	LBM_Domain* D = L.lbm_domain[0];
+	D->F.read_from_device(); L.flags.read_from_device();
+	FacKraft K; K.px=K.py=K.pz=K.rx=K.ry=K.rz=0.0; K.n_voll=K.n_proj=K.n_unklar=0ull;
+	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
+	const bool fac = D->facetten_on;
+	if(fac) {
+		D->fac_tau.read_from_device(); D->fac_tau_n.read_from_device();
+		const double fs = fmax(1.0,(double)fenster);
+		for(ulong i=0ull; i<D->fac_N; i++) {
+			K.rx += ((double)D->fac_tau[4ull*i+1ull]-(snap.empty()?0.0:snap[3ull*i+0ull]))/fs;
+			K.ry += ((double)D->fac_tau[4ull*i+2ull]-(snap.empty()?0.0:snap[3ull*i+1ull]))/fs;
+			K.rz += ((double)D->fac_tau[4ull*i+3ull]-(snap.empty()?0.0:snap[3ull*i+2ull]))/fs;
+		}
+	}
+	auto wxp = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
+	auto wyp = [&](const int v) { return (uint)((v%(int)Ny+(int)Ny)%(int)Ny); };
+	for(uint z=D->fbz0; z<D->fbz0+D->fbnz; z++) for(uint y=D->fby0; y<D->fby0+D->fbny; y++) for(uint x=D->fbx0; x<D->fbx0+D->fbnx; x++) {
+		const ulong n = (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+		if(L.flags[n]!=marker) continue;
+		const ulong fbi = (ulong)(x-D->fbx0)+((ulong)(y-D->fby0)+(ulong)(z-D->fbz0)*(ulong)D->fbny)*(ulong)D->fbnx;
+		const double Fx=(double)D->F[fbi], Fy=(double)D->F[fbi+FN], Fz=(double)D->F[fbi+2ull*FN];
+		double nxm=0.0, nym=0.0, nzm=0.0; bool kontaminiert=false;
+		if(fac) for(uint i=1u; i<19u; i++) {
+			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+			const uint xn=wxp((int)x+FZ_C[i][0]), yn=wyp((int)y+FZ_C[i][1]);
+			if(xn<D->fbx0||yn<D->fby0||(uint)zn<D->fbz0||xn>=D->fbx0+D->fbnx||yn>=D->fby0+D->fbny||(uint)zn>=D->fbz0+D->fbnz) continue;
+			const ulong fbi2=(ulong)(xn-D->fbx0)+((ulong)(yn-D->fby0)+(ulong)((uint)zn-D->fbz0)*(ulong)D->fbny)*(ulong)D->fbnx;
+			const uint fid = D->fac_idx[fbi2];
+			if(fid==0xFFFFFFFFu||D->fac_tau_n[fid]==0u) continue;
+			kontaminiert=true;
+			nxm+=(double)D->fac_geo[8ull*fid]; nym+=(double)D->fac_geo[8ull*fid+1ull]; nzm+=(double)D->fac_geo[8ull*fid+2ull];
+		}
+		if(!kontaminiert) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_voll++; continue; }
+		const double l = sqrt(nxm*nxm+nym*nym+nzm*nzm);
+		if(l<0.5) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_unklar++; continue; } // Gegennormalen (Spalt): konservativ voll
+		const double nx2=nxm/l, ny2=nym/l, nz2=nzm/l;
+		const double fn = Fx*nx2+Fy*ny2+Fz*nz2;
+		K.px+=fn*nx2; K.py+=fn*ny2; K.pz+=fn*nz2; K.n_proj++;
+	}
+	return K;
+}
+
 void main_setup_kanal() {
 	// ---- Parameter. u_tau_lat = 0,003 fest (U_b ~ 0,072 nahe am Fahrzeug-u_lat 0,075).
 	const uint  N        = env_u("CFD_KANAL_N", 38u);        // Zellen ueber die VOLLE Kanalhoehe
@@ -621,6 +672,7 @@ void main_setup_kanal() {
 	// Statistik-Akkumulatoren je z-Ebene (double, Host)
 	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0), suz(Nz,0.0); ulong n_stat=0ull;
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
+	std::vector<double> fac_snap; ulong fac_snap_step=0ull; double fac_fsum=0.0, fac_fn=0.0; // Cd-Pfad (K2/K3)
 	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) { // Audit-Nacharbeit 18: letzter Chunk gekappt, vorher bis zu 99 Schritte Ueberzug
 		const ulong chunk = min((ulong)regel_alle, n_steps-step); // Re-Audit R2: auch fuers CSV-Etikett verwenden
 		lbm.run(chunk, n_steps); // run(steps, total) kappt selbst NICHT (2. Arg ist nur Laufzeitschaetzung)
@@ -654,6 +706,14 @@ void main_setup_kanal() {
 		     << Ub_plus << "," << f_akt << "," << cf_k << "," << cf_m << "\n" << std::flush;
 		// Statistik erst nach dem Warmlauf akkumulieren
 		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];suz[z]+=pz_[z];} n_stat+=(ulong)Nx*Ny; }
+		// ★ Cd-Pfad: Akkumulator-Snapshot am Warmup-Ende, f_wirk-Mittel ab dort (K2-Referenz)
+		if(env_u("CFD_FACETTEN",0u)>0u&&step>=n_warm) {
+			if(fac_snap.empty()) { fac_snap_step=step;
+				lbm.lbm_domain[0]->fac_tau.read_from_device();
+				fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
+				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+3ull]; } }
+			fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk;
+		}
 	}
 	// ---- Profil + Spannungsbilanz
 	std::ofstream pcsv(out_dir+"kanal_profil.csv"); pcsv.precision(8);
@@ -697,9 +757,21 @@ void main_setup_kanal() {
 		if(zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
-		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
+		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[4ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
 		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=sqrt(fmax(0.0,mtau))*0.5/(double)nu_lat;
 			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+", y+ = "+to_string((float)yp,1u)); }
+		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
+		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
+			const FacKraft FK = kraft_facetten(lbm, Nx, Ny, Nz, TYPE_S, n_steps-fac_snap_step, fac_snap);
+			const double fq = fac_fn>0.0 ? fac_fsum/fac_fn : 0.0;
+			const double soll_rx = fq*(double)delta_lat*2.0*(double)Nx*(double)Ny; // f*delta je Saeule, beide Waende
+			print_info("Cd-Pfad Kanal: Reibung x = "+to_string((float)FK.rx,9u)+" (Soll f*delta*Flaeche = "+to_string((float)soll_rx,9u)
+				+", Verhaeltnis "+to_string((float)(soll_rx!=0.0?FK.rx/soll_rx:0.0),4u)+"), Reibung y = "+to_string((float)FK.ry,9u));
+			print_info("Cd-Pfad Kanal: Druck x = "+to_string((float)FK.px,9u)+" (K3-Soll exakt 0), n_voll "+to_string(FK.n_voll)
+				+", projiziert "+to_string(FK.n_proj)+", unklar "+to_string(FK.n_unklar));
+			if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_warning("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab.");
+			if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_warning("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
+		}
 	}
 	// Feld-Hash (FNV-1a ueber die u-Bitmuster) fuer den Bitvergleich der Aequivalenzarme
 	if(env_u("CFD_FELD_HASH", 0u)>0u) {
@@ -794,6 +866,8 @@ void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const floa
 // von Heiko). Ein Nachweis, der nur den Anfangszustand prueft, ist fuer diese Fehlerklasse BLIND.
 // Deshalb: je Sample das u_x-Profil ueber der Fahrbahn an einer festen freien Saeule in die CSV.
 // Kosten: gelesen wird NUR die x-Komponente der untersten acht z-Ebenen -- die liegen im
+
+
 // SoA-Layout kontiguierlich am Pufferanfang (33 MB je Sample im Nahfeld statt 6 GB Vollread).
 bool finde_messsaeule(LBM& L, const uint Nx, const uint Ny, const uint Nz, uint& xs, uint& ys) {
 	(void)Nz; L.flags.read_from_device(); ys = Ny/2u;
@@ -1241,7 +1315,7 @@ void main_setup_kugel() {
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
-		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
+		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[4ull*i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
 		if(ntau>0ull) print_info("Facetten-tau Kugel: "+to_string(ntau)+" Tauschzellen, mittleres tau_w = "+to_string((float)(stau/(double)ntau),9u));
 		print_info("ACHTUNG: Cd oben enthaelt den Impulsaustausch-Reibungsanteil -- an getauschten Links ist er ein PHANTOM (AUDIT-Befund 1 verallgemeinert). Fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
 	}

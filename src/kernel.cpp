@@ -1662,9 +1662,10 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 // Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S schliesst TYPE_E und TYPE_MS linkweise aus.
 // Indizes sind an allen Aufrufstellen Literale -- der Uebersetzer inlinet ohne dynamische fhn-Indizierung.
 void fac_paar(float* fhn, const global uchar* flags, const uxx* j, const uint ip, const uint im,
-              const uint g1, const uint g2, const float taut, uint* getauscht) {
+              const uint g1, const uint g2, const float taut, uint* getauscht, float* fkraft) {
 	if(((flags[j[g1]]&TYPE_BO)==TYPE_S)&&((flags[j[g2]]&TYPE_BO)==TYPE_S)) {
 		const float fp_=fhn[ip]; fhn[ip]=fhn[im]+0.5f*taut; fhn[im]=fp_-0.5f*taut; (*getauscht)++;
+		*fkraft -= taut; // Wandkraft der ANGEWANDTEN Korrektur (Cd-Pfad E5): -tau_t = +def_fac_tau*twe*ut_c/ut
 	}
 }
 void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
@@ -1693,41 +1694,43 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 		if(twf>tw_max) atomic_inc(&hits[8]); // Nachpruefer-Befund 2: auch die ZWEITklemme zaehlen (Slot 8 = beide) -- ab Stufe 3 (faca bis sqrt(3)) klemmt sie sonst lautlos
 		twe = fmin(twf, tw_max); // am Kanal faca==1: twf==tw, nach Erstklemme nie >tw_max -> bitgleich und zaehlerneutral
 	} else atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip (Tausch passiert trotzdem, wie z-WFB)
-	uint getauscht = 0u;
+	uint getauscht = 0u; float fk_x=0.0f, fk_y=0.0f, fk_z=0.0f; // angewandte Wandkraft je Komponente (Cd-Pfad)
 	// Paartabelle FACETTEN-STUFE2.md Abschnitt B; Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S
 	// schliesst TYPE_E und TYPE_MS (0x03) linkweise aus. Paarreihenfolge: tangentiale Achsen aufsteigend.
 	if(achse==2u) {
 		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
 		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;
 		if(nz>0.0f) { // Boden (-z): einlaufend 9=(+1,0,+1)/16=(-1,0,+1), 11=(0,+1,+1)/18=(0,-1,+1)
-			fac_paar(fhn, flags, j, 9u, 16u, 10u, 15u, tau_x, &getauscht);
-			fac_paar(fhn, flags, j, 11u, 18u, 12u, 17u, tau_y, &getauscht);
+			fac_paar(fhn, flags, j, 9u, 16u, 10u, 15u, tau_x, &getauscht, &fk_x);
+			fac_paar(fhn, flags, j, 11u, 18u, 12u, 17u, tau_y, &getauscht, &fk_y);
 		} else {      // Decke (+z): 15=(+1,0,-1)/10=(-1,0,-1), 17=(0,+1,-1)/12=(0,-1,-1)
-			fac_paar(fhn, flags, j, 15u, 10u, 16u, 9u, tau_x, &getauscht);
-			fac_paar(fhn, flags, j, 17u, 12u, 18u, 11u, tau_y, &getauscht);
+			fac_paar(fhn, flags, j, 15u, 10u, 16u, 9u, tau_x, &getauscht, &fk_x);
+			fac_paar(fhn, flags, j, 17u, 12u, 18u, 11u, tau_y, &getauscht, &fk_y);
 		}
 	} else if(achse==0u) {
 		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;
 		const float tau_z = (ut>=1e-6f) ? -def_fac_tau*twe*utz/ut : 0.0f;
 		if(nx>0.0f) { // Wand bei -x: einlaufend 7=(+1,+1,0)/13=(+1,-1,0), 9=(+1,0,+1)/15=(+1,0,-1)
-			fac_paar(fhn, flags, j, 7u, 13u, 8u, 14u, tau_y, &getauscht);
-			fac_paar(fhn, flags, j, 9u, 15u, 10u, 16u, tau_z, &getauscht);
+			fac_paar(fhn, flags, j, 7u, 13u, 8u, 14u, tau_y, &getauscht, &fk_y);
+			fac_paar(fhn, flags, j, 9u, 15u, 10u, 16u, tau_z, &getauscht, &fk_z);
 		} else {      // Wand bei +x: 14=(-1,+1,0)/8=(-1,-1,0), 16=(-1,0,+1)/10=(-1,0,-1)
-			fac_paar(fhn, flags, j, 14u, 8u, 13u, 7u, tau_y, &getauscht);
-			fac_paar(fhn, flags, j, 16u, 10u, 15u, 9u, tau_z, &getauscht);
+			fac_paar(fhn, flags, j, 14u, 8u, 13u, 7u, tau_y, &getauscht, &fk_y);
+			fac_paar(fhn, flags, j, 16u, 10u, 15u, 9u, tau_z, &getauscht, &fk_z);
 		}
 	} else {
 		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
 		const float tau_z = (ut>=1e-6f) ? -def_fac_tau*twe*utz/ut : 0.0f;
 		if(ny>0.0f) { // Wand bei -y: einlaufend 7=(+1,+1,0)/14=(-1,+1,0), 11=(0,+1,+1)/17=(0,+1,-1)
-			fac_paar(fhn, flags, j, 7u, 14u, 8u, 13u, tau_x, &getauscht);
-			fac_paar(fhn, flags, j, 11u, 17u, 12u, 18u, tau_z, &getauscht);
+			fac_paar(fhn, flags, j, 7u, 14u, 8u, 13u, tau_x, &getauscht, &fk_x);
+			fac_paar(fhn, flags, j, 11u, 17u, 12u, 18u, tau_z, &getauscht, &fk_z);
 		} else {      // Wand bei +y: 13=(+1,-1,0)/8=(-1,-1,0), 18=(0,-1,+1)/12=(0,-1,-1)
-			fac_paar(fhn, flags, j, 13u, 8u, 14u, 7u, tau_x, &getauscht);
-			fac_paar(fhn, flags, j, 18u, 12u, 17u, 11u, tau_z, &getauscht);
+			fac_paar(fhn, flags, j, 13u, 8u, 14u, 7u, tau_x, &getauscht, &fk_x);
+			fac_paar(fhn, flags, j, 18u, 12u, 17u, 11u, tau_z, &getauscht, &fk_z);
 		}
 	}
-	if(getauscht>0u) { fac_tau_acc[fid] += tw; fac_tau_cnt[fid] += 1u; } // 1 Zelle = 1 Facette: kein Atomic noetig
+	if(getauscht>0u) { // 1 Zelle = 1 Facette: kein Atomic noetig; Layout 4 float: [0] tw physisch (y+), [1..3] angewandte Wandkraft (Cd-Reibung)
+		fac_tau_acc[4u*(uxx)fid] += tw; fac_tau_acc[4u*(uxx)fid+1u] += fk_x; fac_tau_acc[4u*(uxx)fid+2u] += fk_y; fac_tau_acc[4u*(uxx)fid+3u] += fk_z;
+		fac_tau_cnt[fid] += 1u; }
 	else if(t%100ul==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
 	if(t%100ul==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)
 } // apply_facette()

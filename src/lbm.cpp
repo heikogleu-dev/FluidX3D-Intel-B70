@@ -378,7 +378,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(aktiv==0ull) { print_error("alloc_facetten_domain: keine aktive Facette (alle markiert?)."); return; }
 	fac_geo   = Memory<float>(device, 8ull*aktiv);
 	fac_idx   = Memory<uint>(device, FN);
-	fac_tau   = Memory<float>(device, aktiv);
+	fac_tau   = Memory<float>(device, 4ull*aktiv); // Layout: [4k]=tw, [4k+1..3]=Wandkraft x/y/z (Cd-Pfad E5)
 	fac_tau_n = Memory<uint>(device, aktiv);
 	for(ulong i=0ull; i<FN; i++) fac_idx[i] = 0xFFFFFFFFu;
 	ulong k=0ull;
@@ -390,7 +390,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		fac_geo[8ull*k+4ull]=1.0f/fmax(na, 0.57735027f); // Flaechenfaktor, Kappe sqrt(3) (|n_a|>=1/sqrt(3))
 		fac_geo[8ull*k+5ull]=(float)f.achse;
 		fac_geo[8ull*k+6ull]=0.0f; fac_geo[8ull*k+7ull]=0.0f;
-		fac_tau[k]=0.0f; fac_tau_n[k]=0u;
+		fac_tau[4ull*k]=0.0f; fac_tau[4ull*k+1ull]=0.0f; fac_tau[4ull*k+2ull]=0.0f; fac_tau[4ull*k+3ull]=0.0f; fac_tau_n[k]=0u;
 		// Zellindex -> F-BBox-Index (dieselbe Formel wie f_bbox im Kernel)
 		const uint x=(uint)(f.n%(ulong)Nx), y=(uint)((f.n/(ulong)Nx)%(ulong)Ny), z=(uint)(f.n/((ulong)Nx*(ulong)Ny));
 		if(x<fbx0||y<fby0||z<fbz0||x>=fbx0+fbnx||y>=fby0+fbny||z>=fbz0+fbnz) { print_error("Facette ausserhalb der F-BBox -- set_force_bbox deckt die Wandzellen nicht."); return; }

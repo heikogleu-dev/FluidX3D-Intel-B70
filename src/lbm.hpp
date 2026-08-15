@@ -165,7 +165,7 @@ public:
 	uint fac_param_pos = 0u; ulong fac_N = 0ull;      // Parameterposition in stream_collide, aktive Facetten
 	Memory<float> fac_geo;   // AoS 8 float je Facette: nx,ny,nz,yw,fac_a(=1/|n_achse|),achse,frei,frei
 	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
-	Memory<float> fac_tau;   // Akkumulator: Summe tau_w je Facette (nur Zellen mit >=1 getauschtem Paar)
+	Memory<float> fac_tau;   // Akkumulator 4 float je Facette: [0] Summe tau_w (y+), [1..3] Summe angewandte Wandkraft x/y/z (Cd-Reibung); nur Zellen mit >=1 getauschtem Paar
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
