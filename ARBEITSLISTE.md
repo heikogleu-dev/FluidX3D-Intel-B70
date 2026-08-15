@@ -3,6 +3,12 @@
 Stand 2026-08-09 abends. Eine Liste, eine Reihenfolge. Jeder Punkt ist so geschnitten, dass er in
 einer Sitzung erledigt werden kann.
 
+**Nachtrag 2026-08-15:** 0A (y⁺ gemessen: Median 1122, nicht 137), A1–A3 (Kanal steht, Rauwand
+verstanden, WFB nach Han et al. gebaut — c_f gitterunabhängig flach, Details `WANDMODELL.md`) und
+das Komplett-Audit samt Fix-Schleife (`AUDIT-BEFUNDE.md`, sauber bis Commit 06b432b) sind erledigt.
+**Aktuell in Arbeit: C1b** (zellbasierte Facetten, Heikos Priorisierung) — die
+Relativgeschwindigkeits-Erweiterung der WFB folgt danach.
+
 **Das Ziel, an dem alles gemessen wird:** Cd und Cz des Fahrzeugs gegen OpenFOAM 13
 (**0,599 / −1,301**). Stand heute: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem
 Unterboden.
