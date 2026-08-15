@@ -11,17 +11,25 @@ FACETTEN-PLAN.md / FACETTEN-STUFE2.md / FACETTEN-CD-PFAD.md, alle gegen­geprüf
 geeicht (3³, r21>0,15, 21,9 % markiert), Kernel mit Paar-Gate + Flächenfaktor auf DDF-Ebene
 bewiesen, Kanal-Äquivalenz zur z-WFB BITGLEICH (CPU+iGPU), Kugel Ist=Soll, Cd-Auslesepfad
 K1–K4 bestanden (K2 = 0,9961 stationär). Audit Runde 3 sauber (AUDIT-BEFUNDE.md).
-**Nächste Schritte:** Druck-Zeitmittel im Cd-Pfad (Sample-Kadenz, Plan E6); dann die
-**MORGEN-ENTSCHEIDUNG (neu nach Literatur-Recherche, s. FACETTEN-LITERATUR.md):** die Kugel
-zeigt nur 313 Tauschzellen bei 14.356 ohne offenes Paar — der Paartausch ist an Krümmung
-STRUKTURELL unzureichend (bestätigt durch Matyka 2013). Die Literatur-Empfehlung ist der
-**iMEM-artige Slip-Velocity-Bounce-Back** (Asmuth et al. 2021): u_s pro Facette so bestimmen,
-dass die Summe über ALLE offenen Wand-Links exakt das Ziel-τ_w liefert — löst beide Lücken
-(kein Paarzwang, trägt auch die Hangauf-Komponente), bleibt im Halfway-BB/Esoteric-Pull-Rahmen,
-und der Han/Ooka-Tausch bleibt als gitterparalleler Degenerationsfall + Kontrollarm. Der
-gekippte Kanal (Formelblatt folgt) bleibt der richtige Messpunkt — er ist sogar eine
-Literaturlücke. Danach Stufe 5 Fahrzeug-Abnahme (y⁺ 1122 → ~140) und die
-Relativgeschwindigkeits-Erweiterung.
+**ENTSCHIEDEN (Heiko, 2026-08-15 nachts): direkter iMEM-Umbau** — die Kugel zeigt nur 313
+Tauschzellen bei 14.356 ohne offenes Paar, der Paartausch ist an Krümmung STRUKTURELL
+unzureichend (FACETTEN-LITERATUR.md, bestätigt durch Matyka 2013). iMEM (Asmuth et al. 2021,
+Slip-Velocity-BB: u_s pro Facette so, dass der Impulsaustausch über ALLE offenen Wand-Links
+exakt das Ziel-τ_w liefert) ersetzt mit einem Mechanismus drei Baustellen: Nebenachsen,
+Hangauf-Komponente UND Relativgeschwindigkeit. Der Han/Ooka-Paartausch bleibt Kontrollarm.
+
+**Plan für morgen (in dieser Reihenfolge):**
+1. **iMEM-Herleitungsplan sichten** (Planungsagent läuft über Nacht: exakte D3Q19-Formel,
+   Erhaltungsfragen, Klemmen, Schalterdesign) → adversarial gegenprüfen lassen → einarbeiten.
+2. **Druck-Zeitmittel im Cd-Pfad** (CFD_FAC_CD_EVERY, Plan E6) — kleines Häppchen vorab,
+   macht die Kugel-K5-Abnahme vollständig, nützt beiden Mechanismen.
+3. **iMEM implementieren** (volle Pipeline; Kontrollarm-Regression: Paartausch-Arm und
+   Default-Build bitgleich, Feld-Hash 12755646098055097704).
+4. **Messleiter:** Kanal 0° (Äquivalenzkriterium aus dem iMEM-Plan) → Torus-Kipp 45°/26,6°
+   nach FACETTEN-STUFE3.md (Geometrie/Normierung gelten mechanismus-unabhängig; K4-Risiko
+   y_w(m0)=0,184 bei 26,6° vorab per Schritt-0-Diagnose messen) → Kugel 3 Arme (Erwartung:
+   Tauschzellen-Problem verschwindet, Ist=Soll neu definiert) → danach Fahrzeug-Abnahme
+   (y⁺ 1122 → ~140) mit der Dreierkette Wandmodell + Relativgeschwindigkeit + Kontaktfleck.
 
 **Das Ziel, an dem alles gemessen wird:** Cd und Cz des Fahrzeugs gegen OpenFOAM 13
 (**0,599 / −1,301**). Stand 2026-08-09: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem
