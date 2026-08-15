@@ -125,6 +125,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ist nur fuer D3Q19 gebaut (feste Flaechennachbarn j[1..6]).");
 	if(s_wandfunktion) print_error("CFD_WANDFUNKTION ist nur fuer D3Q19 gebaut (feste Diagonalpaare 9/16, 11/18, 15/10, 17/12).");
 #endif // D3Q19
+	if(s_sgs_wandfrei) print_info("SGS_WANDFREI aktiv: kein nu_t in Zellen mit solidem Flaechennachbarn (Wirkpfad-Zaehler Slot 6, Report am Laufende).");
 #ifndef SUBGRID
 	// ★ Audit-Nacharbeit 2: mit abgeschaltetem SUBGRID (Kugel-Validierung!) war der Schalter ein
 	// lautloser No-Op -- jetzt harte Abweisung. Die WANDFUNKTION dagegen ist von SUBGRID unabhaengig
@@ -140,8 +141,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// ★ Audit-Nacharbeit 8: im CFD_REG_BC-Arm liest deriv_reg u[] von Nachbarzellen, waehrend
 	// stream_collide unter UPDATE_FIELDS u[] im selben Kernellauf SCHREIBT -- Wettlauf, jedes
 	// REG-A/B waere nicht bitreproduzierbar. Default ist aus; wer ihn zieht, wird gewarnt.
+#ifdef REGULARIZED_BOUNDARIES
 	if(getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) print_warning("CFD_REG_BC=1 unter UPDATE_FIELDS: deriv_reg liest u[] im Wettlauf mit dem Schreiber -- Ergebnisse sind NICHT bitreproduzierbar (Audit-Befund 8).");
+#endif // REGULARIZED_BOUNDARIES
 #endif // UPDATE_FIELDS
+#ifndef REGULARIZED_BOUNDARIES
+	// R2: die Race-Warnung oben haengt an UPDATE_FIELDS -- ohne einkompilierten REG-Arm waere sie
+	// eine Warnung ueber Code, den es nicht gibt. Stattdessen die Wirkungslos-Ansage.
+	if(getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) print_warning("CFD_REG_BC ist gesetzt, aber REGULARIZED_BOUNDARIES ist nicht einkompiliert -- der Schalter ist WIRKUNGSLOS.");
+#endif // REGULARIZED_BOUNDARIES
 	// ★ Daempfungszone: Sperre und Wirksamkeitsmeldung.
 	if(s_sponge_n>0u) {
 		// def_Nx/def_Ny/def_Nz im Sponge-Block sind DOMAENENmasse inklusive Halo -- mit mehreren
@@ -212,10 +220,13 @@ void LBM_Domain::allocate(Device& device) {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
 	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
-	// 6 Slots: [0,1] RHO_CLAMP unten/oben, [2] Wandfunktion-Wirkpfad (gegatet t%100), [3] tau-Klemme/
-	// Skip, [5] Ein-Zellen-Spalt. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
-	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef WANDFUNKTION).
-	rho_clamp_hits = Memory<uint>(device, 6ull);
+	// 8 Slots (Legende R2 nachgezogen): [0,1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (gegatet t%100),
+	// [3] NUR tau-Klemme, [4] NUR u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad
+	// (gegatet t%100), [7] frei. Achtung uint: nur 2 und 6 sind gegatet; 3/4/5 zaehlen jeden Schritt
+	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
+	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
+	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
+	rho_clamp_hits = Memory<uint>(device, 8ull);
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
@@ -589,7 +600,10 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define TYPE_X 0x40" // 0b01000000 // reserved type X
 	"\n	#define TYPE_Y 0x80" // 0b10000000 // reserved type Y
 
-	// ★★ DAEMPFUNGSZONE (Sponge) an den TYPE_E-Flaechen, 2026-08-09. DER Weg, der nach drei
+	// ★★ DAEMPFUNGSZONE (Sponge), 2026-08-09 -- GEOMETRISCH an den Domaenenflaechen x-/x+/y-/y+/z+
+	// verankert (Abstand zur Flaeche, KEIN Flag-Test; R2-Korrektur: der alte Text behauptete eine
+	// TYPE_E-Bindung, die es nie gab -- in einem periodischen Setup rampte die Zone an Flaechen
+	// ohne Rand, heute nur per Konvention verhindert, der Kanal setzt sie nicht). DER Weg, der nach drei
 	// gescheiterten Randumbauten uebrig bleibt -- und der einzige, der durch Messung gestuetzt ist:
 	// im leeren Fernfeld hat AUSSCHLIESSLICH die Viskositaet gedaempft (nu x1000: Streuung 0,040 ->
 	// 0,025), waehrend jede Aenderung der Randgleichung das Klingeln verstaerkte. Die Zone hebt nu
@@ -1278,9 +1292,10 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	// Der Per-Schritt-Dispatch ist damit nicht Vorrat, sondern noetig: die Neumann-Bedingung sieht das
 	// Innenfeld des unmittelbar vorangegangenen Schritts. Der alte Kommentar war zu pessimistisch und
 	// widersprach dem, was setup.cpp an derselben Sache richtig beschreibt.
-	// ★ Audit-Nacharbeit 9 (E9): im dd-Fall tragen 1580 Zellen BEIDE Rollen (vi-Kante und po-Deckel/
-	// Seiten). Die Reihenfolge ist bewusst: erst Einlass, dann Auslass -- auf den Doppelzellen
-	// GEWINNT der Druck-Auslass. In-order-Queue je Domaene macht das deterministisch.
+	// ★ Audit-Nacharbeit 9 (E9), Fallzuordnung in R2 korrigiert: die 1580 vi-po-Doppelzellen
+	// (Auslassebenen-Kanten) entstehen im FERNFELD-Fall mit CFD_FERN_VI=1 -- der dd-Fall setzt
+	// keinen velocity_inlet (enqueue ist dort ein No-Op). Reihenfolge bewusst: erst Einlass, dann
+	// Auslass -- auf Doppelzellen GEWINNT der Druck-Auslass; in-order-Queue macht es deterministisch.
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_velocity_inlet(); // FORK: rho am Einlass mitlaufen lassen
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication

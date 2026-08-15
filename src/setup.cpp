@@ -241,6 +241,14 @@ static // ----------------------------------------------------------------------
 // Lauf ueberhaupt ein Ergebnis ist. Bleibt er null, war die Klemme ein nie ausloesender Waechter.
 // Ist er gross, rechnete der Lauf stellenweise auf einem geklemmten, also verfaelschten Feld.
 void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
+	// ★ Re-Audit R2 (Rest von Befund 2): SGS_WANDFREI bekommt seinen Wirkpfad-Nachweis -- Slot 6,
+	// im Kernel gegatet t%100. Null Treffer bei gesetztem Schalter = lautloser No-Op = harter Fehler.
+	if(LBM_Domain::s_sgs_wandfrei) {
+		ulong wz=0ull;
+		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); wz+=(ulong)L.lbm_domain[d]->rho_clamp_hits[6]; }
+		print_info(string("  SGS_WANDFREI ")+wo+": "+to_string(wz)+" gezaehlte Wandzellen-Gates (t%100)");
+		if(wz==0ull) print_error(string("CFD_SGS_WANDFREI war gesetzt, aber der Wirkpfad-Zaehler ist NULL (")+wo+") -- lautloser No-Op.");
+	}
 #ifdef RHO_CLAMP
 	ulong u=0ull, o=0ull; L.rho_clamp_hits_total(u, o);
 	summe += u+o;
@@ -364,6 +372,10 @@ void main_setup_kanal() {
 		+", "+to_string(n_steps)+" Schritte ("+to_string(ett,0u)+" ETT, davon "+to_string(ett_warm,0u)+" Warmlauf)");
 	// Randbedingungen der uebrigen Faelle hier AUSDRUECKLICH inert -- sagen, nicht annehmen:
 	print_info("Kanal: kein TYPE_E, kein Druck-Auslass, keine Daempfungszone -- x/y sind PERIODISCH (Standard).");
+	// R2 (Inventar stumm-inerter Schalter): was der Kanal prinzipbedingt ignoriert, wird angesagt.
+	if(env_u("CFD_SPONGE_N",0u)>0u)      print_warning("CFD_SPONGE_N wird im Kanal NICHT angewandt (periodisch, kein Rand zu daempfen).");
+	if(getenv("CFD_PO_HART")!=nullptr||getenv("CFD_PO_SIGMA")!=nullptr) print_warning("CFD_PO_HART/CFD_PO_SIGMA wirken nur mit Druck-Auslass -- der Kanal hat keinen.");
+	if(env_on("CFD_SPARSE_TILES"))       print_warning("CFD_SPARSE_TILES wird im Kanal NICHT angewandt.");
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
 	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
 	{ const uint wf = env_u("CFD_WANDFUNKTION", 0u); LBM_Domain::s_wandfunktion = wf>0u; LBM_Domain::s_wf_tau = (wf==2u) ? 0.0f : 1.0f;
@@ -411,6 +423,7 @@ void main_setup_kanal() {
 	// ersetzt genau diese Links durch Tausch+tau. Das Kriterium "beide c_f-Wege gleich" gilt NUR
 	// im Arm ohne Wandfunktion. Der Planungsagent hatte diese Kennzeichnung angewiesen; sie fehlte.
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) zcsv << "# ACHTUNG: cf_impulsaustausch unter WANDFUNKTION UNGUELTIG (Reflexionsannahme verletzt) -- nur cf_kraftbilanz zaehlt\n";
+	zcsv << "# Hinweis: f_lat ist das FRISCH geregelte f (wirkt ab dem Folgechunk); cf_kraftbilanz rechnet mit dem im Chunk WIRKENDEN f -- Rueckrechnung cf=2*f_lat*delta/Ub^2 weicht deshalb ab\n";
 	zcsv << "schritt,ett,Ub_lat,Ub_plus,f_lat,cf_kraftbilanz,cf_impulsaustausch\n" << std::flush;
 	const uint regel_alle = 100u;
 	float f_akt = f0, Ub_alt = Ub_ziel;
@@ -418,7 +431,8 @@ void main_setup_kanal() {
 	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0), suz(Nz,0.0); ulong n_stat=0ull;
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
 	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) { // Audit-Nacharbeit 18: letzter Chunk gekappt, vorher bis zu 99 Schritte Ueberzug
-		lbm.run(min((ulong)regel_alle, n_steps-step), n_steps); // run(steps, total) kappt selbst NICHT (2. Arg ist nur Laufzeitschaetzung)
+		const ulong chunk = min((ulong)regel_alle, n_steps-step); // Re-Audit R2: auch fuers CSV-Etikett verwenden
+		lbm.run(chunk, n_steps); // run(steps, total) kappt selbst NICHT (2. Arg ist nur Laufzeitschaetzung)
 		// U_b und Ebenensummen aus u (Vollread -- bei diesen Groessen billig: N=38 -> 3,4 MB)
 		lbm.u.read_from_device();
 		double Ub=0.0; ulong nf=0ull;
@@ -445,7 +459,7 @@ void main_setup_kanal() {
 		const float3 Fw = lbm.object_force(TYPE_S);                             // beide Waende
 		const double tau_mem = fabs((double)Fw.x)/(2.0*(double)Nx*(double)Ny);  // je Flaeche
 		const double cf_k = 2.0*tau_kraft/fmax(1e-30,Ub*Ub), cf_m = 2.0*tau_mem/fmax(1e-30,Ub*Ub);
-		zcsv << (step+regel_alle) << "," << (double)(step+regel_alle)/(double)T_ett << "," << Ub << ","
+		zcsv << (step+chunk) << "," << (double)(step+chunk)/(double)T_ett << "," << Ub << "," // R2: gelaufene Schritte, nicht nominelle (letzter Chunk ist gekappt)
 		     << Ub_plus << "," << f_akt << "," << cf_k << "," << cf_m << "\n" << std::flush;
 		// Statistik erst nach dem Warmlauf akkumulieren
 		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];suz[z]+=pz_[z];} n_stat+=(ulong)Nx*Ny; }
@@ -690,8 +704,12 @@ void audit_bewegte_waende(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 		+to_string(100.0f*abw_max,2u)+" %; Zellen mit Beitrag EXAKT NULL: "+to_string(n_ms_ohne_impuls));
 	// ★ Nachpruefer-Befund: vorher wurde der Sollwert nur HINGESCHRIEBEN und nichts verglichen -- eine
 	// Fahrbahn mit halber oder doppelter Geschwindigkeit haette den Nachweis ohne Befund bestanden.
+	// ★ Re-Audit R2 (Befund 16): der alte Text behauptete "Randzellen mit zwei Wandflaechen sind
+	// ausgenommen" -- diese Ausnahme gab es im Code NIE. Ausgenommen sind nur Zellen mit Beitrag
+	// exakt null; eine Zelle mit stillem zweiten Wandnachbarn (z. B. neben dem Reifenlatsch)
+	// geht mit ihrem Teil-Beitrag in abw_max ein und KANN diese Warnung ausloesen.
 	if(abw_max>0.02f) print_warning(string(wo)+": der Impulsterm weicht um bis zu "+to_string(100.0f*abw_max,2u)
-		+" % vom Sollwert u_lat/3 ab -- die Wandgeschwindigkeit stimmt nicht (Randzellen mit zwei Wandflaechen sind ausgenommen).");
+		+" % vom Sollwert u_lat/3 ab. Achtung: Zellen mit zweitem (auch stillem) Wandnachbarn tragen Teil-Beitraege bei und koennen diese Warnung legitim ausloesen -- erst Einzelzellen pruefen, dann der Wandgeschwindigkeit misstrauen.");
 	print_info("  Koerperzellen auf z = 0: "+to_string(n_veh_z0)+" (muss 0 sein -- sie wurden an die Strasse uebergeben)");
 	print_info("  Fahrbahnzellen ohne Bewegung: "+to_string(n_road_z0-n_road_moving)+", davon MIT Fluid darueber: "+to_string(n_road_still_fluid)
 		+" (nur die zweite Zahl ist ein Fehler -- unter dem Reifenlatsch ist Stillstand Bauart)");
@@ -1408,7 +1426,11 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Einlauf vor der Nase "+to_string((veh_x0-far_x0)/si_length,2u)+" L (bewusst kurz), Nachlauf hinter dem Heck "
 			+to_string((far_x0+(float)(cNx-1u)*dx_c-veh_x1)/si_length,2u)+" L  (OpenFOAM: 1.08 L / 3.33 L)");
 	}
+#ifdef TRT
+	print_info("Kollisionsoperator: TRT (Lambda-Wandlage aktiv).");
+#else
 	print_info("Kollisionsoperator: SRT (TRT samt Lambda-Wandlage in defines.hpp auskommentiert -- gemessene Entscheidung 2026-08-09).");
+#endif // TRT
 	print_info("dt_fein = "+to_string(dt_f,8u)+" s, dt_grob = "+to_string(dt_c,7u)+" s, ratio = "+to_string(ratio));
 
 	// ---------------------------------------------------------------- Netze platzieren
@@ -2035,6 +2057,7 @@ static void main_setup_fernfeld() {
 	print_info("Randbedingungen wie im gekoppelten Fall: z- mitbewegte Fahrbahn, x- / y+- / z+ Gleichgewicht, x+ Druckauslass.");
 
 	const bool mit_fahrzeug = env_on("CFD_FERN_VEH");
+	if(env_on("CFD_SPARSE_TILES")) print_warning("CFD_SPARSE_TILES wird im fernfeld-Fall NICHT angewandt."); // R2-Inventar
 	// ★ Audit-Nacharbeit 5: die Kontaktflaechen-Uebergabe (Fz-Explosionsmechanismus, im dd-Fall
 	// gefixt) ist HIER nicht nachgezogen -- der Diagnosearm mit Fahrzeug kann sich selbst
 	// kontaminieren. Bis zum Nachzug wird das angesagt statt still gerechnet.
@@ -2056,7 +2079,8 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false;
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; // Re-Audit R2: s_wf_tau fehlte nur hier (6. Stelle)
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	// ★ Nachpruefer-Befund 2026-08-15: diese sechste Konstruktorstelle FEHLTE in der Verdrahtung von
 	// CFD_SGS_WANDFREI -- der Schalter waere im fernfeld-Fall still wirkungslos gewesen (die
 	// Commit-Behauptung "alle 5 Aufrufstellen" hatte schlicht falsch gezaehlt: es sind sechs).

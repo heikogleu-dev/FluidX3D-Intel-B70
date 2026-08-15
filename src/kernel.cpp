@@ -1584,8 +1584,12 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#ifdef WANDFUNKTION"+R(
 float wf_spalding_uplus(const float Y) {
 	// Loese X*S(X) = Y fuer X = u+ (Spalding, kappa=0,41, B=5,5 wie Han et al. 2021, Gl. 16).
-	// Log-Log-Newton, Start sqrt(Y), FIX drei Iterationen ohne Konvergenzabfrage (Branch-Divergenz;
-	// Restfehler 1,8e-13, prueferverifiziert). X geklemmt auf <=100: kappa*X <= 41, exp davon ist
+	// Log-Log-Newton, Start sqrt(Y), FIX drei Iterationen ohne Konvergenzabfrage (Branch-Divergenz).
+	// Genauigkeit (R2 nachgemessen, Bisektion als Referenz): ~1e-13 nur fuer kleines/mittleres Y;
+	// rel. Fehler in u+ = 2,8e-4 bei Y=1e3, 4e-3 bei Y=5e3, 1,2e-2 bei Y=1e4 (tau_w ~ u+^-2 =>
+	// bis ~2,3 % zu klein), weil der Start bei Y>1e4 auf X=100 klemmt und 3 Newton-Schritte dort
+	// nicht reichen. N=38-Kanal (Y~2400): ~0,1 % in tau_w, unkritisch; bei hoeherem Re_tau
+	// Iterationszahl erhoehen. X geklemmt auf <=100: kappa*X <= 41, exp davon ist
 	// FP32-sicher -- noetig, weil -cl-finite-math-only NaN/INF zu undefiniertem Verhalten macht.
 	const float kap=0.41f, emkB=0.010517092f; // exp(-kappa*B) mit B=5,5
 	float x = log(fmin(100.0f, sqrt(fmax(Y, 1e-12f))));
@@ -1813,6 +1817,7 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 	// Kontrollarm zahlt nichts, weil ungesetzt gar nicht emittiert wird.
 	bool sgs_wand = false;
 	for(uint i=1u; i<7u; i++) sgs_wand = sgs_wand||(flags[j[i]]&TYPE_BO)==TYPE_S;
+	if(sgs_wand&&t%100ul==0ul) atomic_inc(&rho_clamp_hits[6]); // R2: Wirkpfad-Nachweis (Befund-2-Rest), Slot 6, gegatet wie der WFB-Zaehler
 	if(!sgs_wand)
 )+"#endif"+R( // SGS_WANDFREI
 
@@ -1842,7 +1847,7 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 		const uint3 sxyz = coordinates(n);
 		const uint sdx = min(sxyz.x, def_Nx-1u-sxyz.x);
 		const uint sdy = min(sxyz.y, def_Ny-1u-sxyz.y);
-		const uint sdz = def_Nz-1u-sxyz.z; // nur die Decke, nicht der Boden
+		const uint sdz = def_Nz-1u-sxyz.z; // nur die Decke, nicht der Boden (rein GEOMETRISCH, kein TYPE_E-Test -- siehe lbm.cpp-Sponge-Kommentar)
 		const uint sd = min(min(sdx, sdy), sdz);
 		if(sd<def_sponge_n) {
 			const float sr = 1.0f-(float)sd/(float)def_sponge_n; // 1 am Rand, 0 innen
