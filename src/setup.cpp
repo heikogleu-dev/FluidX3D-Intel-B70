@@ -390,11 +390,16 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	for(uint z=1u; z<Nz-1u; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = idx(x,y,z);
 		if(!ist_fluid(n)) continue;
-		bool wandnah=false; int snx=0,sny=0,snz=0;
-		for(uint i=1u; i<19u&&!wandnah; i++) {
+		bool wandnah=false, ms_nah=false; int snx=0,sny=0,snz=0;
+		for(uint i=1u; i<19u; i++) {
 			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
 			const int xn=(int)x+FZ_C[i][0], yn=(int)y+FZ_C[i][1];
-			if(ist_wand(idx(wx(xn),wy(yn),(uint)zn))) { wandnah=true; snx=xn; sny=yn; snz=zn; }
+			const ulong nn2 = idx(wx(xn),wy(yn),(uint)zn);
+			if(!wandnah&&ist_wand(nn2)) { wandnah=true; snx=xn; sny=yn; snz=zn; }
+			// ★ Kugel-Befund (Ist!=Soll, -777): Nachbarn neben BEWEGTEN Waenden werden zur Laufzeit
+			// TYPE_MS und vom Zellgate ausgeschlossen -- host-seitig ist MS unsichtbar (entsteht erst
+			// in initialize). Hier ueber u!=0 der Solidzelle erkennen und als eigene Klasse zaehlen.
+			if((L.flags[nn2]&(TYPE_S|TYPE_E))==TYPE_S&&(L.u.x[nn2]!=0.0f||L.u.y[nn2]!=0.0f||L.u.z[nn2]!=0.0f)) ms_nah=true;
 		}
 		if(!wandnah) continue;
 		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
@@ -414,6 +419,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		}
 		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u; f.cx_=f.cy_=f.cz_=0.0f; f.r21_=0.0f; f.r10_=0.0f;
 		if(verworfen>0u) f.klasse|=32u; // Ueberlauf -- markieren+zaehlen, nicht still rechnen (A4)
+		if(ms_nah) f.klasse|=64u; // bewegte-Wand-Naehe: Zellgate schloesse sie ohnehin aus -- gezaehlt statt Soll-Luecke
 		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u; F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
 		for(uint i=0u;i<np;i++) { cx+=px[i]; cy+=py[i]; cz+=pz[i]; }
@@ -484,11 +490,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
 	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
 	hist_yw.clear(); hist_r21.clear(); hist_r10.clear(); hist_winkel.clear();
-	ulong markiert=0ull; k4=0ull; ulong k_ueberlauf=0ull;
+	ulong markiert=0ull; k4=0ull; ulong k_ueberlauf=0ull, k_ms=0ull;
 	for(const Facette& f : F) {
 		if(f.klasse!=0u) markiert++;
 		if(f.klasse&8u)  k4++;
 		if(f.klasse&32u) k_ueberlauf++;
+		if(f.klasse&64u) k_ms++;
 		if(f.klasse&1u) continue;
 		hist_yw.push_back((double)f.yw);
 		hist_winkel.push_back(acos(fmin(1.0,(double)fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0/3.14159265358979);
@@ -500,7 +507,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	const ulong nf=(ulong)F.size();
 	print_info(string("Facetten (")+wo+"): "+to_string(nf)+" wandnahe Fluidzellen; Klassen: K1(<6 Punkte) "+to_string(k1)
 		+", K2(Kante) "+to_string(k2)+", K3(Linie) "+to_string(k3)+", K4(y_w, nach Glaettung) "+to_string(k4)
-		+", Orientierung "+to_string(kori)+", Punktueberlauf "+to_string(k_ueberlauf));
+		+", Orientierung "+to_string(kori)+", Punktueberlauf "+to_string(k_ueberlauf)+", bewegte-Wand-Naehe "+to_string(k_ms));
 	if(nf>0ull) print_info("  markierte ZELLEN (klasse!=0, Nachpruefer B2 -- Bitmaske, keine Zaehlersumme): "
 		+to_string(markiert)+" = "+to_string(100.0f*(float)markiert/(float)nf,1u)
 		+" % (Schwellen GEEICHT 2026-08-15: r21>0,15 aus Fenster-A/B, r10<0,02 Sicherheitsnetz -- K3 war ueberall leer)");
