@@ -11,10 +11,17 @@ FACETTEN-PLAN.md / FACETTEN-STUFE2.md / FACETTEN-CD-PFAD.md, alle gegen­geprüf
 geeicht (3³, r21>0,15, 21,9 % markiert), Kernel mit Paar-Gate + Flächenfaktor auf DDF-Ebene
 bewiesen, Kanal-Äquivalenz zur z-WFB BITGLEICH (CPU+iGPU), Kugel Ist=Soll, Cd-Auslesepfad
 K1–K4 bestanden (K2 = 0,9961 stationär). Audit Runde 3 sauber (AUDIT-BEFUNDE.md).
-**Nächste Schritte:** Druck-Zeitmittel im Cd-Pfad (Sample-Kadenz, Plan E6); Entscheidung
-Stufe 3 (gekippter Kanal) vs. vorgezogene Nebenachsen — die Kugel zeigt nur 313 Tauschzellen
-bei 14.356 ohne offenes Paar, der dominante-Achse-Tausch greift an Krümmung kaum; danach
-Stufe 5 Fahrzeug-Abnahme (y⁺ 1122 → ~140) und die Relativgeschwindigkeits-Erweiterung.
+**Nächste Schritte:** Druck-Zeitmittel im Cd-Pfad (Sample-Kadenz, Plan E6); dann die
+**MORGEN-ENTSCHEIDUNG (neu nach Literatur-Recherche, s. FACETTEN-LITERATUR.md):** die Kugel
+zeigt nur 313 Tauschzellen bei 14.356 ohne offenes Paar — der Paartausch ist an Krümmung
+STRUKTURELL unzureichend (bestätigt durch Matyka 2013). Die Literatur-Empfehlung ist der
+**iMEM-artige Slip-Velocity-Bounce-Back** (Asmuth et al. 2021): u_s pro Facette so bestimmen,
+dass die Summe über ALLE offenen Wand-Links exakt das Ziel-τ_w liefert — löst beide Lücken
+(kein Paarzwang, trägt auch die Hangauf-Komponente), bleibt im Halfway-BB/Esoteric-Pull-Rahmen,
+und der Han/Ooka-Tausch bleibt als gitterparalleler Degenerationsfall + Kontrollarm. Der
+gekippte Kanal (Formelblatt folgt) bleibt der richtige Messpunkt — er ist sogar eine
+Literaturlücke. Danach Stufe 5 Fahrzeug-Abnahme (y⁺ 1122 → ~140) und die
+Relativgeschwindigkeits-Erweiterung.
 
 **Das Ziel, an dem alles gemessen wird:** Cd und Cz des Fahrzeugs gegen OpenFOAM 13
 (**0,599 / −1,301**). Stand 2026-08-09: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem
