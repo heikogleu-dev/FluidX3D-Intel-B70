@@ -130,3 +130,31 @@ T2 (Mini-Domäne, erst CPU-OpenCL, dann iGPU): im selben Testfall 32×16×24, 45
 - /home/heiko/CFD/FluidX3D-v2/src/lbm.hpp (Statiken/Member 106–157, LBM-API 540–570)
 - /home/heiko/CFD/FluidX3D-v2/src/setup.cpp (struct Facette/baue_facetten 340–521, kanal 523–681, kugel 954–1018, fahrzeug 1267–1394, dd 1646–1698, fernfeld 2277–2292, main_setup 2378)
 - /home/heiko/CFD/FluidX3D-v2/FACETTEN-PLAN.md (A5–A8, R1/R2, Auflagen 3/4/8 — Abnahmereferenz)
+
+---
+
+# Messstand Stufe 2, Commits 1-2 (2026-08-15)
+
+**T1/T1b (Host-Unit-Test):** unabhaengig aus FZ_C hergeleitete Paartabelle == Kernel-Tabelle
+(alle 12 Paare); 45-Grad-Eckzelle: x-Paar offen, y-Paar zu (das R1-Beispiel des Gegenpruefers).
+
+**T2 (Mini-Domaene 32x16x24, 45-Grad-Treppe, AUS vs NUR-TAUSCH):** Phase 1 nach 1 Schritt
+bitgleich (Tausch wertgleich wegen Solid-Symmetrie -- dokumentiert); Phase 2 nach 2 Schritten:
+512 Differenzen, ALLE an Zellen mit >=1 offenem Paar, **0 verbotene** -- R1 auf DDF-Ebene
+verifiziert. Wirkpfad 1344 = fac_N exakt, 320 Zellen ohne offenes Paar (Treppenkanten), 64 Skips.
+
+**Lehrstueck des Tages:** der erste Sichtbarkeits-Fix gab den Wandzellen u!=0 -- initialize()
+machte damit alle Fluidnachbarn zu TYPE_MS, und der EIGENE MS-Guard sperrte den Facettenpfad
+komplett aus (Wirkpfad 0). Eine Stunde Bisektion; der Konsolen-Zeilenumbruch verschluckte dabei
+zeitweise die entscheidende Zahl. Beides steht jetzt als Kommentar im Testfall.
+
+**Aequivalenznachweis (Messpunkt b) -- STRENGSTE Form erreicht: BITGLEICH, kein Toleranzband.**
+- CPU (N=38, 316 Schritte): FELD-HASH(u) Facetten == z-WFB (12755646098055097704), AUS-Arm
+  verschieden; Ub_lat/f_lat/cf_kraftbilanz spaltenidentisch.
+- iGPU (N=38, 12666 Schritte): FELD-HASH(u) beide 7540097450125369907; Wirkpfad beide exakt
+  1.798.320 = Soll; tau-Klemme/Skips/ohne-Paar alle 0. Die FMA-Sorge (F4/E1) trat nicht ein --
+  der konstruierte Ausdrucksbaum kollabiert auch auf der iGPU bitgenau.
+- cf_impulsaustausch wackelt im LSB (atomare Reduktion) -- als UNGUELTIG markiert, zaehlt nicht.
+
+Naechster Schritt: Commit 3 = Kugel-Verdrahtung (Messpunkt c, drei Arme AUS/2/1 + beide Cd-Wege
+als Pflichtzahl), danach Stufe 3 (gekippter Kanal 45 Grad + 26,6 Grad).
