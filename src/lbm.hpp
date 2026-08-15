@@ -64,7 +64,12 @@ private:
 	Kernel kernel_apply_velocity_inlet;
 	uint vi_N_active = 0u;
 	bool collect_boundary_pairs(const uint face_mask, const string& wofuer, std::vector<ulong>& cells, std::vector<ulong>& interior);
+public:
+	// ★ oeffentlich seit 2026-08-15: die y+-Messung (messe_yplus, setup.cpp) liest den F-Puffer
+	// direkt mit der BBox-Indizierung -- die Huellen-Sicht lbm.F waere die U1-Falle (rechnet mit
+	// voller Domaenengroesse, Puffer ist BBox-gross).
 	uint fbx0=0u, fby0=0u, fbz0=0u, fbnx=0u, fbny=0u, fbnz=0u; // FORK: aktive F-Bounding-Box dieser Domaene
+private:
 	float po_rho = 1.0f; // vorgeschriebene Dichte am Auslass (LBM-Einheiten); 1.0 = Referenzdruck
 	float po_sigma = 1.0f; // Ankerrate des Flaechenmittels gegen rho_out
 	uint po_hart = 0u;     // 1 = alter harter Rand je Zelle (CFD_PO_HART), der Kontrollarm

@@ -316,6 +316,80 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 		+(schmutz=="(leer)" ? ", Baum sauber)" : ", Baum SCHMUTZIG -> aenderungen.diff)"));
 }
 
+// ---------------------------------------------------------------------------- y+ messen statt korrelieren
+// ★★ 0A der Arbeitsliste, 2026-08-15. Die Zahl "y+ = 137" war eine PLATTENKORRELATION bei x = L --
+// nie gemessen. Auf ihr stand die ganze Wandmodell- und Kanalplanung. Diese Funktion misst sie.
+//
+// WAS SIE TUT: update_force_field liefert die Impulsaustauschkraft je Solid-Zelle (F, SoA, in der
+// F-Box). Fuer jede FAHRZEUG-Zelle (flags == TYPE_S|TYPE_X, genau die zaehlt object_force) mit
+// GENAU EINEM Fluid-Flaechennachbarn ist die Wandnormale exakt bekannt -- dort wird die
+// Tangentialkraft (die beiden Komponenten senkrecht zur Normalen) als Wandschubspannung genommen
+// (Zellflaeche = 1 in Gittereinheiten), daraus u_tau = sqrt(tau_w) (rho_lat = 1) und
+// y+ = u_tau * 0,5 / nu_lat (erste Fluidzellmitte liegt eine halbe Zelle von der Wand).
+//
+// WARUM NUR EINDEUTIG ORIENTIERTE ZELLEN: an Treppen und Kanten mischt der Impulsaustausch Druck-
+// und Reibungsanteil untrennbar (Gegenpruefung 2026-08-09: Vorfaktor schwankt um Faktor 3,5, an
+// Kanten kommt wandnormale Transpiration dazu). Die anliegenden Flaechen -- Dach, Haube, Flanken,
+// Unterboden -- sind genau die, um die es bei y+ geht. Der Anteil vermessener Zellen wird
+// ausgegeben; ist er klein, ist das ein Befund ueber die Voxelisierung, nicht ueber y+.
+//
+// ★ U1-FALLE (HYGIENE-BEFUNDE): lbm.F der Huelle rechnet mit der VOLLEN Domaenengroesse, der
+// Puffer ist BBox-gross. Hier wird deshalb direkt der Domaenenpuffer mit der BBox-Indizierung aus
+// f_bbox() gelesen: fbi = (x-fbx0) + (y-fby0)*fbnx + (z-fbz0)*fbnx*fbny, SoA-Stride F_N.
+void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float nu_lat, const float dx, const float dt, const float si_rho, const string& out_dir, const char* wo) {
+	L.update_force_field();
+	LBM_Domain* D = L.lbm_domain[0];
+	D->F.read_from_device(); L.flags.read_from_device();
+	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
+	const uchar VEH = (uchar)(TYPE_S|TYPE_X);
+	const int dirs[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+	std::vector<float> yp; yp.reserve(1u<<20);
+	ulong n_veh_wand=0ull, n_eindeutig=0ull;
+	double tau_sum=0.0;
+	for(uint z=(uint)D->fbz0; z<D->fbz0+D->fbnz; z++) for(uint y=(uint)D->fby0; y<D->fby0+D->fbny; y++) for(uint x=(uint)D->fbx0; x<D->fbx0+D->fbnx; x++) {
+		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		if(L.flags[n]!=VEH) continue;
+		int nrm=-1; uint n_fluid=0u;
+		for(int d=0; d<6; d++) {
+			const int xn=(int)x+dirs[d][0], yn=(int)y+dirs[d][1], zn=(int)z+dirs[d][2];
+			if(xn<0||yn<0||zn<0||xn>=(int)Nx||yn>=(int)Ny||zn>=(int)Nz) continue;
+			const ulong nn = (ulong)xn + ((ulong)yn + (ulong)zn*(ulong)Ny)*(ulong)Nx;
+			// Fluid = nicht Solid im Sinne der Maske (TYPE_MS = 0x03 traegt das S-Bit -- die bekannte Falle)
+			if((L.flags[nn]&(TYPE_S|TYPE_E))!=TYPE_S) { n_fluid++; nrm=d; }
+		}
+		if(n_fluid==0u) continue;
+		n_veh_wand++;
+		if(n_fluid!=1u) continue; // nur eindeutig orientierte Zellen, siehe Kopfkommentar
+		n_eindeutig++;
+		const ulong fbi = (ulong)(x-D->fbx0) + (ulong)(y-D->fby0)*(ulong)D->fbnx + (ulong)(z-D->fbz0)*(ulong)D->fbnx*(ulong)D->fbny;
+		const float Fx=D->F[fbi], Fy=D->F[FN+fbi], Fz=D->F[2ul*FN+fbi];
+		const int ax = dirs[nrm][0]!=0 ? 0 : (dirs[nrm][1]!=0 ? 1 : 2);
+		const float Ft = ax==0 ? sqrt(Fy*Fy+Fz*Fz) : (ax==1 ? sqrt(Fx*Fx+Fz*Fz) : sqrt(Fx*Fx+Fy*Fy));
+		const float tau_lat = Ft; // Flaeche = 1 Gitterzelle
+		tau_sum += (double)tau_lat;
+		yp.push_back(sqrt(tau_lat)*0.5f/nu_lat);
+	}
+	if(yp.empty()) { print_warning(string(wo)+": keine eindeutig orientierte Fahrzeug-Wandzelle gefunden -- y+ nicht messbar."); return; }
+	std::sort(yp.begin(), yp.end());
+	auto q = [&](const double f) { return yp[(size_t)fmin((double)yp.size()-1.0, f*(double)yp.size())]; };
+	const float stress_si = si_rho*(dx/dt)*(dx/dt); // Pa je Gitter-Spannungseinheit
+	print_info(string("--- y+ GEMESSEN, ")+wo+" (nur eindeutig orientierte Wandzellen) ---");
+	print_info("  Fahrzeug-Wandzellen: "+to_string(n_veh_wand)+", davon eindeutig orientiert: "+to_string(n_eindeutig)
+		+" ("+to_string(100.0f*(float)n_eindeutig/(float)fmax(1ull,n_veh_wand),1u)+" %)");
+	print_info("  y+ Quartile: 25 % = "+to_string(q(0.25),1u)+" | MEDIAN = "+to_string(q(0.5),1u)+" | 75 % = "+to_string(q(0.75),1u)
+		+" | 95 % = "+to_string(q(0.95),1u));
+	print_info("  tau_w Mittel = "+to_string((float)(tau_sum/(double)yp.size())*stress_si,3u)+" Pa (Plattenkorrelation erwartete ~1,3 Pa; V1 mass am Unterboden Median 0,28 Pa)");
+	print_info("  zum Vergleich: die Korrelation sagte y+ = 137 -- der MEDIAN oben ist die gemessene Wahrheit");
+	// Histogramm in die CSV, damit die Verteilung nachnutzbar ist
+	std::ofstream f(out_dir+"yplus_histogramm.csv");
+	f << "yplus_bin_bis,anzahl\n";
+	const float bins[12] = {1.0f,5.0f,10.0f,30.0f,60.0f,100.0f,150.0f,200.0f,300.0f,400.0f,600.0f,1e9f};
+	size_t i0=0;
+	for(const float b : bins) { size_t i1=i0; while(i1<yp.size() && yp[i1]<b) i1++; f << b << "," << (i1-i0) << "\n"; i0=i1; }
+	f.close();
+	print_info("  Histogramm: "+out_dir+"yplus_histogramm.csv");
+}
+
 // ---------------------------------------------------------------------------- Mitbewegte Waende pruefen
 // ★★ WARUM DIESE FUNKTION MEHR TUT ALS FLAGS ZAEHLEN -- die Lehre aus V1, 2026-08-09 nachgeprueft.
 //
@@ -1659,6 +1733,7 @@ static void main_setup_fahrzeug_dd() {
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
 	print_info("---------------------------------------------------------------");
+		if(env_u("CFD_YPLUS", 1u)>0u) messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld");
 	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h); berichte_dichteklemme(lbm_c, "Fernfeld", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
