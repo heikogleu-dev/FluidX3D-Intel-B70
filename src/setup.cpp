@@ -337,16 +337,7 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 // FACETTEN-PLAN.md A1-A4 + Revision: TLS-Ausgleichsebene ueber Halfway-BB-Linkmittelpunkte der
 // 5^3-Nachbarschaft jeder wandnahen Fluidzelle. Host, double, kein Kernel-Eingriff, keine Flag-Bits.
 // wand_flag: 0x41 am Fahrzeug (Fahrbahn/Latsch = Ausschluss), TYPE_S im Kanal-Ankerfall.
-struct Facette {
-	float nx, ny, nz, yw; // Normale (ins Fluid), Wandabstand des Zellzentrums zur Ausgleichsebene
-	float cx_, cy_, cz_;  // Fit-Schwerpunkt (fuer y_w-Neuberechnung nach der Glaettung, Nachpruefer B3)
-	float r21_, r10_;     // Eigenwertverhaeltnisse lmin/lmid (K2) und lmid/lmax (K3) -- fuer die Schwelleneichung
-	uint  n_punkte;       // Stuetzpunkte (geschnittene Links) -- Flaechenproxy fuer die Glaettung
-	uint  eigene_links;   // davon Links DIESER Zelle (fuer Akkumulator-Hygiene in Stufe 2)
-	uchar klasse;         // 0 sauber, sonst Bitmaske K1=1 K2=2 K3=4 K4=8 (Orientierungskonflikt=16)
-	uchar achse;          // dominante Achse 0/1/2, Tie-Break: kleinste Achsnummer (Revision Auflage 5)
-	ulong n;              // Zellindex in der Domaene
-};
+// struct Facette: seit Stufe 2 in lbm.hpp (alloc_facetten braucht den Typ)
 // 3x3-Jacobi in double: Eigenvektor zum kleinsten Eigenwert von M (symmetrisch).
 static void jacobi3(double M[3][3], double ew[3], double ev[3][3]) {
 	for(int i=0;i<3;i++) for(int j=0;j<3;j++) ev[i][j] = (i==j)?1.0:0.0;
@@ -392,25 +383,31 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	std::vector<Facette> F;
 	ulong k1=0ull,k2=0ull,k3=0ull,k4=0ull,kori=0ull;
 	std::vector<double> hist_yw, hist_r21, hist_r10, hist_winkel;
-	for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+	// ★ Stufe 2 (F6): x/y PERIODISCH gewickelt -- die z-WFB behandelt alle Wandzellen, der
+	// Facettenpfad muss es auch (sonst kein Ist=Soll und keine Kanal-Aequivalenz). z bleibt 1..Nz-2.
+	auto wx = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
+	auto wy = [&](const int v) { return (uint)((v%(int)Ny+(int)Ny)%(int)Ny); };
+	for(uint z=1u; z<Nz-1u; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = idx(x,y,z);
 		if(!ist_fluid(n)) continue;
 		bool wandnah=false; int snx=0,sny=0,snz=0;
 		for(uint i=1u; i<19u&&!wandnah; i++) {
-			const int xn=(int)x+FZ_C[i][0], yn=(int)y+FZ_C[i][1], zn=(int)z+FZ_C[i][2];
-			if(ist_wand(idx((uint)xn,(uint)yn,(uint)zn))) { wandnah=true; snx=xn; sny=yn; snz=zn; }
+			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+			const int xn=(int)x+FZ_C[i][0], yn=(int)y+FZ_C[i][1];
+			if(ist_wand(idx(wx(xn),wy(yn),(uint)zn))) { wandnah=true; snx=xn; sny=yn; snz=zn; }
 		}
 		if(!wandnah) continue;
 		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
 		uint np=0u, eigene=0u, verworfen=0u; // Puffer np_max = (2R+1)^3 * 18, dynamisch (Nachpruefer B1)
 		for(int dz=-R; dz<=R; dz++) for(int dy=-R; dy<=R; dy++) for(int dx2=-R; dx2<=R; dx2++) {
 			const int cx=(int)x+dx2, cy=(int)y+dy, cz=(int)z+dz;
-			if(cx<1||cy<1||cz<1||cx>=(int)Nx-1||cy>=(int)Ny-1||cz>=(int)Nz-1) continue;
-			const ulong nc = idx((uint)cx,(uint)cy,(uint)cz);
+			if(cz<1||cz>=(int)Nz-1) continue; // z hart, x/y periodisch (F6)
+			const ulong nc = idx(wx(cx),wy(cy),(uint)cz);
 			if(!ist_fluid(nc)) continue;
 			for(uint i=1u; i<19u; i++) {
-				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1], zn=cz+FZ_C[i][2];
-				if(!ist_wand(idx((uint)xn,(uint)yn,(uint)zn))) continue;
+				const int zn=cz+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1];
+				if(!ist_wand(idx(wx(xn),wy(yn),(uint)zn))) continue;
 				if(np<np_max) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
 				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
 			}
@@ -466,8 +463,8 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			double sx=0.0, sy=0.0, sz=0.0;
 			for(int dz=-1; dz<=1; dz++) for(int dy=-1; dy<=1; dy++) for(int dx2=-1; dx2<=1; dx2++) {
 				const int cx2=(int)x+dx2, cy2=(int)y+dy, cz2=(int)z+dz;
-				if(cx2<0||cy2<0||cz2<0||cx2>=(int)Nx||cy2>=(int)Ny||cz2>=(int)Nz) continue;
-				const uint j = feld[idx((uint)cx2,(uint)cy2,(uint)cz2)];
+				if(cz2<0||cz2>=(int)Nz) continue; // x/y periodisch (F6)
+				const uint j = feld[idx(wx(cx2),wy(cy2),(uint)cz2)];
 				if(j==0xFFFFFFFFu||(F[j].klasse&1u)) continue;
 				const double w = (double)max(1u, F[j].eigene_links); // Flaechenproxy der FACETTENZELLE (Nachpruefer-Randnotiz: Fenstersummen ueberlappen fast vollstaendig -> de facto uniform)
 				sx+=w*F[j].nx; sy+=w*F[j].ny; sz+=w*F[j].nz;
@@ -553,6 +550,9 @@ void main_setup_kanal() {
 	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
 	{ const uint wf = env_u("CFD_WANDFUNKTION", 0u); LBM_Domain::s_wandfunktion = wf>0u; LBM_Domain::s_wf_tau = (wf==2u) ? 0.0f : 1.0f;
 	  if(wf>0u) print_info(string("Wandfunktion (Han et al. 2021): ")+(wf==2u?"NUR FREE-SLIP-TAUSCH (Zwischenarm)":"voll (Spalding, kappa=0,41, B=5,5)")); }
+	// ★ C1b Stufe 2: Facettenpfad am Kanal = Aequivalenznachweis gegen die z-WFB (FACETTEN-STUFE2.md F4).
+	{ const uint fc = env_u("CFD_FACETTEN", 0u); LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_tau = (fc==2u) ? 0.0f : 1.0f;
+	  if(fc>0u) print_info(string("Facetten-WFB (dominante Achse, Paar-Gate, Flaechenfaktor): ")+(fc==2u?"NUR TAUSCH (Zwischenarm)":"voll")); }
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
 	create_folder(out_dir);
 	sichere_lauf(out_dir, "kanal");
@@ -594,6 +594,10 @@ void main_setup_kanal() {
 		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, "Kanal-Anker");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
+	if(env_u("CFD_FACETTEN", 0u)>0u) {
+		std::vector<Facette> FF = baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, "Kanal");
+		lbm.alloc_facetten(FF);
+	}
 	lbm.run(0u, n_steps); // initialisieren
 
 	// ---- Zeitschleife mit CFR-Regler und Ebenenstatistik
@@ -602,7 +606,7 @@ void main_setup_kanal() {
 	// update_force_field setzt reine Reflexion voraus ("2x because fi are reflected"), die WFB
 	// ersetzt genau diese Links durch Tausch+tau. Das Kriterium "beide c_f-Wege gleich" gilt NUR
 	// im Arm ohne Wandfunktion. Der Planungsagent hatte diese Kennzeichnung angewiesen; sie fehlte.
-	if(env_u("CFD_WANDFUNKTION", 0u)>0u) zcsv << "# ACHTUNG: cf_impulsaustausch unter WANDFUNKTION UNGUELTIG (Reflexionsannahme verletzt) -- nur cf_kraftbilanz zaehlt\n";
+	if(env_u("CFD_WANDFUNKTION", 0u)>0u||env_u("CFD_FACETTEN", 0u)>0u) zcsv << "# ACHTUNG: cf_impulsaustausch unter WANDFUNKTION/FACETTEN UNGUELTIG (Reflexionsannahme verletzt) -- nur cf_kraftbilanz zaehlt\n";
 	zcsv << "# Hinweis: f_lat ist das FRISCH geregelte f (wirkt ab dem Folgechunk); cf_kraftbilanz rechnet mit dem im Chunk WIRKENDEN f -- Rueckrechnung cf=2*f_lat*delta/Ub^2 weicht deshalb ab\n";
 	zcsv << "schritt,ett,Ub_lat,Ub_plus,f_lat,cf_kraftbilanz,cf_impulsaustausch\n" << std::flush;
 	const uint regel_alle = 100u;
@@ -674,6 +678,28 @@ void main_setup_kanal() {
 		// Audit-Nacharbeit 11: Slot 3 = NUR tau-Klemme, Slot 4 = u_t~0-Skips (vorher vermischt)
 		print_info("Wandfunktion-Wirkpfad: "+to_string(wz)+" gezaehlte Wandzellen-Updates (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", Ein-Zellen-Spalte "+to_string(sp));
 		if(wz==0ull) print_error("Wandfunktion war eingeschaltet, aber der Wirkpfad-Zaehler ist NULL -- lautloser No-Op.");
+	}
+	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 2: Wirkpfad-Nachweis, Soll EXAKT (F7)
+		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
+		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
+		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
+		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)
+			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu));
+		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt.");
+		if(zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
+		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
+		double stau=0.0; ulong ntau=0ull;
+		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
+		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=sqrt(fmax(0.0,mtau))*0.5/(double)nu_lat;
+			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+", y+ = "+to_string((float)yp,1u)); }
+	}
+	// Feld-Hash (FNV-1a ueber die u-Bitmuster) fuer den Bitvergleich der Aequivalenzarme
+	if(env_u("CFD_FELD_HASH", 0u)>0u) {
+		lbm.u.read_from_device();
+		ulong h=1469598103934665603ull;
+		for(ulong i=0ull; i<3ull*lbm.get_N(); i++) { uint b; const float v=(i<lbm.get_N())?lbm.u.x[i%lbm.get_N()]:((i<2ull*lbm.get_N())?lbm.u.y[i%lbm.get_N()]:lbm.u.z[i%lbm.get_N()]); memcpy(&b,&v,4u); h^=(ulong)b; h*=1099511628211ull; }
+		print_info("FELD-HASH(u) = "+to_string(h));
 	}
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
 	print_info("Referenz Lee & Moser 5186: U_b+ = 24,104, c_f = 3,4424e-3.");
@@ -1015,6 +1041,8 @@ void main_setup_kugel() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (Stufe 2: kanal+facetten_test; kugel folgt).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=============== Kugel im Kanal (Neuaufbau auf Upstream 8986874) ===============");
@@ -1285,6 +1313,8 @@ static void main_setup_fahrzeug() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (Stufe 2: kanal+facetten_test; kugel folgt).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
@@ -1672,6 +1702,8 @@ static void main_setup_fahrzeug_dd() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (Stufe 2: kanal+facetten_test; kugel folgt).");
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
 
 	// ---------------------------------------------------------------- Grobes Gitter bauen
@@ -1693,7 +1725,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; // Audit-Nacharbeit 10: Statik-Symmetrie auch vor lbm_c
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // Audit-Nacharbeit 10: Statik-Symmetrie auch vor lbm_c
 	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 kaeme im Fernfeld der Kopplungs-Entnahmeebene x- (152 Zellen) zu nahe.");
 	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
 
@@ -2280,7 +2312,7 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; // Re-Audit R2: s_wf_tau fehlte nur hier (6. Stelle)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // Re-Audit R2: s_wf_tau fehlte nur hier (6. Stelle)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	// ★ Nachpruefer-Befund 2026-08-15: diese sechste Konstruktorstelle FEHLTE in der Verdrahtung von
 	// CFD_SGS_WANDFREI -- der Schalter waere im fernfeld-Fall still wirkungslos gewesen (die
@@ -2375,11 +2407,125 @@ static void main_setup_fernfeld() {
 	_exit(0);
 }
 
+
+// ---------------------------------------------------------------------------- C1b Stufe 2: T1+T2
+// T1: leitet die Paartabelle UNABHAENGIG aus FZ_C ab und prueft sie gegen die Host-Kopie der im
+// Kernel hartkodierten Tabelle (faengt Transkriptionsfehler mechanisch); danach Gate-Logik an
+// synthetischen Geometrien. T2: Mini-Domaene mit 45-Grad-Treppe, Arm AUS gegen Arm FACETTEN=2
+// (reiner Tausch) nach GENAU 1 Schritt -- Differenzen duerfen NUR an Zellen mit >=1 offenem Paar
+// liegen, alle anderen muessen BITGLEICH sein (R1: DDF-Integritaet an fluiden Urspruengen).
+static uint fz_opp(const uint i) { return (i==0u) ? 0u : ((i%2u==1u) ? i+1u : i-1u); }
+struct FacPaar { uint ip, im, g1, g2; }; // Tausch fhn[ip]<->fhn[im], Gates j[g1], j[g2]
+// Host-Kopie der Kernel-Tabelle (apply_facette): [achse][seite 0=+n,1=-n][paar]
+static const FacPaar FAC_TAB[3][2][2] = {
+	{ {{7,13,8,14},{9,15,10,16}}, {{14,8,13,7},{16,10,15,9}} },   // achse 0: nx>0 (-x-Wand), nx<0 (+x)
+	{ {{7,14,8,13},{11,17,12,18}}, {{13,8,14,7},{18,12,17,11}} }, // achse 1: ny>0, ny<0
+	{ {{9,16,10,15},{11,18,12,17}}, {{15,10,16,9},{17,12,18,11}} } // achse 2: nz>0 (Boden), nz<0 (Decke)
+};
+void main_setup_facetten_test() {
+	print_info("C1b T1: Paartabelle unabhaengig aus FZ_C herleiten und gegen die Kernel-Kopie pruefen.");
+	uint fehler=0u;
+	for(uint a=0u; a<3u; a++) for(uint s=0u; s<2u; s++) {
+		const int sign = s==0u ? 1 : -1; // Normale zeigt in +a bzw. -a
+		// einlaufende Diagonalen: c[a] == sign und genau eine weitere Komponente != 0
+		uint gefunden=0u;
+		for(uint ta=0u; ta<3u; ta++) { // tangentiale Achsen aufsteigend (Paarreihenfolge!)
+			if(ta==a) continue;
+			for(uint i=7u; i<19u; i++) {
+				if(FZ_C[i][a]!=sign) continue;
+				int nc=0; for(uint kx=0u;kx<3u;kx++) if(FZ_C[i][kx]!=0) nc++;
+				if(nc!=2 || FZ_C[i][ta]<=0) continue; // Mitglied mit POSITIVER Tangentialkomponente = ip
+				// Partner: gleiches c[a], gespiegelte Tangentiale
+				uint im=0u;
+				for(uint p2=7u; p2<19u; p2++) if(FZ_C[p2][a]==sign && FZ_C[p2][ta]==-FZ_C[i][ta] && FZ_C[p2][3u-a-ta]==0) im=p2;
+				const FacPaar soll = FAC_TAB[a][s][gefunden];
+				const uint g1=fz_opp(i), g2=fz_opp(im);
+				if(soll.ip!=i||soll.im!=im||soll.g1!=g1||soll.g2!=g2) {
+					print_warning("T1: Tabellenfehler achse "+to_string(a)+" seite "+to_string(s)+" paar "+to_string(gefunden)
+						+": hergeleitet ("+to_string(i)+","+to_string(im)+","+to_string(g1)+","+to_string(g2)
+						+") vs Kernel ("+to_string(soll.ip)+","+to_string(soll.im)+","+to_string(soll.g1)+","+to_string(soll.g2)+")");
+					fehler++;
+				}
+				gefunden++;
+			}
+		}
+		if(gefunden!=2u) { print_warning("T1: achse "+to_string(a)+" seite "+to_string(s)+": "+to_string(gefunden)+" statt 2 Paare hergeleitet."); fehler++; }
+	}
+	if(fehler>0u) print_error("T1 GESCHEITERT: "+to_string(fehler)+" Tabellenfehler.");
+	print_info("T1 bestanden: alle 12 Paare (6 Seiten x 2) stimmen mit der Kernel-Tabelle ueberein.");
+	// T1b: Gate-Logik an der 45-Grad-Treppe (solid wenn z<y, Zelle auf z==y): y-Paar zu, x-Paar offen.
+	{
+		auto solid = [](const int x, const int y, const int z) { (void)x; return z<y; };
+		const int x=8,y=8,z=8; uint offen=0u, zu=0u;
+		for(uint p=0u; p<2u; p++) { // Bodenseite (nz>0), achse 2
+			const FacPaar& q = FAC_TAB[2][0][p];
+			const bool g = solid(x+FZ_C[q.g1][0],y+FZ_C[q.g1][1],z+FZ_C[q.g1][2]) && solid(x+FZ_C[q.g2][0],y+FZ_C[q.g2][1],z+FZ_C[q.g2][2]);
+			if(g) offen++; else zu++;
+		}
+		if(offen!=1u||zu!=1u) print_error("T1b GESCHEITERT: 45-Grad-Eckzelle muss genau 1 offenes (x) und 1 geschlossenes (y) Paar haben, hat "+to_string(offen)+"/"+to_string(zu)+".");
+		print_info("T1b bestanden: Eckzelle der 45-Grad-Treppe -- x-Paar offen, y-Paar zu (R1-Beispiel des Gegenpruefers).");
+	}
+	// ---- T2: Mini-Domaene, Arm AUS vs Arm FACETTEN=2, 1 Schritt, Differenz-Lokalisierung.
+	print_info("C1b T2: 32x16x24, 45-Grad-Treppenboden, AUS vs NUR-TAUSCH nach 1 Schritt.");
+	const uint Nx=32u, Ny=16u, Nz=24u; const float nu_lat=0.01f;
+	auto treppe = [&](const uint x, const uint y, const uint z) { (void)y; return (int)z < (int)((x%8u)); }; // Periode 8 teilt Nx=32
+	auto init = [&](LBM& L) {
+		for(ulong n=0ull; n<L.get_N(); n++) {
+			uint x,y,z; L.coordinates(n,x,y,z);
+			if(z==Nz-1u||treppe(x,y,z)) { L.flags[n]=TYPE_S; L.u.x[n]=0.0f; }
+			else L.u.x[n]=0.05f; // tangentiale Anstroemung, damit u_t != 0
+		}
+	};
+	std::vector<float> ua_x, ua_y, ua_z; std::vector<Facette> FF;
+	{ // Arm A: AUS
+		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_tau=1.0f;
+		LBM a(Nx,Ny,Nz,nu_lat); init(a); a.run(1u,1u); a.u.read_from_device();
+		ua_x.resize(a.get_N()); ua_y.resize(a.get_N()); ua_z.resize(a.get_N());
+		for(ulong n=0ull; n<a.get_N(); n++) { ua_x[n]=a.u.x[n]; ua_y[n]=a.u.y[n]; ua_z[n]=a.u.z[n]; }
+	}
+	ulong diff_erlaubt=0ull, diff_verboten=0ull, gleich_erwartet=0ull;
+	{ // Arm B: FACETTEN=2 (reiner Tausch)
+		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_tau=0.0f;
+		LBM b(Nx,Ny,Nz,nu_lat); init(b);
+		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, string("./"), "T2-Treppe");
+		b.alloc_facetten(FF);
+		b.run(1u,1u); b.u.read_from_device();
+		// Host-Vorhersage: fuer jede AKTIVE Facette Gates auswerten
+		std::vector<uchar> erwartet(b.get_N(), 0u); // 1 = Differenz erlaubt (>=1 Paar offen)
+		for(const Facette& f : FF) {
+			if(f.klasse!=0u) continue;
+			uint x,y,z; b.coordinates(f.n,x,y,z);
+			const float na[3]={f.nx,f.ny,f.nz}; const uint a2=f.achse; const uint seite = na[a2]>0.0f ? 0u : 1u;
+			uint offen=0u;
+			for(uint p=0u; p<2u; p++) {
+				const FacPaar& q = FAC_TAB[a2][seite][p];
+				auto sol=[&](const uint gi){ const int xx=(int)x+FZ_C[gi][0], yy=(int)y+FZ_C[gi][1], zz=(int)z+FZ_C[gi][2];
+					const uint wxx=(uint)((xx%(int)Nx+(int)Nx)%(int)Nx), wyy=(uint)((yy%(int)Ny+(int)Ny)%(int)Ny);
+					if(zz<0||zz>=(int)Nz) return false; return (b.flags[(ulong)wxx+((ulong)wyy+(ulong)zz*(ulong)Ny)*(ulong)Nx]&(TYPE_S|TYPE_E))==TYPE_S; };
+				if(sol(q.g1)&&sol(q.g2)) offen++;
+			}
+			if(offen>0u) erwartet[f.n]=1u;
+		}
+		for(ulong n=0ull; n<b.get_N(); n++) {
+			const bool d = (ua_x[n]!=b.u.x[n])||(ua_y[n]!=b.u.y[n])||(ua_z[n]!=b.u.z[n]);
+			if(d) { if(erwartet[n]) diff_erlaubt++; else diff_verboten++; }
+			else if(erwartet[n]) gleich_erwartet++;
+		}
+	}
+	print_info("T2: Differenzen an erlaubten Zellen "+to_string(diff_erlaubt)+", an VERBOTENEN "+to_string(diff_verboten)
+		+", erwartete ohne Differenz "+to_string(gleich_erwartet)+" (u_t~0 oder Tausch symmetrisch: legitim)");
+	if(diff_verboten>0ull) print_error("T2 GESCHEITERT: "+to_string(diff_verboten)+" Zellen ohne offenes Paar haben sich veraendert -- der Tausch zerstoert gestreamte DDFs (R1-Verletzung).");
+	if(diff_erlaubt==0ull) print_error("T2 GESCHEITERT: keine einzige erlaubte Differenz -- der Facettenpfad ist ein lautloser No-Op.");
+	print_info("T2 bestanden: Tausch wirkt genau an den Zellen mit offenen Paaren, alle anderen bitgleich.");
+	_exit(0);
+}
+
 void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug, fahrzeug_dd oder fernfeld
 	const char* c = getenv("CFD_CASE");
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
 	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).
 	if(c!=nullptr && string(c)=="kanal") main_setup_kanal();
+	else if(c!=nullptr && string(c)=="facetten_test") main_setup_facetten_test();
 	else if(c!=nullptr && string(c)=="fernfeld") main_setup_fernfeld();
 	else if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
 	else if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();

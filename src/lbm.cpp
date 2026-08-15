@@ -125,7 +125,14 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Wanderkennung benutzt die festen Flaechennachbarn j[1..6], die nur in D3Q19 stimmen.
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ist nur fuer D3Q19 gebaut (feste Flaechennachbarn j[1..6]).");
 	if(s_wandfunktion) print_error("CFD_WANDFUNKTION ist nur fuer D3Q19 gebaut (feste Diagonalpaare 9/16, 11/18, 15/10, 17/12).");
+	if(s_facetten) print_error("CFD_FACETTEN ist nur fuer D3Q19 gebaut (Paartabelle FACETTEN-STUFE2.md).");
 #endif // D3Q19
+#ifndef FORCE_FIELD
+	if(s_facetten) print_error("CFD_FACETTEN braucht FORCE_FIELD (f_bbox-Indexfeld).");
+#endif // FORCE_FIELD
+	// C1b: WFB und Facetten am selben Einfuegepunkt schliessen sich aus -- hart, kein stilles Nacheinander.
+	if(s_facetten&&s_wandfunktion) print_error("CFD_FACETTEN und CFD_WANDFUNKTION gleichzeitig ist nicht definiert -- genau einen Pfad waehlen.");
+	facetten_on = s_facetten;
 #ifndef SUBGRID
 	// ★ Audit-Nacharbeit 2: mit abgeschaltetem SUBGRID (Kugel-Validierung!) war der Schalter ein
 	// lautloser No-Op -- jetzt harte Abweisung. Die WANDFUNKTION dagegen ist von SUBGRID unabhaengig
@@ -221,6 +228,8 @@ uint LBM_Domain::s_sponge_n = 0u;
 float LBM_Domain::s_sponge_a = 3000.0f;
 float LBM_Domain::s_wf_tau = 1.0f;
 bool LBM_Domain::s_wandfunktion = false;
+bool LBM_Domain::s_facetten = false;
+float LBM_Domain::s_fac_tau = 1.0f;
 bool LBM_Domain::s_sgs_wandfrei = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
@@ -251,7 +260,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 8ull);
+	rho_clamp_hits = Memory<uint>(device, 12ull); // C1b: +4 Facetten-Slots (Legende lbm.hpp), Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
@@ -304,6 +313,18 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 #endif // PARTICLES
 
+	// ★ C1b Stufe 2 (F2): Facetten-Puffer als 1-Element-Platzhalter binden -- die echten Groessen
+	// stehen erst nach Voxelisierung + baue_facetten() fest; bind_facetten() ersetzt sie per
+	// set_parameters an fac_param_pos (Muster finalize_sparse_tiles). MUSS vor dem TS_P-Block stehen.
+	if(facetten_on) {
+		fac_geo   = Memory<float>(device, 8ull);
+		fac_idx   = Memory<uint>(device, 1ull);
+		fac_tau   = Memory<float>(device, 1ull);
+		fac_tau_n = Memory<uint>(device, 1ull);
+		fac_param_pos = kernel_stream_collide.get_number_of_parameters();
+		kernel_stream_collide.add_parameters(fac_geo, fac_idx, fac_tau, fac_tau_n);
+	}
+
 	// FORK -- Block-Tiling: tile_slot ist per TS_P der LETZTE Parameter jedes fi-Kernels, muss also NACH
 	// allen anderen add_parameters angehaengt werden. Bei ausgeschaltetem Sparse ist TS_P leer, dann darf
 	// hier auch nichts gebunden werden -- sonst stimmt die Parameterzahl nicht mehr mit der Device-Seite
@@ -344,6 +365,50 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 		rho, u, flags, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 4u);
 	print_info("Kopplungspuffer: "+to_string(max_plane_cells)+" Zellen a 4 floats = "
 		+to_string((float)(max_plane_cells*16ull)/1048576.0f,2u)+" MB auf "+device.info.name+".");
+}
+
+// ★ C1b Stufe 2: Facettendaten der Domaene bauen, hochladen, Kernel neu binden (FACETTEN-STUFE2.md F1/F2).
+// Filtert klasse!=0 (markierte Zellen behalten reinen BB); fac_a = 1/|n_achse| host-berechnet (R2).
+void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny) {
+	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
+	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
+	if(FN==0ull) { print_error("alloc_facetten_domain: F-BBox ist leer."); return; }
+	ulong aktiv=0ull, ausgeschlossen=0ull;
+	for(const Facette& f : F) { if(f.klasse==0u) aktiv++; else ausgeschlossen++; }
+	if(aktiv==0ull) { print_error("alloc_facetten_domain: keine aktive Facette (alle markiert?)."); return; }
+	fac_geo   = Memory<float>(device, 8ull*aktiv);
+	fac_idx   = Memory<uint>(device, FN);
+	fac_tau   = Memory<float>(device, aktiv);
+	fac_tau_n = Memory<uint>(device, aktiv);
+	for(ulong i=0ull; i<FN; i++) fac_idx[i] = 0xFFFFFFFFu;
+	ulong k=0ull;
+	for(const Facette& f : F) {
+		if(f.klasse!=0u) continue;
+		const float na = (f.achse==0u) ? fabsf(f.nx) : (f.achse==1u) ? fabsf(f.ny) : fabsf(f.nz);
+		fac_geo[8ull*k+0ull]=f.nx; fac_geo[8ull*k+1ull]=f.ny; fac_geo[8ull*k+2ull]=f.nz;
+		fac_geo[8ull*k+3ull]=f.yw;
+		fac_geo[8ull*k+4ull]=1.0f/fmax(na, 0.57735027f); // Flaechenfaktor, Kappe sqrt(3) (|n_a|>=1/sqrt(3))
+		fac_geo[8ull*k+5ull]=(float)f.achse;
+		fac_geo[8ull*k+6ull]=0.0f; fac_geo[8ull*k+7ull]=0.0f;
+		fac_tau[k]=0.0f; fac_tau_n[k]=0u;
+		// Zellindex -> F-BBox-Index (dieselbe Formel wie f_bbox im Kernel)
+		const uint x=(uint)(f.n%(ulong)Nx), y=(uint)((f.n/(ulong)Nx)%(ulong)Ny), z=(uint)(f.n/((ulong)Nx*(ulong)Ny));
+		if(x<fbx0||y<fby0||z<fbz0||x>=fbx0+fbnx||y>=fby0+fbny||z>=fbz0+fbnz) { print_error("Facette ausserhalb der F-BBox -- set_force_bbox deckt die Wandzellen nicht."); return; }
+		const ulong fbi=(ulong)(x-fbx0)+((ulong)(y-fby0)+(ulong)(z-fbz0)*(ulong)fbny)*(ulong)fbnx;
+		fac_idx[fbi]=(uint)k;
+		k++;
+	}
+	fac_N = aktiv;
+	fac_geo.write_to_device(); fac_idx.write_to_device(); fac_tau.write_to_device(); fac_tau_n.write_to_device();
+	kernel_stream_collide.set_parameters(fac_param_pos, fac_geo, fac_idx, fac_tau, fac_tau_n);
+	facetten_bound = true;
+	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
+		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
+}
+
+void LBM::alloc_facetten(const std::vector<Facette>& F) {
+	if(get_D()!=1u) { print_error("CFD_FACETTEN ist nur fuer eine Domaene gebaut (dd = zwei getrennte Instanzen)."); return; }
+	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny());
 }
 
 void LBM_Domain::finalize_sparse_tiles() {
@@ -693,7 +758,14 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
 	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
 	"\n	#define def_wf_Y "+to_string(0.5f/nu,8u)+"f"
-	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f" : (string)"")
+	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f"
+	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
+	// ★ C1b Stufe 2 (FACETTEN-STUFE2.md F4): def_fac_Y ueber WOERTLICH dieselbe Emissionskette wie
+	// def_wf_Y -- der Aequivalenznachweis am Kanal (yw=0,5, fac_a=1) kollabiert dann bitgenau.
+	+((s_facetten) ? (string)"\n	#define FACETTEN"
+	"\n	#define def_fac_Y "+to_string(0.5f/nu,8u)+"f"
+	"\n	#define def_fac_tau "+to_string(s_fac_tau,4u)+"f"
+	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
 	+"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
 	"\n	#define TYPE_BO 0x03" // 0b00000011 // any flag bit used for boundaries (temperature excluded)
 	"\n	#define TYPE_IF 0x18" // 0b00011000 // change from interface to fluid
@@ -1354,6 +1426,9 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 
 void LBM::run(const ulong steps, const ulong total_steps) { // initializes the LBM simulation (copies data to device and runs initialize kernel), then runs LBM
 	info.append(steps, total_steps, get_t()); // total_steps parameter is just for runtime estimation
+	// ★ C1b: Schalter an, aber nie gebunden = der lautlose No-Op, den dieses Projekt jagt -- hart.
+	for(uint d=0u; d<get_D(); d++) if(lbm_domain[d]->facetten_on&&!lbm_domain[d]->facetten_bound)
+		print_error("CFD_FACETTEN ist gesetzt, aber alloc_facetten() wurde nie gerufen -- der Kernel rechnete mit 1-Element-Platzhaltern.");
 	if(!initialized) {
 		initialize();
 		info.print_initialize(this); // only print setup info if the setup is new (run() was not called before)

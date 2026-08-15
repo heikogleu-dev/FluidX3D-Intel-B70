@@ -17,6 +17,18 @@ string default_filename(const string& name, const string& extension, const ulong
 #pragma warning(disable:26812)
 enum enum_transfer_field { fi, rho_u_flags, flags, F, phi_massex_flags, gi, T, enum_transfer_field_length };
 
+// C1b: Host-Facette (baue_facetten in setup.cpp fuellt sie, LBM::alloc_facetten laedt sie hoch)
+struct Facette {
+	float nx, ny, nz, yw; // Normale (ins Fluid), Wandabstand des Zellzentrums zur Ausgleichsebene
+	float cx_, cy_, cz_;  // Fit-Schwerpunkt (fuer y_w-Neuberechnung nach der Glaettung, Nachpruefer B3)
+	float r21_, r10_;     // Eigenwertverhaeltnisse lmin/lmid (K2) und lmid/lmax (K3) -- fuer die Schwelleneichung
+	uint  n_punkte;       // Stuetzpunkte (geschnittene Links) -- Flaechenproxy fuer die Glaettung
+	uint  eigene_links;   // davon Links DIESER Zelle (fuer Akkumulator-Hygiene in Stufe 2)
+	uchar klasse;         // 0 sauber, sonst Bitmaske K1=1 K2=2 K3=4 K4=8 Orientierung=16 Ueberlauf=32
+	uchar achse;          // dominante Achse 0/1/2, Tie-Break: kleinste Achsnummer
+	ulong n;              // Zellindex in der Domaene
+};
+
 class LBM_Domain {
 private:
 	uint Nx=1u, Ny=1u, Nz=1u; // (local) lattice dimensions
@@ -127,6 +139,7 @@ public:
 	Kernel kernel_extract_plane_macros;
 	Kernel kernel_drive_boundary_cubic_lift;
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
+	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny); // C1b: Puffer bauen + binden
 
 	// ★★ Daempfungszone -- PRO DOMAENE, und das ist keine Kosmetik. Vorpruefung 2026-08-09:
 	// die Zone wurde aus device_defines() direkt per getenv gelesen und traf damit JEDE LBM-Instanz.
@@ -142,10 +155,19 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 8 Slots: [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] frei
+	Memory<uint> rho_clamp_hits; // 12 Slots: [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme, [9] Facetten-u_t~0-Skip, [10] Achskonflikt (Stufe 4, bleibt 0), [11] Facette ohne offenes Paar (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
+	static bool s_facetten;  // C1b Stufe 2: Facetten-WFB dominante Achse (CFD_FACETTEN)
+	static float s_fac_tau;  // 1 = voll, 0 = nur Tausch (CFD_FACETTEN=2)
+	bool facetten_on = false, facetten_bound = false; // read-once + Bindungswaechter
+	uint fac_param_pos = 0u; ulong fac_N = 0ull;      // Parameterposition in stream_collide, aktive Facetten
+	Memory<float> fac_geo;   // AoS 8 float je Facette: nx,ny,nz,yw,fac_a(=1/|n_achse|),achse,frei,frei
+	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
+	Memory<float> fac_tau;   // Akkumulator: Summe tau_w je Facette (nur Zellen mit >=1 getauschtem Paar)
+	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
+	void bind_facetten();    // ersetzt die 1-Element-Platzhalter durch die echten Puffer (set_parameters)
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
 	static float s_wf_tau;      // 1 = volle WFB, 0 = nur Free-Slip-Tausch (Zwischenarm)
@@ -560,6 +582,7 @@ public:
 	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out=1.0f); // FORK: Druck-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
 	void set_velocity_inlet_faces(const uint face_mask); // FORK: Geschwindigkeits-Einlass -- u vorgeschrieben, rho laeuft mit der Innenzelle mit
+	void alloc_facetten(const std::vector<Facette>& F); // C1b: Einzeldomaene, filtert klasse!=0, laedt hoch, bindet
 	// FORK -- Doppel-Domaene (Kopplung grob -> fein). Reihenfolge: einmal alloc_coupling_planes() auf BEIDEN
 	// Domaenen, danach je Fernfeld-Schritt extract_plane_macros() auf der groben und drive_boundary_from_coarse()
 	// auf der feinen Domaene. Beide erfordern einen vorherigen run() (Kernel brauchen initialisierte Puffer).

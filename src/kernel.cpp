@@ -1581,7 +1581,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 } // reg_fneq()
 )+"#endif"+R( // REGULARIZED_BOUNDARIES
 
-)+"#ifdef WANDFUNKTION"+R(
+)+"#if defined(WANDFUNKTION)||defined(FACETTEN)"+R(
 float wf_spalding_uplus(const float Y) {
 	// Loese X*S(X) = Y fuer X = u+ (Spalding, kappa=0,41, B=5,5 wie Han et al. 2021, Gl. 16).
 	// Log-Log-Newton, Start sqrt(Y), FIX drei Iterationen ohne Konvergenzabfrage (Branch-Divergenz).
@@ -1593,7 +1593,7 @@ float wf_spalding_uplus(const float Y) {
 	// FP32-sicher -- noetig, weil -cl-finite-math-only NaN/INF zu undefiniertem Verhalten macht.
 	const float kap=0.41f, emkB=0.010517092f; // exp(-kappa*B) mit B=5,5
 	float x = log(fmin(100.0f, sqrt(fmax(Y, 1e-12f))));
-	for(uint it=0u; it<3u; it++) {
+	for(uint it=0u; it<def_wf_spalding_it; it++) { // Iterationszahl als Define (Stufe-2-Auflage 8; Default 3)
 		const float X = fmin(100.0f, exp(x));
 		const float kX = kap*X, ekX = exp(kX);
 		const float S  = X + emkB*(ekX-1.0f-kX-0.5f*kX*kX-0.16666667f*kX*kX*kX);
@@ -1604,6 +1604,8 @@ float wf_spalding_uplus(const float Y) {
 	}
 	return fmin(100.0f, exp(x));
 } // wf_spalding_uplus()
+)+"#endif"+R( // WANDFUNKTION||FACETTEN
+)+"#ifdef WANDFUNKTION"+R(
 void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, global uint* wf_hits, const ulong t, const bool zaehle) {
 	// ★★ WANDFUNKTIONS-BOUNCE-BACK nach Han/Ooka/Kikumoto 2021 (Fluid Dyn. Res. 53, 045506), fuer
 	// EBENE z-WAENDE (der Kanal; das Fahrzeug folgt mit den zellbasierten Facetten, C1b).
@@ -1645,6 +1647,82 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 	if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[2]); // Wirkpfad-Zaehler, gegatet gegen uint-Ueberlauf
 } // apply_wall_function()
 )+"#endif"+R( // WANDFUNKTION
+)+"#ifdef FACETTEN"+R(
+// ★★ C1b Stufe 2: Facetten-WFB, dominante Achse (FACETTEN-STUFE2.md). Verallgemeinert die z-WFB
+// auf alle 6 Wandseiten. ZWEI Pflichten aus der Plan-Revision: (R1) jedes Diagonalpaar wird NUR
+// getauscht, wenn BEIDE Streaming-Urspruenge solid sind -- an Treppen zeigt sonst ein Link ins
+// Fluid und der Tausch zerstoert regulaer gestreamte Information (der Kanal war nur per
+// Geometriezufall sicher); (R2) der ANGEWANDTE tau-Anteil traegt den Flaechenfaktor 1/|n_achse|
+// (host-vorberechnet, am parallelen Kanal exakt 1,0), sonst fehlen bei 45 Grad 29,3 % des
+// integrierten Widerstands. Der AKKUMULATOR bekommt das PHYSIKALISCHE tau_w (ohne Faktor), denn
+// daraus wird y+ gebildet -- und nur von Zellen, die wirklich >=1 Paar getauscht haben (Auflage 3).
+// Ausdrucksbaum bei n=ez wortgleich zur z-WFB -- der Kanal-Aequivalenznachweis kollabiert bitgenau
+// (2.0f*0.5f==1.0f, 1.0f*def_fac_Y==def_fac_Y, faca==1.0f => fmin(tw*1.0f,twmax)==tw).
+void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
+                   const global float* fac_geo, const global uint* fac_idx,
+                   global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t) {
+	uxx fbi; if(!f_bbox(n, &fbi)) return;      // ausserhalb der F-BBox gibt es keine Facetten
+	const uint fid = fac_idx[fbi];
+	if(fid==0xFFFFFFFFu) return;               // keine oder markierte Facette: reiner BB
+	const uxx b = 8ul*(uxx)fid;
+	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
+	const uint achse = (uint)fac_geo[b+5ul];
+	float rhon, uxn, uyn, uzn;
+	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt)
+	const float und = nx*uxn+ny*uyn+nz*uzn;
+	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz; // voller 3D-Tangentialvektor
+	const float ut = sqrt(utx*utx+uty*uty+utz*utz);
+	float tw=0.0f, twe=0.0f; // tw = physikalisch (Akkumulator), twe = angewandt (mit Flaechenfaktor)
+	if(ut>=1e-6f) {
+		const float Y  = ut*((2.0f*yw)*def_fac_Y); // = |u_t| * y_w/nu; bei yw=0,5 bitgenau ut*def_wf_Y
+		const float up = wf_spalding_uplus(Y);
+		const float utau = ut/up;
+		tw = rhon*utau*utau;
+		const float tw_max = 0.5f*rhon*ut;
+		if(tw>tw_max) { tw = tw_max; atomic_inc(&hits[8]); } // Slot 8: Facetten-tau-Klemme
+		twe = fmin(tw*faca, tw_max); // R2 + konservative Zweitklemme (Treffer laufen ueber Slot 8 der Erstklemme hinaus nicht separat)
+	} else atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip (Tausch passiert trotzdem, wie z-WFB)
+	uint getauscht = 0u;
+	// Paartabelle FACETTEN-STUFE2.md Abschnitt B; Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S
+	// schliesst TYPE_E und TYPE_MS (0x03) linkweise aus. Paarreihenfolge: tangentiale Achsen aufsteigend.
+	#define FAC_PAAR(ip,im,g1,g2,taut) 		if(((flags[j[g1]]&TYPE_BO)==TYPE_S)&&((flags[j[g2]]&TYPE_BO)==TYPE_S)) { 			const float fp_=fhn[ip]; fhn[ip]=fhn[im]+0.5f*(taut); fhn[im]=fp_-0.5f*(taut); getauscht++; }
+	if(achse==2u) {
+		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
+		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;
+		if(nz>0.0f) { // Boden (-z): einlaufend 9=(+1,0,+1)/16=(-1,0,+1), 11=(0,+1,+1)/18=(0,-1,+1)
+			FAC_PAAR(9,16,10,15,tau_x)
+			FAC_PAAR(11,18,12,17,tau_y)
+		} else {      // Decke (+z): 15=(+1,0,-1)/10=(-1,0,-1), 17=(0,+1,-1)/12=(0,-1,-1)
+			FAC_PAAR(15,10,16,9,tau_x)
+			FAC_PAAR(17,12,18,11,tau_y)
+		}
+	} else if(achse==0u) {
+		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;
+		const float tau_z = (ut>=1e-6f) ? -def_fac_tau*twe*utz/ut : 0.0f;
+		if(nx>0.0f) { // Wand bei -x: einlaufend 7=(+1,+1,0)/13=(+1,-1,0), 9=(+1,0,+1)/15=(+1,0,-1)
+			FAC_PAAR(7,13,8,14,tau_y)
+			FAC_PAAR(9,15,10,16,tau_z)
+		} else {      // Wand bei +x: 14=(-1,+1,0)/8=(-1,-1,0), 16=(-1,0,+1)/10=(-1,0,-1)
+			FAC_PAAR(14,8,13,7,tau_y)
+			FAC_PAAR(16,10,15,9,tau_z)
+		}
+	} else {
+		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
+		const float tau_z = (ut>=1e-6f) ? -def_fac_tau*twe*utz/ut : 0.0f;
+		if(ny>0.0f) { // Wand bei -y: einlaufend 7=(+1,+1,0)/14=(-1,+1,0), 11=(0,+1,+1)/17=(0,+1,-1)
+			FAC_PAAR(7,14,8,13,tau_x)
+			FAC_PAAR(11,17,12,18,tau_z)
+		} else {      // Wand bei +y: 13=(+1,-1,0)/8=(-1,-1,0), 18=(0,-1,+1)/12=(0,-1,-1)
+			FAC_PAAR(13,8,14,7,tau_x)
+			FAC_PAAR(18,12,17,11,tau_z)
+		}
+	}
+	#undef FAC_PAAR
+	if(getauscht>0u) { fac_tau_acc[fid] += tw; fac_tau_cnt[fid] += 1u; } // 1 Zelle = 1 Facette: kein Atomic noetig
+	else if(t%100ul==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
+	if(t%100ul==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)
+} // apply_facette()
+)+"#endif"+R( // FACETTEN
 
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
@@ -1656,6 +1734,9 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 )+"#ifdef TEMPERATURE"+R(
 	, global fpxx* gi, global float* T // argument order is important
 )+"#endif"+R( // TEMPERATURE
+)+"#ifdef FACETTEN"+R(
+	, const global float* fac_geo, const global uint* fac_idx, global float* fac_tau_acc, global uint* fac_tau_cnt // C1b, Reihenfolge = add_parameters in allocate()
+)+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -1687,6 +1768,11 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 	// Relativgeschwindigkeits-Erweiterung kommt, ist die bewegte Wand hart ausgenommen.
 	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_wall_function(fhn, j, flags, rho_clamp_hits, t, true);
 )+"#endif"+R( // WANDFUNKTION
+)+"#ifdef FACETTEN"+R(
+	// ★ C1b Stufe 2: gleicher Platz, gleiches Zellgate wie die z-WFB (beide schliessen sich per
+	// Konstruktor-Fehler aus). Facetten-Lookup und Paar-Gates uebernehmen die Ortsaufloesung.
+	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t);
+)+"#endif"+R( // FACETTEN
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
