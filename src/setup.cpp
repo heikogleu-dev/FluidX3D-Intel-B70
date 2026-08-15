@@ -1041,8 +1041,9 @@ void main_setup_kugel() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
-	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (Stufe 2: kanal+facetten_test; kugel folgt).");
+	// ★ C1b Stufe 2, Commit 3: Kugel ist Messpunkt c (erste gekruemmte Geometrie, Literaturwert).
+	{ const uint fc = env_u("CFD_FACETTEN", 0u); LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_tau = (fc==2u) ? 0.0f : 1.0f;
+	  if(fc>0u) print_info(string("Facetten-WFB an der Kugel: ")+(fc==2u?"NUR TAUSCH (Zwischenarm)":"voll")+" -- Impulsaustausch-Cd ist an getauschten Links kontaminiert (Phantom), Verschiebung dokumentieren!"); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=============== Kugel im Kanal (Neuaufbau auf Upstream 8986874) ===============");
@@ -1143,6 +1144,13 @@ void main_setup_kugel() {
 	std::vector<double> ts, fx, fy, fz;
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
+	if(env_u("CFD_FACETTEN", 0u)>0u) {
+		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		std::vector<Facette> FF = baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel");
+		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
+		lbm.alloc_facetten(FF);
+	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
 	// Bei CFD_KUGEL_MG=0 (statische Waende) oder CFD_KUGEL_FREE=1 (Freistrom statt Waenden) ist
@@ -1217,6 +1225,19 @@ void main_setup_kugel() {
 		if(se>=0.0) print_info("      "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)+"   (2 sigma = "+to_string((float)(200.0*se/mcd),3u)+" % von Cd)");
 	}
 	print_info("  Populations-Sigma des Momentansignals: +- "+to_string((float)sd,5u)+"  -- KEIN Fehlerbalken, nur zum Vergleich");
+	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe-2-Commit 3: Wirkpfad Ist=Soll + tau-Akkumulator an der Kugel
+		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
+		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
+		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
+		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu));
+		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel.");
+		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
+		double stau=0.0; ulong ntau=0ull;
+		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
+		if(ntau>0ull) print_info("Facetten-tau Kugel: "+to_string(ntau)+" Tauschzellen, mittleres tau_w = "+to_string((float)(stau/(double)ntau),9u));
+		print_info("ACHTUNG: Cd oben enthaelt den Impulsaustausch-Reibungsanteil -- an getauschten Links ist er ein PHANTOM (AUDIT-Befund 1 verallgemeinert). Fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
+	}
 	print_info("---------------------------------------------------------------");
 
 	// Der Intel-Runtime-Teardown laeuft beim regulaeren Rueckweg in ein "double free or
