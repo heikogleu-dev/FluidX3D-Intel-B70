@@ -333,6 +333,162 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 // ★ RELAMINARISIERUNGS-WAECHTER: bei y+_1 = 137 ist der wandnahe Zyklus unaufgeloest; kippt die
 // LES ins Laminare, geht U_b+ gegen Re_tau/3 (~1700) und man misst das statt des Modells.
 // U_b+ > 200 => Abbruch mit Ansage (Gegenpruefer-Befund).
+// ---------------------------------------------------------------------------- C1b Stufe 1: Facettenbau (reine Diagnose)
+// FACETTEN-PLAN.md A1-A4 + Revision: TLS-Ausgleichsebene ueber Halfway-BB-Linkmittelpunkte der
+// 5^3-Nachbarschaft jeder wandnahen Fluidzelle. Host, double, kein Kernel-Eingriff, keine Flag-Bits.
+// wand_flag: 0x41 am Fahrzeug (Fahrbahn/Latsch = Ausschluss), TYPE_S im Kanal-Ankerfall.
+struct Facette {
+	float nx, ny, nz, yw; // Normale (ins Fluid), Wandabstand des Zellzentrums zur Ausgleichsebene
+	uint  n_punkte;       // Stuetzpunkte (geschnittene Links) -- Flaechenproxy fuer die Glaettung
+	uint  eigene_links;   // davon Links DIESER Zelle (fuer Akkumulator-Hygiene in Stufe 2)
+	uchar klasse;         // 0 sauber, sonst Bitmaske K1=1 K2=2 K3=4 K4=8 (Orientierungskonflikt=16)
+	uchar achse;          // dominante Achse 0/1/2, Tie-Break: kleinste Achsnummer (Revision Auflage 5)
+	ulong n;              // Zellindex in der Domaene
+};
+// 3x3-Jacobi in double: Eigenvektor zum kleinsten Eigenwert von M (symmetrisch).
+static void jacobi3(double M[3][3], double ew[3], double ev[3][3]) {
+	for(int i=0;i<3;i++) for(int j=0;j<3;j++) ev[i][j] = (i==j)?1.0:0.0;
+	for(uint sweep=0u; sweep<32u; sweep++) {
+		double off = fabs(M[0][1])+fabs(M[0][2])+fabs(M[1][2]);
+		if(off<1e-30) break;
+		for(int p=0;p<2;p++) for(int q=p+1;q<3;q++) {
+			if(fabs(M[p][q])<1e-300) continue;
+			const double theta = 0.5*(M[q][q]-M[p][p])/M[p][q];
+			const double t = (theta>=0.0?1.0:-1.0)/(fabs(theta)+sqrt(theta*theta+1.0));
+			const double c = 1.0/sqrt(t*t+1.0), sn = t*c;
+			for(int k=0;k<3;k++) {
+				const double mkp=M[k][p], mkq=M[k][q];
+				M[k][p]=c*mkp-sn*mkq; M[k][q]=sn*mkp+c*mkq;
+			}
+			for(int k=0;k<3;k++) {
+				const double mpk=M[p][k], mqk=M[q][k];
+				M[p][k]=c*mpk-sn*mqk; M[q][k]=sn*mpk+c*mqk;
+				const double vkp=ev[k][p], vkq=ev[k][q];
+				ev[k][p]=c*vkp-sn*vkq; ev[k][q]=sn*vkp+c*vkq;
+			}
+		}
+	}
+	for(int i=0;i<3;i++) ew[i]=M[i][i];
+}
+// D3Q19-Richtungen 1..18 (Host-Kopie der Kernel-Tabelle; nur fuer den Facettenbau).
+static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
+	{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz,
+                                   const uchar wand_flag, const string& out_dir, const char* wo) {
+	const double t0 = 0.0; (void)t0;
+	auto idx = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
+	auto ist_wand  = [&](const ulong n) { return L.flags[n]==wand_flag; };
+	auto ist_fluid = [&](const ulong n) { const uchar f=L.flags[n]&(TYPE_S|TYPE_E); return f==0u; };
+	// Kandidaten: Fluidzellen mit mindestens einem wand_flag-Nachbarn unter den 18 Richtungen.
+	std::vector<Facette> F;
+	ulong k1=0ull,k2=0ull,k3=0ull,k4=0ull,kori=0ull;
+	std::vector<double> hist_yw, hist_r21, hist_r10, hist_winkel;
+	for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+		const ulong n = idx(x,y,z);
+		if(!ist_fluid(n)) continue;
+		bool wandnah=false; int snx=0,sny=0,snz=0;
+		for(uint i=1u; i<19u&&!wandnah; i++) {
+			const int xn=(int)x+FZ_C[i][0], yn=(int)y+FZ_C[i][1], zn=(int)z+FZ_C[i][2];
+			if(ist_wand(idx((uint)xn,(uint)yn,(uint)zn))) { wandnah=true; snx=xn; sny=yn; snz=zn; }
+		}
+		if(!wandnah) continue;
+		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
+		double px[190], py[190], pz[190]; uint np=0u, eigene=0u;
+		for(int dz=-2; dz<=2; dz++) for(int dy=-2; dy<=2; dy++) for(int dx2=-2; dx2<=2; dx2++) {
+			const int cx=(int)x+dx2, cy=(int)y+dy, cz=(int)z+dz;
+			if(cx<1||cy<1||cz<1||cx>=(int)Nx-1||cy>=(int)Ny-1||cz>=(int)Nz-1) continue;
+			const ulong nc = idx((uint)cx,(uint)cy,(uint)cz);
+			if(!ist_fluid(nc)) continue;
+			for(uint i=1u; i<19u; i++) {
+				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1], zn=cz+FZ_C[i][2];
+				if(!ist_wand(idx((uint)xn,(uint)yn,(uint)zn))) continue;
+				if(np<190u) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; }
+				if(dx2==0&&dy==0&&dz==0) eigene++;
+			}
+		}
+		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u;
+		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u; F.push_back(f); continue; }
+		double cx=0.0, cy=0.0, cz=0.0;
+		for(uint i=0u;i<np;i++) { cx+=px[i]; cy+=py[i]; cz+=pz[i]; }
+		cx/=np; cy/=np; cz/=np;
+		double M[3][3]={{0,0,0},{0,0,0},{0,0,0}};
+		for(uint i=0u;i<np;i++) {
+			const double dxp=px[i]-cx, dyp=py[i]-cy, dzp=pz[i]-cz;
+			M[0][0]+=dxp*dxp; M[0][1]+=dxp*dyp; M[0][2]+=dxp*dzp;
+			M[1][1]+=dyp*dyp; M[1][2]+=dyp*dzp; M[2][2]+=dzp*dzp;
+		}
+		M[1][0]=M[0][1]; M[2][0]=M[0][2]; M[2][1]=M[1][2];
+		double ew[3], ev[3][3]; jacobi3(M, ew, ev);
+		int imin=0, imax=0;
+		for(int i=1;i<3;i++) { if(ew[i]<ew[imin]) imin=i; if(ew[i]>ew[imax]) imax=i; }
+		const int imid = 3-imin-imax==3 ? 0 : 3-imin-imax; // bei imin==imax (entartet) -> 0
+		double nxd=ev[0][imin], nyd=ev[1][imin], nzd=ev[2][imin];
+		const double nl = sqrt(nxd*nxd+nyd*nyd+nzd*nzd);
+		nxd/=nl; nyd/=nl; nzd/=nl;
+		// Orientierung ins Fluid: y_w = n*(zelle-c) > 0; Gegenprobe gegen den Solidnachbarn.
+		double yw = nxd*((double)x-cx)+nyd*((double)y-cy)+nzd*((double)z-cz);
+		if(yw<0.0) { nxd=-nxd; nyd=-nyd; nzd=-nzd; yw=-yw; }
+		const double gegen = nxd*((double)x-(double)snx)+nyd*((double)y-(double)sny)+nzd*((double)z-(double)snz);
+		if(gegen<=0.0) { f.klasse|=16u; kori++; }
+		// Konditionsklassen: Schwellen VORLAEUFIG (werden aus den Histogrammen dieses Laufs bestimmt).
+		const double r21 = ew[imax]>1e-30 ? ew[imin]/fmax(ew[imid],1e-30) : 1.0;   // K2: Kante
+		const double r10 = ew[imax]>1e-30 ? ew[imid]/ew[imax] : 0.0;               // K3: Linie
+		if(r21>0.1)  { f.klasse|=2u; k2++; }
+		if(r10<0.02) { f.klasse|=4u; k3++; }
+		if(yw<0.2||yw>2.0) { f.klasse|=8u; k4++; }
+		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
+		const double ax=fabs(nxd), ay=fabs(nyd), az=fabs(nzd);
+		f.achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); // Tie-Break: kleinste Achsnummer
+		F.push_back(f);
+		hist_yw.push_back(yw); hist_r21.push_back(r21); hist_r10.push_back(r10);
+		hist_winkel.push_back(acos(fmin(1.0,fmax(ax,fmax(ay,az))))*180.0/3.14159265358979);
+	}
+	// Normalen-Glaettung (A6): 1 Pass, flaechengewichtet (w = n_punkte), 3^3-Nachbarfacetten.
+	{
+		std::vector<uint> feld((ulong)Nx*Ny*Nz, 0xFFFFFFFFu);
+		for(uint i=0u; i<(uint)F.size(); i++) feld[F[i].n]=i;
+		std::vector<Facette> G=F;
+		for(uint i=0u; i<(uint)F.size(); i++) {
+			if(F[i].klasse&1u) continue;
+			uint x,y,z; L.coordinates(F[i].n, x, y, z);
+			double sx=0.0, sy=0.0, sz=0.0;
+			for(int dz=-1; dz<=1; dz++) for(int dy=-1; dy<=1; dy++) for(int dx2=-1; dx2<=1; dx2++) {
+				const int cx2=(int)x+dx2, cy2=(int)y+dy, cz2=(int)z+dz;
+				if(cx2<0||cy2<0||cz2<0||cx2>=(int)Nx||cy2>=(int)Ny||cz2>=(int)Nz) continue;
+				const uint j = feld[idx((uint)cx2,(uint)cy2,(uint)cz2)];
+				if(j==0xFFFFFFFFu||(F[j].klasse&1u)) continue;
+				const double w = (double)F[j].n_punkte;
+				sx+=w*F[j].nx; sy+=w*F[j].ny; sz+=w*F[j].nz;
+			}
+			const double l = sqrt(sx*sx+sy*sy+sz*sz);
+			if(l>1e-12) { G[i].nx=(float)(sx/l); G[i].ny=(float)(sy/l); G[i].nz=(float)(sz/l);
+				const double ax=fabs(sx/l), ay=fabs(sy/l), az=fabs(sz/l);
+				G[i].achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); }
+		}
+		F=G;
+	}
+	// Bericht + Histogramm-CSV.
+	auto quantil = [](std::vector<double>& v, const double q) {
+		if(v.empty()) return 0.0; std::sort(v.begin(), v.end());
+		return v[(size_t)fmin((double)v.size()-1.0, q*(double)v.size())]; };
+	const ulong nf=(ulong)F.size();
+	print_info(string("Facetten (")+wo+"): "+to_string(nf)+" wandnahe Fluidzellen; Klassen: K1(<6 Punkte) "+to_string(k1)
+		+", K2(Kante) "+to_string(k2)+", K3(Linie) "+to_string(k3)+", K4(y_w) "+to_string(k4)+", Orientierung "+to_string(kori));
+	if(nf>0ull) print_info("  markiert gesamt: "+to_string(100.0f*(float)(k1+k2+k3+k4+kori)/(float)nf,1u)
+		+" % (VORLAEUFIGE Schwellen r21>0,1 / r10<0,02 -- endgueltig aus diesen Histogrammen)");
+	print_info("  y_w: Median "+to_string((float)quantil(hist_yw,0.5),3u)+", q10 "+to_string((float)quantil(hist_yw,0.1),3u)
+		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
+	print_info("  Winkel zur dominanten Achse: Median "+to_string((float)quantil(hist_winkel,0.5),1u)
+		+" Grad, q90 "+to_string((float)quantil(hist_winkel,0.9),1u)+" Grad");
+	std::ofstream fh(out_dir+"facetten_histogramme.csv");
+	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,klasse,achse,n_punkte,eigene_links\n";
+	for(const Facette& f : F) fh << f.yw << "," << (acos(fmin(1.0f,fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0f/3.14159265f)
+		<< "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "\n";
+	fh.close();
+	print_info("  CSV: "+out_dir+"facetten_histogramme.csv");
+	return F;
+}
+
 void main_setup_kanal() {
 	// ---- Parameter. u_tau_lat = 0,003 fest (U_b ~ 0,072 nahe am Fahrzeug-u_lat 0,075).
 	const uint  N        = env_u("CFD_KANAL_N", 38u);        // Zellen ueber die VOLLE Kanalhoehe
@@ -399,6 +555,12 @@ void main_setup_kanal() {
 		float umax=0.0f; for(ulong n=0ull;n<lbm.get_N();n++) umax=fmax(umax,fabs(lbm.u.x[n])+fabs(lbm.u.y[n])+fabs(lbm.u.z[n]));
 		print_info("Kanal: max|u| im Anfangsfeld = "+to_string(umax,4u)+" (Grenze c_s = 0,577)");
 		if(umax>0.4f) print_error("Anfangsfeld zu schnell (max|u| = "+to_string(umax,4u)+") -- CFD_KANAL_UTAU oder CFD_KANAL_UBPLUS pruefen.");
+	}
+	// ★ C1b Stufe 1, Anker-Test: am parallelwandigen Kanal MUESSEN alle Facetten exakt n=ez,
+	// y_w=0,500, Klasse 0 liefern (FACETTEN-PLAN A3, Gegenpruefer-verifiziert). =2: nur Diagnose.
+	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
+		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, "Kanal-Anker");
+		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
 	lbm.run(0u, n_steps); // initialisieren
 
@@ -494,6 +656,7 @@ void main_setup_kanal() {
 // F-Box). Fuer jede FAHRZEUG-Zelle (flags == TYPE_S|TYPE_X, genau die zaehlt object_force) mit
 // GENAU EINEM Fluid-Flaechennachbarn ist die Wandnormale exakt bekannt -- dort wird die
 // Tangentialkraft (die beiden Komponenten senkrecht zur Normalen) als Wandschubspannung genommen
+
 // (Zellflaeche = 1 in Gittereinheiten), daraus u_tau = sqrt(tau_w) (rho_lat = 1) und
 // y+ = u_tau * 0,5 / nu_lat (erste Fluidzellmitte liegt eine halbe Zelle von der Wand).
 //
@@ -1186,6 +1349,16 @@ static void main_setup_fahrzeug() {
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug"))+"/";
 	create_folder(out_dir);
+	// ★ C1b Stufe 1: Facettenbau NACH Kontaktflaechen-Uebergabe UND Randsetzung (Revision Auflage 6),
+	// wand_flag 0x41 -- Fahrbahn und Latsch sind per Konstruktion Ausschluss. =2: nur Diagnose.
+	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
+		const ulong census_vorher = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Fahrzeug");
+		const ulong census_nachher = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		if(census_vorher!=census_nachher) print_error("Facettenbau hat den 0x41-Zellcensus veraendert ("+to_string(census_vorher)+" -> "+to_string(census_nachher)+") -- object_force-Falle!");
+		print_info("Facetten: 0x41-Zellcensus unveraendert ("+to_string(census_vorher)+") -- object_force unberuehrt.");
+		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
+	}
 	sichere_lauf(out_dir, "fahrzeug"); // ★ Heiko 2026-08-09: Sicherung MIT JEDEM Lauf, in allen vier Faellen
 	const float q_inf = 0.5f*si_rho*si_u*si_u;
 	const uint y_mid = Ny/2u;
@@ -1565,6 +1738,16 @@ static void main_setup_fahrzeug_dd() {
 	};
 	set_bcs(lbm_f, fNx, fNy, fNz);
 	set_bcs(lbm_c, cNx, cNy, cNz);
+	// ★ C1b Stufe 1: jede Instanz baut ihre Facetten aus den EIGENEN flags (FACETTEN-PLAN Stufe 5);
+	// hier nach set_bcs (Revision Auflage 6). Nahfeld ist das Abnahmegitter.
+	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
+		// out_dir des Falls entsteht erst weiter unten -- hier derselbe Ausdruck lokal.
+		const string fac_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
+		create_folder(fac_dir);
+		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fac_dir, "dd-Nahfeld");
+		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fac_dir, "dd-Fernfeld");
+		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
+	}
 	lbm_f.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f)); // Bit 2 = x_max
 	lbm_c.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f));
 	lbm_f.finalize_sparse_tiles();
