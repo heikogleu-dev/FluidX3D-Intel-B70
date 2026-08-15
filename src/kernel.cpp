@@ -1689,12 +1689,13 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 		tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut;
 		if(tw>tw_max) { tw = tw_max; atomic_inc(&hits[8]); } // Slot 8: Facetten-tau-Klemme
-		twe = fmin(tw*faca, tw_max); // R2 + konservative Zweitklemme (Treffer laufen ueber Slot 8 der Erstklemme hinaus nicht separat)
+		const float twf = tw*faca; // R2-Flaechenfaktor
+		if(twf>tw_max) atomic_inc(&hits[8]); // Nachpruefer-Befund 2: auch die ZWEITklemme zaehlen (Slot 8 = beide) -- ab Stufe 3 (faca bis sqrt(3)) klemmt sie sonst lautlos
+		twe = fmin(twf, tw_max); // am Kanal faca==1: twf==tw, nach Erstklemme nie >tw_max -> bitgleich und zaehlerneutral
 	} else atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip (Tausch passiert trotzdem, wie z-WFB)
 	uint getauscht = 0u;
 	// Paartabelle FACETTEN-STUFE2.md Abschnitt B; Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S
 	// schliesst TYPE_E und TYPE_MS (0x03) linkweise aus. Paarreihenfolge: tangentiale Achsen aufsteigend.
-	#define FAC_PAAR(ip,im,g1,g2,taut) 		if(((flags[j[g1]]&TYPE_BO)==TYPE_S)&&((flags[j[g2]]&TYPE_BO)==TYPE_S)) { 			const float fp_=fhn[ip]; fhn[ip]=fhn[im]+0.5f*(taut); fhn[im]=fp_-0.5f*(taut); getauscht++; }
 	if(achse==2u) {
 		const float tau_x = (ut>=1e-6f) ? -def_fac_tau*twe*utx/ut : 0.0f;
 		const float tau_y = (ut>=1e-6f) ? -def_fac_tau*twe*uty/ut : 0.0f;

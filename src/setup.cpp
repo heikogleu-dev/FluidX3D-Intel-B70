@@ -2495,7 +2495,7 @@ void main_setup_facetten_test() {
 	{ // Arm A: AUS
 		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_tau=1.0f;
 		LBM a(Nx,Ny,Nz,nu_lat); init(a); a.run(1u,2u); a.u.read_from_device();
-		ua1_x.resize(a.get_N()); for(ulong n=0ull; n<a.get_N(); n++) ua1_x[n]=a.u.x[n];
+		ua1_x.resize(3ull*a.get_N()); for(ulong n=0ull; n<a.get_N(); n++) { ua1_x[n]=a.u.x[n]; ua1_x[n+a.get_N()]=a.u.y[n]; ua1_x[n+2ull*a.get_N()]=a.u.z[n]; } // Nachpruefer: alle DREI Komponenten
 		a.run(1u,2u); a.u.read_from_device();
 		ua_x.resize(a.get_N()); ua_y.resize(a.get_N()); ua_z.resize(a.get_N());
 		for(ulong n=0ull; n<a.get_N(); n++) { ua_x[n]=a.u.x[n]; ua_y[n]=a.u.y[n]; ua_z[n]=a.u.z[n]; }
@@ -2507,8 +2507,8 @@ void main_setup_facetten_test() {
 		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, string("./"), "T2-Treppe");
 		b.alloc_facetten(FF);
 		b.run(1u,2u); b.u.read_from_device();
-		{ ulong d1=0ull; for(ulong n=0ull; n<b.get_N(); n++) if(ua1_x[n]!=b.u.x[n]) d1++;
-		  print_info("T2 Phase 1 (nach 1 Schritt): "+to_string(d1)+" u_x-Differenzen (Erwartung 0 -- Tausch wertgleich wegen Solid-Symmetrie)");
+		{ ulong d1=0ull; for(ulong n=0ull; n<b.get_N(); n++) if(ua1_x[n]!=b.u.x[n]||ua1_x[n+b.get_N()]!=b.u.y[n]||ua1_x[n+2ull*b.get_N()]!=b.u.z[n]) d1++;
+		  print_info("T2 Phase 1 (nach 1 Schritt): "+to_string(d1)+" u-Differenzen in allen 3 Komponenten (Erwartung 0 -- Tausch wertgleich wegen Solid-Symmetrie)");
 		  if(d1>0ull) print_warning("Phase 1 nicht bitgleich -- Lokalisierung von Phase 2 gilt nur eingeschraenkt."); }
 		b.run(1u,2u); b.u.read_from_device();
 		b.lbm_domain[0]->rho_clamp_hits.read_from_device();

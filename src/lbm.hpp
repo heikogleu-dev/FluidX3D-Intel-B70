@@ -167,7 +167,6 @@ public:
 	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
 	Memory<float> fac_tau;   // Akkumulator: Summe tau_w je Facette (nur Zellen mit >=1 getauschtem Paar)
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
-	void bind_facetten();    // ersetzt die 1-Element-Platzhalter durch die echten Puffer (set_parameters)
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
 	static float s_wf_tau;      // 1 = volle WFB, 0 = nur Free-Slip-Tausch (Zwischenarm)

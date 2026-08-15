@@ -158,3 +158,12 @@ zeitweise die entscheidende Zahl. Beides steht jetzt als Kommentar im Testfall.
 
 Naechster Schritt: Commit 3 = Kugel-Verdrahtung (Messpunkt c, drei Arme AUS/2/1 + beide Cd-Wege
 als Pflichtzahl), danach Stufe 3 (gekippter Kanal 45 Grad + 26,6 Grad).
+
+**Iron-Rule-Nachpruefung (Commits 419cd8a/3ba6ec5/1b08432): kein Befund oberhalb NIEDRIG.**
+Positiv: alle 12 Paare unabhaengig verifiziert, Bitgleichheit KONSTRUKTIV garantiert (nicht
+Glueck), Akkumulator-Hygiene und Bindung sauber, F6-Wrap Stufe-1-neutral. Nacharbeiten sofort
+umgesetzt: Zweitklemmen-Zaehler (Slot 8 = beide Klemmen -- ab Stufe 3 haette sie lautlos
+geklemmt), verwaistes FAC_PAAR-Define, tote bind_facetten-Deklaration, Debug-Readback,
+T2-Phase-1 prueft alle 3 Komponenten. Nachweis: Tests weiter 3x gruen, Feld-Hash UNVERAENDERT
+(12755646098055097704). OFFEN fuer Stufe 3: y-gespiegelte T2-Treppe (achse-1-Verhaltensnachweis),
+Ein-Zellen-Spalt-Semantik als bewusste Entscheidung dokumentieren.
