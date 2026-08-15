@@ -141,7 +141,7 @@ T2 (Mini-Domäne, erst CPU-OpenCL, dann iGPU): im selben Testfall 32×16×24, 45
 **T2 (Mini-Domaene 32x16x24, 45-Grad-Treppe, AUS vs NUR-TAUSCH):** Phase 1 nach 1 Schritt
 bitgleich (Tausch wertgleich wegen Solid-Symmetrie -- dokumentiert); Phase 2 nach 2 Schritten:
 512 Differenzen, ALLE an Zellen mit >=1 offenem Paar, **0 verbotene** -- R1 auf DDF-Ebene
-verifiziert. Wirkpfad 1344 = fac_N exakt, 320 Zellen ohne offenes Paar (Treppenkanten), 64 Skips.
+verifiziert. Wirkpfad 1344 = fac_N exakt, 320 Zellen ohne offenes Paar (Treppenkanten); Skips: 64 ungegatet gemessen, seit R3 zaehlt Slot 9 gegatet t%100 (T2 druckt entsprechend weniger).
 
 **Lehrstueck des Tages:** der erste Sichtbarkeits-Fix gab den Wandzellen u!=0 -- initialize()
 machte damit alle Fluidnachbarn zu TYPE_MS, und der EIGENE MS-Guard sperrte den Facettenpfad

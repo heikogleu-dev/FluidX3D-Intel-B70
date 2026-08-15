@@ -155,7 +155,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 12 Slots: [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme, [9] Facetten-u_t~0-Skip, [10] Achskonflikt (Stufe 4, bleibt 0), [11] Facette ohne offenes Paar (t%100)
+	Memory<uint> rho_clamp_hits; // 12 Slots: [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] Achskonflikt (Stufe 4, bleibt 0), [11] Facette ohne offenes Paar (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.

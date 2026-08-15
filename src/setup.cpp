@@ -373,6 +373,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Groessere Fenster sehen Kruemmung und Zweitflaechen, keine bessere Wand.
 	const int R = (int)min(3u, max(1u, env_u("CFD_FACETTEN_FENSTER", 1u))); // Radius: 1=3^3 (Default, geeicht), 2=5^3, 3=7^3
 	if(env_u("CFD_FACETTEN_FENSTER", 1u)>3u) print_warning("CFD_FACETTEN_FENSTER > 3 wird auf 3 geklemmt (Audit R3: vorher stille Klemme).");
+	if(getenv("CFD_FACETTEN_FENSTER")!=nullptr&&env_u("CFD_FACETTEN_FENSTER", 1u)==0u) print_warning("CFD_FACETTEN_FENSTER=0 wird auf 1 gehoben (Radius 0 gibt es nicht).");
 	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
 	std::vector<double> px(np_max), py(np_max), pz(np_max);
 	print_info(string("Facetten (")+wo+"): Fenster "+to_string(2*R+1)+"^3 (CFD_FACETTEN_FENSTER="+to_string((uint)R)+")");
@@ -492,12 +493,13 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
 	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
 	hist_yw.clear(); hist_r21.clear(); hist_r10.clear(); hist_winkel.clear();
-	ulong markiert=0ull; k4=0ull; ulong k_ueberlauf=0ull, k_ms=0ull;
+	ulong markiert=0ull; k4=0ull; kori=0ull; ulong k_ueberlauf=0ull, k_ms=0ull; // kori seit R3-Nachschliff aus der ENDbitmaske (Glaettungs-Kipp zaehlt mit; Bit 16 ist bewusst sticky)
 	for(const Facette& f : F) {
 		if(f.klasse!=0u) markiert++;
 		if(f.klasse&8u)  k4++;
 		if(f.klasse&32u) k_ueberlauf++;
 		if(f.klasse&64u) k_ms++;
+		if(f.klasse&16u) kori++;
 		if(f.klasse&1u) continue;
 		hist_yw.push_back((double)f.yw);
 		hist_winkel.push_back(acos(fmin(1.0,(double)fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0/3.14159265358979);
@@ -778,7 +780,7 @@ void main_setup_kanal() {
 				+", projiziert "+to_string(FK.n_proj)+", unklar "+to_string(FK.n_unklar));
 			// K2 ist ein STATIONARITAETS-Kriterium -- im Transientenfenster (<5000 Schritte) wird es
 			// angesagt uebersprungen statt einen legitimen Kurztest zu killen (R3-Nachschliff).
-			if(n_steps-fac_snap_step<5000ull) print_info("K2-Pruefung uebersprungen: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000).");
+			if(n_steps-fac_snap_step<5000ull) print_warning("K2-Pruefung UEBERSPRUNGEN: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000) -- dieser Lauf ist KEIN Abnahmelauf.");
 			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");
 			if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
 		}

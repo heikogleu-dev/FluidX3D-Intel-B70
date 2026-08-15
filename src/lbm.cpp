@@ -141,7 +141,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif // SUBGRID
 	// R2-Nachpruefer: Ansage NACH den harten Abweisern (vorher stand "aktiv" eine Zeile vor dem exit)
 	if(s_sgs_wandfrei) print_info("SGS_WANDFREI aktiv: kein nu_t in Zellen mit solidem Flaechennachbarn (Wirkpfad-Zaehler Slot 6, Report am Laufende).");
-	if(getenv("CFD_SPALDING_IT")!=nullptr&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
+	if(env_u("CFD_SPALDING_IT", 0u)>0u&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
 #ifndef TRT
 	// ★ Audit-Nacharbeit 4: CFD_LAMBDA liegt in der TRT-Emission -- unter SRT (aktueller Build) ist
 	// der Schalter TOT. Ein Lambda-A/B liefe bitgleich und ohne jede Meldung; deshalb die Ansage.

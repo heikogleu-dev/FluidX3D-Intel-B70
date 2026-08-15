@@ -2229,12 +2229,13 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 	phi[n] = phin; // update phi
 } // possible types at the end of surface_3(): TYPE_F / TYPE_I / TYPE_G
 )+"#endif"+R( // SURFACE
-
+)
 // ★ Audit-Befund 21 (latent, Kernel hat derzeit keine Aufrufer im Fork -- UPDATE_FIELDS liefert die
-// Felder im stream_collide): dieser Kernel kennt die WANDFUNKTION NICHT. Wer ihn wiederbelebt,
-// bekommt an WFB-Wandzellen rho/u aus den getauschten fi ohne die Spiegel-Logik -- erst nachziehen.
-// Dasselbe gilt seit Stufe 2 fuer FACETTEN-Zellen (Audit R3): auch deren Tausch+tau fehlt hier.
-)+R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
+// Felder im stream_collide): dieser Kernel kennt WANDFUNKTION und FACETTEN NICHT. Wer ihn
+// wiederbelebt, bekommt an behandelten Wandzellen rho/u aus den getauschten fi ohne Spiegel-/
+// Facettenlogik -- erst nachziehen. (Host-Kommentar, bewusst NICHT emittiert: das
+// CFD_DUMP_CL-Diff-Instrument soll kommentarfrei vergleichbar bleiben -- R3-Nachschliff.)
++R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important
 )+"#endif"+R( // FORCE_FIELD
