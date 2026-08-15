@@ -57,3 +57,20 @@ Klasse-64-Facetten fehlen in `fac_idx` (alloc filtert klasse!=0), tauschen also 
 - /home/heiko/CFD/FluidX3D-v2/src/lbm.cpp (alloc_facetten_domain 372–407, object_force 502–513)
 - /home/heiko/CFD/FluidX3D-v2/src/lbm.hpp (fac_geo/fac_idx/fac_tau-Member 166–169, F-BBox-Felder 82)
 - /home/heiko/CFD/FluidX3D-v2/FACETTEN-PLAN.md (Auflagen 2/3, R2-Flächenfaktor-Argument — Abnahmereferenz)
+
+---
+
+# Messstand Cd-Pfad (2026-08-15, Commits bis a41759b)
+
+- **K1 bestanden:** Feld-Hash exakt 12755646098055097704 nach dem 4-float-Akkumulator, Tests 3x gruen.
+- **K2 bestanden (stationaeres 20-ETT-Fenster, iGPU):** Reibung_x/Kraftbilanz = 0,9955 (Band 1 %);
+  das 0,3-ETT-Kurzfenster zeigte erwartbar 0,26 (Regler-Transiente -- kein Befund).
+- **K3 exakt bestanden:** Druck_x = 0,00000000, 14.160 projiziert, 0 voll, 0 unklar.
+- **K4 bestanden:** AUS-Arm kraft_facetten Fx == object_force Fx (rel. Abw. 1,5e-7).
+- **K5 teilbestanden:** Arm 2 Cd_reibung EXAKT 0; Phantom beseitigt -- neuer Pfad Arm2 vs Arm1:
+  0,1502 vs 0,1645 (Delta 0,014 statt Phantom-Sprung +1,48). EINSCHRAENKUNG (Morgen-TODO):
+  Druckanteil ist End-MOMENTAUFNAHME, kein Zeitmittel -- fuer belastbare Kugel-A/Bs die
+  Druck-Projektion in die Sample-Kadenz heben (CFD_FAC_CD_EVERY, Plan E6). Die Reibung ist
+  bereits exaktes Fenstermittel.
+- Kugel-Erkenntnis bestaetigt: nur 313 Tauschzellen / 14.356 ohne offenes Paar pro Messpunkt --
+  Nebenachsen (Stufe 4) vor der Fahrzeug-Abnahme noetig; der gekippte Kanal misst das kontrolliert.
