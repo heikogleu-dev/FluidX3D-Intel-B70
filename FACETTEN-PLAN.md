@@ -170,21 +170,26 @@ Grenze im Plan und wird ggf. in Stufe 4 (Nebenachsen) adressiert.
 
 ---
 
-# Stufe-1-Messstand (2026-08-15)
+# Stufe-1-Messstand (2026-08-15, nach Iron-Rule-Nachpruefung)
 
-**Kanal-Anker (CPU, N=38): EXAKT bestanden** — 13.456 Facetten (= 2×116×58), alle Klassen 0,
-y_w Median/q10/q90 = 0,500/0,500/0,500. Die Exaktheitsvorhersage des Gegenprüfers (Punkte exakt
-auf z=−0,5, Jacobi rotiert nicht) ist bestätigt.
+Der Nachpruefer fand 3 mittlere + 3 geringe Befunde am Stufe-0/1-Code — alle gefixt und neu
+gemessen (B1 Punktpuffer 190→456 + Ueberlaufklasse; B2 Markiert-Metrik war Zaehlersumme statt
+Zellquote; B3 y_w jetzt gegen die geglaettete Ebene neu; B4 Histogramme aus dem Endzustand;
+B5 Anker-Randstreifen dokumentiert; B6 Dump-Schalter auf env_on; Glaettungsgewicht auf
+eigene_links). Jacobi, Richtungstabelle, Indizierung, Einhaengepunkte: positiv verifiziert
+(10^4 Zufallsmatrizen, max-Residuum 1,1e-14).
 
-**Fahrzeug 8 mm (iGPU, nur Diagnose):** 753.592 wandnahe Fluidzellen.
-- Klassen (VORLÄUFIGE Schwellen r21>0,1 / r10<0,02): K2 Kante 196.353 (26,1 %),
-  K4 y_w-Ausreißer 78.329 (10,4 %), Orientierungskonflikt 40.687 (5,4 %), K1/K3 = 0.
-  **Markiert gesamt 41,8 % → über der 30-%-Schwelle des Plans** ⇒ nächstes Häppchen ist
-  laut Plan Schwellenarbeit + 3³/5³/7³-Fenster-A/B aus den Histogrammen
-  (export/fac_veh8/facetten_histogramme.csv), KEIN Kernel-Eingriff vorher.
-- y_w: Median exakt 0,500, q10 0,188, q90 1,136 (Treppenstreuung wie von der Revision
-  vorhergesagt: Eckzellen ~0,35).
-- Winkel zur dominanten Achse: Median 16,7°, q90 39,4° — die Mehrheit der Karosserie ist
-  achsnah (Flächenfaktor 1/|n̂_a| bleibt dort nahe 1), die Kanten tragen die Ausreißer.
+**Kanal-Anker (CPU, N=38): EXAKT bestanden** — 13.456 Facetten, alle Klassen 0, y_w ueberall
+0,500. (Randstreifen x/y bewusst ausgenommen, ~5 %, Diagnose-only.)
 
-0x41-Zellcensus vor/nach Facettenbau unverändert (Assertion grün) — object_force unberührt.
+**Fahrzeug 8 mm (iGPU, nur Diagnose):** 753.592 wandnahe Fluidzellen, Punktueberlauf 0.
+- **Markierte ZELLEN: 247.385 = 32,8 %** (Bitmaske; die frueher berichteten 41,8 % waren die
+  Zaehlersumme). Klassen: K2 Kante 197.524, K4 y_w-Ausreisser (nach Glaettung) 86.600,
+  Orientierungskonflikt 40.550, K1/K3 = 0.
+- Immer noch knapp ueber der 30-%-Plan-Schwelle ⇒ naechstes Haeppchen: Schwellenarbeit aus
+  export/fac_veh8b/facetten_histogramme.csv + 3³/5³/7³-Fenster-A/B, KEIN Kernel-Eingriff vorher.
+- y_w: Median 0,501, q10 0,179, q90 1,134. Winkel zur dominanten Achse: Median 16,0°, q90 40,1°
+  — die Karosserie ist ueberwiegend achsnah, die Kanten tragen die Ausreisser.
+
+0x41-Zellcensus vor/nach unveraendert (Assertion gruen). Offen fuer Stufe 2 (Randnotiz des
+Nachpruefers): Census-Assertion auch an den beiden dd-Aufrufen nachziehen.

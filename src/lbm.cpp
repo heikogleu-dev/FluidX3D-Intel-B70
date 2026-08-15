@@ -185,7 +185,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// defines.hpp wirkt NUR host-seitig, ein Kernel-#ifdef braucht die Emission ZUSAETZLICH).
 	// CFD_DUMP_CL schreibt den kompletten OpenCL-Quelltext je Domaene -- DAS Werkzeug fuer den
 	// Kontrollarm-Identitaetsnachweis (Diff zweier Dumps).
-	if(getenv("CFD_DUMP_DEFINES")!=nullptr&&atoi(getenv("CFD_DUMP_DEFINES"))>0) {
+	if(env_on("CFD_DUMP_DEFINES")) {
 		const string d = device_defines(device_info);
 		uint n=0u; string out=""; size_t pos=0ull;
 		while(true) {
@@ -197,7 +197,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		print_info("CFD_DUMP_DEFINES: "+to_string(n)+" Defines an OpenCL emittiert:");
 		print(out);
 	}
-	if(getenv("CFD_DUMP_CL")!=nullptr&&atoi(getenv("CFD_DUMP_CL"))>0) {
+	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
 		const string pfad = "/tmp/fx3d_kernel_dump_"+to_string(dump_nr++)+".cl";
 		std::ofstream f(pfad); f<<opencl_c_code; f.close();

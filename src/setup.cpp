@@ -339,6 +339,7 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 // wand_flag: 0x41 am Fahrzeug (Fahrbahn/Latsch = Ausschluss), TYPE_S im Kanal-Ankerfall.
 struct Facette {
 	float nx, ny, nz, yw; // Normale (ins Fluid), Wandabstand des Zellzentrums zur Ausgleichsebene
+	float cx_, cy_, cz_;  // Fit-Schwerpunkt (fuer y_w-Neuberechnung nach der Glaettung, Nachpruefer B3)
 	uint  n_punkte;       // Stuetzpunkte (geschnittene Links) -- Flaechenproxy fuer die Glaettung
 	uint  eigene_links;   // davon Links DIESER Zelle (fuer Akkumulator-Hygiene in Stufe 2)
 	uchar klasse;         // 0 sauber, sonst Bitmaske K1=1 K2=2 K3=4 K4=8 (Orientierungskonflikt=16)
@@ -393,7 +394,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		}
 		if(!wandnah) continue;
 		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
-		double px[190], py[190], pz[190]; uint np=0u, eigene=0u;
+		double px[456], py[456], pz[456]; uint np=0u, eigene=0u, verworfen=0u; // 25 Zellen x 18 Links = 450 absolutes Maximum (Nachpruefer B1: 190 lief in beidwandigen Spalten still ueber)
 		for(int dz=-2; dz<=2; dz++) for(int dy=-2; dy<=2; dy++) for(int dx2=-2; dx2<=2; dx2++) {
 			const int cx=(int)x+dx2, cy=(int)y+dy, cz=(int)z+dz;
 			if(cx<1||cy<1||cz<1||cx>=(int)Nx-1||cy>=(int)Ny-1||cz>=(int)Nz-1) continue;
@@ -402,15 +403,17 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			for(uint i=1u; i<19u; i++) {
 				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1], zn=cz+FZ_C[i][2];
 				if(!ist_wand(idx((uint)xn,(uint)yn,(uint)zn))) continue;
-				if(np<190u) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; }
-				if(dx2==0&&dy==0&&dz==0) eigene++;
+				if(np<456u) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
+				else verworfen++; // kann bei 456 >= 450 nie greifen -- Waechter statt stiller Annahme
 			}
 		}
-		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u;
+		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u; f.cx_=f.cy_=f.cz_=0.0f;
+		if(verworfen>0u) f.klasse|=32u; // Ueberlauf -- markieren+zaehlen, nicht still rechnen (A4)
 		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u; F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
 		for(uint i=0u;i<np;i++) { cx+=px[i]; cy+=py[i]; cz+=pz[i]; }
 		cx/=np; cy/=np; cz/=np;
+		f.cx_=(float)cx; f.cy_=(float)cy; f.cz_=(float)cz;
 		double M[3][3]={{0,0,0},{0,0,0},{0,0,0}};
 		for(uint i=0u;i<np;i++) {
 			const double dxp=px[i]-cx, dyp=py[i]-cy, dzp=pz[i]-cz;
@@ -457,15 +460,32 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				if(cx2<0||cy2<0||cz2<0||cx2>=(int)Nx||cy2>=(int)Ny||cz2>=(int)Nz) continue;
 				const uint j = feld[idx((uint)cx2,(uint)cy2,(uint)cz2)];
 				if(j==0xFFFFFFFFu||(F[j].klasse&1u)) continue;
-				const double w = (double)F[j].n_punkte;
+				const double w = (double)max(1u, F[j].eigene_links); // Flaechenproxy der FACETTENZELLE (Nachpruefer-Randnotiz: Fenstersummen ueberlappen fast vollstaendig -> de facto uniform)
 				sx+=w*F[j].nx; sy+=w*F[j].ny; sz+=w*F[j].nz;
 			}
 			const double l = sqrt(sx*sx+sy*sy+sz*sz);
 			if(l>1e-12) { G[i].nx=(float)(sx/l); G[i].ny=(float)(sy/l); G[i].nz=(float)(sz/l);
 				const double ax=fabs(sx/l), ay=fabs(sy/l), az=fabs(sz/l);
-				G[i].achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); }
+				G[i].achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u);
+				// ★ Nachpruefer B3: y_w gegen die GEGLAETTETE Ebene neu (Plan A6) -- Schwerpunkt liegt in der Facette.
+				double ywn = (sx/l)*((double)x-(double)F[i].cx_)+(sy/l)*((double)y-(double)F[i].cy_)+(sz/l)*((double)z-(double)F[i].cz_);
+				G[i].yw = (float)fabs(ywn);
+				G[i].klasse &= (uchar)~8u; if(G[i].yw<0.2f||G[i].yw>2.0f) G[i].klasse|=8u; // K4 neu bewerten
+			}
 		}
 		F=G;
+	}
+	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
+	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
+	hist_yw.clear(); hist_r21.clear(); hist_r10.clear(); hist_winkel.clear();
+	ulong markiert=0ull; k4=0ull; ulong k_ueberlauf=0ull;
+	for(const Facette& f : F) {
+		if(f.klasse!=0u) markiert++;
+		if(f.klasse&8u)  k4++;
+		if(f.klasse&32u) k_ueberlauf++;
+		if(f.klasse&1u) continue;
+		hist_yw.push_back((double)f.yw);
+		hist_winkel.push_back(acos(fmin(1.0,(double)fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0/3.14159265358979);
 	}
 	// Bericht + Histogramm-CSV.
 	auto quantil = [](std::vector<double>& v, const double q) {
@@ -473,8 +493,10 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		return v[(size_t)fmin((double)v.size()-1.0, q*(double)v.size())]; };
 	const ulong nf=(ulong)F.size();
 	print_info(string("Facetten (")+wo+"): "+to_string(nf)+" wandnahe Fluidzellen; Klassen: K1(<6 Punkte) "+to_string(k1)
-		+", K2(Kante) "+to_string(k2)+", K3(Linie) "+to_string(k3)+", K4(y_w) "+to_string(k4)+", Orientierung "+to_string(kori));
-	if(nf>0ull) print_info("  markiert gesamt: "+to_string(100.0f*(float)(k1+k2+k3+k4+kori)/(float)nf,1u)
+		+", K2(Kante) "+to_string(k2)+", K3(Linie) "+to_string(k3)+", K4(y_w, nach Glaettung) "+to_string(k4)
+		+", Orientierung "+to_string(kori)+", Punktueberlauf "+to_string(k_ueberlauf));
+	if(nf>0ull) print_info("  markierte ZELLEN (klasse!=0, Nachpruefer B2 -- Bitmaske, keine Zaehlersumme): "
+		+to_string(markiert)+" = "+to_string(100.0f*(float)markiert/(float)nf,1u)
 		+" % (VORLAEUFIGE Schwellen r21>0,1 / r10<0,02 -- endgueltig aus diesen Histogrammen)");
 	print_info("  y_w: Median "+to_string((float)quantil(hist_yw,0.5),3u)+", q10 "+to_string((float)quantil(hist_yw,0.1),3u)
 		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
@@ -559,6 +581,7 @@ void main_setup_kanal() {
 	// ★ C1b Stufe 1, Anker-Test: am parallelwandigen Kanal MUESSEN alle Facetten exakt n=ez,
 	// y_w=0,500, Klasse 0 liefern (FACETTEN-PLAN A3, Gegenpruefer-verifiziert). =2: nur Diagnose.
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
+		// Randstreifen x/y (1..N-2-Ausschluss, kein periodischer Wrap) fehlen bewusst: ~5 % Diagnose-only (Nachpruefer B5).
 		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, "Kanal-Anker");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
