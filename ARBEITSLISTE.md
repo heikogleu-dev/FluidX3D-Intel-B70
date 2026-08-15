@@ -100,14 +100,17 @@ Dazu zu lösen: Vorfaktor schwankt über Wandorientierungen um Faktor 3,5, an ko
 entsteht wandnormale Transpiration; Reglerzeitkonstante ist vier Größenordnungen zu schnell
 (braucht Zeitfilterung über 10²–10³ Schritte); keine Klemme auf u_w.
 
-**C1b. Facetten-basierte Wandbehandlung (Heiko-Vorschlag, 2026-08-15 — entspricht dem
-Surfel-Ansatz von PowerFLOW).** Wandfunktion auf Oberflächenfacetten statt auf Voxeln rechnen und
-flächengewichtet in die Zellen zurückverteilen. Für uns: exaktes y und exakte Normale aus dem
-nächsten STL-Dreieck je Wandzelle (steckt schon im Plan), plus **Glättung von u_w über
-Nachbarfacetten** — dämpft genau die Treppen-Oszillationen, die Cai et al. 2021 als die
-c_f-Fehlerquelle identifizieren. Achtung: heilt nur den GEOMETRISCHEN Rauheitsanteil (der Kanal
-ist gitterparallel und rau trotzdem — Test B klärt den Rest); Rückverteilung muss
-impulserhaltend gewichtet sein.
+**C1b. Facetten-basierte Wandbehandlung — ZELLBASIERT (Heiko, 2026-08-15).**
+Wandfunktion auf lokalen Facetten rechnen und geglättet zurückverteilen (≙ Surfel-Ansatz von
+PowerFLOW). **Entscheidung: aus den Zellen, nicht aus der STL** — die Wandfunktion soll die Wand
+modellieren, die der Löser hat (Halfway-Voxelwand), nicht die des CAD; die STL läge systematisch
+bis dx/2 daneben, und im dd-Fall bekommt so jedes Gitter automatisch seine eigene effektive Wand.
+Umsetzung: **Ausgleichsebene über Wandzellen der 3³/5³-Nachbarschaft** (die Verallgemeinerung von
+Heikos Dreiecken — gemittelte Normale ohne Kollinearitäts-Sonderfälle, löst strukturell V1s
+Matyka-Rauschproblem), u_w flächengewichtet über Nachbarfacetten geglättet. Kanten/dünne Teile:
+schlecht konditionierte Fits markieren und zählen, nicht still mitrechnen. STL nur als einmalige
+Diagnose-Gegenprobe der Normalen. Heilt den GEOMETRISCHEN Rauheitsanteil; den nicht-geometrischen
+(Kanal ist gitterparallel und trotzdem rau) klärt Test B.
 
 **C2. Werkzeuge zuerst** (Phase 0): `CFD_DUMP_CL`/`CFD_DUMP_DEFINES` aus V1 portieren (~20 Zeilen,
 V1 nennt es „das Werkzeug gegen die teuerste Fehlerklasse des Projekts"), und
