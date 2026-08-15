@@ -193,3 +193,31 @@ eigene_links). Jacobi, Richtungstabelle, Indizierung, Einhaengepunkte: positiv v
 
 0x41-Zellcensus vor/nach unveraendert (Assertion gruen). Offen fuer Stufe 2 (Randnotiz des
 Nachpruefers): Census-Assertion auch an den beiden dd-Aufrufen nachziehen.
+
+---
+
+# Schwelleneichung + Fenster-A/B (2026-08-15) — Stufe-1-Abschluss
+
+**Fenster-A/B am Fahrzeug 8 mm (753.592 Zellen, identische Geometrie):**
+
+| | 3³ | 5³ | 7³ |
+|---|---|---|---|
+| r21 q90 | 0,21 | 0,27 | 0,42 |
+| Orientierungskonflikte | **2,7 %** | 5,4 % | 9,0 % |
+| y_w Median | **0,500** | 0,501 | 0,617 (Drift!) |
+
+**3³ gewinnt klar** — größere Fenster sehen Krümmung und Zweitflächen, keine bessere Wand.
+Default jetzt CFD_FACETTEN_FENSTER=1.
+
+**Schwellen (geeicht, nicht geraten):** die saubere r21-Population endet bei q80 = 0,10, der
+Kantenschwanz beginnt dahinter → **r21 > 0,15**. K3 (r10 < 0,02) war in allen drei Fenstern
+LEER → bleibt als Sicherheitsnetz. K4 besteht praktisch vollständig aus y_w < 0,2 (101.646
+bei 3³; nur 0-6 Zellen über 2,0) — das ist Spalt-/Eckgeometrie (Unterboden, Radhaus), keine
+Fit-Pathologie; diese Zellen behalten in Stufe 2 den reinen BB.
+
+**Endstand mit geeichten Einstellungen: 21,9 % markiert — UNTER der 30-%-Plan-Schwelle.**
+(K2 Kante 96.021, K4 wandnah 101.646, Orientierung 20.502, Überlauf 0.)
+Kanal-Anker mit 3³ weiterhin exakt (0 markiert, y_w = 0,500).
+
+**⇒ Das Stufe-2-Gate ist offen: Kernel-Eingriff (dominante Achse) mit linkweisem Paar-Gate
+und Flächenfaktor 1/|n̂_a| ist der nächste Schritt.**

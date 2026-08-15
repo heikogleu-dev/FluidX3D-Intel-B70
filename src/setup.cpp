@@ -377,7 +377,10 @@ static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1
 	{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
 std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz,
                                    const uchar wand_flag, const string& out_dir, const char* wo) {
-	const int R = (int)min(3u, max(1u, env_u("CFD_FACETTEN_FENSTER", 2u))); // Radius: 1=3^3, 2=5^3 (Default), 3=7^3
+	// ★ Fenster-A/B 2026-08-15 (Fahrzeug 8 mm, je 753.592 Zellen): 3^3 gewinnt klar -- r21-q90
+	// 0,21/0,27/0,42 und Orientierungskonflikte 2,7/5,4/9,0 % fuer 3/5/7; 7^3 driftet y_w auf 0,617.
+	// Groessere Fenster sehen Kruemmung und Zweitflaechen, keine bessere Wand.
+	const int R = (int)min(3u, max(1u, env_u("CFD_FACETTEN_FENSTER", 1u))); // Radius: 1=3^3 (Default, geeicht), 2=5^3, 3=7^3
 	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
 	std::vector<double> px(np_max), py(np_max), pz(np_max);
 	print_info(string("Facetten (")+wo+"): Fenster "+to_string(2*R+1)+"^3 (CFD_FACETTEN_FENSTER="+to_string((uint)R)+")");
@@ -442,7 +445,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		const double r21 = ew[imax]>1e-30 ? ew[imin]/fmax(ew[imid],1e-30) : 1.0;   // K2: Kante
 		const double r10 = ew[imax]>1e-30 ? ew[imid]/ew[imax] : 0.0;               // K3: Linie
 		f.r21_=(float)r21; f.r10_=(float)r10;
-		if(r21>0.1)  { f.klasse|=2u; k2++; }
+		if(r21>0.15) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
 		if(r10<0.02) { f.klasse|=4u; k3++; }
 		if(yw<0.2||yw>2.0) { f.klasse|=8u; k4++; }
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
@@ -503,7 +506,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		+", Orientierung "+to_string(kori)+", Punktueberlauf "+to_string(k_ueberlauf));
 	if(nf>0ull) print_info("  markierte ZELLEN (klasse!=0, Nachpruefer B2 -- Bitmaske, keine Zaehlersumme): "
 		+to_string(markiert)+" = "+to_string(100.0f*(float)markiert/(float)nf,1u)
-		+" % (VORLAEUFIGE Schwellen r21>0,1 / r10<0,02 -- endgueltig aus diesen Histogrammen)");
+		+" % (Schwellen GEEICHT 2026-08-15: r21>0,15 aus Fenster-A/B, r10<0,02 Sicherheitsnetz -- K3 war ueberall leer)");
 	print_info("  y_w: Median "+to_string((float)quantil(hist_yw,0.5),3u)+", q10 "+to_string((float)quantil(hist_yw,0.1),3u)
 		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
 	print_info("  Winkel zur dominanten Achse: Median "+to_string((float)quantil(hist_winkel,0.5),1u)
