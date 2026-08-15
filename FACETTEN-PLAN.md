@@ -114,3 +114,56 @@ RHO_CLAMP > 0 oder divergierende Kraftreihen.
 9. u[]-Race → Glättung nur im Vorkernel (Befund-8-Klasse).
 10. Indexfeld-Speicher (~560 MB @ 4 mm) → akzeptiert (~4 %); Rückfallebene engere BBox.
 11. Zähler-Überlauf → neue Slots 7/10 gegatet; 8/9 wie 3/4 (Ist≠Soll fällt auf).
+
+---
+
+# Revision nach adversarialer Gegenprüfung (2026-08-15, Stand 2cfdc43)
+
+Urteil: Architektur A1–A4/A6–A8 und Stufenlogik halten; ZWEI Befunde treffen den Kernel-Kern
+und sind eingearbeitet. Der Gegenprüfer hat die Esoteric-Pull-Tausch-Identität für x/y-Wände
+am Code VERIFIZIERT (load_f/store_f lesen/schreiben je Paar denselben Slot; Tausch in Registern).
+
+## R1 (KIPPT → eingearbeitet): linkweises Tauschpaar-Gate ist PFLICHT.
+Der Kanal-WFB brauchte kein Paar-Gate, weil an gitterparallelen Wänden alle vier Diagonal-
+ursprünge zwingend solid sind — GEOMETRIEZUFALL. An jeder Treppen-Eckzelle hat z. B. das
+y-Paar (11,18) einen FLUIDEN Ursprung; ungegatet tauscht man dort regulär gestreamte DDFs
+gegen Reflexionen — destruktiv, jeder Schritt, jede Schräge. Regel: Paar (9,16) nur wenn
+flags[j[10]] UND flags[j[15]] solid; (11,18) nur wenn j[12] UND j[17] solid; Decke/x/y analog.
+±½τ NUR auf tatsächlich getauschte Paare (sonst Addition auf ungetauschtem BB =
+V1-Doppelzählungsklasse). Der 45°-Treppen-Unit-Test prüft DDF-INTEGRITÄT an fluiden
+Ursprüngen, nicht nur τ-Werte.
+
+## R2 (KIPPT → eingearbeitet): Flächenfaktor 1/|n̂_a| sofort in Stufe 2.
+An der 45°-Treppe trägt eine Eckzelle pro Periode den Tausch, wahre Wandfläche √2·dx² —
+ohne Faktor fehlen 29,3 % des integrierten Widerstands, Stufe 3 wäre zum Scheitern verabredet.
+Angewandtes τ = τ_w/|n̂_a| macht das Flächenintegral über die Monolage exakt; am parallelen
+Kanal ist der Faktor exakt 1,0 → Bitgleichheit unberührt. STRUKTURELLE GRENZE (ehrlich
+benannt): die τ-Komponente ENTLANG der dominanten Achse (Hangauf-Strömung, Windschutzscheibe
+bis sin45° = 71 %) kann der dominante-Achse-Tausch nicht anwenden; der gekippte Kanal
+(Strömung parallel zu den Stufenkanten) misst diese Lücke NICHT — sie bleibt als bekannte
+Grenze im Plan und wird ggf. in Stufe 4 (Nebenachsen) adressiert.
+
+## Auflagen (alle übernommen):
+1. **Stufe 1:** y_w-Systematik an der 45°-Treppe (Eckzellen ~0,35–0,39 statt 0,5; Punktwolke
+   nicht eben, Streuung ~0,35 dx) als BEKANNTE Zahl in die Diagnose; logarithmische Dämpfung:
+   ±40 % y_w ≈ ±9–10 % τ_w — halbiert das Stufe-3-Budget, steht jetzt hier.
+2. **Cd/Cz-Auslesepfad:** Druckanteil per zellweiser n̂-Projektion von F beim Auslesen,
+   Reibung aus dem τ-Akkumulator; der rohe Impulsaustausch misst an getauschten Links ein
+   PHANTOM (weder BB noch Modell-τ, Größenordnung Rauwand). Kugel-A/B beider Wege ist
+   PFLICHT-Abnahmekriterium mit Zahl, keine bloße Gegenmaßnahme.
+3. **Akkumulator-Hygiene:** τ nur für Zellen akkumulieren, die mindestens ein Paar wirklich
+   getauscht haben — sonst schönt das y⁺-Histogramm unbehandelte Zellen.
+4. **Stufe 2b Bitgleichheits-Vorschrift:** bei n̂=ê_z exakt derselbe Ausdrucksbaum wie die
+   z-WFB (Konstante über identische to_string-Kette, τ_a = −def_wf_tau·tw·u_a/ut,
+   Paarreihenfolge (9,16) vor (11,18)); andernfalls Kriterium ehrlich als "bitnah mit
+   Letzt-Bit-Drift" + Toleranzband. Fit liefert am parallelen Kanal EXAKT 0,5 (verifiziert).
+5. **Stufe 3 festgelegt:** iGPU; Kippwinkel 45° UND ein Nicht-Tie-Winkel (~26,6° = atan 0,5,
+   Treppenperiode 2) — 45° ist der argmax-Tie-Fall, Tie-Break deterministisch (kleinste
+   Achsnummer); Treppenperiode muss Ny teilen; c_f-Normierung auf BENETZTE Fläche definiert.
+6. **Einhängepunkt:** baue_facetten() NACH set_bcs (Zellcensus sieht den Endzustand);
+   host-flags sind dort aktuell (verifiziert: nach Readback nur host-seitige Änderungen).
+7. **dd-Speicher:** Indexfeld Fahrzeug-BBox ≈ 0,63 GB (nicht 560 MB "Vollgitter" — der wäre
+   2,0 GB); B70-Budget fahrzeug ≈ 29,5 GB von 32 → passt; "dd-Nahfeld kleiner" war FALSCH
+   (gleiche BBox); dd-Bilanz vor Stufe 5-dd am realen Log nachweisen.
+8. Spalding-Iterationszahl als Define, Default je Fall (y⁺~140 → 3 Schritte reichen ~0,1 %).
+9. Stufe 5 ist eine SERIE von ≥6 B70-Läufen à ≤2,5 h — als Serie einplanen.
