@@ -34,6 +34,8 @@
 // f_neq kommt aus dem Scherratentensor ueber Differenzen des FELDES u[] -- nicht aus den Verteilungen
 // des Nachbarn, weil die unter Esoteric Pull teilweise diesem selbst gehoeren.
 // AUSKOMMENTIEREN stellt den alten Zustand bit-genau her (der Kontrollarm).
+// Test B (CFD_SGS_WANDFREI) benutzt die festen Flaechennachbarn j[1..6] -- nur fuer D3Q19 gebaut.
+// (Der Schalter selbst ist Laufzeit; dieser Guard schuetzt den Kernel-Code dahinter.)
 #if defined(REGULARIZED_BOUNDARIES)&&!defined(D3Q19)
 #error "REGULARIZED_BOUNDARIES ist nur fuer D3Q19 gebaut (Gewichtszuordnung in reg_fneq und Achsnachbarn j[1..6]). Pruefer-Befund 2026-08-08: bei D3Q15 fehlt def_we, bei D3Q27 und D2Q9 sind die Gewichte falsch."
 #endif

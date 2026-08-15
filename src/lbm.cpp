@@ -162,6 +162,7 @@ void LBM_Domain::set_force_bbox(const uint x0, const uint y0, const uint z0, con
 }
 uint LBM_Domain::s_sponge_n = 0u;
 float LBM_Domain::s_sponge_a = 3000.0f;
+bool LBM_Domain::s_sgs_wandfrei = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
 uint LBM_Domain::s_sparse_T = 8u;
@@ -675,6 +676,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 
 #ifdef SUBGRID
 	"\n	#define SUBGRID"
+	// ★ Test B (CFD_SGS_WANDFREI): nur emittiert wenn gesetzt -- ungesetzt ist der praeprozessierte
+	// Quelltext bit-identisch (dasselbe Muster wie SPONGE und CFD_REG_BC).
+	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
 #endif // SUBGRID
 
 #ifdef PARTICLES

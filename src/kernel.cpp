@@ -1637,6 +1637,15 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 		uzn  = u[2ul*def_N+(ulong)n];
 	} else {
 		calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
+)+"#ifdef RHO_CLAMP"+R(
+		// ★★ ZAEHLER-FIX 2026-08-15 (Vorpruefer-Befund): die Zaehlung stand NUR im
+		// #ifndef-EQUILIBRIUM_BOUNDARIES-Pfad -- der ist in JEDEM Build dieses Forks wegkompiliert
+		// (EQUILIBRIUM_BOUNDARIES ist immer definiert). Die Klemme klemmte lautlos, und jede
+		// "0 Treffer"-Meldung stammte von einem Zaehler, der im Binary nie existierte. Genau der
+		// No-Op, vor dem der eigene Kommentar im anderen Zweig warnt.
+		if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]);
+		else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]);
+)+"#endif"+R( // RHO_CLAMP
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	float fxn=fx, fyn=fy, fzn=fz; // force starts as constant volume force, can be modified before call of calculate_forcing_terms(...)
@@ -1724,6 +1733,21 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	float w = def_w; // LBM relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
 
 )+"#ifdef SUBGRID"+R(
+)+"#ifdef SGS_WANDFREI"+R(
+	// ★★ TEST B der Rauwand-Diagnose (Laufzeitschalter CFD_SGS_WANDFREI, 2026-08-15): kein nu_t in
+	// Zellen mit solidem FLAECHENnachbarn -- entscheidet, ob die gemessene Rauwand (k_s ~ 1 Zelle,
+	// c_f 2,3-3,3x zu hoch) vom SGS-Modell oder vom Bounce-Back kommt. Das Gate sitzt VOR dem
+	// Block und ueberspringt ihn (statt w hinterher zurueckzusetzen): so entfallen auch die
+	// fneq-Produkte, SPONGE liest danach das laminare w und rampt korrekt, TRT leitet wm aus dem
+	// finalen w ab. Wanderkennung ueber das etablierte Idiom (flags[j[i]]&TYPE_BO)==TYPE_S auf den
+	// sechs geometrischen Flaechennachbarn j[1..6] -- bewusst NICHT ueber TYPE_MS, denn ruhende
+	// Waende (Kanal!) markieren keine MS-Zellen. Kostet 6 uchar-Reads je Zelle (+~6 %); der
+	// Kontrollarm zahlt nichts, weil ungesetzt gar nicht emittiert wird.
+	bool sgs_wand = false;
+	for(uint i=1u; i<7u; i++) sgs_wand = sgs_wand||(flags[j[i]]&TYPE_BO)==TYPE_S;
+	if(!sgs_wand)
+)+"#endif"+R( // SGS_WANDFREI
+
 	{ // Smagorinsky-Lilly subgrid turbulence model, source: https://arxiv.org/pdf/comp-gas/9401004.pdf, in the eq. below (26), it is "tau_0" not "nu_0", and "sqrt(2)/rho" (they call "rho" "n") is missing
 		const float tau0 = 1.0f/w; // source 2: https://youtu.be/V8ydRrdCzl0
 		float Hxx=0.0f, Hyy=0.0f, Hzz=0.0f, Hxy=0.0f, Hxz=0.0f, Hyz=0.0f; // non-equilibrium stress tensor

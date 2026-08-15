@@ -143,6 +143,7 @@ public:
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
 	Memory<uint> rho_clamp_hits; // [0] = untere Grenze getroffen, [1] = obere
+	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static uint s_sponge_n;  // 0 = aus; Zonenbreite in Zellen (CFD_SPONGE_N)
 	static float s_sponge_a; // Viskositaetsfaktor am Rand (CFD_SPONGE_A)
 	static float s_sponge_wmin; // untere Klemme fuer w in der Zone (CFD_SPONGE_WMIN)
