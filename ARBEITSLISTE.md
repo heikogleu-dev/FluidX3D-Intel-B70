@@ -6,8 +6,15 @@ einer Sitzung erledigt werden kann.
 **Nachtrag 2026-08-15:** 0A (y⁺ gemessen: Median 1122, nicht 137), A1–A3 (Kanal steht, Rauwand
 verstanden, WFB nach Han et al. gebaut — c_f gitterunabhängig flach, Details `WANDMODELL.md`) und
 das Komplett-Audit samt Fix-Schleife (`AUDIT-BEFUNDE.md`, sauber bis Commit 06b432b) sind erledigt.
-**Aktuell in Arbeit: C1b** (zellbasierte Facetten, Heikos Priorisierung) — die
-Relativgeschwindigkeits-Erweiterung der WFB folgt danach.
+**Stand C1b (2026-08-15 abends):** Stufen 0–2 KOMPLETT durch die Agenten-Pipeline (Pläne in
+FACETTEN-PLAN.md / FACETTEN-STUFE2.md / FACETTEN-CD-PFAD.md, alle gegen­geprüft): Facettenbau
+geeicht (3³, r21>0,15, 21,9 % markiert), Kernel mit Paar-Gate + Flächenfaktor auf DDF-Ebene
+bewiesen, Kanal-Äquivalenz zur z-WFB BITGLEICH (CPU+iGPU), Kugel Ist=Soll, Cd-Auslesepfad
+K1–K4 bestanden (K2 = 0,9961 stationär). Audit Runde 3 sauber (AUDIT-BEFUNDE.md).
+**Nächste Schritte:** Druck-Zeitmittel im Cd-Pfad (Sample-Kadenz, Plan E6); Entscheidung
+Stufe 3 (gekippter Kanal) vs. vorgezogene Nebenachsen — die Kugel zeigt nur 313 Tauschzellen
+bei 14.356 ohne offenes Paar, der dominante-Achse-Tausch greift an Krümmung kaum; danach
+Stufe 5 Fahrzeug-Abnahme (y⁺ 1122 → ~140) und die Relativgeschwindigkeits-Erweiterung.
 
 **Das Ziel, an dem alles gemessen wird:** Cd und Cz des Fahrzeugs gegen OpenFOAM 13
 (**0,599 / −1,301**). Stand heute: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem
