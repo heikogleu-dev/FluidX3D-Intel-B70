@@ -201,3 +201,52 @@ analytische Ableitung von einem Prüfer nachgerechnet und korrekt).
 
 V1 wusste das teilweise selbst: in `wall-models.md` steht die Rechnung, dass die beiden
 Kawai-Larsson-Bedingungen auf diesen Gittern **um Faktor ~17 unvereinbar** sind.
+
+---
+
+# Nachtrag 2026-08-15 — der Kanal hat gemessen, und das Bild ist ein anderes
+
+## Die Befundkette: fünf Hypothesen, vier tot
+
+Der Kanal (A1) lief als Leiter N = 38/54/76/108 plus Gegentests, alle mit validierter
+Messvorrichtung (zwei unabhängige c_f-Wege, Übereinstimmung 1,4 % am Hauptlauf):
+
+| Hypothese | Test | Ergebnis |
+|---|---|---|
+| Mischweg/ungedämpftes Smagorinsky: c_f ∝ 1/N², **−69 %** | Leiter | **tot** — gemessen +217 % bis +121 %, nur schwach fallend |
+| Reynolds-Effekt | Re_τ 5186 gegen 1000, gleiches Gitter | **tot** — c_f identisch (0,01092 / 0,01093) |
+| SRT-Instabilitäts-Rauschboden | U_b unter die Schwelle halbiert | **tot** — c_f fällt nur 9 % |
+| FP16C-Quantisierung | FP32-Build, gleicher Lauf | **tot** — −3 % |
+| **Raue Wand (vollraues Regime)** | k_s-Konsistenz über die Leiter | **trägt** |
+
+## Die Arbeitshypothese: Bounce-Back als hydraulisch raue Wand
+
+Aus U_b⁺ = (1/κ)·ln(δ/k_s) + 8,5 (Nikuradse, vollrau) rückgerechnet:
+
+| N | c_f | k_s [Zellen] |
+|---|---:|---:|
+| 38 | 0,01092 | 2,41 |
+| 54 | 0,01121 | 3,69 (Ausreißer — dieser Lauf hat auch 20 % c_f-Wege-Diskrepanz, vermutlich nicht konvergiert) |
+| 76 | 0,00772 | 1,68 |
+| 108 | 0,00761 | 2,29 |
+| 38, U_b halbiert | 0,00995 | 1,85 |
+
+**k_s ≈ 2 ± 1 Zellen, näherungsweise konstant** — und das vollraue Regime erklärt alle drei
+Signaturen auf einmal: c_f Re-unabhängig, c_f U_b-unabhängig, nur logarithmisch in N.
+
+Physikalische Deutung (unbewiesen, aber konsistent): unter SRT ist die effektive
+Bounce-Back-Wandlage viskositätsabhängig (Λ = (τ−½)² statt 3/16), und Smagorinsky moduliert τ
+lokal — die Wandposition **flackert** räumlich und zeitlich um O(Zellen). Eine flackernde
+Wandposition *ist* Rauheit.
+
+## Was das für das Wandmodell heißt
+
+Die Aufgabe ist präziser als „fehlende Reibung ergänzen": **die Rauwand-Charakteristik durch die
+korrekte Glattwand-Spannung ersetzen.** Und es gibt erstmals eine quantitative Basislinie mit
+Vorhersagekraft — c_f folgt dem vollrauen Gesetz mit k_s ≈ 2 Zellen; jede Verbesserung ist gegen
+diese Kurve messbar.
+
+Konsistent damit: die y⁺-Messung am Fahrzeug (Median 1122 statt korrelierter 137, τ_w ~130× über
+der Glattwand-Erwartung) — eine raue Wand liefert genau solche Überschüsse.
+
+**Status: Arbeitshypothese nach fünf Gegentests, unabhängige Prüfung (Iron Rule 2) angestoßen.**
