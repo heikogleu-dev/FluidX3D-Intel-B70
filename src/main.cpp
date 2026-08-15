@@ -1,4 +1,13 @@
 #include "info.hpp"
+// ★ F1 der Arbeitsliste, aus V1 portiert 2026-08-15: HEARTBEAT_DIAG.
+#include <execinfo.h>
+#include <csignal>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <map>
+#include <thread>
+#include <chrono>
 #include "lbm.hpp"
 #include "setup.hpp"
 
@@ -150,6 +159,60 @@ void main_physics() {
 }
 
 #ifndef GRAPHICS
+// ★★ HEARTBEAT_DIAG, aus V1 portiert (F1 der Arbeitsliste). Anlass vom selben Tag: ein Lauf hing
+// 35 Minuten in "Allocating memory", ein Thread bei 100 % -- und die Zuordnung (Treiber-Hänger
+// oder eigene Schleife?) kostete Handarbeit. Mit HEARTBEAT_DIAG=1 dumpt ein Waechter-Thread alle
+// 5 s je Thread Zustand/wchan/Kontextwechsel, und ein Thread, der 15 s im R-Zustand klebt,
+// bekommt automatisch SIGRTMIN und schreibt seinen Backtrace nach stderr. V1 nennt es das
+// Werkzeug, das den INIT-HANG in 15 Sekunden zuordnet.
+static volatile bool hb_running = true;
+static void diag_backtrace_handler(int) {
+	void* buf[80];
+	const int n = backtrace(buf, 80);
+	const char hdr[] = "\n[DIAG_BACKTRACE] TID=";
+	(void)!write(2, hdr, sizeof(hdr)-1);
+	char tid_str[24];
+	const long tid = syscall(SYS_gettid);
+	const int len = snprintf(tid_str, sizeof(tid_str), "%ld n=%d\n", tid, n);
+	(void)!write(2, tid_str, len);
+	backtrace_symbols_fd(buf, n, 2);
+	(void)!write(2, "[/DIAG_BACKTRACE]\n", 18);
+}
+static void heartbeat_starten() {
+	{ struct sigaction sa{}; sa.sa_handler = diag_backtrace_handler; sigemptyset(&sa.sa_mask); sa.sa_flags = SA_RESTART; sigaction(SIGRTMIN, &sa, nullptr); }
+	std::thread([](){
+		const pid_t pid = getpid();
+		std::map<long, ulong> last_nv;
+		std::map<long, int> stuck_count;
+		while(hb_running) {
+			std::this_thread::sleep_for(std::chrono::seconds(5));
+			DIR* d = opendir("/proc/self/task");
+			if(!d) continue;
+			struct dirent* ent;
+			while((ent = readdir(d)) != nullptr) {
+				if(ent->d_name[0]=='.') continue;
+				const long tid = atol(ent->d_name);
+				char path[96];
+				snprintf(path, sizeof(path), "/proc/self/task/%ld/status", tid);
+				std::ifstream st(path);
+				char state = '?'; ulong nvcs = 0ull; std::string line;
+				while(std::getline(st, line)) {
+					if(line.compare(0, 6, "State:")==0) state = line.size()>7 ? line[7] : '?';
+					else if(line.compare(0, 27, "nonvoluntary_ctxt_switches:")==0) sscanf(line.c_str()+27, "%lu", &nvcs);
+				}
+				const ulong delta = nvcs-last_nv[tid]; last_nv[tid]=nvcs;
+				snprintf(path, sizeof(path), "/proc/self/task/%ld/wchan", tid);
+				std::ifstream wch(path); std::string wchan; std::getline(wch, wchan);
+				if(wchan.empty()) wchan = "0";
+				print_info("[HEARTBEAT TID="+to_string((uint)tid)+"] state="+string(1,state)+" wchan="+wchan+" dnvcs="+to_string((uint)delta));
+				if(state=='R') { if(++stuck_count[tid]==3) { print_warning("[HEARTBEAT] TID="+to_string((uint)tid)+" seit 15 s im R-Zustand -- SIGRTMIN fuer Backtrace"); syscall(SYS_tgkill, pid, (pid_t)tid, SIGRTMIN); } }
+				else stuck_count[tid]=0;
+			}
+			closedir(d);
+		}
+	}).detach();
+}
+
 int main(int argc, char* argv[]) {
 	// ★ FORK 2026-08-08: Ausgabe zeilenweise leeren. Wird die Ausgabe in eine Datei umgeleitet --
 	// also bei JEDEM Hintergrundlauf --, sammelt die Standardbibliothek sie blockweise. Am
@@ -158,6 +221,7 @@ int main(int argc, char* argv[]) {
 	// NICHTS uebrig, woran sich haette ablesen lassen, wo der Lauf steht. Bei Laeufen ueber Stunden
 	// ist das kein Komfortmangel, sondern der Unterschied zwischen Diagnose und Raten.
 	std::cout << std::unitbuf;
+	if(getenv("HEARTBEAT_DIAG")!=nullptr) heartbeat_starten();
 	info.allow_printing.lock();
 	main_arguments = get_main_arguments(argc, argv);
 	thread compute_thread(main_physics);
