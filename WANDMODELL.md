@@ -250,3 +250,30 @@ Konsistent damit: die y⁺-Messung am Fahrzeug (Median 1122 statt korrelierter 1
 der Glattwand-Erwartung) — eine raue Wand liefert genau solche Überschüsse.
 
 **Status: Arbeitshypothese nach fünf Gegentests, unabhängige Prüfung (Iron Rule 2) angestoßen.**
+
+## Unabhängige Prüfung der Rauwand-These (Iron Rule 2) — Ergebnis
+
+**Haltbar in präzisierter Form.** Fit gegen sechs Alternativmodelle: vollrau gewinnt mit
+AICc-Abstand ≥ 19; die freie Log-Steigung (2,62 ± 0,30) trifft 1/κ = 2,44; der Re-1000-Punkt ist
+ein bestandener Falsifikationsversuch (U_b⁺ ändert sich um 0,12, „glatt mit verschobenem B" sagte
++4,4). Referenz korrekt angewandt: Re_b aller Hauptläufe = 249 950–250 034 gegen Lee&Moser 250 047.
+
+**Drei Korrekturen an meiner Fassung:**
+1. **k_s ≈ 1 Zelle, nicht 2** — die Konstante B = 8,5 war bulk-inkonsistent; korrekt integriert
+   (B = 6,53) ist k_s = 1,02 [0,95; 1,12], und das N=108-Profil bestätigt unabhängig 0,93 Zellen
+   (B_eff = −3,42 statt glatt +5,2). Sprich: **vollrau, k_s = O(1 dx)**.
+2. **Der Mechanismus ist KEINE Treppe** — die Kanalwände sind gitterparallel. Kandidaten:
+   Bounce-Back ohne Wandmodell und **ungedämpftes Smagorinsky bis in die Wandzelle** (ν_t ∝ (CΔ)²|S|
+   skaliert mit der Zellgröße — genau die beobachtete k_s ∝ dx-Signatur). Meine
+   „flackernde Wandlage"-Deutung ist damit unbelegt.
+3. Zitatkorrektur: JCP 429 (2021) 109995 ist **Cai, Degrigny, Boussuge & Sagaut**, nicht Capizzano.
+
+**Direkter Literaturbeleg für den Befund:** Han, Ooka & Kikumoto 2021 (Fluid Dyn. Res. 53, 045506):
+Standard-Bounce-Back auf groben Gittern unterschätzt die mittlere Geschwindigkeit im ganzen Feld —
+exakt unsere Signatur (U_b⁺ 13,6–16,5 statt 24,1) — und wird durch eine **Spalding-Wandfunktion im
+Bounce-Back** repariert.
+
+**Offen:** n54 passt nicht (nicht monoton in N, zugleich 9 % c_f-Wege-Diskrepanz — vermutlich nicht
+konvergiert); das transitionale Regime ist ungetestet (läuft als Test A); und der
+Mechanismus-Entscheider ist **Test B: ν_t = 0 in der ersten Fluidlage** — fällt c_f deutlich, ist
+die „Rauheit" das SGS-Modell, nicht der Bounce-Back. Das bestimmt die Stellschraube des Wandmodells.
