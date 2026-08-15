@@ -383,7 +383,10 @@ void main_setup_kanal() {
 		const float zw   = fmin((float)z-0.5f, (float)(Nz-1u)-0.5f-(float)z); // Wandabstand (Halfway)
 		const float up   = reichardt(zw*dxp);
 		const float zh   = ((float)z-0.5f)/delta_lat; // 0..2 ueber die Kanalhoehe
-		// Stromfunktions-Stoerung: u' = d(psi)/dz, w' = -d(psi)/dx -> exakt divergenzfrei in (x,z)
+		// Stromfunktions-artige Stoerung. ★ Nachpruefer-Befund: NICHT exakt divergenzfrei, wie hier
+		// zuvor behauptet -- im z-Term steht eine Naeherung statt der Stammfunktion von sin^2. Der
+		// Divergenzrest ist O(A*kx) und klingt im Warmlauf ab; fuer c_f nach 20 ETT ohne Belang,
+		// aber die Behauptung war falsch und der Anspruch (kein Akustik-Klingeln saeen) nur teilweise erfuellt.
 		const float A = 0.10f*Ub_ziel, kx = 2.0f*3.14159265f/(float)Nx, ky2 = 2.0f*3.14159265f*2.0f/(float)Ny;
 		const float sz = sin(0.5f*3.14159265f*fmin(zh, 2.0f-zh));
 		lbm.u.x[n] = up*utau_lat + A*sz*sz*cos(kx*(float)x)*cos(ky2*(float)y);
@@ -404,19 +407,19 @@ void main_setup_kanal() {
 	const uint regel_alle = 100u;
 	float f_akt = f0, Ub_alt = Ub_ziel;
 	// Statistik-Akkumulatoren je z-Ebene (double, Host)
-	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0); ulong n_stat=0ull;
+	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0), suz(Nz,0.0); ulong n_stat=0ull;
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
 	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) {
 		lbm.run((ulong)regel_alle, n_steps);
 		// U_b und Ebenensummen aus u (Vollread -- bei diesen Groessen billig: N=38 -> 3,4 MB)
 		lbm.u.read_from_device();
 		double Ub=0.0; ulong nf=0ull;
-		std::vector<double> pu(Nz,0.0), puu(Nz,0.0), pww(Nz,0.0), puw(Nz,0.0);
+		std::vector<double> pu(Nz,0.0), puu(Nz,0.0), pww(Nz,0.0), puw(Nz,0.0), pz_(Nz,0.0);
 		for(ulong n=0ull; n<lbm.get_N(); n++) {
 			uint x=0u,y=0u,z=0u; lbm.coordinates(n,x,y,z);
 			if(z==0u||z==Nz-1u) continue;
 			const double ux=(double)lbm.u.x[n], uz=(double)lbm.u.z[n];
-			Ub+=ux; nf++; pu[z]+=ux; puu[z]+=ux*ux; pww[z]+=uz*uz; puw[z]+=ux*uz;
+			Ub+=ux; nf++; pu[z]+=ux; puu[z]+=ux*ux; pww[z]+=uz*uz; puw[z]+=ux*uz; pz_[z]+=uz;
 		}
 		Ub/=(double)nf;
 		const double Ub_plus = Ub/(double)utau_lat;
@@ -434,18 +437,28 @@ void main_setup_kanal() {
 		zcsv << (step+regel_alle) << "," << (double)(step+regel_alle)/(double)T_ett << "," << Ub << ","
 		     << Ub_plus << "," << f_akt << "," << cf_k << "," << cf_m << "\n" << std::flush;
 		// Statistik erst nach dem Warmlauf akkumulieren
-		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];} n_stat+=(ulong)Nx*Ny; }
+		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];suz[z]+=pz_[z];} n_stat+=(ulong)Nx*Ny; }
 	}
 	// ---- Profil + Spannungsbilanz
 	std::ofstream pcsv(out_dir+"kanal_profil.csv"); pcsv.precision(8);
+	// ★★ NACHPRUEFER-BEFUND 2026-08-15: hier wurde mit dem ZIEL-u_tau normiert statt mit dem
+	// GEMESSENEN. Bei c_f-Abweichung ist das ein systematischer Skalenfehler in ALLEN +-Groessen
+	// (im ersten Lauf Faktor 1,78: der Lauf sass real bei Re_tau ~ 9200 und y+_1 ~ 243, nicht
+	// 5186/137), und die Spannungsbilanz KONNTE mit den Spalten nicht aufgehen. Jetzt: u_tau_ist
+	// aus der Kraftbilanz des Laufendes, beide Werte im Kopf ausgewiesen.
+	const double utau_ist = sqrt((double)f_akt*(double)delta_lat);
+	print_info("Kanal: u_tau IST = "+to_string((float)utau_ist,6u)+" gegen Ziel "+to_string(utau_lat,6u)
+		+" (Faktor "+to_string((float)(utau_ist/(double)utau_lat),3u)+") -> Re_tau IST = "+to_string((float)(utau_ist*(double)delta_lat/(double)nu_lat),0u));
+	pcsv << "# utau_ist=" << utau_ist << " utau_ziel=" << utau_lat << " nu_lat=" << nu_lat << "\n";
 	pcsv << "z,yplus,Uplus,uu_plus,ww_plus,uw_plus,tau_gesamt_soll\n";
-	const double ut2=(double)utau_lat*(double)utau_lat;
+	const double ut2=utau_ist*utau_ist;
 	for(uint z=1u; z<Nz-1u; z++) {
-		const double m=su[z]/(double)n_stat;
+		const double m=su[z]/(double)n_stat, mz=suz[z]/(double)n_stat;
 		const double zw=fmin((double)z-0.5,(double)(Nz-1u)-0.5-(double)z);
-		pcsv << z << "," << zw*(double)dxp << "," << m/(double)utau_lat << ","
-		     << (suu[z]/(double)n_stat-m*m)/ut2 << "," << (sww[z]/(double)n_stat)/ut2 << ","
-		     << (suw[z]/(double)n_stat-m*0.0)/ut2 << "," << 1.0-zw/(double)delta_lat << "\n";
+		const double dxp_ist = utau_ist/(double)nu_lat; // Wandeinheiten aus dem IST-u_tau
+		pcsv << z << "," << zw*dxp_ist << "," << m/utau_ist << ","
+		     << (suu[z]/(double)n_stat-m*m)/ut2 << "," << (sww[z]/(double)n_stat-mz*mz)/ut2 << ","
+		     << (suw[z]/(double)n_stat-m*mz)/ut2 << "," << 1.0-zw/(double)delta_lat << "\n";
 	}
 	pcsv.close();
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h); dichteklemme_fazit(h); }
