@@ -118,6 +118,12 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Konstruktoren umlegt, aendert rueckwirkend das Verhalten der ERSTEN Domaene, deren fi dann als
 	// 1-Zellen-Platzhalter stehen bliebe. Deshalb jetzt genauso read-once wie die F-Bounding-Box:
 	// hier einmal in Domaenen-Felder uebernehmen, danach lesen ausschliesslich diese.
+#ifndef D3Q19
+	// ★ Nachpruefer-Befund 2026-08-15: der "D3Q19-Guard" fuer CFD_SGS_WANDFREI war nur ein KOMMENTAR.
+	// Der Schalter ist Laufzeit, kein #error kann ihn fangen -- deshalb hart zur Laufzeit: die
+	// Wanderkennung benutzt die festen Flaechennachbarn j[1..6], die nur in D3Q19 stimmen.
+	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ist nur fuer D3Q19 gebaut (feste Flaechennachbarn j[1..6]).");
+#endif // D3Q19
 	// ★ Daempfungszone: Sperre und Wirksamkeitsmeldung.
 	if(s_sponge_n>0u) {
 		// def_Nx/def_Ny/def_Nz im Sponge-Block sind DOMAENENmasse inklusive Halo -- mit mehreren
