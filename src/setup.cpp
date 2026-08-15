@@ -340,6 +340,7 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 struct Facette {
 	float nx, ny, nz, yw; // Normale (ins Fluid), Wandabstand des Zellzentrums zur Ausgleichsebene
 	float cx_, cy_, cz_;  // Fit-Schwerpunkt (fuer y_w-Neuberechnung nach der Glaettung, Nachpruefer B3)
+	float r21_, r10_;     // Eigenwertverhaeltnisse lmin/lmid (K2) und lmid/lmax (K3) -- fuer die Schwelleneichung
 	uint  n_punkte;       // Stuetzpunkte (geschnittene Links) -- Flaechenproxy fuer die Glaettung
 	uint  eigene_links;   // davon Links DIESER Zelle (fuer Akkumulator-Hygiene in Stufe 2)
 	uchar klasse;         // 0 sauber, sonst Bitmaske K1=1 K2=2 K3=4 K4=8 (Orientierungskonflikt=16)
@@ -376,6 +377,10 @@ static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1
 	{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
 std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz,
                                    const uchar wand_flag, const string& out_dir, const char* wo) {
+	const int R = (int)min(3u, max(1u, env_u("CFD_FACETTEN_FENSTER", 2u))); // Radius: 1=3^3, 2=5^3 (Default), 3=7^3
+	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
+	std::vector<double> px(np_max), py(np_max), pz(np_max);
+	print_info(string("Facetten (")+wo+"): Fenster "+to_string(2*R+1)+"^3 (CFD_FACETTEN_FENSTER="+to_string((uint)R)+")");
 	const double t0 = 0.0; (void)t0;
 	auto idx = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
 	auto ist_wand  = [&](const ulong n) { return L.flags[n]==wand_flag; };
@@ -394,8 +399,8 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		}
 		if(!wandnah) continue;
 		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
-		double px[456], py[456], pz[456]; uint np=0u, eigene=0u, verworfen=0u; // 25 Zellen x 18 Links = 450 absolutes Maximum (Nachpruefer B1: 190 lief in beidwandigen Spalten still ueber)
-		for(int dz=-2; dz<=2; dz++) for(int dy=-2; dy<=2; dy++) for(int dx2=-2; dx2<=2; dx2++) {
+		uint np=0u, eigene=0u, verworfen=0u; // Puffer np_max = (2R+1)^3 * 18, dynamisch (Nachpruefer B1)
+		for(int dz=-R; dz<=R; dz++) for(int dy=-R; dy<=R; dy++) for(int dx2=-R; dx2<=R; dx2++) {
 			const int cx=(int)x+dx2, cy=(int)y+dy, cz=(int)z+dz;
 			if(cx<1||cy<1||cz<1||cx>=(int)Nx-1||cy>=(int)Ny-1||cz>=(int)Nz-1) continue;
 			const ulong nc = idx((uint)cx,(uint)cy,(uint)cz);
@@ -403,11 +408,11 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			for(uint i=1u; i<19u; i++) {
 				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1], zn=cz+FZ_C[i][2];
 				if(!ist_wand(idx((uint)xn,(uint)yn,(uint)zn))) continue;
-				if(np<456u) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
-				else verworfen++; // kann bei 456 >= 450 nie greifen -- Waechter statt stiller Annahme
+				if(np<np_max) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
+				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
 			}
 		}
-		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u; f.cx_=f.cy_=f.cz_=0.0f;
+		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u; f.cx_=f.cy_=f.cz_=0.0f; f.r21_=0.0f; f.r10_=0.0f;
 		if(verworfen>0u) f.klasse|=32u; // Ueberlauf -- markieren+zaehlen, nicht still rechnen (A4)
 		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u; F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
@@ -436,6 +441,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		// Konditionsklassen: Schwellen VORLAEUFIG (werden aus den Histogrammen dieses Laufs bestimmt).
 		const double r21 = ew[imax]>1e-30 ? ew[imin]/fmax(ew[imid],1e-30) : 1.0;   // K2: Kante
 		const double r10 = ew[imax]>1e-30 ? ew[imid]/ew[imax] : 0.0;               // K3: Linie
+		f.r21_=(float)r21; f.r10_=(float)r10;
 		if(r21>0.1)  { f.klasse|=2u; k2++; }
 		if(r10<0.02) { f.klasse|=4u; k3++; }
 		if(yw<0.2||yw>2.0) { f.klasse|=8u; k4++; }
@@ -503,9 +509,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	print_info("  Winkel zur dominanten Achse: Median "+to_string((float)quantil(hist_winkel,0.5),1u)
 		+" Grad, q90 "+to_string((float)quantil(hist_winkel,0.9),1u)+" Grad");
 	std::ofstream fh(out_dir+"facetten_histogramme.csv");
-	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,klasse,achse,n_punkte,eigene_links\n";
+	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,r21,r10,klasse,achse,n_punkte,eigene_links\n";
 	for(const Facette& f : F) fh << f.yw << "," << (acos(fmin(1.0f,fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0f/3.14159265f)
-		<< "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "\n";
+		<< "," << f.r21_ << "," << f.r10_ << "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "\n";
 	fh.close();
 	print_info("  CSV: "+out_dir+"facetten_histogramme.csv");
 	return F;
