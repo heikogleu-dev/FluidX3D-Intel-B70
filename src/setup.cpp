@@ -246,7 +246,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 	if(LBM_Domain::s_sgs_wandfrei) {
 		ulong wz=0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); wz+=(ulong)L.lbm_domain[d]->rho_clamp_hits[6]; }
-		print_info(string("  SGS_WANDFREI ")+wo+": "+to_string(wz)+" gezaehlte Wandzellen-Gates (t%100)");
+		print_info(string("  SGS_WANDFREI ")+wo+": "+to_string(wz)+" gezaehlte Gate-Zellen (solider Flaechennachbar, inkl. TYPE_E; t%100)");
 		if(wz==0ull) print_error(string("CFD_SGS_WANDFREI war gesetzt, aber der Wirkpfad-Zaehler ist NULL (")+wo+") -- lautloser No-Op.");
 	}
 #ifdef RHO_CLAMP
@@ -374,7 +374,7 @@ void main_setup_kanal() {
 	print_info("Kanal: kein TYPE_E, kein Druck-Auslass, keine Daempfungszone -- x/y sind PERIODISCH (Standard).");
 	// R2 (Inventar stumm-inerter Schalter): was der Kanal prinzipbedingt ignoriert, wird angesagt.
 	if(env_u("CFD_SPONGE_N",0u)>0u)      print_warning("CFD_SPONGE_N wird im Kanal NICHT angewandt (periodisch, kein Rand zu daempfen).");
-	if(getenv("CFD_PO_HART")!=nullptr||getenv("CFD_PO_SIGMA")!=nullptr) print_warning("CFD_PO_HART/CFD_PO_SIGMA wirken nur mit Druck-Auslass -- der Kanal hat keinen.");
+	if(env_u("CFD_PO_HART",0u)>0u||getenv("CFD_PO_SIGMA")!=nullptr) print_warning("CFD_PO_HART/CFD_PO_SIGMA wirken nur mit Druck-Auslass -- der Kanal hat keinen."); // R2-Nachpruefer: env_u statt getenv-Falle
 	if(env_on("CFD_SPARSE_TILES"))       print_warning("CFD_SPARSE_TILES wird im Kanal NICHT angewandt.");
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
 	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
