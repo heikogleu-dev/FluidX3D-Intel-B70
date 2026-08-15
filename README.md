@@ -1,3 +1,27 @@
+# Projektdoku (Fork) — Leseeinstieg
+
+Dieser Fork misst ein Fahrzeug gegen die OpenFOAM-13-Referenz (Cd 0,599 / Cz −1,301) und baut
+dafür ein Wandmodell (WFB + zellbasierte Facetten). Wer einsteigt, liest in dieser Reihenfolge:
+
+| Datei | Zweck |
+|---|---|
+| **ARBEITSLISTE.md** | Priorisierte Arbeitsliste + Tagesstand — **führend für „was ist offen"** |
+| **AUDIT-BEFUNDE.md** | Komplett-Audits R1–R3 (2026-08-15) mit allen Nacharbeits-Nachweisen |
+| **WANDMODELL.md** | Wissensstand Wandmodell/Kanal: Rauwand-Befundkette, WFB-Ergebnis |
+| **FACETTEN-PLAN.md** | C1b-Architekturplan (zellbasierte Facetten) + Stufe-0/1-Messstände |
+| **FACETTEN-STUFE2.md** | C1b Stufe 2: Kernel-Plan, Paartabelle aller 6 Wandseiten, Bitgleichheits-Messstand |
+| **FACETTEN-CD-PFAD.md** | C1b Cd/Cz-Auslesepfad: Plan + K1–K5-Messstand |
+| **OFFENE-PUNKTE.md** | Iron Rules + Übergabeprotokoll 2026-08-08/09 (historisch, mit Korrektur-Vermerken) |
+| **HYGIENE-BEFUNDE.md** | Codehygiene-Prüferberichte (2026-08-09, weitgehend abgearbeitet) |
+| **EINLASS-AUSLASS.md** | Randbedingungs-Analyse: Klingeln, Dämpfungszone, SRT/TRT-Entscheidung |
+| **DOPPEL-DOMAENE.md** | Zwei-Domänen-Fall: Geometrie, Kopplung, bewusste Grenzen |
+| **LEISTUNG.md** | Leistungsindex, Phasenprofil, Hardware-Bezugswerte (B70 + iGPU) |
+| **V1-GEGEN-V2.md** | Prüfbericht 2026-08-08: was der V1-Fork wirklich konnte |
+
+Der Rest dieser README ist die unveränderte Upstream-Dokumentation von FluidX3D.
+
+---
+
 # FluidX3D
 
 The fastest and most memory efficient lattice Boltzmann CFD software, running on all GPUs and CPUs via [OpenCL](https://github.com/ProjectPhysX/OpenCL-Wrapper "OpenCL-Wrapper"). Free for non-commercial use.

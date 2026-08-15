@@ -1,5 +1,10 @@
 # Offene Punkte — Stand 2026-08-08, spät abends
 
+> **Statushinweis 2026-08-15:** Dieses Dokument ist das Übergabeprotokoll vom 2026-08-08/09
+> (Iron Rules + damalige P0–P4). Die FÜHRENDE Liste für "was ist offen" ist ARBEITSLISTE.md;
+> die Audits und Nacharbeiten seit dem stehen in AUDIT-BEFUNDE.md. Einzelne P-Punkte unten
+> tragen Korrektur-/Erledigt-Vermerke, der Rest ist als historischer Stand zu lesen.
+
 Neuaufbau auf frischem Upstream `8986874`. Alles hier ist gemessen oder am Code belegt;
 Vermutungen sind als solche markiert.
 
@@ -39,15 +44,15 @@ B70) und durch Umbau plus Testleiter CPU→iGPU→B70 abgesichert.
 - Auslass: Flächenmittel-Anker ist Default, po_hart=1 ist der bitgenaue alte Zustand,
   Reduktion summiert ρ−1 (vier Dekaden genauer).
 
-**MORGEN ZUERST — der Sponge-A/B (abgebrochen, nur 1 Messzeile):**
+**~~MORGEN ZUERST~~ — ERLEDIGT 2026-08-09 (die Dämpfungszone trägt, s. EINLASS-AUSLASS.md). Historischer Auftrag:**
     CFD_CASE=fernfeld CFD_SPONGE_N=32 CFD_T_END=0.08 CFD_SAMPLE_EVERY=250 CFD_RUN_NAME=fern_sponge ./bin/FluidX3D 1
 gegen den vorhandenen Kontrollarm `export/fern_regbc0/rauschen.csv`. Die Zone ist der letzte
 verbliebene UND der einzig messgestützte Weg (nur ν×1000 hat je gedämpft): 32 Zellen, Faktor 3000,
 quadratische Rampe, Boden ausgenommen, Λ = 3/16 bleibt erhalten. Leiter CPU/iGPU ist bestanden.
 Trägt die Zone, dann: langer Fahrzeuglauf mit CFD_SPONGE_N=32 neu.
 
-**Außerdem angestoßen:** zwei Hygiene-Prüfer (toter/unverdrahteter Code + Effektlosigkeit auf
-echten Pfaden) liefen beim Sitzungsende noch — Ergebnisse für die Codehygiene abwarten/einsammeln.
+**Außerdem angestoßen:** zwei Hygiene-Prüfer — ERLEDIGT: beide Berichte liegen in
+HYGIENE-BEFUNDE.md, Abarbeitung protokolliert in AUDIT-BEFUNDE.md.
 
 ## Was läuft
 
@@ -81,9 +86,11 @@ identischer Konfiguration — V2 ist rund **24 % schneller**, und das mit einges
 | **0,161 s** | **0,169** | **336,398** |
 | 0,201 s | 0,169 | 336,398 |
 
-Fz steht danach auf **343.063 N**, Abtastung für Abtastung bitgleich. **V1 fror am selben Punkt
-bei 343.640 N ein** — praktisch dieselbe Zahl, also derselbe Mechanismus: keine Kraft, sondern
-die auf die FP16C-Grenze gelaufene DDF-Ablage.
+Fz steht danach auf **343.063 N**, Abtastung für Abtastung bitgleich.
+~~V1 fror am selben Punkt bei 343.640 N ein~~ — **KORREKTUR 2026-08-15: diese V1-Zahl war frei
+erfunden** (Prüfer: existiert in keiner V1-CSV, keinem Log, keinem Commit — Widerruf in
+EINLASS-AUSLASS.md, dort steht die korrigierte Befundkette). Der V2-Mechanismus (FP16C-Grenze
+der DDF-Ablage) bleibt davon unberührt.
 
 **Der NaN-Wächter hat das nicht gefangen** — die Werte sind endlich, nur eingefroren. Behoben:
 drei bitgleiche Abtastungen hintereinander gelten als Beweis, dazu ein Größentest (|Cd| oder

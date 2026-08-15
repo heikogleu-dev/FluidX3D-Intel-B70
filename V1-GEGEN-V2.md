@@ -65,7 +65,9 @@ Halbzellen-y-Versatz.
 
 ## Was V2 kann, das V1 nicht oder nicht sauber konnte
 
-1. **TRT mit Λ = 3/16 aktiv.** In V1 vorhanden, aber auskompiliert — „toter Code".
+1. **TRT mit Λ = 3/16 aktiv.** In V1 vorhanden, aber auskompiliert. ~~„toter Code"~~ —
+   **KORREKTUR 2026-08-15: das war V1s GEMESSENE Entscheidung, kein Versäumnis** (Widerruf in
+   EINLASS-AUSLASS.md); V2 ist ihr am 2026-08-15 gefolgt und läuft selbst mit SRT.
 2. **`UPDATE_FIELDS` unbedingt an.** In V1 in **keiner** Konfiguration definiert: u/ρ wurden nur
    alle 100 Schritte aufgefrischt, während das Wandmodell sie **jeden** Schritt las. Es rechnete
    auf einem bis zu 99 Schritte alten Feld.

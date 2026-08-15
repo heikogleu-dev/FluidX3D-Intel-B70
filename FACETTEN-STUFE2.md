@@ -158,6 +158,8 @@ zeitweise die entscheidende Zahl. Beides steht jetzt als Kommentar im Testfall.
 
 Naechster Schritt: Commit 3 = Kugel-Verdrahtung (Messpunkt c, drei Arme AUS/2/1 + beide Cd-Wege
 als Pflichtzahl), danach Stufe 3 (gekippter Kanal 45 Grad + 26,6 Grad).
+*(Nachtrag: Commit 3 + Cd-Pfad ERLEDIGT — s. FACETTEN-CD-PFAD.md; die Stufe-3-vs-Nebenachsen-
+Entscheidung fuehrt ARBEITSLISTE.md.)*
 
 **Iron-Rule-Nachpruefung (Commits 419cd8a/3ba6ec5/1b08432): kein Befund oberhalb NIEDRIG.**
 Positiv: alle 12 Paare unabhaengig verifiziert, Bitgleichheit KONSTRUKTIV garantiert (nicht

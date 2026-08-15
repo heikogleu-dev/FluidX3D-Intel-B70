@@ -1,8 +1,8 @@
 # Hygiene-Befunde — Arbeitsgrundlage für die Codehygiene
 
-Stand 2026-08-09, kurz nach Mitternacht. Prüfer 1 (toter/unverdrahteter Code) ist fertig;
-Prüfer 2 (Effektlosigkeit auf echten Pfaden) lief beim Sitzungsende noch — sein Bericht wird
-hier ergänzt, sobald er vorliegt.
+Stand 2026-08-09; beide Prüferberichte liegen unten vollständig vor.
+**Status 2026-08-15: weitgehend abgearbeitet** — die Befunde 1–4 und 7–10 sind gefixt
+(Nachweise in AUDIT-BEFUNDE.md, Runden 1–2); Rest siehe ARBEITSLISTE Block E.
 
 **Kurzfazit von Prüfer 1:** Kein einziger vollständig toter eigener Codepfad — die verworfenen
 Experimente sind sauber als Negativergebnisse geparkt. Der Aufräumwert liegt in zwei

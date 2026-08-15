@@ -17,7 +17,7 @@ bei 14.356 ohne offenes Paar, der dominante-Achse-Tausch greift an Krümmung kau
 Stufe 5 Fahrzeug-Abnahme (y⁺ 1122 → ~140) und die Relativgeschwindigkeits-Erweiterung.
 
 **Das Ziel, an dem alles gemessen wird:** Cd und Cz des Fahrzeugs gegen OpenFOAM 13
-(**0,599 / −1,301**). Stand heute: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem
+(**0,599 / −1,301**). Stand 2026-08-09: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem
 Unterboden.
 
 **Zwei harte Randbedingungen (Heiko):** kein Lauf über **2,5 h**. Fernfeld immer auf der **iGPU**
@@ -26,6 +26,8 @@ Unterboden.
 ---
 
 ## Block 0 — zwei Tests, die fast nichts kosten und die Reihenfolge ändern könnten
+> **Status 2026-08-15: 0A ERLEDIGT** (gemessen: Median 1122, s. WANDMODELL.md). **0B ÜBERHOLT** —
+> die Prämisse c_f ∝ 1/N² ist durch die Kanalleiter widerlegt (Rauwand-Befund, WANDMODELL.md).
 
 Beide kamen aus der Gegenprüfung und ziehen an der Wurzel der Blöcke A und C.
 
@@ -46,6 +48,8 @@ Wandmodell hängt — und wir hätten es für den Preis eines Laufs gezeigt.*
 ---
 
 ## Block A — Messgrundlage schaffen (billig, macht alles andere erst bewertbar)
+> **Status 2026-08-15: A1–A4 KOMPLETT ERLEDIGT** (Kanal steht samt Vorrichtungs-Validierung,
+> Leiter gemessen, Lee&Moser ausgewertet — alles in WANDMODELL.md).
 
 **A1. Turbulenter Kanal bauen** (`main_setup_kanal`, `CFD_CASE=kanal`).
 Wandnormale z, periodisch in x/y, ruhende Wände, Antrieb über `VOLUME_FORCE` (endlich ein Nutzen —
@@ -104,6 +108,10 @@ Fahrzeug den Kanal? V2 lässt es aufsitzen, V1 ließ es 16 mm schweben — Gegen
 ---
 
 ## Block C — Wandmodell, nach dem Entwurfsfehler neu aufzusetzen
+> **Status 2026-08-15:** C1-Regelkreis blieb widerlegt; stattdessen WFB (Han et al., WANDMODELL.md)
+> + **C1b Stufen 0–2 ERLEDIGT** (FACETTEN-*.md). C2 portiert, C3 = Facetten-Stufe 1, C4 durch
+> Spalding (statt Reichardt) erledigt, C6 = Kugel-Arme gelaufen. C5/C7 bleiben als Merkposten
+> für Stufe 5 gültig.
 
 **C1. Den Kopplungsmechanismus neu entwerfen.** Vollständige Begründung in `WANDMODELL.md`. Die Gegenprüfung hat den Regelkreis widerlegt:
 `update_force_field` misst `2·Σ c_i f_i^in`, die Ladd-Korrektur ist **nicht enthalten**. Der wahre
@@ -173,6 +181,8 @@ Wächter; greift sie dauernd, ist der Lauf kein Ergebnis.
 ---
 
 ## Block E — Hygiene 3 bis 8 (aus `HYGIENE-BEFUNDE.md`)
+> **Status 2026-08-15: E4–E7 und E9 ERLEDIGT** (Nachweise in AUDIT-BEFUNDE.md R1/R2 + Code);
+> Reststatus je Punkt in HYGIENE-BEFUNDE.md.
 
 **E1. VOLUME_FORCE-Nullkraft** — läuft in allen vier Fällen umsonst mit; im **Kugelfall ist keine
 F-Box gesetzt**, also 12 B/Zelle über die volle Domäne, bis ~10 % Leistung. Erst Wächter für den
@@ -208,7 +218,7 @@ aber nirgends aufgeschrieben. Wer die zwei Zeilen tauscht, lässt den Einlass di
 
 ## Block F — Werkzeuge und Kleinigkeiten
 
-**F1. `HEARTBEAT_DIAG` aus V1 portieren.** Dumpt alle 5 s Threadzustand und schickt nach 15 s im
+**F1. `HEARTBEAT_DIAG` aus V1 portieren.** Dumpt alle 5 s Threadzustand und schickt nach 15 s im **→ ERLEDIGT 2026-08-15 (portiert, main.cpp).**
 R-Zustand ein Signal für einen Backtrace. Hätte den 25-Minuten-Hänger von heute in 15 Sekunden
 zugeordnet.
 

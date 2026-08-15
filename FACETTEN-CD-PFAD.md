@@ -63,7 +63,8 @@ Klasse-64-Facetten fehlen in `fac_idx` (alloc filtert klasse!=0), tauschen also 
 # Messstand Cd-Pfad (2026-08-15, Commits bis a41759b)
 
 - **K1 bestanden:** Feld-Hash exakt 12755646098055097704 nach dem 4-float-Akkumulator, Tests 3x gruen.
-- **K2 bestanden (stationaeres 20-ETT-Fenster, iGPU):** Reibung_x/Kraftbilanz = 0,9955 (Band 1 %);
+- **K2 bestanden (stationaeres 20-ETT-Fenster, iGPU):** Reibung_x/Kraftbilanz = 0,9955 (Band 1 %),
+  nach dem R3-Snapshot-Fix wiederholt: **0,9961**;
   das 0,3-ETT-Kurzfenster zeigte erwartbar 0,26 (Regler-Transiente -- kein Befund).
 - **K3 exakt bestanden:** Druck_x = 0,00000000, 14.160 projiziert, 0 voll, 0 unklar.
 - **K4 bestanden:** AUS-Arm kraft_facetten Fx == object_force Fx (rel. Abw. 1,5e-7).

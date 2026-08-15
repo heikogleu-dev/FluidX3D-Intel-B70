@@ -221,3 +221,5 @@ Kanal-Anker mit 3³ weiterhin exakt (0 markiert, y_w = 0,500).
 
 **⇒ Das Stufe-2-Gate ist offen: Kernel-Eingriff (dominante Achse) mit linkweisem Paar-Gate
 und Flächenfaktor 1/|n̂_a| ist der nächste Schritt.**
+*(Nachtrag: Stufe 2 samt Cd-Pfad ist ERLEDIGT — s. FACETTEN-STUFE2.md / FACETTEN-CD-PFAD.md;
+nächste Schritte führt ARBEITSLISTE.md.)*
