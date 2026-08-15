@@ -42,7 +42,6 @@ private:
 	// TS_P/TS_A sind leer und der erzeugte Device-Code ist bit-identisch zu Upstream.
 	Memory<uint> tile_slot; // tile_id -> kompakter Slot; 0xFFFFFFFF = tote Tile
 	uint sparse_tiles_x = 0u, sparse_tiles_y = 0u, sparse_tiles_z = 0u;
-	uint sparse_n_active = 0u;
 	// Read-once-Kopien der statischen Schalter, im Konstruktor uebernommen. Alles ausserhalb des
 	// Konstruktors liest AUSSCHLIESSLICH diese -- sonst aenderte ein Schalterwechsel zwischen zwei
 	// Domaenen rueckwirkend das Verhalten der ersten (finalize_sparse_tiles laeuft viel spaeter).

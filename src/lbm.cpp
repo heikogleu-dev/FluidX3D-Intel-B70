@@ -307,7 +307,6 @@ void LBM_Domain::finalize_sparse_tiles() {
 		// T=8- und T=4-Laeufe divergiert (Cd 18.4 bzw. 22.4), auch noch mit is_dead_tile-Ausstieg.
 		if(!all_solid) slot[(ulong)tx+(ulong)sparse_tiles_x*((ulong)ty+(ulong)sparse_tiles_y*tz)] = 1u + n_active++;
 	}
-	sparse_n_active = n_active;
 	for(ulong i=0ull; i<n_tiles; i++) tile_slot[i] = slot[i];
 	tile_slot.write_to_device();
 

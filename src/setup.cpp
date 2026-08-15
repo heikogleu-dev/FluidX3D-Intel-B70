@@ -789,7 +789,12 @@ void main_setup_kugel() {
 		f.close();
 		print_info("CSV geschrieben: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen)");
 	}
-	if(cd_w.size()<16u) { print_warning("Zu wenige Samples im Mittelungsfenster fuer eine belastbare Statistik."); return; }
+	// ★ Hygiene E7a, 2026-08-15: hier stand `return` -- und lief damit in genau den Intel-Teardown-
+	// Crash ("double free or corruption", rc=134 auf dem regulaeren Rueckweg), den der Kommentar am
+	// Fallende begruendet. _exit(0) wie an allen Fallenden. (Der Nachpruefer hat eine zweite
+	// Begruendung gestrichen, die ich hier faelschlich uebertragen hatte: der Kugelfall ist der
+	// else-Zweig der Fallauswahl, nach einem return liefe KEIN weiterer Fall.)
+	if(cd_w.size()<16u) { print_warning("Zu wenige Samples im Mittelungsfenster fuer eine belastbare Statistik."); _exit(0); }
 
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd_w.size(); i++) { mcd+=cd_w[i]; mcz+=cz_w[i]; }
@@ -1550,7 +1555,7 @@ static void main_setup_fahrzeug_dd() {
 	// Rand um dt_c voraus, am Ende stimmt er. Der Betrag ist derselbe -- bei dt_c = 4e-5 s wandert
 	// die Stroemung 1,2 mm, weniger als eine feine Zelle --, aber die Richtung war falsch beschrieben.
 	// Als Praediktor-Halteschema ist ein Vorlauf gegenueber einem Nachlauf eher guenstiger.
-	std::vector<double> ts, fx, fz, fx_c;
+	std::vector<double> ts, fx, fz, fx_c; // fx_c war write-only (Hygiene E6b) -- wird jetzt unten ausgewiesen
 	float slice_next = 0.0f;
 	Clock outer_clock; double t_acc = 0.0; ulong n_acc = 0ull;
 	double Fx_prev = 1e300, Fz_prev = 1e300; uint n_frozen = 0u; // fuer den Einfrier-Test, siehe Zeitschleife
@@ -1779,6 +1784,15 @@ static void main_setup_fahrzeug_dd() {
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
 	print_info("---------------------------------------------------------------");
 		if(env_u("CFD_YPLUS", 1u)>0u) messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld");
+		{	// ★ Hygiene E6b: fx_c wurde den ganzen Lauf befuellt und nie gelesen. Jetzt als EIN Anker
+		// ausgewiesen: das Mittel der Fernfeld-Fahrzeugkraft AB WARMLAUF (derselbe Filter wie Cd/Cz --
+		// der Nachpruefer fand das Mittel ueber alles inkl. Anlaufstoss irrefuehrend, zu Recht).
+		// Die volle Zeitreihe steht ohnehin als Spalte Fx_far_N in forces.csv; wer Spruenge oder
+		// Vorzeichenwechsel sucht, schaut dort.
+		double m=0.0; uint nm=0u;
+		for(size_t i=0; i<fx_c.size(); i++) if(ts[i]>=(double)t_warmup) { m += fx_c[i]; nm++; }
+		if(nm>0u) print_info("Fernfeld-Fahrzeugkraft Fx (Mittel ab Warmlauf): "+to_string((float)(m/(double)nm),1u)+" N ueber "+to_string(nm)+" Samples (Zeitreihe: Spalte Fx_far_N in forces.csv)");
+	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h); berichte_dichteklemme(lbm_c, "Fernfeld", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
@@ -1934,8 +1948,10 @@ static void main_setup_fernfeld() {
 
 void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug, fahrzeug_dd oder fernfeld
 	const char* c = getenv("CFD_CASE");
+	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
+	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).
 	if(c!=nullptr && string(c)=="fernfeld") main_setup_fernfeld();
-	if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
+	else if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
 	else if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
 	else main_setup_kugel();
 }
