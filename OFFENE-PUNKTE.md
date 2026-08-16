@@ -5,6 +5,15 @@
 > die Audits und Nacharbeiten seit dem stehen in AUDIT-BEFUNDE.md. Einzelne P-Punkte unten
 > tragen Korrektur-/Erledigt-Vermerke, der Rest ist als historischer Stand zu lesen.
 
+> **Iron Rule 3 (Heiko, 2026-08-16):** Nach JEDEM groesseren Bauabschnitt laeuft automatisch die
+> volle Audit-Schleife: drei unabhaengige Pruefer (jede einzelne Funktion / Host+Pipeline /
+> Zusammenspiel inkl. totem Code), Befunde fixen, erneut pruefen, bis sauber — wie am 2026-08-15.
+> Und: **Diagnostik gehoert IN den Code** — jeder neue Mechanismus bekommt eingebaute
+> Zwischenergebnis-Introspektion (per-Zellen-Zeitreihen, Plausibilitaetszaehler), sodass an
+> kleinen Testfaellen selbst nachvollziehbar ist, ob Zwischen- UND Endergebnisse plausibel sind
+> und die Pipeline sauber ist — nicht nur globale Endzahlen.
+
+
 Neuaufbau auf frischem Upstream `8986874`. Alles hier ist gemessen oder am Code belegt;
 Vermutungen sind als solche markiert.
 
