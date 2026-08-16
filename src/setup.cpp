@@ -1224,6 +1224,7 @@ void main_setup_kugel() {
 	  LBM_Domain::s_fac_ema = (fc>=3u) ? env_f("CFD_FAC_EMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im Kugelfall noch NICHT verdrahtet (IR3-Audit) -- Diagnose nur im Kanal/Torus.");
+	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  if(fc>0u) print_info(string("Facettenpfad Kugel: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Impulsaustausch-Cd an behandelten Links kontaminiert, nur der projizierte Cd-Pfad zaehlt."); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
@@ -1443,7 +1444,13 @@ void main_setup_kugel() {
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
 		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
 		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
-		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu));
+		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
+			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
+			+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
+			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])):string("")));
+		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
+			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
+			print_info("iMEM-Erhaltung Kugel: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)); }
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;

@@ -1871,9 +1871,13 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
 	const float Gt11 = G11 - Sn1*Sn1/Snn, Gt22 = G22 - Sn2*Sn2/Snn, Gt12 = G12 - Sn1*Sn2/Snn;
 	const float dett = Gt11*Gt22 - Gt12*Gt12;
-	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett; }
-	else if(Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad (Prioritaet: Normal-Nullung + t1-Ziel)
-	else if(Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; if(t%100ul==0ul) atomic_inc(&hits[14]); }
+	// ★ J4-Befund #1 (Kugel): ABSOLUTE 1e-8-Schwellen lagen exakt auf dem float-Schur-Residuum
+	// eps*G11 der Einzellink-Zellen -- 31 % der Kugelfacetten FLACKERTEN ins Rang-2 mit
+	// G~=Rauschen, s=R/1e-8~1e6, Doppelklemme, permanente Injektion (belegt: 546 statt 485
+	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
+	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett; }
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; if(t%100ul==0ul) atomic_inc(&hits[14]); }
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
 	const float s1c = clamp(s1, -2.0f*ut, 2.0f*ut), s2c = clamp(s2, -ut, ut); // Klemmen (Gl. 9)
