@@ -195,3 +195,34 @@ Kaskaden-Schwellen trennscharf). Die 7 Auflagen, alle uebernommen:
    Feld-Hash-Anspruch des Kontrollarms bleibt (Akkumulator speist nie in fhn zurueck).
 7. **Iron Rule 2 explizit:** nach der I0-Implementierung unabhaengiger Pruefagent VOR den
    ersten Messlaeufen.
+
+---
+
+# Messstand I0/I1 (2026-08-16 vormittags)
+
+**I0 (Commits bis 69dd1de):** alle 5 CPU-Tests gruen (T1/T1b/T2 Paararm, T3a double-Referenz
+inkl. Spiegelfall {11}, T2-iMEM 1-Schritt-Lokalisierung: 1216 erlaubt / 0 verboten / Bilanz
+1344=1216+128 exakt). Pipeline fing drei Fehler vor dem ersten Messlauf: vergessenes
+def_fac_tau im Ziel (Arm 4 lief bitidentisch als Arm 3), Faktor-6-Fehler im
+Normalkontaminations-Akkumulator, det=0-UB-Loch der Kaskade (stammte aus dem Plan selbst;
+jetzt: Branch 1 braucht beide Diagonalen, eigener Quer-Skalar-Zweig, Slot-13-Semantik korrekt).
+Kontrollarm-Regression: Arm-1-Feld-Hash exakt 12755646098055097704.
+
+**I1 Kanal 0 Grad (iGPU, N=38): AEQUIVALENZ BESTANDEN.**
+| | Phase 0,0 | Phase 1,7 | Mittel |
+|---|---|---|---|
+| Paararm c_f (80 ETT) | 0,0010175 | 0,0010501 | 0,001034 |
+| iMEM c_f (80 ETT) | 0,0010846 | 0,0010067 | 0,001046 |
+
+Differenz der Mittel +1,2 % INNERHALB des gemessenen Rauschbodens (Paararm-Spreizung 3,2 %);
+U_b+ alle 24,10-24,11 (gleiches Regime); **Delta-m ueber 507k Schritte exakt 0,00000000**;
+Wirkpfad Ist=Soll exakt (71.748.720), alle Kaskaden-/Klemmen-Zaehler 0. Arm 4 (Nullziel):
+c_f -> 0 exakt (Gl.-11-Kriterium). CFD_KANAL_PHASE=0 bitidentisch zum Alt-Init (verifiziert).
+
+**Befund am K2-Instrument (kein iMEM-Befund):** Verhaeltnis 1,035-1,042 bei ETT=80/WARM=20 in
+BEIDEN Mechanismen (Paararm 1,0355/1,0356 identisch) vs 0,996-0,998 bei ETT=20/WARM=10 --
+Einschwingen im Messfenster; das 1-%-Band gilt nur fuer hinreichend stationaere Fenster.
+K2-Gate entsprechend nachziehen (laengerer Warmlauf oder Fensterpruefung) -- als TODO vor I2.
+
+Naechster Schritt: I2 Torus-Kipp 45/26,6 Grad nach FACETTEN-STUFE3.md (+ neue iMEM-Solls per
+Host-Census statt der paartausch-spezifischen F7-F10).
