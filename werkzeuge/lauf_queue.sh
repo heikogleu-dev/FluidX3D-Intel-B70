@@ -10,22 +10,31 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 Q=logs/queue_status.txt; mkdir -p logs
 if pgrep -x FluidX3D >/dev/null 2>&1; then
-	echo "VERWEIGERT: FluidX3D laeuft bereits (PID $(pgrep -x FluidX3D | tr '\n' ' '))." | tee -a "$Q"; exit 2
+	echo "VERWEIGERT: FluidX3D laeuft bereits (PID $(pgrep -x FluidX3D | tr '\n' ' '))." >&2; exit 2
 fi
 if [ -f logs/queue.lock ]; then
-	echo "VERWEIGERT: queue.lock existiert (PID $(cat logs/queue.lock)) -- alte Kette pruefen/loeschen." | tee -a "$Q"; exit 3
+	echo "VERWEIGERT: queue.lock existiert (PID $(cat logs/queue.lock)) -- alte Kette pruefen/loeschen." >&2; exit 3
 fi
 echo $$ > logs/queue.lock
-trap 'rm -f logs/queue.lock' EXIT
+trap 'rm -f logs/queue.lock' EXIT INT TERM
 : > "$Q"
 n=0; gesamt=$(grep -vc '^\s*\(#\|$\)' "$1")
+hb() { while [ -f logs/queue.lock ]; do echo "[$(date +%H:%M:%S)] LAEUFT (Herzschlag)" >> "$Q"; sleep 120; done; }
+hb & HB=$!
+trap 'rm -f logs/queue.lock; kill $HB 2>/dev/null' EXIT INT TERM
 while IFS= read -r zeile; do
+	# ★ IR3-Abschluss-Loop: Zeile erst TRIMMEN, dann filtern -- eine Whitespace-Zeile startete
+	# vorher einen UNBENANNTEN Default-Lauf, eine eingerueckte #-Zeile liess env das '#' ausfuehren.
+	zeile="$(echo "$zeile" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 	case "$zeile" in ''|'#'*) continue;; esac
+	case "$zeile" in *'::'*) ;; *) echo "UEBERSPRUNGEN (kein '::'): $zeile" | tee -a "$Q"; continue;; esac
 	env_teil="${zeile%%::*}"; name="${zeile##*::}"; name="$(echo "$name" | tr -d ' ')"
+	[ -n "$name" ] || { echo "UEBERSPRUNGEN (leerer Name): $zeile" | tee -a "$Q"; continue; }
 	n=$((n+1))
 	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name" | tee -a "$Q"
 	env $env_teil CFD_RUN_NAME="$name" bin/FluidX3D 2 > "logs/$name.log" 2>&1
 	rc=$?
-	echo "[$(date +%H:%M:%S)] ENDE  $n/$gesamt: $name (rc=$rc, cf=$(tail -1 "export/$name/kanal_zeit.csv" 2>/dev/null | cut -d, -f6))" | tee -a "$Q"
+	m=""; [ $rc -ne 0 ] && m=" FEHLER"
+	echo "[$(date +%H:%M:%S)] ENDE  $n/$gesamt: $name (rc=$rc$m, cf=$(tail -1 "export/$name/kanal_zeit.csv" 2>/dev/null | cut -d, -f6))" | tee -a "$Q"
 done < "$1"
 echo "[$(date +%H:%M:%S)] SERIE FERTIG ($n Laeufe)" | tee -a "$Q"

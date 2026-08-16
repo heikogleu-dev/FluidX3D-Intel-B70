@@ -84,7 +84,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
   können per Float-Rauschen in 15 statt 13 landen — Soll-Formeln prüfen die **Summe 13+15**.
 - **CFD_FAC_DIAGZ** (Iron Rule 3): Ketten-Zeitreihe EINER Facette (Zellindex → Laufzeit-fid,
   Sentinel −1.0f matcht nie) → `facetten_diagz.csv` mit
-  schritt,t_kernel_check,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon.
+  schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon.
   Nur iMEM-Arme; Kanal/Torus verdrahtet, Kugel noch nicht (Warnung).
 - **Host-Census** (CFD_FACETTEN_DIAG / baue_facetten-Log): Klassen, y_w-Lagen, |L|, Momente —
   liefert die exakten Slot-Solls VOR jedem Kernellauf.
@@ -101,6 +101,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FACETTEN_DIAG` | 1 = Facettenbau-Census loggen; 2 = Census + _exit(0) (Schritt-0-Diagnose ohne Lauf). |
 | `CFD_FAC_EMA` | Lösungs-EMA auf u_s (nur Arme ≥3, emission-gated). **WIDERLEGT** (J3: verschlechtert, filtert die falsche Seite) — bleibt nur für A/B-Vergleiche. |
 | `CFD_FAC_PEMA` | Beidseitige Eingangs-Filterung P̄/ū, a≈0,01 (nur Arme ≥3, emission-gated; ungesetzt = exakt instantaner Pfad). N2 dennoch verletzt — kein hinreichender Fix, Messarm. |
+| `CFD_FAC_SATGATE` | 1 = Saettigungs-Gate (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme; Slots 10/16 = Rueckfaelle. Stufe-3-Abnahme lief damit. Nur Arme 3/4. |
 | `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
 | `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Nur mit CFD_FACETTEN; mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
@@ -160,7 +161,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 5. **Fahrzeug Stufe 5** (Serie ≥6 B70-Läufe à ≤2,5 h): y⁺-Median 1122 → ~140 aus dem
    Akkumulator; Arme AUS/4/3; Δm-Wächter; Cd/Cz mit C7-Notiz davor.
 6. **Niedrige Audit-Reste (IR3)**: Statik-Symmetrie diagz (s_fac_diagz nicht an allen
-   Konstruktorstellen) · Kugel-iMEM-Report-Slots fehlen · cf_m-Normierung am Torus ·
+   Konstruktorstellen) · Kugel-Report: Slots 10-17 seit b1f2caf/IR3-Abschluss vollstaendig; Rest-Item war stale fehlen · cf_m-Normierung am Torus ·
    fac_diag-float-Grenzen (fid-Vergleich als float) · y⁺-Report rechnet am Torus hartkodiert
    mit y_w = 0,5.
 7. K2-Instrument: 1-%-Band gilt nur für hinreichend stationäre Fenster (ETT=80/WARM=20 lief
