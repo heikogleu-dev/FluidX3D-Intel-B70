@@ -180,3 +180,25 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 | FACETTEN-IMEM.md | iMEM-Herleitung (1)–(15), Gegenprüfungs-Auflagen, I0/I1-Messstand, I2-Durchfall (Diagnose Normalkontamination) |
 | FACETTEN-IMEM-3X3.md | 3×3-Formeln (16)–(28), Entkopplungsbeweise je Torus-Lage, N1–N3-Kriterien, J0-Loganalyse, J3-Messstand |
 | FACETTEN-IMEM-ANALYSE.md | Asmuth-Exegese (Eingangs- vs. Lösungsfilterung), ν_t-Rückkopplungsschleife, Wegbewertung A/B/C, PEMA-Messstand + Familienfrage |
+
+---
+
+# Nachtrag 2026-08-16 spätabends: Saum-fixe N2-Wiederholung — WENDE
+
+| 45°-Lauf (Saum-fix, 80 ETT) | cf | Urteil |
+|---|---|---|
+| Arm 4 pur (instantan!) | **0,000847** | **N2 BESTANDEN** (≤ BB-Basis 0,00166) |
+| Arm 4 + PEMA | 0,00119 | N2 bestanden |
+| Arm 3 + PEMA | 0,00623 | Arme sind GETRENNT — das Ziel ist erstmals messbar |
+
+N1 auf korrektem Fenster: Δm = −0,0000366, Normalkontamination 0,00051 — praktisch perfekt.
+
+**Auflösung der Familienfrage: die iMEM-Kompensation IST tragfähig.** Der komplette N2-Durchfall
+(drei Varianten) war der z-Saum-Geometriefehler: die BB-Löcher im Wandband säten die Fluktuationen,
+die das Nullziel dann jagte und verstärkte. Mit sauberem Band besteht sogar der PURE instantane
+Arm 4 — PEMA ist möglicherweise gar nicht nötig (Arm 4 pur schlägt Arm 4+PEMA).
+
+**Arm 3 = 0,0062 über dem F12-Band ist KEIN Mechanikfehler**, sondern konsistente Modellantwort im
+nicht-selbsterhaltenen Torus-Regime (Wandzelle trägt ~volles U_b → Spalding-τ entsprechend groß —
+die −68-%-Baustelle von der anderen Seite). Genau der N3-Vorbehalt des Plans: die WERT-Frage
+gehört zum Richter mit eigenerhaltener Turbulenz → **Kugel J4 ist der nächste Messpunkt.**
