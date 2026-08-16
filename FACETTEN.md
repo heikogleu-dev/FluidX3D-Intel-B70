@@ -202,3 +202,33 @@ Arm 4 — PEMA ist möglicherweise gar nicht nötig (Arm 4 pur schlägt Arm 4+PE
 nicht-selbsterhaltenen Torus-Regime (Wandzelle trägt ~volles U_b → Spalding-τ entsprechend groß —
 die −68-%-Baustelle von der anderen Seite). Genau der N3-Vorbehalt des Plans: die WERT-Frage
 gehört zum Richter mit eigenerhaltener Turbulenz → **Kugel J4 ist der nächste Messpunkt.**
+
+---
+
+# Nachtrag 2026-08-16 nachts: m1-Diagnose + Kugel J4 -- der gekoppelte Pfad ist der Kern
+
+**m1-Diagnose 26,6° (das neue Instrument liefert):** Frueh ist die Kette perfekt (phi1 == -twe
+exakt, Ziel erfuellt). Spaet kippt sie: die Momentan-Basis rotiert (G11 0,33 -> 0,19, Sn1 -> 0,18),
+die Loesung klemmt (s1 = -2ut), und der Ist-Austausch wird POSITIV (phi1 = +0,0015 bei Ziel
+-4e-7) -- die Wand PUMPT Impuls. Klemm-Rektifikation an gekoppelten, basis-rotierenden Zellen
+ist der 1,4x-N2-Rest bei 26,6°.
+
+**Kugel J4: DISQUALIFIZIERT.** AUS-Arm Cd 1,32 (unveraendert); iMEM-Arme object_force-Cd ~21,
+projizierter Cd_druck NEGATIV (-1,7), RHO_CLAMP schlaegt an -- an der Kugel (mehrheitlich
+gekoppelte Linkmengen) destabilisiert derselbe Mechanismus die Stroemung komplett. Wirkpfad
+Ist=Soll exakt (Mechanik-Buchhaltung stimmt); Luecke: der Kugel-Report druckt die iMEM-Slots
+noch nicht (Audit-Rest) -- Klemm-/Rang-Quoten dort blind.
+
+**Befundlage damit klar strukturiert:**
+- ENTKOPPELTE Linkmengen (45°-Torus, ebene Waende): iMEM funktioniert, N2 bestanden.
+- GEKOPPELTE Linkmengen (26,6°-m1 teils, Kugel massiv): Kompensation + Klemme rektifiziert
+  Fluktuationen zu Netto-Injektion bis zur Destabilisierung.
+
+**Optionen fuer den naechsten Schritt (Entscheid ausstehend):**
+(a) Kopplungs-Gate verschaerfen: stark gekoppelte Zellen -> BB belassen + zaehlen (wie der
+    Einzellink-Entscheid; sicher, kostet Abdeckung an der Kugel);
+(b) Ziel-Deckelung twe <= beta*G~11*ut (Plan-Reserve, Risiko 2): begrenzt die geforderte
+    Loesung VOR der Klemme -- kein Rektifizierer, Abdeckung bleibt;
+(c) Basis-Stabilisierung nur fuer gekoppelte Zellen (gefiltertes t-hat) -- gezieltes PEMA-Light.
+Empfehlung: (b) zuerst (kleinster Eingriff, adressiert den gemessenen Mechanismus direkt),
+mit m1-Diagnose als Vorher/Nachher-Nachweis; dann Kugel-Wiederholung.
