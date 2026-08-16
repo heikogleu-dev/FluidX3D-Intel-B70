@@ -60,3 +60,27 @@ Mittel: ⟨Φ⟩ = T (EMA im stationären Zustand erwartungstreu) — Ziel exakt
 **Messpunkt:** 45° Arm 4 + PEMA, ein Lauf (~25 min). Abnahme hart und regimeunabhängig: **cf ≤ 0,00166 (N2)**, Klemmquote Slot 10 ≈ 0, |Σ[5]| ≤ 5, Slot 16 = 0. Sekundär: Arm 3 vs Arm 4 müssen sich endlich TRENNEN (heute 0,1 % Abstand — erst wenn das Ziel im Messwert sichtbar wird, misst der Stand überhaupt ein Wandmodell). Danach 26,6° als Bestätigung, dann J4-Kugel-Census.
 
 **Dateien:** /home/heiko/CFD/FluidX3D-v2/src/kernel.cpp (1746–1851: Momentenschleife/EMA-Block — der PEMA ersetzt Zeilen 1826–1838-Logik an der P-Seite), /home/heiko/CFD/FluidX3D-v2/src/lbm.cpp (764–781 Emission, fac_us-Alloc-Muster), /home/heiko/CFD/FluidX3D-v2/FACETTEN-IMEM-3X3.md (Weggabelungs-Entscheid nachtragen). Asmuth-PDF lokal: /home/heiko/.claude/projects/-home-heiko-CFD-FluidX3D/81cd8076-a5ca-4bf9-9f8a-a928d549933b/tool-results/webfetch-1786875510193-65e3if.pdf (S. 5–6: Gl. 22–30; S. 13: Conclusio zu Filterung vs Abtastpunkt).
+
+---
+
+# PEMA-Messstand + Diskriminator (2026-08-16 abends)
+
+**PEMA Arm 4 (45°, 80 ETT): cf = 0,0062 -- N2 VERLETZT, exakt auf EMA-Niveau** (Auditor-Mathematik
+bestaetigt: beide Filterwege teilen den Fluktuationsdurchlass Phi' ~ P'). Kernel-Audit fand
+KEINEN Bug, der den Trend erklaert -- die Implementierung entspricht Weg A exakt.
+
+**Diskriminator-Zaehler des Laufs:**
+- Normalkontamination 0,0011 (PERFEKT -- die 3x3 haelt auch unter PEMA), Delta-m 199 (im Band).
+- **u_s-Klemme = 4,2 Mio (~6 % der Lage-0-Zellen je Messpunkt) -- NICHT ~0**: auch mit
+  gefiltertem P verlangt die Loesung an einem Zellsaum |s1|>2ut; die Klemm-Rektifikation von P'
+  bleibt ein aktiver Drag-Kanal. Der Diskriminator sagt also: TEILS noch Mechanik (Klemmsaum),
+  TEILS Modellgrenze (P'-Korrelationsarbeit, von beiden Filtern geteilt).
+- Nebenbefund Gate-Randzone: die Lage-1-Zellen ({18}, c || n) werden vom Kopplungsgate ueber
+  Float-Rauschen als "gekoppelt" eingestuft und landen in Slot 15 statt 13 (46,8 Mio vs 27,9 Mio)
+  -- verhaltensidentisch (beide BB), aber die Soll-Formeln muessen die Summe 13+15 pruefen.
+
+**Konsequenz -- die Familienfrage steht:** Die iMEM-Kompensationsfamilie hat am Torus-N2 mit
+drei Varianten (instantan / EMA / PEMA) denselben strukturellen Rest gezeigt. Vor der
+Familien-Entscheidung (Ersetzungs-Ansatz a la PowerFLOW-Gewichtung vs Richterwechsel Kugel)
+noch EIN billiger Klemmsaum-Test: Klemmskala als Messarm (z. B. +-4ut) -- faellt cf damit auf
+BB-Basis, war es der Saum; bleibt es, ist es die P'-Arbeit und damit Modell.
