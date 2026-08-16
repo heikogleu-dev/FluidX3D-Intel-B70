@@ -231,6 +231,7 @@ float LBM_Domain::s_wf_tau = 1.0f;
 bool LBM_Domain::s_wandfunktion = false;
 bool LBM_Domain::s_facetten = false;
 bool LBM_Domain::s_fac_imem = false;
+float LBM_Domain::s_fac_ema = 0.0f;
 float LBM_Domain::s_fac_tau = 1.0f;
 bool LBM_Domain::s_sgs_wandfrei = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
@@ -264,7 +265,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 14ull); // iMEM: +2 Slots (12/13, Legende lbm.hpp), Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 18ull); // 3x3: +4 Slots (14/15/16/17, Legende lbm.hpp), Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
@@ -321,12 +322,14 @@ void LBM_Domain::allocate(Device& device) {
 	// stehen erst nach Voxelisierung + baue_facetten() fest; bind_facetten() ersetzt sie per
 	// set_parameters an fac_param_pos (Muster finalize_sparse_tiles). MUSS vor dem TS_P-Block stehen.
 	if(facetten_on) {
+		fac_ema_on = s_fac_imem&&s_fac_ema>0.0f;
 		fac_geo   = Memory<float>(device, 8ull);
 		fac_idx   = Memory<uint>(device, 1ull);
 		fac_tau   = Memory<float>(device, 1ull);
 		fac_tau_n = Memory<uint>(device, 1ull);
 		fac_param_pos = kernel_stream_collide.get_number_of_parameters();
 		kernel_stream_collide.add_parameters(fac_geo, fac_idx, fac_tau, fac_tau_n);
+		if(fac_ema_on) { fac_us = Memory<float>(device, 3ull); kernel_stream_collide.add_parameters(fac_us); } // Signatur-Paritaet mit #ifdef FACETTEN_EMA
 	}
 
 	// FORK -- Block-Tiling: tile_slot ist per TS_P der LETZTE Parameter jedes fi-Kernels, muss also NACH
@@ -407,6 +410,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	fac_N = aktiv;
 	fac_geo.write_to_device(); fac_idx.write_to_device(); fac_tau.write_to_device(); fac_tau_n.write_to_device();
 	kernel_stream_collide.set_parameters(fac_param_pos, fac_geo, fac_idx, fac_tau, fac_tau_n);
+	if(fac_ema_on) { fac_us = Memory<float>(device, 3ull*aktiv); for(ulong q3=0ull;q3<3ull*aktiv;q3++) fac_us[q3]=0.0f; fac_us.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u, fac_us); }
 	facetten_bound = true;
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
@@ -773,6 +777,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_tau "+to_string(s_fac_tau,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
 	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
+	+((s_facetten&&s_fac_imem&&s_fac_ema>0.0f) ? (string)"\n	#define FACETTEN_EMA"
+	"\n	#define def_fac_ema "+to_string(s_fac_ema,6u)+"f" : (string)"") // EMA nur wenn gesetzt -- ungesetzt bitgleich zum 3x3-ohne-EMA
 	+"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
 	"\n	#define TYPE_BO 0x03" // 0b00000011 // any flag bit used for boundaries (temperature excluded)
 	"\n	#define TYPE_IF 0x18" // 0b00011000 // change from interface to fluid

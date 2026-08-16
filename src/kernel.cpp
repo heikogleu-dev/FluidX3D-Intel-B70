@@ -1743,9 +1743,13 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 // f_out_opp(t-2) -- der Esoteric-Pull-BB ist ein ZWEI-Schritt-Umlauf (Gegenpruefer, Auflage 1);
 // alle Formeln sind zeitindexfrei. 2x2-System in der Tangentialebene (Quer-Ziel 0 = Modell),
 // Degenerationskaskade fuer Einzellink-Zellen, Klemmen machen Ist!=Soll im Akkumulator sichtbar.
-void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
+void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
                         const global float* fac_geo, const global uint* fac_idx,
-                        global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t) {
+                        global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t
+)+"#ifdef FACETTEN_EMA"+R(
+                        , global float* fac_us // EMA-Zustand 3 float je Facette (1 Zelle = 1 Facette: racefrei)
+)+"#endif"+R( // FACETTEN_EMA
+)+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return;
 	const uint fid = fac_idx[fbi];
 	if(fid==0xFFFFFFFFu) return;
@@ -1773,7 +1777,7 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 	const float t1x=utx/ut, t1y=uty/ut, t1z=utz/ut;               // Tangentialbasis (Gl. 6)
 	const float t2x=ny*t1z-nz*t1y, t2y=nz*t1x-nx*t1z, t2z=nx*t1y-ny*t1x;
 	float G11=0.0f, G22=0.0f, G12=0.0f, P1=0.0f, P2=0.0f;         // Linkmengen-Momente (Gl. 4/7)
-	float S1x=0.0f, S1y=0.0f, S1z=0.0f, Sn1=0.0f, Sn2=0.0f;       // S1 KOMPONENTENWEISE (Auflage 2)
+	float S1x=0.0f, S1y=0.0f, S1z=0.0f, Sn1=0.0f, Sn2=0.0f, Snn=0.0f; // S1 KOMPONENTENWEISE (Auflage 2); Snn fuer die 3x3
 	for(uint i=1u; i<def_velocity_set; i++) { // compiler-entrollt, Muster apply_moving_boundaries
 		const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue; // linkweises Gate (schliesst TYPE_E/TYPE_MS aus)
@@ -1784,33 +1788,65 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 		P1 = fma(2.0f*ct1, fhn[i], P1); P2 = fma(2.0f*ct2, fhn[i], P2); // Phi^f-Tangentialkomponenten (geshiftete DDFs, Offset hebt sich per Gl. 5)
 		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
 		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
+		Snn = fma(6.0f*wi, cn*cn, Snn); // 3x3-Iteration: Normalautoritaet
 	}
-	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0); Arm 4 (tau=0) = Nullziel/Free-Slip-Sinn (Gl. 11) -- der erste iGPU-Lauf hatte def_fac_tau vergessen, Arm 3 == Arm 4 bitidentisch (gefangen am identischen CSV)
-	float s1=0.0f, s2=0.0f;
+	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
+	float s1=0.0f, s2=0.0f, sn=0.0f;
+	// ★ 3x3-Iteration (FACETTEN-IMEM-3X3.md): Entkopplungs-Gate (Gl. 20). Entkoppelt laeuft
+	// WOERTLICH der bisherige 2x2-Pfad (Bitgleichheit der ebenen Waende); gekoppelt wird die
+	// Normalinjektion per Schur-Elimination exakt genullt (I2-Durchfallursache bei 26,6 Grad).
+	const float kop = Sn1*Sn1+Sn2*Sn2;
+	if(Snn<1e-8f||kop<=1e-6f*Snn*(G11+G22)) {
 	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8, Nachpruefer-Befund 2/3 geschlossen)
-	// Befund 2: G11==0 exakt und G22>=1e-8 machte det=0 und "0>=0" nahm den 2x2-Zweig -- Division
-	// durch 0/NaN unter -cl-finite-math-only = UB. Branch 1 verlangt jetzt BEIDE Diagonalen.
-	// Befund 3: der Spiegelfall (nur Quer-Link wirksam) bekam faelschlich Slot 13 ("kein
-	// tangential wirksamer Link") und liess das Quer-Ziel still fallen -- jetzt eigener Zweig.
 	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
 	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
-	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2 (Quer-Nullung, t1-Ziel unerfuellbar)
+	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
 	else { if(t%100ul==0ul) atomic_inc(&hits[13]); return; } // Slot 13: kein tangential wirksamer Link
+	} else {
+	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
+	const float Gt11 = G11 - Sn1*Sn1/Snn, Gt22 = G22 - Sn2*Sn2/Snn, Gt12 = G12 - Sn1*Sn2/Snn;
+	const float dett = Gt11*Gt22 - Gt12*Gt12;
+	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett; }
+	else if(Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad (Prioritaet: Normal-Nullung + t1-Ziel)
+	else if(Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; if(t%100ul==0ul) atomic_inc(&hits[14]); }
+	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
+	}
 	const float s1c = clamp(s1, -2.0f*ut, 2.0f*ut), s2c = clamp(s2, -ut, ut); // Klemmen (Gl. 9)
 	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
 	s1=s1c; s2=s2c;
-	const float usx = s1*t1x+s2*t2x, usy = s1*t1y+s2*t2y, usz = s1*t1z+s2*t2z;
+	// 3x3: sn aus den GEKLEMMTEN s1/s2 (Normal-Nullung haelt auch bei Tangentialklemme, Gl. 23);
+	// im entkoppelten Pfad ist sn=0 und Snn ggf. ~0 -- Guard haelt die Division sicher.
+	if(Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
+		sn = -(Sn1*s1+Sn2*s2)/Snn;
+		const float snc = clamp(sn, -ut, ut);
+		if(snc!=sn&&t%100ul==0ul) atomic_inc(&hits[16]); // Slot 16: s_n-Klemme
+		sn = snc;
+	}
+	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
+)+"#ifdef FACETTEN_EMA"+R(
+	// ★ Asmuth Gl. 29/30 / A6-Plan: EMA von u_s im xyz-Rahmen (frame-stabil) -- das instantane
+	// Nullziel jagte P-Fluktuationen und pumpte mit +-2ut-Oszillation selbst Turbulenz (J0-Befund
+	// 45 Grad: Klemmquote 8 %, Ist-Reibung 84 % der Wandreibung trotz Nullziel).
+	{
+		const uxx e = 3ul*(uxx)fid;
+		const float ax = def_fac_ema;
+		usx = fma(ax, usx-fac_us[e], fac_us[e]); usy = fma(ax, usy-fac_us[e+1ul], fac_us[e+1ul]); usz = fma(ax, usz-fac_us[e+2ul], fac_us[e+2ul]);
+		fac_us[e]=usx; fac_us[e+1ul]=usy; fac_us[e+2ul]=usz;
+	}
+	// Projektionen des ANGEWANDTEN u_s fuer Ist-Kraft/Delta-m/Rest (nur im EMA-Arm noetig)
+	s1 = usx*t1x+usy*t1y+usz*t1z; s2 = usx*t2x+usy*t2y+usz*t2z; sn = usx*nx+usy*ny+usz*nz;
+)+"#endif"+R( // FACETTEN_EMA
 	for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3)
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;
 		fhn[i] = fma(6.0f*w(i), c(i)*usx+c(def_velocity_set+i)*usy+c(2u*def_velocity_set+i)*usz, fhn[i]);
 	}
-	const float phi1 = P1 + fma(G11,s1,G12*s2), phi2 = P2 + fma(G12,s1,G22*s2); // Ist-Austausch nach Klemme
+	const float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn; // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn)
 	const float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
 	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] IST-Wandkraft (ungeklemmt == twe*t1, Wirkpfadnachweis)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
 	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz); // Delta-m-Leck (Gl. 13, komponentenweise)
-	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2;                  // parasitaerer Normalaustausch (Gl. 12; Sn traegt die 6 bereits -- Nachpruefer-Befund 1: vorher 6x doppelt)
+	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // 3x3: REST-Normalinjektion (Soll ~0 bei Vollrang; N1-Kriterium |Summe|<=5 je Torus-Lauf)
 	fac_tau_cnt[fid] += 1u;
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM
@@ -1827,6 +1863,9 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 )+"#endif"+R( // TEMPERATURE
 )+"#ifdef FACETTEN"+R(
 	, const global float* fac_geo, const global uint* fac_idx, global float* fac_tau_acc, global uint* fac_tau_cnt // C1b, Reihenfolge = add_parameters in allocate()
+)+"#ifdef FACETTEN_EMA"+R(
+	, global float* fac_us // EMA-Zustand (nur Arm 3/4 mit CFD_FAC_EMA)
+)+"#endif"+R( // FACETTEN_EMA
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
@@ -1865,7 +1904,11 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 )+"#ifndef FACETTEN_IMEM"+R(
 	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t);
 )+"#else"+R(
-	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette_imem(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t);
+	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette_imem)+"("+R(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t
+)+"#ifdef FACETTEN_EMA"+R(
+		, fac_us
+)+"#endif"+R( // FACETTEN_EMA
+	)+");"+R(
 )+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
