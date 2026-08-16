@@ -1749,6 +1749,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_EMA"+R(
                         , global float* fac_us // EMA-Zustand 3 float je Facette (1 Zelle = 1 Facette: racefrei)
 )+"#endif"+R( // FACETTEN_EMA
+)+"#ifdef FACETTEN_PEMA"+R(
+                        , global float* fac_pu // PEMA-Zustand 6 float je Facette: P-quer (xyz) + u-quer (xyz)
+)+"#endif"+R( // FACETTEN_PEMA
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return;
 	const uint fid = fac_idx[fbi];
@@ -1759,10 +1762,10 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt)
 	const float und = nx*uxn+ny*uyn+nz*uzn;
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
-	const float ut = sqrt(utx*utx+uty*uty+utz*utz);
+	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
 	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return; } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
-	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet)
+	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
 	{
 		const float Y  = ut*((2.0f*yw)*def_fac_Y);
 		const float up = wf_spalding_uplus(Y);
@@ -1774,9 +1777,12 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]);
 		twe = fmin(twf, tw_max);
 	}
-	const float t1x=utx/ut, t1y=uty/ut, t1z=utz/ut;               // Tangentialbasis (Gl. 6)
-	const float t2x=ny*t1z-nz*t1y, t2y=nz*t1x-nx*t1z, t2z=nx*t1y-ny*t1x;
+	float t1x=utx/ut, t1y=uty/ut, t1z=utz/ut;                     // Tangentialbasis (Gl. 6; unter PEMA aus dem gefilterten u neu gesetzt)
+	float t2x=ny*t1z-nz*t1y, t2y=nz*t1x-nx*t1z, t2z=nx*t1y-ny*t1x;
 	float G11=0.0f, G22=0.0f, G12=0.0f, P1=0.0f, P2=0.0f;         // Linkmengen-Momente (Gl. 4/7)
+)+"#ifdef FACETTEN_PEMA"+R(
+	float Pvx=0.0f, Pvy=0.0f, Pvz=0.0f;
+)+"#endif"+R( // FACETTEN_PEMA
 	float S1x=0.0f, S1y=0.0f, S1z=0.0f, Sn1=0.0f, Sn2=0.0f, Snn=0.0f; // S1 KOMPONENTENWEISE (Auflage 2); Snn fuer die 3x3
 	for(uint i=1u; i<def_velocity_set; i++) { // compiler-entrollt, Muster apply_moving_boundaries
 		const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
@@ -1786,10 +1792,65 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float ct1=cx*t1x+cy*t1y+cz*t1z, ct2=cx*t2x+cy*t2y+cz*t2z, cn=cx*nx+cy*ny+cz*nz;
 		G11 = fma(6.0f*wi, ct1*ct1, G11); G22 = fma(6.0f*wi, ct2*ct2, G22); G12 = fma(6.0f*wi, ct1*ct2, G12);
 		P1 = fma(2.0f*ct1, fhn[i], P1); P2 = fma(2.0f*ct2, fhn[i], P2); // Phi^f-Tangentialkomponenten (geshiftete DDFs, Offset hebt sich per Gl. 5)
+)+"#ifdef FACETTEN_PEMA"+R(
+		Pvx = fma(2.0f*cx, fhn[i], Pvx); Pvy = fma(2.0f*cy, fhn[i], Pvy); Pvz = fma(2.0f*cz, fhn[i], Pvz); // Phi^f als xyz-Vektor (Filterrahmen)
+)+"#endif"+R( // FACETTEN_PEMA
 		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
 		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
 		Snn = fma(6.0f*wi, cn*cn, Snn); // 3x3-Iteration: Normalautoritaet
 	}
+)+"#ifdef FACETTEN_PEMA"+R(
+	// ★ Beidseitige Filterung (FACETTEN-IMEM-ANALYSE.md, Weg A): EMA auf P-Vektor UND Abtast-u
+	// (xyz-Rahmen); geloest wird gegen die GEFILTERTEN Groessen -> Phi(t) = T + P_prime(t): das Ziel
+	// exakt im Mittel, die Fluktuation laeuft als natuerlicher BB-Austausch durch (Schumann-Klasse,
+	// Asmuth Gl. 29/30 -- er filtert den EINGANG, nie die Loesung). s wird glatt: Klemm-Rektifizierer
+	// und nu_t-Pumpe (die J3-Rueckkopplungsschleife) sind konstruktiv aus.
+	{
+		const uxx e = 6ul*(uxx)fid;
+		if(fac_tau_cnt[fid]==0u) { // Warmstart: erster Besuch uebernimmt Momentanwerte statt 0
+			fac_pu[e]=Pvx; fac_pu[e+1ul]=Pvy; fac_pu[e+2ul]=Pvz;
+			fac_pu[e+3ul]=uxn; fac_pu[e+4ul]=uyn; fac_pu[e+5ul]=uzn;
+		} else {
+			const float ap = def_fac_pema;
+			fac_pu[e]    = fma(ap, Pvx-fac_pu[e],     fac_pu[e]);
+			fac_pu[e+1ul]= fma(ap, Pvy-fac_pu[e+1ul], fac_pu[e+1ul]);
+			fac_pu[e+2ul]= fma(ap, Pvz-fac_pu[e+2ul], fac_pu[e+2ul]);
+			fac_pu[e+3ul]= fma(ap, uxn-fac_pu[e+3ul], fac_pu[e+3ul]);
+			fac_pu[e+4ul]= fma(ap, uyn-fac_pu[e+4ul], fac_pu[e+4ul]);
+			fac_pu[e+5ul]= fma(ap, uzn-fac_pu[e+5ul], fac_pu[e+5ul]);
+		}
+		// Basis/Ziel/P aus den GEFILTERTEN Groessen neu (ueberschreibt die Momentanwerte oben):
+		const float ubx=fac_pu[e+3ul], uby=fac_pu[e+4ul], ubz=fac_pu[e+5ul];
+		const float undb = nx*ubx+ny*uby+nz*ubz;
+		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
+		const float utb = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
+		if(utb>=1e-6f) {
+			t1x=utxb/utb; t1y=utyb/utb; t1z=utzb/utb;
+			t2x=ny*t1z-nz*t1y; t2y=nz*t1x-nx*t1z; t2z=nx*t1y-ny*t1x;
+			const float Yb = utb*((2.0f*yw)*def_fac_Y);
+			const float upb = wf_spalding_uplus(Yb);
+			const float utaub = utb/upb;
+			float twb = rhon*utaub*utaub;
+			const float twmb = 0.5f*rhon*utb;
+			if(twb>twmb) twb = twmb;
+			twe = fmin(twb*faca, twmb);
+			ut = utb; // Klemmskalen folgen der gefilterten Basis
+			// Momente in der NEUEN Basis (G/Sn haengen an t-hat) -- zweiter Pass ueber L:
+			G11=0.0f; G22=0.0f; G12=0.0f; Sn1=0.0f; Sn2=0.0f; P1=0.0f; P2=0.0f;
+			for(uint i2=1u; i2<def_velocity_set; i2++) {
+				const uint ib2 = (i2%2u==1u) ? i2+1u : i2-1u;
+				if((flags[j[ib2]]&TYPE_BO)!=TYPE_S) continue;
+				const float cx2=c(i2), cy2=c(def_velocity_set+i2), cz2=c(2u*def_velocity_set+i2);
+				const float wi2=w(i2);
+				const float ct1b=cx2*t1x+cy2*t1y+cz2*t1z, ct2b=cx2*t2x+cy2*t2y+cz2*t2z, cnb=cx2*nx+cy2*ny+cz2*nz;
+				G11 = fma(6.0f*wi2, ct1b*ct1b, G11); G22 = fma(6.0f*wi2, ct2b*ct2b, G22); G12 = fma(6.0f*wi2, ct1b*ct2b, G12);
+				Sn1 = fma(6.0f*wi2, ct1b*cnb, Sn1); Sn2 = fma(6.0f*wi2, ct2b*cnb, Sn2);
+			}
+			P1 = fac_pu[e]*t1x+fac_pu[e+1ul]*t1y+fac_pu[e+2ul]*t1z; // GEFILTERTES P in der neuen Basis
+			P2 = fac_pu[e]*t2x+fac_pu[e+1ul]*t2y+fac_pu[e+2ul]*t2z;
+		}
+	}
+)+"#endif"+R( // FACETTEN_PEMA
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
 	float s1=0.0f, s2=0.0f, sn=0.0f;
 	// ★ 3x3-Iteration (FACETTEN-IMEM-3X3.md): Entkopplungs-Gate (Gl. 20). Entkoppelt laeuft
@@ -1866,6 +1927,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_EMA"+R(
 	, global float* fac_us // EMA-Zustand (nur Arm 3/4 mit CFD_FAC_EMA)
 )+"#endif"+R( // FACETTEN_EMA
+)+"#ifdef FACETTEN_PEMA"+R(
+	, global float* fac_pu // PEMA-Zustand (nur Arm 3/4 mit CFD_FAC_PEMA)
+)+"#endif"+R( // FACETTEN_PEMA
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
@@ -1908,6 +1972,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_EMA"+R(
 		, fac_us
 )+"#endif"+R( // FACETTEN_EMA
+)+"#ifdef FACETTEN_PEMA"+R(
+		, fac_pu
+)+"#endif"+R( // FACETTEN_PEMA
 	)+");"+R(
 )+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
