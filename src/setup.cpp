@@ -546,9 +546,9 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		D->fac_tau.read_from_device(); D->fac_tau_n.read_from_device();
 		const double fs = fmax(1.0,(double)fenster);
 		for(ulong i=0ull; i<D->fac_N; i++) {
-			K.rx += ((double)D->fac_tau[4ull*i+1ull]-(snap.empty()?0.0:snap[3ull*i+0ull]))/fs;
-			K.ry += ((double)D->fac_tau[4ull*i+2ull]-(snap.empty()?0.0:snap[3ull*i+1ull]))/fs;
-			K.rz += ((double)D->fac_tau[4ull*i+3ull]-(snap.empty()?0.0:snap[3ull*i+2ull]))/fs;
+			K.rx += ((double)D->fac_tau[6ull*i+1ull]-(snap.empty()?0.0:snap[3ull*i+0ull]))/fs;
+			K.ry += ((double)D->fac_tau[6ull*i+2ull]-(snap.empty()?0.0:snap[3ull*i+1ull]))/fs;
+			K.rz += ((double)D->fac_tau[6ull*i+3ull]-(snap.empty()?0.0:snap[3ull*i+2ull]))/fs;
 		}
 	}
 	auto wxp = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
@@ -614,9 +614,12 @@ void main_setup_kanal() {
 	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
 	{ const uint wf = env_u("CFD_WANDFUNKTION", 0u); LBM_Domain::s_wandfunktion = wf>0u; LBM_Domain::s_wf_tau = (wf==2u) ? 0.0f : 1.0f;
 	  if(wf>0u) print_info(string("Wandfunktion (Han et al. 2021): ")+(wf==2u?"NUR FREE-SLIP-TAUSCH (Zwischenarm)":"voll (Spalding, kappa=0,41, B=5,5)")); }
-	// ★ C1b Stufe 2: Facettenpfad am Kanal = Aequivalenznachweis gegen die z-WFB (FACETTEN-STUFE2.md F4).
-	{ const uint fc = env_u("CFD_FACETTEN", 0u); LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_tau = (fc==2u) ? 0.0f : 1.0f;
-	  if(fc>0u) print_info(string("Facetten-WFB (dominante Achse, Paar-Gate, Flaechenfaktor): ")+(fc==2u?"NUR TAUSCH (Zwischenarm)":"voll")); }
+	// ★ C1b: Facettenpfad am Kanal. Arme 1/2 = Paartausch (Kontrollarm), 3/4 = iMEM (FACETTEN-IMEM.md).
+	{ const uint fc = env_u("CFD_FACETTEN", 0u);
+	  if(fc>4u) print_error("CFD_FACETTEN kennt nur 0..4 (1/2 Paartausch voll/Tausch, 3/4 iMEM voll/Nullziel).");
+	  LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_imem = fc>=3u;
+	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
+	  if(fc>0u) print_info(string("Facettenpfad: ")+(fc==1u?"Paartausch voll (Kontrollarm)":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll (Slip-Velocity-BB)":"iMEM NULLZIEL (tau=0)")); }
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
 	create_folder(out_dir);
 	sichere_lauf(out_dir, "kanal");
@@ -720,7 +723,7 @@ void main_setup_kanal() {
 			if(fac_snap.empty()) { fac_snap_step=step+chunk;
 				lbm.lbm_domain[0]->fac_tau.read_from_device();
 				fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
-				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+3ull]; } }
+				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull]; } }
 			else { fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk; }
 		}
 	}
@@ -760,13 +763,21 @@ void main_setup_kanal() {
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
 		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
 		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
+		const ulong s12=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[12], s13=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[13], s10=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[10];
 		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)
-			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu));
+			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
+			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ohne Tangential-Link "+to_string(s13)):string("")));
+		if(env_u("CFD_FACETTEN",0u)>=3u) { // Delta-m + Normalkontamination global (Auflage 2: Kanal-Soll exakt 0)
+			double dm=0.0, nk=0.0;
+			for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+5ull]; }
+			print_info("iMEM-Erhaltung: Delta-m gesamt = "+to_string((float)dm,9u)+" (Kanal-Soll exakt 0), Normalkontamination = "+to_string((float)nk,9u));
+			if(dm!=0.0) print_warning("Delta-m am parallelen Kanal nicht exakt 0 -- S1-Komponentenpfad pruefen.");
+		}
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt.");
 		if(zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
-		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[4ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
+		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
 		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=sqrt(fmax(0.0,mtau))*0.5/(double)nu_lat;
 			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+", y+ = "+to_string((float)yp,1u)); }
 		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
@@ -1134,9 +1145,12 @@ void main_setup_kugel() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	// ★ C1b Stufe 2, Commit 3: Kugel ist Messpunkt c (erste gekruemmte Geometrie, Literaturwert).
-	{ const uint fc = env_u("CFD_FACETTEN", 0u); LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_tau = (fc==2u) ? 0.0f : 1.0f;
-	  if(fc>0u) print_info(string("Facetten-WFB an der Kugel: ")+(fc==2u?"NUR TAUSCH (Zwischenarm)":"voll")+" -- Impulsaustausch-Cd ist an getauschten Links kontaminiert (Phantom), Verschiebung dokumentieren!"); }
+	// ★ C1b: Kugel ist der Lackmustest des iMEM (Einzellink-Zellen!). Arme 1/2 Paartausch, 3/4 iMEM.
+	{ const uint fc = env_u("CFD_FACETTEN", 0u);
+	  if(fc>4u) print_error("CFD_FACETTEN kennt nur 0..4 (1/2 Paartausch voll/Tausch, 3/4 iMEM voll/Nullziel).");
+	  LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_imem = fc>=3u;
+	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
+	  if(fc>0u) print_info(string("Facettenpfad Kugel: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Impulsaustausch-Cd an behandelten Links kontaminiert, nur der projizierte Cd-Pfad zaehlt."); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=============== Kugel im Kanal (Neuaufbau auf Upstream 8986874) ===============");
@@ -1289,7 +1303,7 @@ void main_setup_kugel() {
 		if(env_u("CFD_FACETTEN",0u)>0u&&ts.back()>=(double)t_warmup&&fac_snap.empty()) { fac_snap_step=step+chunk;
 			lbm.lbm_domain[0]->fac_tau.read_from_device();
 			fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
-			for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[4ull*i+3ull]; } }
+			for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull]; } }
 		fx.push_back((double)units.si_F(F_lat.x));
 		fy.push_back((double)units.si_F(F_lat.y));
 		fz.push_back((double)units.si_F(F_lat.z));
@@ -1358,7 +1372,7 @@ void main_setup_kugel() {
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
-		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[4ull*i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
+		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
 		if(ntau>0ull) print_info("Facetten-tau Kugel: "+to_string(ntau)+" Tauschzellen, mittleres tau_w = "+to_string((float)(stau/(double)ntau),9u));
 		print_info("ACHTUNG: Cd oben enthaelt den Impulsaustausch-Reibungsanteil -- an getauschten Links ist er ein PHANTOM (AUDIT-Befund 1 verallgemeinert). Fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
 		// ★ NEUER Cd-Pfad (K4/K5): Druck projiziert + Reibung exakt aus dem Fenster-Delta
@@ -1472,7 +1486,7 @@ static void main_setup_fahrzeug() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
@@ -1861,7 +1875,7 @@ static void main_setup_fahrzeug_dd() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall mit eigener Verdrahtung (kugel: Stufe-2-Commit 3, fahrzeug/dd: Stufe 5)
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
 
@@ -1884,7 +1898,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // Audit-Nacharbeit 10: Statik-Symmetrie auch vor lbm_c
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_tau = 1.0f; // Audit-Nacharbeit 10: Statik-Symmetrie auch vor lbm_c
 	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 kaeme im Fernfeld der Kopplungs-Entnahmeebene x- (152 Zellen) zu nahe.");
 	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
 
@@ -2471,7 +2485,7 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_tau = 1.0f; // Re-Audit R2: s_wf_tau fehlte nur hier (6. Stelle)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_tau = 1.0f; // Re-Audit R2: s_wf_tau fehlte nur hier (6. Stelle)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) print_warning("CFD_FACETTEN_DIAG wird im fernfeld-Fall NICHT angewandt.");
@@ -2707,6 +2721,113 @@ void main_setup_facetten_test() {
 	if(diff_verboten>0ull) print_error("T2 GESCHEITERT: "+to_string(diff_verboten)+" Zellen ohne offenes Paar haben sich veraendert -- der Tausch zerstoert gestreamte DDFs (R1-Verletzung).");
 	if(diff_erlaubt==0ull) print_error("T2 GESCHEITERT: keine einzige erlaubte Differenz -- der Facettenpfad ist ein lautloser No-Op.");
 	print_info("T2 bestanden: Tausch wirkt genau an den Zellen mit offenen Paaren, alle anderen bitgleich.");
+
+	// ================================================================ iMEM-Tests (FACETTEN-IMEM.md I0)
+	// T3a: Host-Referenz der Momente/Kaskade in double an synthetischen Linkmengen.
+	{
+		static const double WH[19] = {1.0/3.0, 1.0/18,1.0/18,1.0/18,1.0/18,1.0/18,1.0/18,
+			1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36};
+		auto momente = [&](const std::vector<uint>& L, const double nh[3], const double uu[3],
+		                   double& G11, double& G22, double& G12, double S1[3], double& ut, double t1[3]) {
+			const double und = nh[0]*uu[0]+nh[1]*uu[1]+nh[2]*uu[2];
+			const double utv[3] = {uu[0]-und*nh[0], uu[1]-und*nh[1], uu[2]-und*nh[2]};
+			ut = sqrt(utv[0]*utv[0]+utv[1]*utv[1]+utv[2]*utv[2]);
+			for(int d2=0;d2<3;d2++) t1[d2] = ut>0.0 ? utv[d2]/ut : 0.0;
+			const double t2[3] = {nh[1]*t1[2]-nh[2]*t1[1], nh[2]*t1[0]-nh[0]*t1[2], nh[0]*t1[1]-nh[1]*t1[0]};
+			G11=G22=G12=0.0; S1[0]=S1[1]=S1[2]=0.0;
+			for(const uint i : L) {
+				const double cx=FZ_C[i][0], cy=FZ_C[i][1], cz=FZ_C[i][2], wi=WH[i];
+				const double ct1=cx*t1[0]+cy*t1[1]+cz*t1[2], ct2=cx*t2[0]+cy*t2[1]+cz*t2[2];
+				G11+=6.0*wi*ct1*ct1; G22+=6.0*wi*ct2*ct2; G12+=6.0*wi*ct1*ct2;
+				S1[0]+=wi*cx; S1[1]+=wi*cy; S1[2]+=wi*cz;
+			}
+		};
+		uint f3=0u;
+		// (1) ebene Wand: G-Momente + Free-Slip-Identitaet s1 = rho*u_x
+		{
+			const std::vector<uint> L={5,9,16,11,18}; const double nh[3]={0,0,1}, uu[3]={0.05,0,0};
+			double G11,G22,G12,S1[3],ut,t1[3]; momente(L,nh,uu,G11,G22,G12,S1,ut,t1);
+			if(fabs(G11-1.0/3.0)>1e-15||fabs(G22-1.0/3.0)>1e-15||fabs(G12)>1e-15) { print_warning("T3a(1): G-Momente ebene Wand falsch."); f3++; }
+			// Phi^f aus feq (geshiftet; Shift hebt sich, Symmetrie): P1 = 2*sum ct1*(feq[opp(i)]-w)
+			double P1=0.0;
+			for(const uint i : L) { const uint o=fz_opp(i);
+				const double cu=FZ_C[o][0]*uu[0]+FZ_C[o][1]*uu[1]+FZ_C[o][2]*uu[2];
+				const double feq=WH[o]*(3.0*cu+4.5*cu*cu-1.5*(uu[0]*uu[0])); // rho=1, geshiftet (feq-w)
+				const double ct1=FZ_C[i][0]*t1[0]+FZ_C[i][1]*t1[1]+FZ_C[i][2]*t1[2];
+				P1+=2.0*ct1*feq; }
+			const double s1 = (0.0-P1)/G11; // Nullziel (Free-Slip-Grenzfall, Gl. 11)
+			if(fabs(P1-(-uu[0]/3.0))>1e-12) { print_warning("T3a(1): Phi^f != -rho*u_x/3 (ist "+to_string((float)P1,9u)+")."); f3++; }
+			if(fabs(s1-uu[0])>1e-12) { print_warning("T3a(1): Free-Slip s1 != u_x (ist "+to_string((float)s1,9u)+")."); f3++; }
+		}
+		// (2) 45-Grad-Lage-0: S1 = (0,-5,+5)/36 parallel zu +n
+		{
+			const std::vector<uint> L={4,5,18,8,13,16,9}; const double nh[3]={0,-1.0/sqrt(2.0),1.0/sqrt(2.0)}, uu[3]={0.05,0,0};
+			double G11,G22,G12,S1[3],ut,t1[3]; momente(L,nh,uu,G11,G22,G12,S1,ut,t1);
+			if(fabs(S1[0])>1e-15||fabs(S1[1]+5.0/36.0)>1e-15||fabs(S1[2]-5.0/36.0)>1e-15) { print_warning("T3a(2): S1 != (0,-5,+5)/36."); f3++; }
+			// Delta-m-Leck fuer tangentiales u_s: S1 || n => S1*u_s = 0 fuer JEDES tangentiale u_s
+			const double us[3]={t1[0]*0.1, t1[1]*0.1, t1[2]*0.1};
+			if(fabs(S1[0]*us[0]+S1[1]*us[1]+S1[2]*us[2])>1e-12) { print_warning("T3a(2): Delta-m-Leck an 45-Grad-Lage-0 nicht 0."); f3++; }
+		}
+		// (3) Einzellink diagonal -> Skalar-Fallback; (4) Einzellink normal -> kein Tangential-Link
+		{
+			const double nh[3]={0,0,1}, uu[3]={0.05,0,0}; double G11,G22,G12,S1[3],ut,t1[3];
+			momente({9},nh,uu,G11,G22,G12,S1,ut,t1);
+			const double det=G11*G22-G12*G12;
+			if(!(det<1e-4*G11*G22||G22<1e-8)||G11<1e-8) { print_warning("T3a(3): Einzellink diagonal landet nicht im Skalar-Fallback."); f3++; }
+			momente({5},nh,uu,G11,G22,G12,S1,ut,t1);
+			if(G11>=1e-8) { print_warning("T3a(4): Normal-Einzellink hat G11 != 0."); f3++; }
+		}
+		if(f3>0u) print_error("T3a GESCHEITERT: "+to_string(f3)+" Referenzpruefungen.");
+		print_info("T3a bestanden: Momente, Free-Slip-Identitaet, S1-Vorzeichen, Kaskadenpfade (double-Referenz).");
+	}
+	// T2-iMEM: Arm 4 (Nullziel) vs AUS nach GENAU 1 Schritt -- iMEM modifiziert sofort (Gl. 11),
+	// die Lokalisierung ist nur im 1. Schritt exakt (Gegenpruefer-Auflage 3).
+	{
+		ulong di_erlaubt=0ull, di_verboten=0ull, di_still=0ull;
+		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=true; LBM_Domain::s_fac_tau=0.0f;
+		LBM d(Nx,Ny,Nz,nu_lat); init(d);
+		std::vector<Facette> FD = baue_facetten(d, Nx, Ny, Nz, TYPE_S, get_exe_path()+"../export/facetten_test/", "T2-iMEM");
+		d.alloc_facetten(FD);
+		d.run(1u,1u); d.u.read_from_device();
+		d.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		// Host-Vorhersage: Modifikation <=> klasse==0 && ut>=1e-6 && tangential wirksame Linkmenge
+		std::vector<uchar> mod(d.get_N(), 0u);
+		{
+			static const double WH2[19] = {1.0/3.0, 1.0/18,1.0/18,1.0/18,1.0/18,1.0/18,1.0/18,
+				1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36,1.0/36};
+			for(const Facette& f : FD) {
+				if(f.klasse!=0u) continue;
+				uint x,y,z; d.coordinates(f.n,x,y,z);
+				const double nh[3]={f.nx,f.ny,f.nz}, uu[3]={0.05,0,0};
+				const double und=nh[0]*uu[0]; const double utv[3]={uu[0]-und*nh[0],-und*nh[1],-und*nh[2]};
+				const double ut=sqrt(utv[0]*utv[0]+utv[1]*utv[1]+utv[2]*utv[2]);
+				if(ut<1e-6) continue;
+				const double t1[3]={utv[0]/ut,utv[1]/ut,utv[2]/ut};
+				const double t2[3]={nh[1]*t1[2]-nh[2]*t1[1], nh[2]*t1[0]-nh[0]*t1[2], nh[0]*t1[1]-nh[1]*t1[0]};
+				double G11=0.0,G22=0.0;
+				for(uint i=1u;i<19u;i++){ const uint ib=fz_opp(i);
+					const int xn=(int)x+FZ_C[ib][0], yn=(int)y+FZ_C[ib][1], zn=(int)z+FZ_C[ib][2];
+					const uint wxx=(uint)((xn%(int)Nx+(int)Nx)%(int)Nx), wyy=(uint)((yn%(int)Ny+(int)Ny)%(int)Ny);
+					if(zn<0||zn>=(int)Nz) continue;
+					if((d.flags[(ulong)wxx+((ulong)wyy+(ulong)zn*(ulong)Ny)*(ulong)Nx]&(TYPE_S|TYPE_E))!=TYPE_S) continue;
+					const double ct1=FZ_C[i][0]*t1[0]+FZ_C[i][1]*t1[1]+FZ_C[i][2]*t1[2];
+					const double ct2=FZ_C[i][0]*t2[0]+FZ_C[i][1]*t2[1]+FZ_C[i][2]*t2[2];
+					G11+=6.0*WH2[i]*ct1*ct1; G22+=6.0*WH2[i]*ct2*ct2; }
+				if(G11>=1e-8||G22>=1e-8) mod[f.n]=1u;
+			}
+		}
+		for(ulong n2=0ull; n2<d.get_N(); n2++) {
+			const bool df = (ua1_x[n2]!=d.u.x[n2])||(ua1_x[n2+d.get_N()]!=d.u.y[n2])||(ua1_x[n2+2ull*d.get_N()]!=d.u.z[n2]);
+			if(df) { if(mod[n2]) di_erlaubt++; else di_verboten++; }
+			else if(mod[n2]) di_still++;
+		}
+		print_info("T2-iMEM (1 Schritt, Arm 4): Differenzen erlaubt "+to_string(di_erlaubt)+", VERBOTEN "+to_string(di_verboten)
+			+", vorhergesagt ohne Differenz "+to_string(di_still)+"; Wirkpfad[7]="+to_string((ulong)d.lbm_domain[0]->rho_clamp_hits[7])
+			+" Skalar[12]="+to_string((ulong)d.lbm_domain[0]->rho_clamp_hits[12])+" ohneTangential[13]="+to_string((ulong)d.lbm_domain[0]->rho_clamp_hits[13]));
+		if(di_verboten>0ull) print_error("T2-iMEM GESCHEITERT: "+to_string(di_verboten)+" Zellen ohne vorhergesagte Modifikation haben sich veraendert.");
+		if(di_erlaubt==0ull) print_error("T2-iMEM GESCHEITERT: keine einzige erlaubte Differenz -- iMEM-Pfad lautloser No-Op.");
+		print_info("T2-iMEM bestanden: iMEM wirkt genau an den vorhergesagten Zellen (1-Schritt-Lokalisierung).");
+	}
 	_exit(0);
 }
 

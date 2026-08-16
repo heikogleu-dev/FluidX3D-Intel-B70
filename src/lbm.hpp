@@ -155,17 +155,18 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 12 Slots: [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] Achskonflikt (Stufe 4, bleibt 0), [11] Facette ohne offenes Paar (t%100)
+	Memory<uint> rho_clamp_hits; // 12 Slots: [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
-	static bool s_facetten;  // C1b Stufe 2: Facetten-WFB dominante Achse (CFD_FACETTEN)
+	static bool s_facetten;  // C1b: Facettenpfad an (CFD_FACETTEN>0)
+	static bool s_fac_imem;  // C1b iMEM-Umbau: CFD_FACETTEN=3/4 (Slip-Velocity-BB) statt 1/2 (Paartausch-Kontrollarm)
 	static float s_fac_tau;  // 1 = voll, 0 = nur Tausch (CFD_FACETTEN=2)
 	bool facetten_on = false, facetten_bound = false; // read-once + Bindungswaechter
 	uint fac_param_pos = 0u; ulong fac_N = 0ull;      // Parameterposition in stream_collide, aktive Facetten
 	Memory<float> fac_geo;   // AoS 8 float je Facette: nx,ny,nz,yw,fac_a(=1/|n_achse|),achse,frei,frei
 	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
-	Memory<float> fac_tau;   // Akkumulator 4 float je Facette: [0] Summe tau_w (y+), [1..3] Summe angewandte Wandkraft x/y/z (Cd-Reibung); nur Zellen mit >=1 getauschtem Paar
+	Memory<float> fac_tau;   // Akkumulator 6 float je Facette: [0] Summe tau_w (y+), [1..3] Ist-Wandkraft x/y/z (Cd-Reibung), [4] Delta-m-Leck (iMEM; Paararm 0), [5] Normalkontamination (iMEM; Paararm 0); nur Zellen mit tatsaechlicher Modifikation
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)

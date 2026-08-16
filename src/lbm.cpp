@@ -230,6 +230,7 @@ float LBM_Domain::s_sponge_a = 3000.0f;
 float LBM_Domain::s_wf_tau = 1.0f;
 bool LBM_Domain::s_wandfunktion = false;
 bool LBM_Domain::s_facetten = false;
+bool LBM_Domain::s_fac_imem = false;
 float LBM_Domain::s_fac_tau = 1.0f;
 bool LBM_Domain::s_sgs_wandfrei = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
@@ -263,7 +264,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 12ull); // C1b: +4 Facetten-Slots (Legende lbm.hpp), Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 14ull); // iMEM: +2 Slots (12/13, Legende lbm.hpp), Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 
@@ -382,7 +383,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(aktiv>=0xFFFFFFFFull) { print_error("alloc_facetten_domain: Facettenzahl kollidiert mit dem NIL-Sentinel."); return; }
 	fac_geo   = Memory<float>(device, 8ull*aktiv);
 	fac_idx   = Memory<uint>(device, FN);
-	fac_tau   = Memory<float>(device, 4ull*aktiv); // Layout: [4k]=tw, [4k+1..3]=Wandkraft x/y/z (Cd-Pfad E5)
+	fac_tau   = Memory<float>(device, 6ull*aktiv); // Layout: [6k]=tw, [6k+1..3]=Wandkraft, [6k+4]=Delta-m, [6k+5]=Normalkontamination (iMEM-Umbau)
 	fac_tau_n = Memory<uint>(device, aktiv);
 	for(ulong i=0ull; i<FN; i++) fac_idx[i] = 0xFFFFFFFFu;
 	ulong k=0ull;
@@ -394,7 +395,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		fac_geo[8ull*k+4ull]=1.0f/fmax(na, 0.57735027f); // Flaechenfaktor, Kappe sqrt(3) (|n_a|>=1/sqrt(3))
 		fac_geo[8ull*k+5ull]=(float)f.achse;
 		fac_geo[8ull*k+6ull]=0.0f; fac_geo[8ull*k+7ull]=0.0f;
-		fac_tau[4ull*k]=0.0f; fac_tau[4ull*k+1ull]=0.0f; fac_tau[4ull*k+2ull]=0.0f; fac_tau[4ull*k+3ull]=0.0f; fac_tau_n[k]=0u;
+		for(ulong q6=0ull; q6<6ull; q6++) fac_tau[6ull*k+q6]=0.0f;
+		fac_tau_n[k]=0u;
 		// Zellindex -> F-BBox-Index (dieselbe Formel wie f_bbox im Kernel)
 		const uint x=(uint)(f.n%(ulong)Nx), y=(uint)((f.n/(ulong)Nx)%(ulong)Ny), z=(uint)(f.n/((ulong)Nx*(ulong)Ny));
 		if(x<fbx0||y<fby0||z<fbz0||x>=fbx0+fbnx||y>=fby0+fbny||z>=fbz0+fbnz) { print_error("Facette ausserhalb der F-BBox -- set_force_bbox deckt die Wandzellen nicht."); return; }
@@ -770,6 +772,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_Y "+to_string(0.5f/nu,8u)+"f"
 	"\n	#define def_fac_tau "+to_string(s_fac_tau,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
+	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
 	+"\n	#define TYPE_MS 0x03" // 0b00000011 // cell next to moving solid boundary
 	"\n	#define TYPE_BO 0x03" // 0b00000011 // any flag bit used for boundaries (temperature excluded)
 	"\n	#define TYPE_IF 0x18" // 0b00011000 // change from interface to fluid

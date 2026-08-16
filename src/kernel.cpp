@@ -1728,13 +1728,87 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 			fac_paar(fhn, flags, j, 18u, 12u, 17u, 11u, tau_z, &getauscht, &fk_z);
 		}
 	}
-	if(getauscht>0u) { // 1 Zelle = 1 Facette: kein Atomic noetig; Layout 4 float: [0] tw physisch (y+), [1..3] angewandte Wandkraft (Cd-Reibung)
-		fac_tau_acc[4ul*(uxx)fid] += tw; fac_tau_acc[4ul*(uxx)fid+1ul] += fk_x; fac_tau_acc[4ul*(uxx)fid+2ul] += fk_y; fac_tau_acc[4ul*(uxx)fid+3ul] += fk_z;
+	if(getauscht>0u) { // 1 Zelle = 1 Facette: kein Atomic noetig; Layout 6 float (iMEM-Umbau): [0] tw physisch (y+), [1..3] angewandte Wandkraft (Cd-Reibung), [4] Delta-m (Paararm 0), [5] Normalkontamination (Paararm 0)
+		fac_tau_acc[6ul*(uxx)fid] += tw; fac_tau_acc[6ul*(uxx)fid+1ul] += fk_x; fac_tau_acc[6ul*(uxx)fid+2ul] += fk_y; fac_tau_acc[6ul*(uxx)fid+3ul] += fk_z;
 		fac_tau_cnt[fid] += 1u; }
 	else if(t%100ul==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
 	if(t%100ul==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)
 } // apply_facette()
 )+"#endif"+R( // FACETTEN
+)+"#ifdef FACETTEN_IMEM"+R(
+// ★★ iMEM-Facettenpfad (FACETTEN-IMEM.md, an Asmuth et al. 2021 Gl. 20-28 verankert, Revision
+// 2026-08-16): Slip-Geschwindigkeit u_s statt Diagonalpaar-Tausch. JEDER Link mit solidem
+// Streaming-Ursprung traegt (linkweise, nicht paarweise); der Zusatzterm q_i = 6 w_i (c_i*u_s)
+// ist dieselbe Termform wie apply_moving_boundaries (rho_wall=1). Register: fhn[i] haelt
+// f_out_opp(t-2) -- der Esoteric-Pull-BB ist ein ZWEI-Schritt-Umlauf (Gegenpruefer, Auflage 1);
+// alle Formeln sind zeitindexfrei. 2x2-System in der Tangentialebene (Quer-Ziel 0 = Modell),
+// Degenerationskaskade fuer Einzellink-Zellen, Klemmen machen Ist!=Soll im Akkumulator sichtbar.
+void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
+                        const global float* fac_geo, const global uint* fac_idx,
+                        global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t) {
+	uxx fbi; if(!f_bbox(n, &fbi)) return;
+	const uint fid = fac_idx[fbi];
+	if(fid==0xFFFFFFFFu) return;
+	const uxx b = 8ul*(uxx)fid;
+	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
+	float rhon, uxn, uyn, uzn;
+	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt)
+	const float und = nx*uxn+ny*uyn+nz*uzn;
+	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
+	const float ut = sqrt(utx*utx+uty*uty+utz*utz);
+	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
+	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return; } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
+	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet)
+	{
+		const float Y  = ut*((2.0f*yw)*def_fac_Y);
+		const float up = wf_spalding_uplus(Y);
+		const float utau = ut/up;
+		tw = rhon*utau*utau;
+		const float tw_max = 0.5f*rhon*ut;
+		if(tw>tw_max) { tw = tw_max; if(t%100ul==0ul) atomic_inc(&hits[8]); }
+		const float twf = tw*faca;
+		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]);
+		twe = fmin(twf, tw_max);
+	}
+	const float t1x=utx/ut, t1y=uty/ut, t1z=utz/ut;               // Tangentialbasis (Gl. 6)
+	const float t2x=ny*t1z-nz*t1y, t2y=nz*t1x-nx*t1z, t2z=nx*t1y-ny*t1x;
+	float G11=0.0f, G22=0.0f, G12=0.0f, P1=0.0f, P2=0.0f;         // Linkmengen-Momente (Gl. 4/7)
+	float S1x=0.0f, S1y=0.0f, S1z=0.0f, Sn1=0.0f, Sn2=0.0f;       // S1 KOMPONENTENWEISE (Auflage 2)
+	for(uint i=1u; i<def_velocity_set; i++) { // compiler-entrollt, Muster apply_moving_boundaries
+		const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
+		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue; // linkweises Gate (schliesst TYPE_E/TYPE_MS aus)
+		const float cx=c(i), cy=c(def_velocity_set+i), cz=c(2u*def_velocity_set+i);
+		const float wi=w(i);
+		const float ct1=cx*t1x+cy*t1y+cz*t1z, ct2=cx*t2x+cy*t2y+cz*t2z, cn=cx*nx+cy*ny+cz*nz;
+		G11 = fma(6.0f*wi, ct1*ct1, G11); G22 = fma(6.0f*wi, ct2*ct2, G22); G12 = fma(6.0f*wi, ct1*ct2, G12);
+		P1 = fma(2.0f*ct1, fhn[i], P1); P2 = fma(2.0f*ct2, fhn[i], P2); // Phi^f-Tangentialkomponenten (geshiftete DDFs, Offset hebt sich per Gl. 5)
+		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
+		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
+	}
+	const float R1 = -twe - P1, R2 = -P2; // Ziel: (-twe, 0) in der Tangentialebene (Gl. 7)
+	float s1=0.0f, s2=0.0f;
+	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8)
+	if(det>=1e-4f*G11*G22&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
+	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback
+	else { if(t%100ul==0ul) atomic_inc(&hits[13]); return; } // Slot 13: kein tangential wirksamer Link
+	const float s1c = clamp(s1, -2.0f*ut, 2.0f*ut), s2c = clamp(s2, -ut, ut); // Klemmen (Gl. 9)
+	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
+	s1=s1c; s2=s2c;
+	const float usx = s1*t1x+s2*t2x, usy = s1*t1y+s2*t2y, usz = s1*t1z+s2*t2z;
+	for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3)
+		const uint ib = (i%2u==1u) ? i+1u : i-1u;
+		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;
+		fhn[i] = fma(6.0f*w(i), c(i)*usx+c(def_velocity_set+i)*usy+c(2u*def_velocity_set+i)*usz, fhn[i]);
+	}
+	const float phi1 = P1 + fma(G11,s1,G12*s2), phi2 = P2 + fma(G12,s1,G22*s2); // Ist-Austausch nach Klemme
+	const float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
+	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] IST-Wandkraft (ungeklemmt == twe*t1, Wirkpfadnachweis)
+	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
+	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz); // Delta-m-Leck (Gl. 13, komponentenweise)
+	fac_tau_acc[a+5ul] += 6.0f*(Sn1*s1+Sn2*s2);           // parasitaerer Normalaustausch (Gl. 12)
+	fac_tau_cnt[fid] += 1u;
+} // apply_facette_imem()
+)+"#endif"+R( // FACETTEN_IMEM
 
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
@@ -1783,7 +1857,11 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 )+"#ifdef FACETTEN"+R(
 	// ★ C1b Stufe 2: gleicher Platz, gleiches Zellgate wie die z-WFB (beide schliessen sich per
 	// Konstruktor-Fehler aus). Facetten-Lookup und Paar-Gates uebernehmen die Ortsaufloesung.
+)+"#ifndef FACETTEN_IMEM"+R(
 	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t);
+)+"#else"+R(
+	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette_imem(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t);
+)+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
