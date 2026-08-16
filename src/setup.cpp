@@ -1236,6 +1236,10 @@ void main_setup_kugel() {
 	// ---------------------------------------------------------------- Zeitschleife
 	std::vector<double> ts, fx, fy, fz;
 	std::vector<double> fac_snap; ulong fac_snap_step=0ull; // Cd-Pfad
+	// ★ Druck-ZEITMITTEL (Plan E6, Morgen-TODO vom 2026-08-15): der Druckanteil wird an der
+	// Sample-Kadenz gemittelt statt als End-Momentaufnahme gelesen. CFD_FAC_CD_EVERY duennt aus.
+	double fac_px=0.0, fac_py=0.0, fac_pz=0.0; ulong fac_pn=0ull, fac_cd_i=0ull;
+	std::ofstream fac_csv;
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
@@ -1267,6 +1271,20 @@ void main_setup_kugel() {
 		lbm.update_force_field();
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
 		ts.push_back((double)((float)(step+chunk)*dt));
+		// ★ Druck-Zeitmittel: je Kadenz-Sample im Mittelungsfenster die Druckprojektion summieren.
+		// kraft_facetten ruft update_force_field erneut -- der t_last_force_field-Guard macht das
+		// zum No-Op (R3-Pruefer), die Reibungs-Slots des Ergebnisses werden hier ignoriert
+		// (Reibung bleibt exaktes Fenster-Delta am Laufende).
+		if(env_u("CFD_FACETTEN",0u)>0u&&ts.back()>=(double)t_warmup) {
+			fac_cd_i++;
+			if((fac_cd_i-1ull)%(ulong)max(1u,env_u("CFD_FAC_CD_EVERY",1u))==0ull) {
+				const std::vector<double> leer;
+				const FacKraft FS = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
+				fac_px+=FS.px; fac_py+=FS.py; fac_pz+=FS.pz; fac_pn++;
+				if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv << "# Druck-Zeitreihe des projizierten Cd-Pfads (Reibung: exaktes Fenster-Delta im Endreport)\nt_si,cd_druck_x,cd_druck_z\n"; }
+				fac_csv << ts.back() << "," << (double)units.si_F((float)FS.px)/((double)q_inf*(double)A_nom) << "," << (double)units.si_F((float)FS.pz)/((double)q_inf*(double)A_nom) << "\n" << std::flush;
+			}
+		}
 		// ★ Cd-Pfad: Akkumulator-Snapshot beim ersten Sample im Mittelungsfenster
 		if(env_u("CFD_FACETTEN",0u)>0u&&ts.back()>=(double)t_warmup&&fac_snap.empty()) { fac_snap_step=step+chunk;
 			lbm.lbm_domain[0]->fac_tau.read_from_device();
@@ -1346,11 +1364,14 @@ void main_setup_kugel() {
 		// ★ NEUER Cd-Pfad (K4/K5): Druck projiziert + Reibung exakt aus dem Fenster-Delta
 		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
 			const FacKraft FKu = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), n_steps-fac_snap_step, fac_snap);
-			// Cd-Normierung: dieselbe Kette wie die Zeitreihe (units.si_F, q_inf*A_nom)
-			const double cd_druck = (double)units.si_F((float)FKu.px)/((double)q_inf*(double)A_nom);
+			// Cd-Normierung: dieselbe Kette wie die Zeitreihe (units.si_F, q_inf*A_nom).
+			// ★ Druck = ZEITMITTEL ueber die Kadenz-Samples (E6); Reibung = exaktes Fenster-Delta.
+			const double cd_druck_ende = (double)units.si_F((float)FKu.px)/((double)q_inf*(double)A_nom);
+			const double cd_druck = fac_pn>0ull ? (double)units.si_F((float)(fac_px/(double)fac_pn))/((double)q_inf*(double)A_nom) : cd_druck_ende;
 			const double cd_reib  = (double)units.si_F((float)FKu.rx)/((double)q_inf*(double)A_nom);
-			print_info("Cd-Pfad Kugel: Cd_druck = "+to_string((float)cd_druck,4u)+", Cd_reibung = "+to_string((float)cd_reib,4u)
+			print_info("Cd-Pfad Kugel: Cd_druck = "+to_string((float)cd_druck,4u)+" (Zeitmittel, "+to_string(fac_pn)+" Samples; Endwert "+to_string((float)cd_druck_ende,4u)+"), Cd_reibung = "+to_string((float)cd_reib,4u)
 				+", Summe = "+to_string((float)(cd_druck+cd_reib),4u)+" (nominale Flaeche)");
+			if(fac_csv.is_open()) print_info("CSV: "+out_dir+"cd_facetten.csv ("+to_string(fac_pn)+" Zeilen)");
 			print_info("Cd-Pfad Kugel (LATTICE-Einheiten, Verschiebung zaehlt): Druck x = "+to_string((float)FKu.px,6u)
 				+", Reibung x = "+to_string((float)FKu.rx,6u)+" | n_voll "+to_string(FKu.n_voll)+", projiziert "+to_string(FKu.n_proj)+", unklar "+to_string(FKu.n_unklar));
 		}
