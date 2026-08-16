@@ -708,8 +708,10 @@ void main_setup_kanal() {
 		lbm.alloc_facetten(FF);
 		// F2/F7: Facettenzahl ist geometrisch exakt abzaehlbar -- harte Pruefung faengt jeden
 		// vergessenen z-Wrap mechanisch (Formelblatt Schritt 5).
-		if(kipp==45u&&lbm.lbm_domain[0]->fac_N!=(ulong)4u*Nx*Ny) print_error("Torus 45: fac_N != 4*Nx*Ny ("+to_string(lbm.lbm_domain[0]->fac_N)+" statt "+to_string((ulong)4u*Nx*Ny)+").");
-		if(kipp==26u&&lbm.lbm_domain[0]->fac_N!=(ulong)3u*Nx*Ny) print_error("Torus 26: fac_N != 3*Nx*Ny ("+to_string(lbm.lbm_domain[0]->fac_N)+" statt "+to_string((ulong)3u*Nx*Ny)+").");
+		// GESAMTzahl (aktiv + markiert) ist die geometrische F2-Invariante -- fac_N allein zaehlt nur
+		// die aktiven (der erste Serienlauf starb an genau dieser Verwechslung).
+		if(kipp==45u&&FF.size()!=(size_t)4u*Nx*Ny) print_error("Torus 45: Facetten gesamt != 4*Nx*Ny ("+to_string((ulong)FF.size())+" statt "+to_string((ulong)4u*Nx*Ny)+").");
+		if(kipp==26u&&FF.size()!=(size_t)3u*Nx*Ny) print_error("Torus 26: Facetten gesamt != 3*Nx*Ny ("+to_string((ulong)FF.size())+" statt "+to_string((ulong)3u*Nx*Ny)+").");
 	}
 	lbm.run(0u, n_steps); // initialisieren
 
