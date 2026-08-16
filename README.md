@@ -8,9 +8,8 @@ dafür ein Wandmodell (WFB + zellbasierte Facetten). Wer einsteigt, liest in die
 | **ARBEITSLISTE.md** | Priorisierte Arbeitsliste + Tagesstand — **führend für „was ist offen"** |
 | **AUDIT-BEFUNDE.md** | Komplett-Audits R1–R3 (2026-08-15) mit allen Nacharbeits-Nachweisen |
 | **WANDMODELL.md** | Wissensstand Wandmodell/Kanal: Rauwand-Befundkette, WFB-Ergebnis |
-| **FACETTEN-PLAN.md** | C1b-Architekturplan (zellbasierte Facetten) + Stufe-0/1-Messstände |
-| **FACETTEN-STUFE2.md** | C1b Stufe 2: Kernel-Plan, Paartabelle aller 6 Wandseiten, Bitgleichheits-Messstand |
-| **FACETTEN-CD-PFAD.md** | C1b Cd/Cz-Auslesepfad: Plan + K1–K5-Messstand |
+| **FACETTEN.md** | **Einstieg C1b-Facetten-Wandmodell**: geltende Architektur, Schalter-Referenz, Abnahmen, offene Punkte |
+| FACETTEN-ARCHIV.md + FACETTEN-*.md | Archivfamilie (8 Altdateien: PLAN/STUFE2/STUFE3/CD-PFAD/LITERATUR/IMEM/IMEM-3X3/IMEM-ANALYSE) — Belegkette; Verzeichnis mit Überholt-Vermerken in FACETTEN-ARCHIV.md |
 | **OFFENE-PUNKTE.md** | Iron Rules + Übergabeprotokoll 2026-08-08/09 (historisch, mit Korrektur-Vermerken) |
 | **HYGIENE-BEFUNDE.md** | Codehygiene-Prüferberichte (2026-08-09, weitgehend abgearbeitet) |
 | **EINLASS-AUSLASS.md** | Randbedingungs-Analyse: Klingeln, Dämpfungszone, SRT/TRT-Entscheidung |

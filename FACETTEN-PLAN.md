@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** Stufe-4-Nebenachsen (iMEM-obsolet), Paartausch als Hauptmechanismus (jetzt Kontrollarm), 41,8-%-Zahl, 12-Slot-Zähler, „dd-Nahfeld kleiner".
+> Rest bleibt Belegkette (A1–A8, R1/R2, Auflagen, Eich-Messstände) — Einordnung: FACETTEN-ARCHIV.md.
+
 # C1b — Facetten-basierte Wandbehandlung: Implementierungsplan
 
 Planungsagent 2026-08-15 (Iron Rule 2), auf Stand 2018a64. Heikos Entscheidung: zellbasiert,

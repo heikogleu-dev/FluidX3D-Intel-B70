@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** J0-Konsequenz „EMA auf u_s" (von J3 widerlegt), getrennte Slot-13/15-Solls (Summe 13+15 prüfen); J3-Torus-c_f unter z-Saum-/N1-Fenster-Vorbehalt (2a8bd20).
+> Formeln (16)–(28), Entkopplungsbeweise und N1–N3-Logik bleiben gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # iMEM-Iteration 2: 3x3-Plan (2026-08-16, auf 9688ead)
 
 Alle Pflichtlektüre gelesen (FACETTEN-IMEM.md komplett inkl. Revision/I0/I1/I2-Durchfall, kernel.cpp 1660–1816, FACETTEN-STUFE3.md). Ich habe zusätzlich die Linkmengen-Momente aller Torus-Lagen von Hand durchgerechnet — dabei fällt ein Befund an, der die Erwartung an die I2-Wiederholung wesentlich schärft (Abschnitt 5). Hier der Plan.

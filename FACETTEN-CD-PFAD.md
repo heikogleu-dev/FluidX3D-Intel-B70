@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** E5-Layout 4 float (heute 6 float), K5-Momentaufnahme-Einschränkung (durch den E6-Nachtrag unten selbst erledigt).
+> E1–E7 und der K1–K5-Messstand bleiben gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # C1b: Cd/Cz-Auslesepfad unter Facetten (Plan, 2026-08-15)
 
 Ich habe den Stand im richtigen Repo (/home/heiko/CFD/FluidX3D-v2, f3af022) gelesen: `apply_facette`/`fac_paar` (kernel.cpp:1650–1733), `update_force_field`/`object_force` (kernel.cpp:2546–2619), `alloc_facetten_domain` (lbm.cpp:372–407), `messe_yplus` als F-BBox-Lesemuster (setup.cpp:736–789), Kanal-Report (setup.cpp:689–703), Kugel-Report (setup.cpp:1235–1247), FACETTEN-PLAN.md Auflage 2 und FACETTEN-STUFE2.md.

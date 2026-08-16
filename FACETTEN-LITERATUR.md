@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** nichts inhaltlich — nur zwei Präzisierungen: Asmuths Normalinversion erwies sich als nötig (I2), Gl. 29/30 filtern den EINGANG (FACETTEN-IMEM-ANALYSE.md).
+> Quellenverzeichnis bleibt voll gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # C1b: Literatur-Recherche Wandfunktion an schraegen/gekruemmten Waenden (2026-08-15)
 
 Recherche abgeschlossen. Hier der Bericht auf Deutsch, mit Mechanik-Fokus und ehrlicher Kennzeichnung der Lücken.

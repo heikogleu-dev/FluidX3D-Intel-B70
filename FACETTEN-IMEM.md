@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** Festlegung (12)/2×2-System (I2-Messung: Asmuths Normalinversion nötig → 3×3, s. FACETTEN-IMEM-3X3.md), 14-Slot-Legende; I2-Torus-Zahlen unter z-Saum-Vorbehalt (2a8bd20).
+> Herleitung (1)–(11)/(13)–(15), Revisions-Auflagen und I0/I1-Messstand bleiben gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # C1b: iMEM-Umbau — Herleitung + Implementierungsplan (Planungsagent, 2026-08-15 nachts)
 
 > STATUS: Plan liegt zur adversarialen Gegenpruefung an (Morgen-Schritt 1, ARBEITSLISTE.md).

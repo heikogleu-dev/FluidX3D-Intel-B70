@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** F7–F10 (paartausch-spezifisch), F11-BB-Erwartung 0,010–0,014 (gemessen 0,00166/0,00179), Abnahme D5 (ersetzt durch N1–N3).
+> Geometrie/Normierung F1–F6, Lagenprognosen und YWMIN-Entscheid bleiben gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # C1b Stufe 3: Gekippter Kanal — Formelblatt (Planungsagent, 2026-08-15 nachts)
 
 > **Einordnung nach der Literatur-Recherche (FACETTEN-LITERATUR.md):** Die Geometrie-, Normierungs-

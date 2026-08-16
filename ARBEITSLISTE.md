@@ -6,30 +6,20 @@ einer Sitzung erledigt werden kann.
 **Nachtrag 2026-08-15:** 0A (y⁺ gemessen: Median 1122, nicht 137), A1–A3 (Kanal steht, Rauwand
 verstanden, WFB nach Han et al. gebaut — c_f gitterunabhängig flach, Details `WANDMODELL.md`) und
 das Komplett-Audit samt Fix-Schleife (`AUDIT-BEFUNDE.md`, sauber bis Commit 06b432b) sind erledigt.
-**Stand C1b (2026-08-15 abends):** Stufen 0–2 KOMPLETT durch die Agenten-Pipeline (Pläne in
-FACETTEN-PLAN.md / FACETTEN-STUFE2.md / FACETTEN-CD-PFAD.md, alle gegen­geprüft): Facettenbau
-geeicht (3³, r21>0,15, 21,9 % markiert), Kernel mit Paar-Gate + Flächenfaktor auf DDF-Ebene
-bewiesen, Kanal-Äquivalenz zur z-WFB BITGLEICH (CPU+iGPU), Kugel Ist=Soll, Cd-Auslesepfad
-K1–K4 bestanden (K2 = 0,9961 stationär). Audit Runde 3 sauber (AUDIT-BEFUNDE.md).
-**ENTSCHIEDEN (Heiko, 2026-08-15 nachts): direkter iMEM-Umbau** — die Kugel zeigt nur 313
-Tauschzellen bei 14.356 ohne offenes Paar, der Paartausch ist an Krümmung STRUKTURELL
-unzureichend (FACETTEN-LITERATUR.md, bestätigt durch Matyka 2013). iMEM (Asmuth et al. 2021,
-Slip-Velocity-BB: u_s pro Facette so, dass der Impulsaustausch über ALLE offenen Wand-Links
-exakt das Ziel-τ_w liefert) ersetzt mit einem Mechanismus drei Baustellen: Nebenachsen,
-Hangauf-Komponente UND Relativgeschwindigkeit. Der Han/Ooka-Paartausch bleibt Kontrollarm.
+**Stand C1b (2026-08-16 abends): Leitdokument ist `FACETTEN.md`** (geltende Architektur,
+Schalter-Referenz, Abnahmen mit Zahl, offene Punkte; die acht FACETTEN-*-Altdateien sind Archiv,
+Verzeichnis in `FACETTEN-ARCHIV.md`). Kurzstand: Paartausch-Stufen 0–2 + Cd-Pfad bestanden
+(Kanal BITGLEICH zur z-WFB, K1–K5); iMEM auf 3×3-Normal-Nullung umgebaut, mechanisch sauber
+(I1-Äquivalenz +1,2 % im Rauschboden, N1-Kontamination −763k → −0,16), aber **Torus-N2 mit drei
+Varianten (instantan/EMA/PEMA) verletzt** — und der IR3-Audit fand einen z-Saum-Geometriefehler
+in ALLEN bisherigen Torus-Läufen (gefixt 2a8bd20).
 
-**Plan für morgen (in dieser Reihenfolge):**
-1. **iMEM-Herleitungsplan sichten** (Planungsagent läuft über Nacht: exakte D3Q19-Formel,
-   Erhaltungsfragen, Klemmen, Schalterdesign) → adversarial gegenprüfen lassen → einarbeiten.
-2. **Druck-Zeitmittel im Cd-Pfad** (CFD_FAC_CD_EVERY, Plan E6) — kleines Häppchen vorab,
-   macht die Kugel-K5-Abnahme vollständig, nützt beiden Mechanismen.
-3. **iMEM implementieren** (volle Pipeline; Kontrollarm-Regression: Paartausch-Arm und
-   Default-Build bitgleich, Feld-Hash 12755646098055097704).
-4. **Messleiter:** Kanal 0° (Äquivalenzkriterium aus dem iMEM-Plan) → Torus-Kipp 45°/26,6°
-   nach FACETTEN-STUFE3.md (Geometrie/Normierung gelten mechanismus-unabhängig; K4-Risiko
-   y_w(m0)=0,184 bei 26,6° vorab per Schritt-0-Diagnose messen) → Kugel 3 Arme (Erwartung:
-   Tauschzellen-Problem verschwindet, Ist=Soll neu definiert) → danach Fahrzeug-Abnahme
-   (y⁺ 1122 → ~140) mit der Dreierkette Wandmodell + Relativgeschwindigkeit + Kontaktfleck.
+**Nächste Schritte (in dieser Reihenfolge):**
+1. **Torus-N2-Wiederholung nach Saum-Fix** (läuft) + **Klemmskalen-Messarm ±4ut**.
+2. **Familienfrage** (Kompensation vs. Ersetzung vs. Richterwechsel Kugel) — bis dahin
+   SUSPENDIERT, Entscheid nur mit Saum-fixer Zahl.
+3. **Kugel J4** (Census, Arme AUS/4/3, beide Cd-Wege, FP32-Sprosse) → **Hangauf I2b** →
+   **Fahrzeug Stufe 5** (y⁺ 1122 → ~140). Details und Audit-Reste: `FACETTEN.md` Abschnitt 4.
 
 **Das Ziel, an dem alles gemessen wird:** Cd und Cz des Fahrzeugs gegen OpenFOAM 13
 (**0,599 / −1,301**). Stand 2026-08-09: **1,20 / −0,95** — und das ohne Wandmodell, mit sichtbar totem

@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** 1-float-Akkumulator (heute 6 float), 12-Slot-Zähler (heute 18), „nächster Schritt Stufe 3".
+> Paartabelle B, Bitgleichheits-Konstruktion und Messstand bleiben gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # Implementierungsplan C1b Stufe 2 — Kernel-Eingriff „dominante Achse" mit Paar-Gate (R1) und Flächenfaktor (R2)
 
 Alle Pfade beziehen sich auf /home/heiko/CFD/FluidX3D-v2, Stand 29ab0f8. Alle Zeilenangaben aus dem heutigen Code gelesen.

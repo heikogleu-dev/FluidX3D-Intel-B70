@@ -1,3 +1,6 @@
+> **Archiv — Leitdokument ist FACETTEN.md (Stand 2026-08-16); überholt sind hier:** die Handlungsempfehlung (vor jeder Familien-Entscheidung erst Saum-fixe N2-Wiederholung + Klemmskalen-Messarm ±4ut); PEMA hat N2 nicht geheilt (0,0062).
+> Asmuth-Exegese, ν_t-Schleifen-Mechanik und Diskriminator-Zahlen bleiben gültige Belegkette — Einordnung: FACETTEN-ARCHIV.md.
+
 # iMEM-Weggabelungs-Analyse (2026-08-16, auf ce690a0)
 
 Alle Pflichtlektüre gelesen (FACETTEN-IMEM-3X3.md, FACETTEN-IMEM.md komplett, kernel.cpp 1740–2102, WANDMODELL.md), Asmuth-Volltext (17 Seiten PDF) im Original gelesen, und die sechs J3-CSVs ausgewertet. Hier der Bericht.
