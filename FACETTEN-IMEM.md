@@ -163,3 +163,35 @@ Sources: [Asmuth et al. 2021, Phys. Fluids 33, 105111 (AIP)](https://pubs.aip.or
 - /home/heiko/CFD/FluidX3D-v2/src/setup.cpp (baue_facetten + Census-Erweiterung, Kanal-/Kipp-/Kugel-Verdrahtung und Reports, facetten_test T1/T2/T3)
 - /home/heiko/CFD/FluidX3D-v2/src/lbm.hpp (Statiken/Schalter, Slot-Legende 158, Akkumulator-Member)
 - /home/heiko/CFD/FluidX3D-v2/FACETTEN-STUFE3.md (Torus-Geometrie/Normierung F1–F6/F11–F12 — wörtlich wiederverwendet; F7–F10 durch iMEM-Solls ersetzen)
+
+---
+
+# Revision nach adversarialer Gegenpruefung (2026-08-16 morgens)
+
+**Urteil: freigeben mit Auflagen.** Der mathematische Kern haelt (Faktor 2 = beide Beine
+DESSELBEN Pakets, kein Doppelzaehlen; 2x2-System und G-Momente nachgerechnet; Asmuths
+Gl.-28-Diagonale (3,3,1) in D3Q27 unabhaengig reproduziert; Masse-Ledger vollstaendig;
+Kaskaden-Schwellen trennscharf). Die 7 Auflagen, alle uebernommen:
+
+1. **Gl. (2) korrigiert:** fhn[i] = f_out,ī(t−2) — der Esoteric-Pull-BB ist ein
+   ZWEI-Schritt-Umlauf (Slot-Paritaet nachgerechnet; fullway-artige Latenz, stationaer
+   identisch zu Halfway). Formeln unberuehrt (alle zeitindexfrei); relevant erst fuer
+   instationaere Fahrbahn in (15).
+2. **Masse:** S₁ KOMPONENTENWEISE akkumulieren, erst danach mit u_s projizieren — nur so ist
+   das Kanal-Kriterium "Δm exakt 0.0" erfuellbar (Summandenreihenfolge!). I2-Kriterium 45° von
+   "exakt 0" auf Band |Δm| < 1e-7·fac_N·n_steps. Vorzeichen richtiggestellt:
+   S₁(45°-Lage-0) = (0,−5,+5)/36 ∝ +n̂ (Summe ueber L, nicht ueber Solidrichtungen).
+3. **T2-iMEM: 1-SCHRITT-Lokalisierung** — iMEM modifiziert schon am Gleichgewicht (s₁≈u_t,
+   Gl. 11); nach Schritt 2 ist der Effekt zu Nachbarn gestreamt. Exakte Lokalisierung nur nach
+   Schritt 1; der 2-Schritt-Lauf prueft nur Slot-Solls (oder 1-Ring-Erlaubtmenge).
+4. **Slot-13-Soll an "Slot 9 = 0 am Torus" koppeln** (sonst kippt die harte Pruefung bei einem
+   einzigen ut<1e-6-Ereignis zu Unrecht).
+5. **I2b-Umbauliste vollstaendig:** U_b-Summe, CFR-Regler/set_f-Vektor, tau_mem (Fw-Projektion)
+   und Ub+-Waechter alle auf (0,1,1)/√2 projizieren; Streamwise-Periode hangauf = 4,3·δ_eff
+   (Konventionsabweichung, dokumentiert).
+6. **A1 praezisiert:** Arm-1-Dump-Diff = EXAKT die 4→6-Stride-Stellen, sonst nichts; alle
+   Host-Leser umstellen (lbm.cpp:385/397, setup.cpp:549-551/723/769/1292/1361);
+   FACETTEN_IMEM-ifdefs ausserhalb der R()-Bloecke splicen (bekannte V2-Werkzeugfalle).
+   Feld-Hash-Anspruch des Kontrollarms bleibt (Akkumulator speist nie in fhn zurueck).
+7. **Iron Rule 2 explizit:** nach der I0-Implementierung unabhaengiger Pruefagent VOR den
+   ersten Messlaeufen.
