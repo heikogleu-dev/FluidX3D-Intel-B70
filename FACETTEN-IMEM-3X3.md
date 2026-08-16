@@ -134,3 +134,36 @@ als Arm 3, weil |u_s| im Nullziel-Arm groesser ist).
    Umsetzung: Puffer fac_us (3 float je Facette, xyz-Rahmen -- frame-stabil gegen rotierendes
    t-Basis), u_s_angewandt = (1-a)*u_s_alt + a*u_s_geloest, a = CFD_FAC_EMA (Emission-gated:
    ungesetzt = exakt heutiger Pfad, Bitgleichheit der bestehenden Arme bleibt).
+
+---
+
+# Messstand J3 (2026-08-16 nachmittags)
+
+**N1 Mechanik: BESTANDEN, vier bis sechs Groessenordnungen.** Normalkontamination
+26,6°: -763.625 -> **-0,16**; 45°+EMA: -0,00096; sn-Klemme 0 ueberall. Die 3x3-Normal-Nullung
+wirkt exakt wie konstruiert.
+
+**N2/N3: NICHT bestanden -- und die EMA ist als Fix WIDERLEGT:**
+| Lauf | cf | vs Iteration 1 |
+|---|---|---|
+| 26,6° Arm 4 (3x3, ohne EMA) | 0,0118 | 0,0287 (2,4x besser) |
+| 26,6° Arm 3 | 0,0115 | 0,0315 |
+| 26,6° Arm 3 + EMA 0,01 | 0,0109 | EMA nur ~5 % |
+| 45° Arm 4 ohne EMA | 0,0053 | 0,0040 (Durchfall reproduziert -- 3x3-No-Op-Prognose bestaetigt) |
+| 45° Arm 4 + EMA | 0,0065 | EMA VERSCHLECHTERT |
+| 45° Arm 3 + EMA | 0,0055 | dito |
+
+**Diagnose des Restmechanismus:** Nach der Normal-Nullung bleibt die tangentiale
+Fluktuationsjagd selbst: die EMA filtert die LOESUNG s, aber der Austausch P(t)+G*s_ema
+laesst die P-Fluktuationen dann UNGEDAEMPFT durch (vorher kompensierte s sie gerade) --
+Filterung der Loesung ist konzeptionell die falsche Stelle, solange die Inversion gegen
+instantanes P laeuft. Zusaetzlich offen: das ±2ut-Klemmbudget deckelt die Kompensation an
+den hochfluktuierenden Zellen (J0: 8 %/Schritt), der Rest wirkt als Rauheit; und die
+BB-Basislinie (0,0017) lebt selbst in einem nicht-selbsterhaltenen Grenzregime -- der
+Minimal-Torus misst moeglicherweise primaer iMEM x Regime-Wechselwirkung statt der
+Wandmodell-Guete (N3-Vorbehalt des Plans).
+
+WEGGABELUNG (Analyse laeuft): (A) Filterung an die ZIELSEITE (gefiltertes u_t/tau, Inversion
+instantan gegen P -- Fluktuationen werden kompensiert statt gejagt); (B) Klemmbudget-Analyse;
+(C) Richter wechseln: der Torus im Grenzregime ist moeglicherweise der falsche Massstab,
+Kugel (J4, eigenerzeugte Turbulenz) als naechster Messpunkt mit den N1-Instrumenten.
