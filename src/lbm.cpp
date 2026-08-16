@@ -235,6 +235,7 @@ bool LBM_Domain::s_facetten = false;
 bool LBM_Domain::s_fac_imem = false;
 float LBM_Domain::s_fac_ema = 0.0f;
 float LBM_Domain::s_fac_pema = 0.0f;
+bool LBM_Domain::s_fac_satgate = false;
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
 bool LBM_Domain::s_sgs_wandfrei = false;
@@ -798,6 +799,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
 	+((s_facetten&&s_fac_imem&&s_fac_ema>0.0f) ? (string)"\n	#define FACETTEN_EMA"
 	"\n	#define def_fac_ema "+to_string(s_fac_ema,6u)+"f" : (string)"") // EMA nur wenn gesetzt -- ungesetzt bitgleich zum 3x3-ohne-EMA
+	+((s_facetten&&s_fac_imem&&s_fac_satgate) ? (string)"\n	#define FACETTEN_SATGATE" : (string)"") // (a-strich): Klemme -> BB-Rueckfall
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"
 	"\n	#define def_fac_pema "+to_string(s_fac_pema,6u)+"f" : (string)"") // PEMA (Weg A): Eingangs-Filterung
 	+((s_facetten&&s_fac_imem&&s_fac_diagz>=0l) ? (string)"\n	#define FACETTEN_DIAGZ" : (string)"") // Ziel-fid zur Laufzeit in fac_diag[16]

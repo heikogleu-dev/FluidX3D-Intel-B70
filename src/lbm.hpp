@@ -163,6 +163,7 @@ public:
 	static bool s_fac_imem;  // C1b iMEM-Umbau: CFD_FACETTEN=3/4 (Slip-Velocity-BB) statt 1/2 (Paartausch-Kontrollarm)
 	static float s_fac_ema;  // EMA-Faktor fuer u_s (CFD_FAC_EMA; 0 = aus; WIDERLEGT in J3 -- filtert die falsche Seite, bleibt als A/B-Arm)
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
+	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)

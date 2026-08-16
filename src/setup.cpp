@@ -649,6 +649,8 @@ void main_setup_kanal() {
 	  LBM_Domain::s_fac_ema = (fc>=3u) ? env_f("CFD_FAC_EMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_diagz = (fc>=3u&&getenv("CFD_FAC_DIAGZ")!=nullptr) ? (long)atoll(getenv("CFD_FAC_DIAGZ")) : -1l;
+	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
+	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle).");
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
@@ -1224,6 +1226,7 @@ void main_setup_kugel() {
 	  LBM_Domain::s_fac_ema = (fc>=3u) ? env_f("CFD_FAC_EMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im Kugelfall noch NICHT verdrahtet (IR3-Audit) -- Diagnose nur im Kanal/Torus.");
+	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  if(fc>0u) print_info(string("Facettenpfad Kugel: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Impulsaustausch-Cd an behandelten Links kontaminiert, nur der projizierte Cd-Pfad zaehlt."); }
@@ -1568,7 +1571,7 @@ static void main_setup_fahrzeug() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 

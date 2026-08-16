@@ -1880,16 +1880,28 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; if(t%100ul==0ul) atomic_inc(&hits[14]); }
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
+)+"#ifdef FACETTEN_SATGATE"+R(
+	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
+	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
+	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
+	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
+	if(fabs(s1)>2.0f*ut||fabs(s2)>ut) { if(t%100ul==0ul) atomic_inc(&hits[10]); return; } // Slot 10: Gate-Rueckfall (frueher Klemme)
+)+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*ut, 2.0f*ut), s2c = clamp(s2, -ut, ut); // Klemmen (Gl. 9)
 	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
 	s1=s1c; s2=s2c;
+)+"#endif"+R( // FACETTEN_SATGATE
 	// 3x3: sn aus den GEKLEMMTEN s1/s2 (Normal-Nullung haelt auch bei Tangentialklemme, Gl. 23);
 	// im entkoppelten Pfad ist sn=0 und Snn ggf. ~0 -- Guard haelt die Division sicher.
 	if(Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
 		sn = -(Sn1*s1+Sn2*s2)/Snn;
+)+"#ifdef FACETTEN_SATGATE"+R(
+		if(fabs(sn)>ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); return; } // Slot 16: sn-Gate-Rueckfall
+)+"#else"+R(
 		const float snc = clamp(sn, -ut, ut);
 		if(snc!=sn&&t%100ul==0ul) atomic_inc(&hits[16]); // Slot 16: s_n-Klemme
 		sn = snc;
+)+"#endif"+R( // FACETTEN_SATGATE
 	}
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
 )+"#ifdef FACETTEN_EMA"+R(
