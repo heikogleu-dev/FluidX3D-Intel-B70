@@ -226,3 +226,36 @@ K2-Gate entsprechend nachziehen (laengerer Warmlauf oder Fensterpruefung) -- als
 
 Naechster Schritt: I2 Torus-Kipp 45/26,6 Grad nach FACETTEN-STUFE3.md (+ neue iMEM-Solls per
 Host-Census statt der paartausch-spezifischen F7-F10).
+
+---
+
+# Messstand I2 Torus-Kipp (2026-08-16 mittags): NICHT BESTANDEN -- Ursache identifiziert
+
+**BB-Basislinien (Erkenntnis):** 45°: c_f 0,00166, 26,6°: 0,00179 -- die gekippte BB-Wand ist
+~6x GLATTER als die parallele (0,0106) und liegt unter glatt-turbulent: der Rauheitsantrieb der
+parallelen BB-Wand fehlt, der Kanal sitzt schon in der Basislinie im bekannten
+nicht-selbsterhaltenen Regime (die -68-%-Baustelle, jetzt von der anderen Seite sichtbar).
+F11-Schaetzung (0,010-0,014) damit widerlegt; keine Relaminarisierung (stabile Fluktuation
+ueber 80 ETT).
+
+**iMEM-Arme: DURCHGEFALLEN.**
+| Lauf | c_f | Band [0,00096;0,00126] |
+|---|---|---|
+| 45° Arm 4 (Nullziel) | 0,0040 | 3-4x drueber, sogar UEBER BB-Basis |
+| 45° Arm 3 | 0,0045 | 3,5-4,7x drueber |
+| 26,6° Arm 4 | 0,0287 | katastrophal (16x) |
+| 26,6° Arm 3 | 0,0315 | katastrophal |
+
+**Diagnose (die Instrumente zeigen die Ursache):** RHO_CLAMP 0 (numerisch sauber), Delta-m
+218/-627 (im Plan-Band) -- aber **Normalkontamination [5]: -1.285 (45°) bzw. -763.625 (26,6°)**
+gegen ~0 am parallelen Kanal. Der Gl.-12-Mechanismus: das tangentiale u_s injiziert ueber die
+Stn-Kreuzmomente der ASYMMETRISCHEN Linkmengen permanent Normalimpuls an der Wand -- eine
+Sekundaerstroemungs-Quelle, die die Grenzschicht aufblaeht und als Widerstand erscheint. Genau
+die im Plan als "Modellwahl, messen statt vorschreiben" markierte Abweichung von Asmuth
+(er invertiert die Normalkomponente MIT, Gl. 28) -- **die Messung hat entschieden: Asmuth hatte
+recht.**
+
+**Naechster Schritt (I2-Iteration 2): 3x3-System** -- dritte Gleichung Normalziel 0 (Phi_n =
+Soll-BB-Normalaustausch), Degenerationskaskade rangbehaftet erweitern (Einzellink-Zellen:
+Prioritaet t1-Ziel), an der ebenen Wand entkoppelt Stn=0 exakt -> I1-Aequivalenz bleibt
+konstruktiv erhalten. Danach I2 wiederholen.
