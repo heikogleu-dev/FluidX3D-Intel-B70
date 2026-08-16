@@ -146,10 +146,16 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 
 ---
 
-## 4. Offene Punkte (Stand 2026-08-16 abends)
+## 4. Offene Punkte (Stand 2026-08-17)
 
-1. **Torus-N2-Wiederholung nach Saum-Fix läuft** (45°/26,6°, Arme 4/3; N1-Zahlen werden mit
-   korrektem Fenster neu erhoben).
+0. **APG-Term als Cz-Hebel (externe Zweitmeinung, 2026-08-17):** Der Spalding-Fit ist ein
+   GLEICHGEWICHTS-Wandmodell — die falsche Ablösung am Fahrzeug (der eigentliche Cz-Fehler)
+   hängt am Druckgradienten-Term, nicht an der iMEM-Mechanik selbst. Vor bzw. parallel zu
+   Stufe 5 prüfen: Nicht-Gleichgewichts-Erweiterung der Zielschubspannung um den APG-Term
+   (Mozaffari et al.). Erst iMEM+Spalding als Basis messen (Arm-Trennung!), dann APG als
+   eigener Messarm.
+1. ~~Torus-N2-Wiederholung nach Saum-Fix~~ ERLEDIGT 2026-08-16: N2 beide Winkel bestanden
+   (0,00118 ≤ 0,00166; 0,001714 ≤ 0,00179), Stufe 3 abgenommen, IR3-Loop geschlossen (37ed98e).
 2. **Familienfrage SUSPENDIERT bis zur Saum-fixen Messung**: Kompensationsfamilie (iMEM
    instantan/EMA/PEMA) vs. Ersetzungsansatz (PowerFLOW-artige BB/Specular-Gewichtung) vs.
    Richterwechsel Kugel. Davor noch der billige **Klemmskalen-Messarm** (±4ut): fällt c_f
