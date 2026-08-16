@@ -378,6 +378,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// (Fahrzeug-Eichung!); der 26,6-Grad-Torus faehrt 0,15, weil seine tragende m0-Lage bei
 	// y_w=0,187 liegt (Census 2026-08-16 bestaetigte die Formelblatt-Prognose 0,184).
 	const float yw_min = env_f("CFD_FACETTEN_YWMIN", 0.2f);
+	if(env_u("CFD_KANAL_KIPP",0u)==26u&&env_u("CFD_FACETTEN",0u)>0u&&yw_min>=0.187f) print_error("kipp=26 braucht CFD_FACETTEN_YWMIN<0,187 (tragende m0-Lage bei y_w=0,187) -- sonst 33 % BB-Loecher und K3-Abbruch nach Stunden (IR3-Audit).");
 	if(yw_min!=0.2f) print_warning("CFD_FACETTEN_YWMIN = "+to_string(yw_min,3u)+" (Default 0,2) -- deklarierter Messarm, Ergebnisse entsprechend kennzeichnen.");
 	if(getenv("CFD_FACETTEN_FENSTER")!=nullptr&&env_u("CFD_FACETTEN_FENSTER", 1u)==0u) print_warning("CFD_FACETTEN_FENSTER=0 wird auf 1 gehoben (Radius 0 gibt es nicht).");
 	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
@@ -406,7 +407,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			const uint zn=(uint)(z_per?(int)wz(zn0):zn0);
 			const int xn=(int)x+FZ_C[i][0], yn=(int)y+FZ_C[i][1];
 			const ulong nn2 = idx(wx(xn),wy(yn),zn);
-			if(!wandnah&&ist_wand(nn2)) { wandnah=true; snx=xn; sny=yn; snz=zn; }
+			// ★ IR3-Audit HOCH 1: GEOMETRIE ungewickelt (zn0), Wrap NUR im Speicherindex --
+			// vorher zerstoerte der gewickelte snz die Orientierungs-Gegenprobe am z-Saum.
+			if(!wandnah&&ist_wand(nn2)) { wandnah=true; snx=xn; sny=yn; snz=zn0; }
 			// ★ Kugel-Befund (Ist!=Soll, -777): Nachbarn neben BEWEGTEN Waenden werden zur Laufzeit
 			// TYPE_MS und vom Zellgate ausgeschlossen -- host-seitig ist MS unsichtbar (entsteht erst
 			// in initialize). Hier ueber u!=0 der Solidzelle erkennen und als eigene Klasse zaehlen.
@@ -418,14 +421,16 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		for(int dz=-R; dz<=R; dz++) for(int dy=-R; dy<=R; dy++) for(int dx2=-R; dx2<=R; dx2++) {
 			const int cx=(int)x+dx2, cy=(int)y+dy, cz0=(int)z+dz;
 			if(!z_per&&(cz0<1||cz0>=(int)Nz-1)) continue; // z hart (Standard) bzw. periodisch (Torus)
-			const uint cz=(uint)(z_per?(int)wz(cz0):cz0);
-			const ulong nc = idx(wx(cx),wy(cy),cz);
+			const uint czi=(uint)(z_per?(int)wz(cz0):cz0); // NUR fuer den Index
+			const int cz=cz0; // GEOMETRIE ungewickelt (IR3-Audit HOCH 1: Saum-Stuetzpunkte lagen ±Nz daneben)
+			const ulong nc = idx(wx(cx),wy(cy),czi);
 			if(!ist_fluid(nc)) continue;
 			for(uint i=1u; i<19u; i++) {
-				const int zn0=(int)cz+FZ_C[i][2]; if(!z_per&&(zn0<0||zn0>=(int)Nz)) continue;
-				const uint zn=(uint)(z_per?(int)wz(zn0):zn0);
+				const int zn0=cz+FZ_C[i][2]; if(!z_per&&(zn0<0||zn0>=(int)Nz)) continue;
+				const uint zni=(uint)(z_per?(int)wz(zn0):zn0); // Index gewickelt, Geometrie (zn0) nicht
+				const int zn=zn0;
 				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1];
-				if(!ist_wand(idx(wx(xn),wy(yn),zn))) continue;
+				if(!ist_wand(idx(wx(xn),wy(yn),zni))) continue;
 				if(np<np_max) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
 				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
 			}
@@ -833,10 +838,11 @@ void main_setup_kanal() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // Delta-m + Normalkontamination global (Auflage 2: Kanal-Soll exakt 0)
+			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ IR3-Audit MITTEL: vorher las die Schleife die VERALTETE Warmup-Kopie -- alle bisherigen N1-Zahlen waren falsch gefenstert!
 			double dm=0.0, nk=0.0;
 			for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+5ull]; }
 			print_info("iMEM-Erhaltung: Delta-m gesamt = "+to_string((float)dm,9u)+" (Kanal-Soll exakt 0), Normalkontamination = "+to_string((float)nk,9u));
-			if(dm!=0.0) print_warning("Delta-m am parallelen Kanal nicht exakt 0 -- S1-Komponentenpfad pruefen.");
+			if(kipp==0u&&dm!=0.0) print_warning("Delta-m am parallelen Kanal nicht exakt 0 -- S1-Komponentenpfad pruefen.");
 		}
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt.");
 		if(kipp==0u&&env_u("CFD_FACETTEN",0u)<3u&&zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
@@ -1217,6 +1223,7 @@ void main_setup_kugel() {
 	  LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_imem = fc>=3u;
 	  LBM_Domain::s_fac_ema = (fc>=3u) ? env_f("CFD_FAC_EMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
+	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im Kugelfall noch NICHT verdrahtet (IR3-Audit) -- Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  if(fc>0u) print_info(string("Facettenpfad Kugel: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Impulsaustausch-Cd an behandelten Links kontaminiert, nur der projizierte Cd-Pfad zaehlt."); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
