@@ -632,6 +632,7 @@ void main_setup_kanal() {
 	auto reichardt = [&](const float yp) {
 		return log(1.0f+kappa*yp)/kappa + 7.8f*(1.0f-exp(-yp/11.0f)-(yp/11.0f)*exp(-0.33f*yp));
 	};
+	const float ph = env_f("CFD_KANAL_PHASE", 0.0f); // Stoerphase fuer Wiederholbarkeitsmessungen (0.0 = numerisch identisch: x+0.0f==x)
 	for(ulong n=0ull; n<lbm.get_N(); n++) {
 		uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
 		if(z==0u || z==Nz-1u) { lbm.flags[n] = TYPE_S; continue; } // ruhende Waende, u bleibt 0
@@ -644,8 +645,8 @@ void main_setup_kanal() {
 		// aber die Behauptung war falsch und der Anspruch (kein Akustik-Klingeln saeen) nur teilweise erfuellt.
 		const float A = 0.10f*Ub_ziel, kx = 2.0f*3.14159265f/(float)Nx, ky2 = 2.0f*3.14159265f*2.0f/(float)Ny;
 		const float sz = sin(0.5f*3.14159265f*fmin(zh, 2.0f-zh));
-		lbm.u.x[n] = up*utau_lat + A*sz*sz*cos(kx*(float)x)*cos(ky2*(float)y);
-		lbm.u.z[n] = -A*kx/(0.5f*3.14159265f/delta_lat+1e-9f)*0.5f*sin(kx*(float)x)*sz*cos(ky2*(float)y);
+		lbm.u.x[n] = up*utau_lat + A*sz*sz*cos(kx*(float)x+ph)*cos(ky2*(float)y);
+		lbm.u.z[n] = -A*kx/(0.5f*3.14159265f/delta_lat+1e-9f)*0.5f*sin(kx*(float)x+ph)*sz*cos(ky2*(float)y);
 		lbm.u.y[n] = 0.0f;
 	}
 	{	// Ma-Kontrolle des Anfangsfelds -- eine ueberschnelle Zelle im Startfeld waere ein stiller

@@ -1785,7 +1785,7 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
 		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
 	}
-	const float R1 = -twe - P1, R2 = -P2; // Ziel: (-twe, 0) in der Tangentialebene (Gl. 7)
+	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0); Arm 4 (tau=0) = Nullziel/Free-Slip-Sinn (Gl. 11) -- der erste iGPU-Lauf hatte def_fac_tau vergessen, Arm 3 == Arm 4 bitidentisch (gefangen am identischen CSV)
 	float s1=0.0f, s2=0.0f;
 	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8)
 	if(det>=1e-4f*G11*G22&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
