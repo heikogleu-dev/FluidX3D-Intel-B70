@@ -367,7 +367,8 @@ static void jacobi3(double M[3][3], double ew[3], double ev[3][3]) {
 static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
 	{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
 std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz,
-                                   const uchar wand_flag, const string& out_dir, const char* wo) {
+                                   const uchar wand_flag, const string& out_dir, const char* wo,
+                                   const bool z_per=false) { // I2: Torus-Kipp wickelt auch z
 	// ★ Fenster-A/B 2026-08-15 (Fahrzeug 8 mm, je 753.592 Zellen): 3^3 gewinnt klar -- r21-q90
 	// 0,21/0,27/0,42 und Orientierungskonflikte 2,7/5,4/9,0 % fuer 3/5/7; 7^3 driftet y_w auf 0,617.
 	// Groessere Fenster sehen Kruemmung und Zweitflaechen, keine bessere Wand.
@@ -389,14 +390,17 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Facettenpfad muss es auch (sonst kein Ist=Soll und keine Kanal-Aequivalenz). z bleibt 1..Nz-2.
 	auto wx = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
 	auto wy = [&](const int v) { return (uint)((v%(int)Ny+(int)Ny)%(int)Ny); };
-	for(uint z=1u; z<Nz-1u; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+	auto wz = [&](const int v) { return (uint)((v%(int)Nz+(int)Nz)%(int)Nz); };
+	const uint z_lo = z_per?0u:1u, z_hi = z_per?Nz:(Nz-1u);
+	for(uint z=z_lo; z<z_hi; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = idx(x,y,z);
 		if(!ist_fluid(n)) continue;
 		bool wandnah=false, ms_nah=false; int snx=0,sny=0,snz=0;
 		for(uint i=1u; i<19u; i++) {
-			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+			const int zn0=(int)z+FZ_C[i][2]; if(!z_per&&(zn0<0||zn0>=(int)Nz)) continue;
+			const uint zn=(uint)(z_per?(int)wz(zn0):zn0);
 			const int xn=(int)x+FZ_C[i][0], yn=(int)y+FZ_C[i][1];
-			const ulong nn2 = idx(wx(xn),wy(yn),(uint)zn);
+			const ulong nn2 = idx(wx(xn),wy(yn),zn);
 			if(!wandnah&&ist_wand(nn2)) { wandnah=true; snx=xn; sny=yn; snz=zn; }
 			// ★ Kugel-Befund (Ist!=Soll, -777): Nachbarn neben BEWEGTEN Waenden werden zur Laufzeit
 			// TYPE_MS und vom Zellgate ausgeschlossen -- host-seitig ist MS unsichtbar (entsteht erst
@@ -407,14 +411,16 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
 		uint np=0u, eigene=0u, verworfen=0u; // Puffer np_max = (2R+1)^3 * 18, dynamisch (Nachpruefer B1)
 		for(int dz=-R; dz<=R; dz++) for(int dy=-R; dy<=R; dy++) for(int dx2=-R; dx2<=R; dx2++) {
-			const int cx=(int)x+dx2, cy=(int)y+dy, cz=(int)z+dz;
-			if(cz<1||cz>=(int)Nz-1) continue; // z hart, x/y periodisch (F6)
-			const ulong nc = idx(wx(cx),wy(cy),(uint)cz);
+			const int cx=(int)x+dx2, cy=(int)y+dy, cz0=(int)z+dz;
+			if(!z_per&&(cz0<1||cz0>=(int)Nz-1)) continue; // z hart (Standard) bzw. periodisch (Torus)
+			const uint cz=(uint)(z_per?(int)wz(cz0):cz0);
+			const ulong nc = idx(wx(cx),wy(cy),cz);
 			if(!ist_fluid(nc)) continue;
 			for(uint i=1u; i<19u; i++) {
-				const int zn=cz+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+				const int zn0=(int)cz+FZ_C[i][2]; if(!z_per&&(zn0<0||zn0>=(int)Nz)) continue;
+				const uint zn=(uint)(z_per?(int)wz(zn0):zn0);
 				const int xn=cx+FZ_C[i][0], yn=cy+FZ_C[i][1];
-				if(!ist_wand(idx(wx(xn),wy(yn),(uint)zn))) continue;
+				if(!ist_wand(idx(wx(xn),wy(yn),zn))) continue;
 				if(np<np_max) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
 				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
 			}
@@ -470,9 +476,10 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			uint x,y,z; L.coordinates(F[i].n, x, y, z);
 			double sx=0.0, sy=0.0, sz=0.0;
 			for(int dz=-1; dz<=1; dz++) for(int dy=-1; dy<=1; dy++) for(int dx2=-1; dx2<=1; dx2++) {
-				const int cx2=(int)x+dx2, cy2=(int)y+dy, cz2=(int)z+dz;
-				if(cz2<0||cz2>=(int)Nz) continue; // x/y periodisch (F6)
-				const uint j = feld[idx(wx(cx2),wy(cy2),(uint)cz2)];
+				const int cx2=(int)x+dx2, cy2=(int)y+dy, cz20=(int)z+dz;
+				if(!z_per&&(cz20<0||cz20>=(int)Nz)) continue;
+				const uint cz2=(uint)(z_per?(int)wz(cz20):cz20);
+				const uint j = feld[idx(wx(cx2),wy(cy2),cz2)];
 				if(j==0xFFFFFFFFu||(F[j].klasse&1u)) continue;
 				const double w = (double)max(1u, F[j].eigene_links); // Flaechenproxy der FACETTENZELLE (Nachpruefer-Randnotiz: Fenstersummen ueberlappen fast vollstaendig -> de facto uniform)
 				sx+=w*F[j].nx; sy+=w*F[j].ny; sz+=w*F[j].nz;
@@ -535,7 +542,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 // Facettennachbarn: voller F (dort gilt reiner BB). fbi-Formel WOERTLICH wie messe_yplus.
 struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; };
 FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uchar marker,
-                        const ulong fenster, const std::vector<double>& snap) {
+                        const ulong fenster, const std::vector<double>& snap, const bool z_per=false) {
 	L.update_force_field();
 	LBM_Domain* D = L.lbm_domain[0];
 	D->F.read_from_device(); L.flags.read_from_device();
@@ -560,9 +567,9 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		const double Fx=(double)D->F[fbi], Fy=(double)D->F[fbi+FN], Fz=(double)D->F[fbi+2ull*FN];
 		double nxm=0.0, nym=0.0, nzm=0.0; bool kontaminiert=false;
 		if(fac) for(uint i=1u; i<19u; i++) {
-			// z hart geklemmt statt periodisch: beweisbar folgenlos, solange baue_facetten nur z in [1,Nz-2]
-			// belegt (Audit-R3-Notiz) -- ein kuenftiger z-periodischer Fall muss hier wickeln wie der Kernel.
-			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+			// z_per (Torus-Kipp) wickelt z wie der Kernel; Standardfall klemmt hart (R3-Notiz eingeloest).
+			const int zn0=(int)z+FZ_C[i][2]; if(!z_per&&(zn0<0||zn0>=(int)Nz)) continue;
+			const int zn=z_per?(int)((zn0%(int)Nz+(int)Nz)%(int)Nz):zn0;
 			const uint xn=wxp((int)x+FZ_C[i][0]), yn=wyp((int)y+FZ_C[i][1]);
 			if(xn<D->fbx0||yn<D->fby0||(uint)zn<D->fbz0||xn>=D->fbx0+D->fbnx||yn>=D->fby0+D->fbny||(uint)zn>=D->fbz0+D->fbnz) continue;
 			const ulong fbi2=(ulong)(xn-D->fbx0)+((ulong)(yn-D->fby0)+(ulong)((uint)zn-D->fbz0)*(ulong)D->fbny)*(ulong)D->fbnx;
@@ -589,14 +596,25 @@ void main_setup_kanal() {
 	const float Ub_plus_ziel = env_f("CFD_KANAL_UBPLUS", 24.104f); // Lee & Moser bei Re_tau 5186
 	const float ett      = env_f("CFD_KANAL_ETT", 80.0f);    // Wirbelumschlagzeiten gesamt
 	const float ett_warm = env_f("CFD_KANAL_WARM", 20.0f);   // davon verworfen
-	const float delta_lat = 0.5f*(float)N;
-	const float dxp      = 2.0f*Re_tau/(float)N;             // dx+ = Gitterweite in Wandeinheiten
-	const float nu_lat   = utau_lat/dxp;                     // aus dx+ = u_tau/nu (dx = 1)
+	// ★ I2 Torus-Kipp (FACETTEN-STUFE3.md): schraege Doppelwand, die ueber den z-Wrap auf sich
+	// selbst schliesst -- exakt homogen, NULL Kernel-Aenderung. kipp==0 bleibt WORTGLEICH (jede
+	// Formel via Ternaere mit dem alten Ausdrucksbaum -- Bitgleichheits-Pflicht des Kontrollarms).
+	const uint kipp = env_u("CFD_KANAL_KIPP", 0u); // 0 / 45 / 26 (= atan(1/2) = 26,565 Grad)
+	if(kipp!=0u&&kipp!=45u&&kipp!=26u) print_error("CFD_KANAL_KIPP kennt nur 0, 45 und 26.");
+	if(kipp>0u&&env_u("CFD_WANDFUNKTION",0u)>0u) print_error("z-WFB an gekippten Waenden ist physisch falsch -- CFD_KANAL_KIPP nur mit CFD_FACETTEN.");
+	const uint pk = 1u, qk = (kipp==26u) ? 2u : 1u;
+	const float cosa = (kipp==45u) ? 0.70710678f : (kipp==26u) ? 0.89442719f : 1.0f;
+	const uint Tv = (kipp==45u) ? 4u : (kipp==26u) ? 3u : 0u; // vertikale Slabdicke (F2)
+	const uint  Ny = (kipp==0u) ? ((uint)round(3.14159265f*(0.5f*(float)N))/2u)*2u
+	                            : env_u("CFD_KANAL_NY", (kipp==45u) ? 60u : 90u);
+	const uint  Nz = (kipp==0u) ? (N+2u) : (pk*Ny/qk); // Einkanal-Schliessung q*Nz = p*Ny (F1)
+	if(kipp>0u&&(Ny%qk!=0u||qk*Nz!=pk*Ny)) print_error("Torus-Schliessung verletzt: q*Nz muss p*Ny sein (Ny durch q teilbar waehlen).");
+	const float delta_lat = (kipp==0u) ? 0.5f*(float)N : 0.5f*(float)(Nz-Tv)*cosa; // delta_eff (F3)
+	const float dxp      = (kipp==0u) ? 2.0f*Re_tau/(float)N : Re_tau/delta_lat;   // dx+ (alt wortgleich)
+	const float nu_lat   = (kipp==0u) ? utau_lat/dxp : utau_lat*delta_lat/Re_tau;  // (F4; alt wortgleich)
 	const float Ub_ziel  = Ub_plus_ziel*utau_lat;            // Zielgeschwindigkeit (Gitter)
-	const float f0       = utau_lat*utau_lat/delta_lat;      // Startkraft: tau_w = f*delta exakt
-	const uint  Nx = ((uint)round(2.0f*3.14159265f*delta_lat)/2u)*2u; // 2*pi*delta, gerade
-	const uint  Ny = ((uint)round(3.14159265f*delta_lat)/2u)*2u;      // pi*delta
-	const uint  Nz = N+2u;                                   // + 2 Wandlagen
+	const float f0       = utau_lat*utau_lat/delta_lat;      // Startkraft: tau_w = f*delta_eff exakt (F5)
+	const uint  Nx = ((uint)round(2.0f*3.14159265f*delta_lat)/2u)*2u; // 2*pi*delta(_eff), gerade
 	const float T_ett    = delta_lat/utau_lat;               // 1 Wirbelumschlag in Schritten
 	const ulong n_steps  = (ulong)(ett*T_ett);
 	const ulong n_warm   = (ulong)(ett_warm*T_ett);
@@ -633,8 +651,26 @@ void main_setup_kanal() {
 		return log(1.0f+kappa*yp)/kappa + 7.8f*(1.0f-exp(-yp/11.0f)-(yp/11.0f)*exp(-0.33f*yp));
 	};
 	const float ph = env_f("CFD_KANAL_PHASE", 0.0f); // Stoerphase fuer Wiederholbarkeitsmessungen (0.0 = numerisch identisch: x+0.0f==x)
+	// Torus-Kipp: solid nach F1 (ganzzahlig exakt), Reichardt ueber den SENKRECHTEN Wandabstand d_perp
+	// (F6); Stoerungs-u_z ist nicht wandtangential -- klingt im Warmlauf ab (Formelblatt Schritt 2).
+	auto kipp_solid = [&](const uint xx, const uint yy, const uint zz) {
+		(void)xx; const long g = ((long)qk*(long)zz-(long)pk*(long)yy)%((long)qk*(long)Nz);
+		return (g+(long)qk*(long)Nz)%((long)qk*(long)Nz) < (long)qk*(long)Tv; };
 	for(ulong n=0ull; n<lbm.get_N(); n++) {
 		uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		if(kipp>0u) {
+			if(kipp_solid(x,y,z)) { lbm.flags[n] = TYPE_S; continue; }
+			const long m = (((long)qk*(long)z-(long)pk*(long)y)%((long)qk*(long)Nz)+(long)qk*(long)Nz)%((long)qk*(long)Nz)-(long)qk*(long)Tv;
+			const float dperp = ((float)m+0.5f)/sqrt((float)(pk*pk+qk*qk));
+			const float zwk = fmin(dperp, 2.0f*delta_lat-dperp);
+			const float upk = reichardt(zwk*(utau_lat/nu_lat));
+			const float whk = fmin(dperp/delta_lat, 2.0f-dperp/delta_lat);
+			const float Ak = 0.10f*Ub_ziel, kxk = 2.0f*3.14159265f/(float)Nx;
+			const float szk = sin(0.5f*3.14159265f*whk);
+			lbm.u.x[n] = upk*utau_lat + Ak*szk*szk*cos(kxk*(float)x+ph);
+			lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f;
+			continue;
+		}
 		if(z==0u || z==Nz-1u) { lbm.flags[n] = TYPE_S; continue; } // ruhende Waende, u bleibt 0
 		const float zw   = fmin((float)z-0.5f, (float)(Nz-1u)-0.5f-(float)z); // Wandabstand (Halfway)
 		const float up   = reichardt(zw*dxp);
@@ -659,12 +695,16 @@ void main_setup_kanal() {
 	// y_w=0,500, Klasse 0 liefern (FACETTEN-PLAN A3, Gegenpruefer-verifiziert). =2: nur Diagnose.
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
 		// Randstreifen x/y (1..N-2-Ausschluss, kein periodischer Wrap) fehlen bewusst: ~5 % Diagnose-only (Nachpruefer B5).
-		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, "Kanal-Anker");
+		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, kipp>0u?"Kipp-Census":"Kanal-Anker", kipp>0u);
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
-		std::vector<Facette> FF = baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, "Kanal");
+		std::vector<Facette> FF = baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, kipp>0u?"Torus-Kipp":"Kanal", kipp>0u);
 		lbm.alloc_facetten(FF);
+		// F2/F7: Facettenzahl ist geometrisch exakt abzaehlbar -- harte Pruefung faengt jeden
+		// vergessenen z-Wrap mechanisch (Formelblatt Schritt 5).
+		if(kipp==45u&&lbm.lbm_domain[0]->fac_N!=(ulong)4u*Nx*Ny) print_error("Torus 45: fac_N != 4*Nx*Ny ("+to_string(lbm.lbm_domain[0]->fac_N)+" statt "+to_string((ulong)4u*Nx*Ny)+").");
+		if(kipp==26u&&lbm.lbm_domain[0]->fac_N!=(ulong)3u*Nx*Ny) print_error("Torus 26: fac_N != 3*Nx*Ny ("+to_string(lbm.lbm_domain[0]->fac_N)+" statt "+to_string((ulong)3u*Nx*Ny)+").");
 	}
 	lbm.run(0u, n_steps); // initialisieren
 
@@ -692,7 +732,8 @@ void main_setup_kanal() {
 		std::vector<double> pu(Nz,0.0), puu(Nz,0.0), pww(Nz,0.0), puw(Nz,0.0), pz_(Nz,0.0);
 		for(ulong n=0ull; n<lbm.get_N(); n++) {
 			uint x=0u,y=0u,z=0u; lbm.coordinates(n,x,y,z);
-			if(z==0u||z==Nz-1u) continue;
+			if(kipp>0u) { if(lbm.flags[n]==TYPE_S) continue; } // Torus: Fluid per Flag (F7-Schritt 7)
+			else if(z==0u||z==Nz-1u) continue;
 			const double ux=(double)lbm.u.x[n], uz=(double)lbm.u.z[n];
 			Ub+=ux; nf++; pu[z]+=ux; puu[z]+=ux*ux; pww[z]+=uz*uz; puw[z]+=ux*uz; pz_[z]+=uz;
 		}
@@ -775,7 +816,7 @@ void main_setup_kanal() {
 			if(dm!=0.0) print_warning("Delta-m am parallelen Kanal nicht exakt 0 -- S1-Komponentenpfad pruefen.");
 		}
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt.");
-		if(zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
+		if(kipp==0u&&env_u("CFD_FACETTEN",0u)<3u&&zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
 		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
@@ -783,9 +824,10 @@ void main_setup_kanal() {
 			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+", y+ = "+to_string((float)yp,1u)); }
 		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
 		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
-			const FacKraft FK = kraft_facetten(lbm, Nx, Ny, Nz, TYPE_S, n_steps-fac_snap_step, fac_snap);
+			const FacKraft FK = kraft_facetten(lbm, Nx, Ny, Nz, TYPE_S, n_steps-fac_snap_step, fac_snap, kipp>0u);
 			const double fq = fac_fn>0.0 ? fac_fsum/fac_fn : 0.0;
-			const double soll_rx = fq*(double)delta_lat*2.0*(double)Nx*(double)Ny; // f*delta je Saeule, beide Waende
+			const double soll_rx = (kipp==0u) ? fq*(double)delta_lat*2.0*(double)Nx*(double)Ny // f*delta je Saeule, beide Waende (alt wortgleich)
+			                                  : fq*(double)Nx*(double)Ny*(double)(Nz-Tv);      // F5: f*V_fluid (Torus)
 			print_info("Cd-Pfad Kanal: Reibung x = "+to_string((float)FK.rx,9u)+" (Soll f*delta*Flaeche = "+to_string((float)soll_rx,9u)
 				+", Verhaeltnis "+to_string((float)(soll_rx!=0.0?FK.rx/soll_rx:0.0),4u)+"), Reibung y = "+to_string((float)FK.ry,9u));
 			print_info("Cd-Pfad Kanal: Druck x = "+to_string((float)FK.px,9u)+" (K3-Soll exakt 0), n_voll "+to_string(FK.n_voll)
