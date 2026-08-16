@@ -422,7 +422,10 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		for(ulong q=0ull;q<17ull;q++) fac_diag[q]=0.0f;
 		fac_diag[16] = -1.0f; ulong k2=0ull;
 		for(const Facette& f : F) { if(f.klasse!=0u) { continue; } if(f.n==(ulong)s_fac_diagz) { fac_diag[16]=(float)k2; fac_diag_fid=(uint)k2; } k2++; }
-		if(fac_diag[16]<0.0f) { fac_diagz_on=false; print_warning("CFD_FAC_DIAGZ: Zelle "+to_string((ulong)s_fac_diagz)+" traegt keine AKTIVE Facette -- Diagnose HART AUS (IR3-Audit: Sentinel darf nie in den Kernelvergleich)."); }
+		if(fac_diag[16]<0.0f) { fac_diagz_on=false; print_warning("CFD_FAC_DIAGZ: Zelle "+to_string((ulong)s_fac_diagz)+" traegt keine AKTIVE Facette -- Diagnose HART AUS."); }
+		// ★ Nachpruefer Stufe-3: auch im Hart-Aus-Fall REBINDEN -- das Move-Assignment hat den als
+		// Kernel-Arg gebundenen Platzhalter zerstoert (Use-after-free auf der iGPU-Zero-Copy);
+		// der neue Puffer traegt den -1-Sentinel, der Kernelvergleich matcht nie.
 		else print_info("Diagnose-Facette: Zelle "+to_string((ulong)s_fac_diagz)+" -> fid "+to_string((ulong)fac_diag_fid));
 		fac_diag.write_to_device();
 	}
@@ -430,7 +433,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	kernel_stream_collide.set_parameters(fac_param_pos, fac_geo, fac_idx, fac_tau, fac_tau_n);
 	if(fac_ema_on) { fac_us = Memory<float>(device, 3ull*aktiv); for(ulong q3=0ull;q3<3ull*aktiv;q3++) fac_us[q3]=0.0f; fac_us.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u, fac_us); }
 	if(fac_pema_on) { fac_pu = Memory<float>(device, 6ull*aktiv); for(ulong q6=0ull;q6<6ull*aktiv;q6++) fac_pu[q6]=0.0f; fac_pu.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+(fac_ema_on?5u:4u), fac_pu); }
-	if(fac_diagz_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag);
+	if(s_fac_diagz>=0l&&fac_diag.length()>=17ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	facetten_bound = true;
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");

@@ -240,7 +240,7 @@ mit m1-Diagnose als Vorher/Nachher-Nachweis; dann Kugel-Wiederholung.
 **Abnahme (Saettigungs-Gate a-strich aktiv, Saum-Fix, relative Schur-Schwellen):**
 | Kriterium | Ergebnis |
 |---|---|
-| N1 Mechanik (beide Winkel, korrektes Fenster) | Delta-m im Band (45°: exakt 0), Normal-Rest ~1e-6, Slots = Soll |
+| N1 Mechanik (beide Winkel, korrektes Fenster) | 45°: Delta-m 0,00045, Rest -0,0002; 26,6°: Delta-m -14,9 (unbewacht! -- gleicher Mechanismus wie der J4-Blocker, Band+Waechter = J4-Vorarbeit), Rest -0,023; Slots = Soll EXAKT (nachgerechnet) |
 | **N2 45°** (cf Arm4 <= BB-Basis 0,00166) | **0,00118 -- BESTANDEN** |
 | **N2 26,6°** (cf Arm4 <= BB-Basis 0,00179) | **0,001714 -- BESTANDEN** (vorher 1,4x verletzt; fiel exakt mit der Klemm-Rektifikation, wie prognostiziert) |
 | Arm-Trennung (Modell im Messwert sichtbar) | 26,6°: Arm3 0,0128 vs Arm4 0,0017 |
@@ -248,8 +248,11 @@ mit m1-Diagnose als Vorher/Nachher-Nachweis; dann Kugel-Wiederholung.
 | N3/F12-Band | planmaessig zur Kugel verlagert (Torus-Grenzregime ist Wert-blind) |
 
 Bekannte Instrumenten-Notiz: K2-Fenstergate feuert unter dem Saettigungs-Gate (BB-Rueckfall-
-Reibung fehlt im Akkumulator) -- Buchfuehrung, kein Physikbefund; satgate-bewusste K2-Formel
-als kleines Nachruest-Haeppchen.
+Reibung fehlt im Akkumulator) -- Buchfuehrung, kein Physikbefund. Nachpruefer-Praezisierung: K2 (Akkumulator vs Voll-Kraftbilanz)
+kann auf KEINEM Arm-4-Torus bestehen (Nullziel liefert ~0 in den Akkumulator, Rang0/ohneTang
+waren schon immer akkumulator-blind) -- die satgate-bewusste K2-Formel muss das Nullziel mitloesen.
+NEU in der Schalter-Referenz: CFD_FAC_SATGATE=1 (a-strich, Budget-Riss -> BB-Rueckfall; Slots
+10/16 = Rueckfaelle; Stufe-3-Abnahme lief damit).
 
 **Der Weg dorthin (3 Bugs, 3 Werkzeuge):** z-Saum-Geometrie (IR3-Audit, Host-Replikat) ->
 Einzellink-Schur-Flicker (Code-Verdachts-Agent, 546-vs-485-Beleg, relative Schwellen) ->

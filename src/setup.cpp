@@ -781,8 +781,8 @@ void main_setup_kanal() {
 		// Iron Rule 3: Diagnose-Facette je Chunk in CSV sampeln
 		if(LBM_Domain::s_fac_diagz>=0l&&lbm.lbm_domain[0]->fac_diagz_on) {
 			lbm.lbm_domain[0]->fac_diag.read_from_device();
-			if(!diag_csv.is_open()) { diag_csv.open(out_dir+"facetten_diagz.csv"); diag_csv << "schritt,t_kernel_check,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon\n"; }
-			diag_csv << (step+chunk) << "," << ((double)lbm.lbm_domain[0]->fac_diag[14]) /* t_kernel: stagnierend = Facette uebersprungen (Skip/Rang-0) */;
+			if(!diag_csv.is_open()) { diag_csv.open(out_dir+"facetten_diagz.csv"); diag_csv << "schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon\n"; }
+			diag_csv << (step+chunk);
 			for(uint q=0u;q<16u;q++) diag_csv << "," << lbm.lbm_domain[0]->fac_diag[q];
 			diag_csv << "\n" << std::flush;
 		}
@@ -838,7 +838,7 @@ void main_setup_kanal() {
 		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ohne Tangential-Link "+to_string(s13)
-			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])):string("")));
+			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // Delta-m + Normalkontamination global (Auflage 2: Kanal-Soll exakt 0)
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ IR3-Audit MITTEL: vorher las die Schleife die VERALTETE Warmup-Kopie -- alle bisherigen N1-Zahlen waren falsch gefenstert!
 			double dm=0.0, nk=0.0;
@@ -1452,6 +1452,7 @@ void main_setup_kugel() {
 			+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
+			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
 			print_info("iMEM-Erhaltung Kugel: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)); }
 		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel.");
