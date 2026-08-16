@@ -114,3 +114,23 @@ Die Lagenrechnung (26)/(27) liefert eine scharfe, unbequeme Prognose:
 - /home/heiko/CFD/FluidX3D-v2/src/lbm.hpp (Slot-Legende, Zähler 14→17, Schalter)
 - /home/heiko/CFD/FluidX3D-v2/src/lbm.cpp (Zählerpuffer-Größe, alloc_facetten_domain, Guards)
 - /home/heiko/CFD/FluidX3D-v2/FACETTEN-IMEM.md (Formeln 16–28, Entscheide, N1–N3, J0–J4 nachtragen — Doku-Drift-Pflicht vor dem ersten Messlauf)
+
+---
+
+# J0-Ergebnis (2026-08-16): 45-Grad-Ursache = MECHANIK, Fix bekannt
+
+Arm-4-Log 45 Grad: u_s-Klemme 5.763.359 (~8 % der modifizierten Zellen je Messpunkt),
+Skalar-Fallback 2.618.880, Slot 13 = 72,0 Mio (Lage-1 wie erwartet); Ist-Reibung 0,226 bei
+Soll 0,270 (Verhaeltnis 0,837) -- das Nullziel wird an den hochbelasteten Zellen von der
+Klemme gebrochen, und die instantane Inversion jagt den turbulenten P-Fluktuationen hinterher:
+u_s oszilliert mit +-2ut und pumpt selbst Fluktuationen (daher Arm 4 UEBER BB-Basis).
+Normalkontamination +5713 ueber 528k Schritte = Float-Rauschen (Sn=0-Beweis haelt; groesser
+als Arm 3, weil |u_s| im Nullziel-Arm groesser ist).
+
+**Konsequenz: Iteration 2 braucht BEIDE Bausteine:**
+1. **3x3-Normal-Nullung** (dieser Plan) -- heilt den 26,6-Grad-Mechanismus (m1/m2-Kopplung).
+2. **Zeitliche EMA-Filterung von u_s** (Asmuth Gl. 29/30; entspricht unserem A6-Plan
+   "EMA 10^2-10^3 Schritte", der ausgelassen wurde) -- heilt das 45-Grad-Fluktuationsjagen.
+   Umsetzung: Puffer fac_us (3 float je Facette, xyz-Rahmen -- frame-stabil gegen rotierendes
+   t-Basis), u_s_angewandt = (1-a)*u_s_alt + a*u_s_geloest, a = CFD_FAC_EMA (Emission-gated:
+   ungesetzt = exakt heutiger Pfad, Bitgleichheit der bestehenden Arme bleibt).
