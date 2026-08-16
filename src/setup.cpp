@@ -2781,11 +2781,13 @@ void main_setup_facetten_test() {
 		if(f3>0u) print_error("T3a GESCHEITERT: "+to_string(f3)+" Referenzpruefungen.");
 		print_info("T3a bestanden: Momente, Free-Slip-Identitaet, S1-Vorzeichen, Kaskadenpfade (double-Referenz).");
 	}
-	// T2-iMEM: Arm 4 (Nullziel) vs AUS nach GENAU 1 Schritt -- iMEM modifiziert sofort (Gl. 11),
-	// die Lokalisierung ist nur im 1. Schritt exakt (Gegenpruefer-Auflage 3).
+	// T2-iMEM: Arm 3 (VOLLES Ziel) vs AUS nach GENAU 1 Schritt. Arm 4 (Nullziel) ist im ersten
+	// Schritt wertneutral (Wand-Slots tragen geshiftete Nullen -> P1=0 -> s=0 -- dieselbe
+	// Schritt-1-Unsichtbarkeit wie der Paartausch, am gefixten def_fac_tau gemessen); erst das
+	// volle Ziel -twe modifiziert sofort, und die 1-Schritt-Lokalisierung (Auflage 3) bleibt exakt.
 	{
 		ulong di_erlaubt=0ull, di_verboten=0ull, di_still=0ull;
-		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=true; LBM_Domain::s_fac_tau=0.0f;
+		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=true; LBM_Domain::s_fac_tau=1.0f;
 		LBM d(Nx,Ny,Nz,nu_lat); init(d);
 		std::vector<Facette> FD = baue_facetten(d, Nx, Ny, Nz, TYPE_S, get_exe_path()+"../export/facetten_test/", "T2-iMEM");
 		d.alloc_facetten(FD);
@@ -2822,7 +2824,7 @@ void main_setup_facetten_test() {
 			if(df) { if(mod[n2]) di_erlaubt++; else di_verboten++; }
 			else if(mod[n2]) di_still++;
 		}
-		print_info("T2-iMEM (1 Schritt, Arm 4): Differenzen erlaubt "+to_string(di_erlaubt)+", VERBOTEN "+to_string(di_verboten)
+		print_info("T2-iMEM (1 Schritt, Arm 3): Differenzen erlaubt "+to_string(di_erlaubt)+", VERBOTEN "+to_string(di_verboten)
 			+", vorhergesagt ohne Differenz "+to_string(di_still)+"; Wirkpfad[7]="+to_string((ulong)d.lbm_domain[0]->rho_clamp_hits[7])
 			+" Skalar[12]="+to_string((ulong)d.lbm_domain[0]->rho_clamp_hits[12])+" ohneTangential[13]="+to_string((ulong)d.lbm_domain[0]->rho_clamp_hits[13]));
 		if(di_verboten>0ull) print_error("T2-iMEM GESCHEITERT: "+to_string(di_verboten)+" Zellen ohne vorhergesagte Modifikation haben sich veraendert.");
