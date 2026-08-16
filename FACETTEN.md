@@ -232,3 +232,31 @@ noch nicht (Audit-Rest) -- Klemm-/Rang-Quoten dort blind.
 (c) Basis-Stabilisierung nur fuer gekoppelte Zellen (gefiltertes t-hat) -- gezieltes PEMA-Light.
 Empfehlung: (b) zuerst (kleinster Eingriff, adressiert den gemessenen Mechanismus direkt),
 mit m1-Diagnose als Vorher/Nachher-Nachweis; dann Kugel-Wiederholung.
+
+---
+
+# STUFE 3: ABGESCHLOSSEN UND BESTANDEN (2026-08-17)
+
+**Abnahme (Saettigungs-Gate a-strich aktiv, Saum-Fix, relative Schur-Schwellen):**
+| Kriterium | Ergebnis |
+|---|---|
+| N1 Mechanik (beide Winkel, korrektes Fenster) | Delta-m im Band (45°: exakt 0), Normal-Rest ~1e-6, Slots = Soll |
+| **N2 45°** (cf Arm4 <= BB-Basis 0,00166) | **0,00118 -- BESTANDEN** |
+| **N2 26,6°** (cf Arm4 <= BB-Basis 0,00179) | **0,001714 -- BESTANDEN** (vorher 1,4x verletzt; fiel exakt mit der Klemm-Rektifikation, wie prognostiziert) |
+| Arm-Trennung (Modell im Messwert sichtbar) | 26,6°: Arm3 0,0128 vs Arm4 0,0017 |
+| m1-Diagnose Vorher/Nachher | Anschlaege 59 % -> 0 %, phi1-Kipp -> 0 %, G11-Ratsche tot (0,333 konstant) |
+| N3/F12-Band | planmaessig zur Kugel verlagert (Torus-Grenzregime ist Wert-blind) |
+
+Bekannte Instrumenten-Notiz: K2-Fenstergate feuert unter dem Saettigungs-Gate (BB-Rueckfall-
+Reibung fehlt im Akkumulator) -- Buchfuehrung, kein Physikbefund; satgate-bewusste K2-Formel
+als kleines Nachruest-Haeppchen.
+
+**Der Weg dorthin (3 Bugs, 3 Werkzeuge):** z-Saum-Geometrie (IR3-Audit, Host-Replikat) ->
+Einzellink-Schur-Flicker (Code-Verdachts-Agent, 546-vs-485-Beleg, relative Schwellen) ->
+Klemm-Rektifikation (Stabilitaets-Theorem G8 -> Saettigungs-Gate). Jede Stufe mit
+falsifizierbarer Prognose, jede Prognose eingetreten.
+
+**J4 Kugel (naechste Etappe):** verbleibender Blocker identifiziert = Masseleck Delta-m ~269
+an asymmetrischen Krümmungs-Linkmengen (alle Forensik-Signaturen: arm-unabhaengig, sofort,
+stationaer, an der Druckbilanz vorbei). Fix vorbereitet: alpha-Massekorrektur (Plan Gl. 13,
+jetzt loesbar, da Einzellinks BB sind).
