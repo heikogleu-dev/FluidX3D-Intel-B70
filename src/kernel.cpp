@@ -1827,7 +1827,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float undb = nx*ubx+ny*uby+nz*ubz;
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float utb = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
-		if(utb>=1e-6f) {
+		if(utb<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[17]); return; } // IR3-Audit M2: KEIN stiller Rueckfall in den widerlegten Instantan-Modus -- BB belassen, Slot 17 zaehlt (Staupunkt-/Abloesezellen)
+		{
 			t1x=utxb/utb; t1y=utyb/utb; t1z=utzb/utb;
 			t2x=ny*t1z-nz*t1y; t2y=nz*t1x-nx*t1z; t2z=nx*t1y-ny*t1x;
 			const float Yb = utb*((2.0f*yw)*def_fac_Y);
@@ -1916,7 +1917,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
 	// Facette schreibt ihre komplette Kette jeden Schritt in einen 16er-Puffer; der Host sampelt
 	// je Chunk in eine CSV -- Plausibilitaet an kleinen Faellen SELBST nachvollziehbar.
-	if(fid==(uint)fac_diag[16]) { // Ziel-fid liegt zur Laufzeit im Puffer (Slot 16) -- keine Emissionskonstante noetig
+	if((float)fid==fac_diag[16]) { // float-Vergleich: Sentinel -1.0f matcht nie (IR3-Audit: (uint)(-1.0f) war UB und haette fid 0 stumm geloggt)
 		fac_diag[0]=ut; fac_diag[1]=twe; fac_diag[2]=P1; fac_diag[3]=P2;
 		fac_diag[4]=s1; fac_diag[5]=s2; fac_diag[6]=sn;
 		fac_diag[7]=phi1; fac_diag[8]=phi2;

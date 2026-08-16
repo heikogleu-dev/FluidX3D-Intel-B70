@@ -645,6 +645,7 @@ void main_setup_kanal() {
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_diagz = (fc>=3u&&getenv("CFD_FAC_DIAGZ")!=nullptr) ? (long)atoll(getenv("CFD_FAC_DIAGZ")) : -1l;
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
+	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  if(fc>0u) print_info(string("Facettenpfad: ")+(fc==1u?"Paartausch voll (Kontrollarm)":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll (Slip-Velocity-BB)":"iMEM NULLZIEL (tau=0)")); }
@@ -773,8 +774,8 @@ void main_setup_kanal() {
 		// Iron Rule 3: Diagnose-Facette je Chunk in CSV sampeln
 		if(LBM_Domain::s_fac_diagz>=0l&&lbm.lbm_domain[0]->fac_diagz_on) {
 			lbm.lbm_domain[0]->fac_diag.read_from_device();
-			if(!diag_csv.is_open()) { diag_csv.open(out_dir+"facetten_diagz.csv"); diag_csv << "schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon\n"; }
-			diag_csv << (step+chunk);
+			if(!diag_csv.is_open()) { diag_csv.open(out_dir+"facetten_diagz.csv"); diag_csv << "schritt,t_kernel_check,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon\n"; }
+			diag_csv << (step+chunk) << "," << ((double)lbm.lbm_domain[0]->fac_diag[14]) /* t_kernel: stagnierend = Facette uebersprungen (Skip/Rang-0) */;
 			for(uint q=0u;q<16u;q++) diag_csv << "," << lbm.lbm_domain[0]->fac_diag[q];
 			diag_csv << "\n" << std::flush;
 		}

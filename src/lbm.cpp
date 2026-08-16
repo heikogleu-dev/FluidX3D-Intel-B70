@@ -419,7 +419,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		for(ulong q=0ull;q<17ull;q++) fac_diag[q]=0.0f;
 		fac_diag[16] = -1.0f; ulong k2=0ull;
 		for(const Facette& f : F) { if(f.klasse!=0u) { continue; } if(f.n==(ulong)s_fac_diagz) { fac_diag[16]=(float)k2; fac_diag_fid=(uint)k2; } k2++; }
-		if(fac_diag[16]<0.0f) print_warning("CFD_FAC_DIAGZ: Zelle "+to_string((ulong)s_fac_diagz)+" traegt keine AKTIVE Facette -- Diagnose bleibt leer.");
+		if(fac_diag[16]<0.0f) { fac_diagz_on=false; print_warning("CFD_FAC_DIAGZ: Zelle "+to_string((ulong)s_fac_diagz)+" traegt keine AKTIVE Facette -- Diagnose HART AUS (IR3-Audit: Sentinel darf nie in den Kernelvergleich)."); }
 		else print_info("Diagnose-Facette: Zelle "+to_string((ulong)s_fac_diagz)+" -> fid "+to_string((ulong)fac_diag_fid));
 		fac_diag.write_to_device();
 	}
