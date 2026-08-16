@@ -165,6 +165,9 @@ public:
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
+	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
+	Memory<float> fac_diag;  // 16-float-Kettenprotokoll
+	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)
 	bool fac_ema_on = false;
 	static float s_fac_tau;  // 1 = voll, 0 = nur Tausch (CFD_FACETTEN=2)

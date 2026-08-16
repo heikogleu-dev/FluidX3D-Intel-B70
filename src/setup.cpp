@@ -643,6 +643,7 @@ void main_setup_kanal() {
 	  LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_imem = fc>=3u;
 	  LBM_Domain::s_fac_ema = (fc>=3u) ? env_f("CFD_FAC_EMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
+	  LBM_Domain::s_fac_diagz = (fc>=3u&&getenv("CFD_FAC_DIAGZ")!=nullptr) ? (long)atoll(getenv("CFD_FAC_DIAGZ")) : -1l;
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
@@ -734,6 +735,7 @@ void main_setup_kanal() {
 	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0), suz(Nz,0.0); ulong n_stat=0ull;
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
 	std::vector<double> fac_snap; ulong fac_snap_step=0ull; double fac_fsum=0.0, fac_fn=0.0; // Cd-Pfad (K2/K3)
+	std::ofstream diag_csv; // Iron Rule 3: Diagnose-Facetten-Zeitreihe
 	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) { // Audit-Nacharbeit 18: letzter Chunk gekappt, vorher bis zu 99 Schritte Ueberzug
 		const ulong chunk = min((ulong)regel_alle, n_steps-step); // Re-Audit R2: auch fuers CSV-Etikett verwenden
 		lbm.run(chunk, n_steps); // run(steps, total) kappt selbst NICHT (2. Arg ist nur Laufzeitschaetzung)
@@ -768,6 +770,14 @@ void main_setup_kanal() {
 		     << Ub_plus << "," << f_akt << "," << cf_k << "," << cf_m << "\n" << std::flush;
 		// Statistik erst nach dem Warmlauf akkumulieren
 		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];suz[z]+=pz_[z];} n_stat+=(ulong)Nx*Ny; }
+		// Iron Rule 3: Diagnose-Facette je Chunk in CSV sampeln
+		if(LBM_Domain::s_fac_diagz>=0l&&lbm.lbm_domain[0]->fac_diagz_on) {
+			lbm.lbm_domain[0]->fac_diag.read_from_device();
+			if(!diag_csv.is_open()) { diag_csv.open(out_dir+"facetten_diagz.csv"); diag_csv << "schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon\n"; }
+			diag_csv << (step+chunk);
+			for(uint q=0u;q<16u;q++) diag_csv << "," << lbm.lbm_domain[0]->fac_diag[q];
+			diag_csv << "\n" << std::flush;
+		}
 		// ★ Cd-Pfad: Akkumulator-Snapshot am Warmup-Ende, f_wirk-Mittel ab dort (K2-Referenz)
 		if(env_u("CFD_FACETTEN",0u)>0u&&step>=n_warm) {
 			// ★ Audit R3 (MITTEL): der Snapshot steht NACH lbm.run(chunk) bei step+chunk Schritten --

@@ -1752,6 +1752,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_PEMA"+R(
                         , global float* fac_pu // PEMA-Zustand 6 float je Facette: P-quer (xyz) + u-quer (xyz)
 )+"#endif"+R( // FACETTEN_PEMA
+)+"#ifdef FACETTEN_DIAGZ"+R(
+                        , global float* fac_diag // 16-float-Kettenprotokoll der Diagnose-Facette
+)+"#endif"+R( // FACETTEN_DIAGZ
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return;
 	const uint fid = fac_idx[fbi];
@@ -1909,6 +1912,19 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz); // Delta-m-Leck (Gl. 13, komponentenweise)
 	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // 3x3: REST-Normalinjektion (Soll ~0 bei Vollrang; N1-Kriterium |Summe|<=5 je Torus-Lauf)
 	fac_tau_cnt[fid] += 1u;
+)+"#ifdef FACETTEN_DIAGZ"+R(
+	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
+	// Facette schreibt ihre komplette Kette jeden Schritt in einen 16er-Puffer; der Host sampelt
+	// je Chunk in eine CSV -- Plausibilitaet an kleinen Faellen SELBST nachvollziehbar.
+	if(fid==(uint)fac_diag[16]) { // Ziel-fid liegt zur Laufzeit im Puffer (Slot 16) -- keine Emissionskonstante noetig
+		fac_diag[0]=ut; fac_diag[1]=twe; fac_diag[2]=P1; fac_diag[3]=P2;
+		fac_diag[4]=s1; fac_diag[5]=s2; fac_diag[6]=sn;
+		fac_diag[7]=phi1; fac_diag[8]=phi2;
+		fac_diag[9]=G11; fac_diag[10]=G22; fac_diag[11]=Snn;
+		fac_diag[12]=Sn1; fac_diag[13]=Sn2;
+		fac_diag[14]=(float)t; fac_diag[15]=rhon;
+	}
+)+"#endif"+R( // FACETTEN_DIAGZ
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM
 
@@ -1930,6 +1946,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_PEMA"+R(
 	, global float* fac_pu // PEMA-Zustand (nur Arm 3/4 mit CFD_FAC_PEMA)
 )+"#endif"+R( // FACETTEN_PEMA
+)+"#ifdef FACETTEN_DIAGZ"+R(
+	, global float* fac_diag // Diagnose-Facette (CFD_FAC_DIAGZ)
+)+"#endif"+R( // FACETTEN_DIAGZ
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
@@ -1975,6 +1994,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_PEMA"+R(
 		, fac_pu
 )+"#endif"+R( // FACETTEN_PEMA
+)+"#ifdef FACETTEN_DIAGZ"+R(
+		, fac_diag
+)+"#endif"+R( // FACETTEN_DIAGZ
 	)+");"+R(
 )+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
