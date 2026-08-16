@@ -1787,9 +1787,14 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 	}
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0); Arm 4 (tau=0) = Nullziel/Free-Slip-Sinn (Gl. 11) -- der erste iGPU-Lauf hatte def_fac_tau vergessen, Arm 3 == Arm 4 bitidentisch (gefangen am identischen CSV)
 	float s1=0.0f, s2=0.0f;
-	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8)
-	if(det>=1e-4f*G11*G22&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
-	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback
+	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8, Nachpruefer-Befund 2/3 geschlossen)
+	// Befund 2: G11==0 exakt und G22>=1e-8 machte det=0 und "0>=0" nahm den 2x2-Zweig -- Division
+	// durch 0/NaN unter -cl-finite-math-only = UB. Branch 1 verlangt jetzt BEIDE Diagonalen.
+	// Befund 3: der Spiegelfall (nur Quer-Link wirksam) bekam faelschlich Slot 13 ("kein
+	// tangential wirksamer Link") und liess das Quer-Ziel still fallen -- jetzt eigener Zweig.
+	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
+	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
+	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2 (Quer-Nullung, t1-Ziel unerfuellbar)
 	else { if(t%100ul==0ul) atomic_inc(&hits[13]); return; } // Slot 13: kein tangential wirksamer Link
 	const float s1c = clamp(s1, -2.0f*ut, 2.0f*ut), s2c = clamp(s2, -ut, ut); // Klemmen (Gl. 9)
 	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
@@ -1805,7 +1810,7 @@ void apply_facette_imem(const uxx n, float* fhn, const uxx* j, const global ucha
 	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] IST-Wandkraft (ungeklemmt == twe*t1, Wirkpfadnachweis)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
 	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz); // Delta-m-Leck (Gl. 13, komponentenweise)
-	fac_tau_acc[a+5ul] += 6.0f*(Sn1*s1+Sn2*s2);           // parasitaerer Normalaustausch (Gl. 12)
+	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2;                  // parasitaerer Normalaustausch (Gl. 12; Sn traegt die 6 bereits -- Nachpruefer-Befund 1: vorher 6x doppelt)
 	fac_tau_cnt[fid] += 1u;
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM

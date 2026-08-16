@@ -2669,7 +2669,7 @@ void main_setup_facetten_test() {
 	// WEIL die Felder bis dahin identisch waren.
 	std::vector<float> ua_x, ua_y, ua_z, ua1_x; std::vector<Facette> FF;
 	{ // Arm A: AUS
-		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_tau=1.0f;
+		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_imem=false; LBM_Domain::s_fac_tau=1.0f;
 		LBM a(Nx,Ny,Nz,nu_lat); init(a); a.run(1u,2u); a.u.read_from_device();
 		ua1_x.resize(3ull*a.get_N()); for(ulong n=0ull; n<a.get_N(); n++) { ua1_x[n]=a.u.x[n]; ua1_x[n+a.get_N()]=a.u.y[n]; ua1_x[n+2ull*a.get_N()]=a.u.z[n]; } // Nachpruefer: alle DREI Komponenten
 		a.run(1u,2u); a.u.read_from_device();
@@ -2678,7 +2678,7 @@ void main_setup_facetten_test() {
 	}
 	ulong diff_erlaubt=0ull, diff_verboten=0ull, gleich_erwartet=0ull;
 	{ // Arm B: FACETTEN=2 (reiner Tausch)
-		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_tau=0.0f;
+		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=false; LBM_Domain::s_fac_tau=0.0f;
 		LBM b(Nx,Ny,Nz,nu_lat); init(b);
 		const string t2_dir = get_exe_path()+"../export/facetten_test/"; create_folder(t2_dir);
 		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, t2_dir, "T2-Treppe");
@@ -2777,6 +2777,12 @@ void main_setup_facetten_test() {
 			if(!(det<1e-4*G11*G22||G22<1e-8)||G11<1e-8) { print_warning("T3a(3): Einzellink diagonal landet nicht im Skalar-Fallback."); f3++; }
 			momente({5},nh,uu,G11,G22,G12,S1,ut,t1);
 			if(G11>=1e-8) { print_warning("T3a(4): Normal-Einzellink hat G11 != 0."); f3++; }
+			// (5) Spiegelfall {11} (Nachpruefer-Befund 2): reiner Quer-Link -- G11==0, G22>0.
+			// Muss im Quer-Skalar-Zweig landen (frueher: det=0-Division im 2x2!).
+			momente({11},nh,uu,G11,G22,G12,S1,ut,t1);
+			const double det5=G11*G22-G12*G12;
+			const bool b1 = det5>=1e-4*G11*G22&&G11>=1e-8&&G22>=1e-8, b2 = G11>=1e-8;
+			if(b1||b2||G22<1e-8) { print_warning("T3a(5): Quer-Einzellink {11} landet nicht im Quer-Skalar-Zweig."); f3++; }
 		}
 		if(f3>0u) print_error("T3a GESCHEITERT: "+to_string(f3)+" Referenzpruefungen.");
 		print_info("T3a bestanden: Momente, Free-Slip-Identitaet, S1-Vorzeichen, Kaskadenpfade (double-Referenz).");
