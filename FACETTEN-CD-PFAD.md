@@ -75,3 +75,22 @@ Klasse-64-Facetten fehlen in `fac_idx` (alloc filtert klasse!=0), tauschen also 
   bereits exaktes Fenstermittel.
 - Kugel-Erkenntnis bestaetigt: nur 313 Tauschzellen / 14.356 ohne offenes Paar pro Messpunkt --
   Nebenachsen (Stufe 4) vor der Fahrzeug-Abnahme noetig; der gekippte Kanal misst das kontrolliert.
+
+---
+
+# E6-Nachtrag: Druck-Zeitmittel (2026-08-16 morgens) — K5 VOLLSTAENDIG
+
+Druckanteil jetzt als Zeitmittel an der Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv);
+Reibung bleibt exaktes Fenster-Delta. Der Wert der Aenderung, gemessen: Zeitmittel 0,8371 vs
+Endwert 0,1640 -- der Kugelnachlauf schwankt so stark, dass die End-Momentaufnahme wertlos war.
+
+**K5 abgeschlossen (Kugel DX=40, 184 Samples):**
+| Arm | Cd_druck (Zeitmittel) | Cd_reibung | Summe | altes Instrument (Phantom) |
+|---|---|---|---|---|
+| AUS | -- | -- | 1,32 (object_force gueltig) | 1,32 |
+| 2 (nur Tausch) | 0,8359 | **0,0000 exakt** | 0,8359 | 2,80 |
+| 1 (voll) | 0,8371 | 0,0004 | 0,8375 | 2,79 |
+
+Phantom beseitigt (kein +1,48-Sprung); Arm-Differenz +0,002 im Erwartungsband [-0,4;+0,1];
+Facetten SENKEN Cd gegen AUS (kuenstliche Rauheitsreibung entfaellt) -- Richtung plausibel,
+Absolutwerte erst nach iMEM + Literaturvergleich (subkritisch 0,45-0,5, bodennah hoeher) bewerten.
