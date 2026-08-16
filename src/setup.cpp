@@ -374,6 +374,11 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Groessere Fenster sehen Kruemmung und Zweitflaechen, keine bessere Wand.
 	const int R = (int)min(3u, max(1u, env_u("CFD_FACETTEN_FENSTER", 1u))); // Radius: 1=3^3 (Default, geeicht), 2=5^3, 3=7^3
 	if(env_u("CFD_FACETTEN_FENSTER", 1u)>3u) print_warning("CFD_FACETTEN_FENSTER > 3 wird auf 3 geklemmt (Audit R3: vorher stille Klemme).");
+	// ★ Stufe-3-Schritt 6: K4-Untergrenze als deklarierter Messarm-Parameter. Default 0,2 UNVERAENDERT
+	// (Fahrzeug-Eichung!); der 26,6-Grad-Torus faehrt 0,15, weil seine tragende m0-Lage bei
+	// y_w=0,187 liegt (Census 2026-08-16 bestaetigte die Formelblatt-Prognose 0,184).
+	const float yw_min = env_f("CFD_FACETTEN_YWMIN", 0.2f);
+	if(yw_min!=0.2f) print_warning("CFD_FACETTEN_YWMIN = "+to_string(yw_min,3u)+" (Default 0,2) -- deklarierter Messarm, Ergebnisse entsprechend kennzeichnen.");
 	if(getenv("CFD_FACETTEN_FENSTER")!=nullptr&&env_u("CFD_FACETTEN_FENSTER", 1u)==0u) print_warning("CFD_FACETTEN_FENSTER=0 wird auf 1 gehoben (Radius 0 gibt es nicht).");
 	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
 	std::vector<double> px(np_max), py(np_max), pz(np_max);
@@ -458,7 +463,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		f.r21_=(float)r21; f.r10_=(float)r10;
 		if(r21>0.15) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
 		if(r10<0.02) { f.klasse|=4u; k3++; }
-		if(yw<0.2||yw>2.0) { f.klasse|=8u; k4++; }
+		if(yw<(double)yw_min||yw>2.0) { f.klasse|=8u; k4++; }
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
 		const double ax=fabs(nxd), ay=fabs(nyd), az=fabs(nzd);
 		f.achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); // Tie-Break: kleinste Achsnummer
@@ -492,7 +497,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				double ywn = (sx/l)*((double)x-(double)F[i].cx_)+(sy/l)*((double)y-(double)F[i].cy_)+(sz/l)*((double)z-(double)F[i].cz_);
 				if(ywn<0.0) G[i].klasse|=16u; // Audit R3: Orientierungskipp durch die Glaettung -- markieren, fabs darf ihn nicht verdecken
 				G[i].yw = (float)fabs(ywn);
-				G[i].klasse &= (uchar)~8u; if(G[i].yw<0.2f||G[i].yw>2.0f) G[i].klasse|=8u; // K4 neu bewerten
+				G[i].klasse &= (uchar)~8u; if(G[i].yw<yw_min||G[i].yw>2.0f) G[i].klasse|=8u; // K4 neu bewerten
 			}
 		}
 		F=G;
