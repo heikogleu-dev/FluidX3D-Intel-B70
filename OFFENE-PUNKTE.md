@@ -13,6 +13,12 @@
 > kleinen Testfaellen selbst nachvollziehbar ist, ob Zwischen- UND Endergebnisse plausibel sind
 > und die Pipeline sauber ist — nicht nur globale Endzahlen.
 
+> **Iron Rule 4 (Heiko, 2026-08-16): Ein Läufer, eine Kette, ein Wächter.** GPU-Läufe starten
+> NUR über `werkzeuge/lauf_queue.sh` (verweigert bei laufendem FluidX3D/aktivem Lock, strikt
+> sequenziell, Zustand in `logs/queue_status.txt`). Keine gestapelten nohup-Monitore, keine
+> ad-hoc-pgrep-Ketten — der Doppellauf vom 2026-08-16 bremste eine Serie unbemerkt auf halbe
+> Geschwindigkeit. Vor jedem Serienstart und nach jedem Serienende: Prozess-Census.
+
 
 Neuaufbau auf frischem Upstream `8986874`. Alles hier ist gemessen oder am Code belegt;
 Vermutungen sind als solche markiert.
