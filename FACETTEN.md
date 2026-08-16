@@ -161,7 +161,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 5. **Fahrzeug Stufe 5** (Serie ≥6 B70-Läufe à ≤2,5 h): y⁺-Median 1122 → ~140 aus dem
    Akkumulator; Arme AUS/4/3; Δm-Wächter; Cd/Cz mit C7-Notiz davor.
 6. **Niedrige Audit-Reste (IR3)**: Statik-Symmetrie diagz (s_fac_diagz nicht an allen
-   Konstruktorstellen) · Kugel-Report: Slots 10-17 seit b1f2caf/IR3-Abschluss vollstaendig; Rest-Item war stale fehlen · cf_m-Normierung am Torus ·
+   Konstruktorstellen) · Kugel-Report: Slots 10-17 seit b1f2caf/IR3-Abschluss vollstaendig; Rest-Item war stale · cf_m-Normierung am Torus ·
    fac_diag-float-Grenzen (fid-Vergleich als float) · y⁺-Report rechnet am Torus hartkodiert
    mit y_w = 0,5.
 7. K2-Instrument: 1-%-Band gilt nur für hinreichend stationäre Fenster (ETT=80/WARM=20 lief

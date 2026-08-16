@@ -18,18 +18,22 @@ fi
 echo $$ > logs/queue.lock
 trap 'rm -f logs/queue.lock' EXIT INT TERM
 : > "$Q"
-n=0; gesamt=$(grep -vc '^\s*\(#\|$\)' "$1")
-hb() { while [ -f logs/queue.lock ]; do echo "[$(date +%H:%M:%S)] LAEUFT (Herzschlag)" >> "$Q"; sleep 120; done; }
+n=0; gesamt=$(grep -c '::' "$1")
+hb() { while [ -f logs/queue.lock ] && kill -0 $$ 2>/dev/null; do echo "[$(date +%H:%M:%S)] LAEUFT (Herzschlag)" >> "$Q"; sleep 120; done; }
 hb & HB=$!
-trap 'rm -f logs/queue.lock; kill $HB 2>/dev/null' EXIT INT TERM
+# ★ R2-Befund: Signal-Handler MUSS exit-en -- sonst setzt bash die Schleife nach dem Handler
+# fort und die Kette laeuft ohne Lock/Herzschlag weiter (Iron Rule 4 im Abbruchpfad gebrochen).
+trap 'rm -f logs/queue.lock; kill $HB 2>/dev/null' EXIT
+trap 'rm -f logs/queue.lock; kill $HB 2>/dev/null; trap - EXIT; exit 130' INT TERM
 while IFS= read -r zeile; do
 	# ★ IR3-Abschluss-Loop: Zeile erst TRIMMEN, dann filtern -- eine Whitespace-Zeile startete
 	# vorher einen UNBENANNTEN Default-Lauf, eine eingerueckte #-Zeile liess env das '#' ausfuehren.
-	zeile="$(echo "$zeile" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+	zeile="$(printf '%s' "$zeile" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 	case "$zeile" in ''|'#'*) continue;; esac
 	case "$zeile" in *'::'*) ;; *) echo "UEBERSPRUNGEN (kein '::'): $zeile" | tee -a "$Q"; continue;; esac
 	env_teil="${zeile%%::*}"; name="${zeile##*::}"; name="$(echo "$name" | tr -d ' ')"
 	[ -n "$name" ] || { echo "UEBERSPRUNGEN (leerer Name): $zeile" | tee -a "$Q"; continue; }
+	[ "${zeile#*::}" = "${zeile##*::}" ] || { echo "UEBERSPRUNGEN (mehrfaches '::'): $zeile" | tee -a "$Q"; continue; }
 	n=$((n+1))
 	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name" | tee -a "$Q"
 	env $env_teil CFD_RUN_NAME="$name" bin/FluidX3D 2 > "logs/$name.log" 2>&1
