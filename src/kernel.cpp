@@ -1787,6 +1787,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	float Pvx=0.0f, Pvy=0.0f, Pvz=0.0f;
 )+"#endif"+R( // FACETTEN_PEMA
 	float S1x=0.0f, S1y=0.0f, S1z=0.0f, Sn1=0.0f, Sn2=0.0f, Snn=0.0f; // S1 KOMPONENTENWEISE (Auflage 2); Snn fuer die 3x3
+)+"#ifdef FACETTEN_ALPHA"+R(
+	float S0=0.0f; // J4-alpha: Summe w_i ueber die Wandlinks (>= w(1), sobald ein Link existiert)
+)+"#endif"+R( // FACETTEN_ALPHA
 	for(uint i=1u; i<def_velocity_set; i++) { // compiler-entrollt, Muster apply_moving_boundaries
 		const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue; // linkweises Gate (schliesst TYPE_E/TYPE_MS aus)
@@ -1801,7 +1804,28 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
 		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
 		Snn = fma(6.0f*wi, cn*cn, Snn); // 3x3-Iteration: Normalautoritaet
+)+"#ifdef FACETTEN_ALPHA"+R(
+		S0 += wi;
+)+"#endif"+R( // FACETTEN_ALPHA
 	}
+)+"#ifdef FACETTEN_ALPHA2"+R(
+	// ★ J4-alpha Stufe 2 (Plan 2026-08-17): symmetrisches Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T
+	// mit cq = S1/S0 -- eine Kovarianz, garantiert PSD. Der Solve erreicht sein Impulsziel damit
+	// INKLUSIVE des alpha-Terms exakt (Sum q c = G'*u_s), und die sn-Nullung nullt die TATSAECHLICHE
+	// Normalinjektion inkl. alpha. Einzellink-Facette: G' == 0 analytisch -> faellt sauber in
+	// Rang-0-BB; der relative Waechter haelt das float-Restrauschen (~eps*G) aus der Kaskade
+	// (J4-Flicker-Lehre: absolute Schwellen lagen exakt auf dem Rauschen).
+	if(S0>0.0f) {
+		const float G11r=G11, G22r=G22, Snnr=Snn;
+		const float B1=S1x*t1x+S1y*t1y+S1z*t1z, B2=S1x*t2x+S1y*t2y+S1z*t2z, Bn=S1x*nx+S1y*ny+S1z*nz;
+		const float Dd=6.0f/S0;
+		G11 -= Dd*B1*B1; G22 -= Dd*B2*B2; G12 -= Dd*B1*B2;
+		Sn1 -= Dd*B1*Bn; Sn2 -= Dd*B2*Bn; Snn -= Dd*Bn*Bn;
+		if(G11<1e-4f*G11r) { G11=0.0f; G12=0.0f; Sn1=0.0f; } // Ausloeschungswaechter: t1-Richtung degeneriert -> Kaskade
+		if(G22<1e-4f*G22r) { G22=0.0f; G12=0.0f; Sn2=0.0f; }
+		if(Snn<1e-4f*Snnr) Snn=0.0f; // Entkopplungs-Gate (Snn<1e-8) uebernimmt
+	}
+)+"#endif"+R( // FACETTEN_ALPHA2
 )+"#ifdef FACETTEN_PEMA"+R(
 	// ★ Beidseitige Filterung (FACETTEN-IMEM-ANALYSE.md, Weg A): EMA auf P-Vektor UND Abtast-u
 	// (xyz-Rahmen); geloest wird gegen die GEFILTERTEN Groessen -> Phi(t) = T + P_prime(t): das Ziel
@@ -1852,6 +1876,17 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			}
 			P1 = fac_pu[e]*t1x+fac_pu[e+1ul]*t1y+fac_pu[e+2ul]*t1z; // GEFILTERTES P in der neuen Basis
 			P2 = fac_pu[e]*t2x+fac_pu[e+1ul]*t2y+fac_pu[e+2ul]*t2z;
+)+"#ifdef FACETTEN_ALPHA2"+R(
+		if(S0>0.0f) { // Downdate in der GEFILTERTEN Basis wiederholen; Snn ist basisunabhaengig und oben bereits downgedatet
+			const float G11q=G11, G22q=G22;
+			const float B1=S1x*t1x+S1y*t1y+S1z*t1z, B2=S1x*t2x+S1y*t2y+S1z*t2z, Bn=S1x*nx+S1y*ny+S1z*nz;
+			const float Dd=6.0f/S0;
+			G11 -= Dd*B1*B1; G22 -= Dd*B2*B2; G12 -= Dd*B1*B2;
+			Sn1 -= Dd*B1*Bn; Sn2 -= Dd*B2*Bn;
+			if(G11<1e-4f*G11q) { G11=0.0f; G12=0.0f; Sn1=0.0f; }
+			if(G22<1e-4f*G22q) { G22=0.0f; G12=0.0f; Sn2=0.0f; }
+		}
+)+"#endif"+R( // FACETTEN_ALPHA2
 		}
 	}
 )+"#endif"+R( // FACETTEN_PEMA
@@ -1917,17 +1952,49 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// Projektionen des ANGEWANDTEN u_s fuer Ist-Kraft/Delta-m/Rest (nur im EMA-Arm noetig)
 	s1 = usx*t1x+usy*t1y+usz*t1z; s2 = usx*t2x+usy*t2y+usz*t2z; sn = usx*nx+usy*ny+usz*nz;
 )+"#endif"+R( // FACETTEN_EMA
+)+"#ifdef FACETTEN_ALPHA"+R(
+	// ★ J4-alpha (Massenkorrektur): Sum_i 6 w_i (c_i*u_s) = 6(S1*u_s) != 0 bei unsymmetrischer
+	// Linkmenge -- jede Facette injizierte netto Masse (Kugel Delta-m~269, arm-unabhaengig, am
+	// Druck-Bookkeeping vorbei). alpha aus dem ANGEWANDTEN u_s (nach Gate/Klemme/EMA), damit
+	// Sum q = alpha*S0 + 6(S1*u_s) = 0 exakt gilt, egal was Gates und Filter getan haben.
+	// S0 >= w(1) > 0 hier: ohne Wandlink waere der Solver oben mit Rang 0 ausgestiegen.
+	const float alph = -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0;
+	if(fabs(alph)>ut&&t%100ul==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
+)+"#endif"+R( // FACETTEN_ALPHA
 	for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3)
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;
 		fhn[i] = fma(6.0f*w(i), c(i)*usx+c(def_velocity_set+i)*usy+c(2u*def_velocity_set+i)*usz, fhn[i]);
+)+"#ifdef FACETTEN_ALPHA"+R(
+		fhn[i] += w(i)*alph; // separater Summand: die bestehende fma-Zeile bleibt rundungsidentisch
+)+"#endif"+R( // FACETTEN_ALPHA
 	}
-	const float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn; // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn)
+	float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn; // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn; unter ALPHA2 sind G/Sn downgedatet -> alpha-Beitrag enthalten)
+)+"#ifdef FACETTEN_ALPHA"+R(
+)+"#ifndef FACETTEN_ALPHA2"+R(
+	// Stufe 1 traegt den alpha-Impuls (alpha*S1) NICHT im Downdate -- fuer die ehrliche Ist-Kraft addieren:
+	phi1 += alph*(S1x*t1x+S1y*t1y+S1z*t1z); phi2 += alph*(S1x*t2x+S1y*t2y+S1z*t2z);
+)+"#endif"+R(
+)+"#endif"+R( // FACETTEN_ALPHA
 	const float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
 	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] IST-Wandkraft (ungeklemmt == twe*t1, Wirkpfadnachweis)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
+)+"#ifdef FACETTEN_ALPHA"+R(
+	fac_tau_acc[a+4ul] += fma(alph, S0, 6.0f*(S1x*usx+S1y*usy+S1z*usz)); // Delta-m-REST unter alpha: Soll ~float-ulp (Leck-Formel bleibt im #else als A/B-Referenz)
+)+"#else"+R(
 	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz); // Delta-m-Leck (Gl. 13, komponentenweise)
-	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // 3x3: REST-Normalinjektion (Soll ~0 bei Vollrang; N1-Kriterium |Summe|<=5 je Torus-Lauf)
+)+"#endif"+R( // FACETTEN_ALPHA
+)+"#ifdef FACETTEN_ALPHA"+R(
+)+"#ifndef FACETTEN_ALPHA2"+R(
+	// Werkzeugfalle Variante 3: get_opencl_c_code() laesst nach #if nur EIN Token zu -- deshalb
+	// verschachtelte ifdef/ifndef statt "#if defined(A) && !defined(B)".
+	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn + alph*(S1x*nx+S1y*ny+S1z*nz); // Stufe 1: alpha-Normalimpuls ehrlich mitzaehlen
+)+"#else"+R(
+	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // ALPHA2: via downgedatete Sn/Snn inkl. alpha
+)+"#endif"+R( // FACETTEN_ALPHA2-Weiche
+)+"#else"+R(
+	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // 3x3: REST-Normalinjektion (Soll ~0 bei Vollrang; N1 |Summe|<=5 je Torus-Lauf)
+)+"#endif"+R( // FACETTEN_ALPHA-Weiche
 	fac_tau_cnt[fid] += 1u;
 )+"#ifdef FACETTEN_DIAGZ"+R(
 	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
@@ -1940,6 +2007,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		fac_diag[9]=G11; fac_diag[10]=G22; fac_diag[11]=Snn;
 		fac_diag[12]=Sn1; fac_diag[13]=Sn2;
 		fac_diag[14]=(float)t; fac_diag[15]=rhon;
+)+"#ifdef FACETTEN_ALPHA"+R(
+		fac_diag[17]=alph;
+)+"#endif"+R( // FACETTEN_ALPHA
 	}
 )+"#endif"+R( // FACETTEN_DIAGZ
 } // apply_facette_imem()
