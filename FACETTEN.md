@@ -208,6 +208,14 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    2,6 GB roh; VRAM ~50 MB). Blending 100→0 % zu den Kopplungsrändern (Zirkularitätsschutz).
    Falsifikation: Interface-Sprung an den Deckungspunkten mit/ohne (Instrument existiert im
    Wirksamkeitsnachweis). Eigener Messarm, NACH Punkt 8, nie gleichzeitig einführen.
+   **DAVOR (Heiko-Beobachtung 2026-08-18, Stufe-5-Serie): die Kopplung läuft aktuell NICHT
+   asynchron** — GPU-Auslastung zeigt Alternieren statt Überlappen, obwohl das Phasenprofil
+   97,8 % "Nahfeld" / 0,4 % "Fernfeld-Sync" meldet. Verdacht: run_async enqueued ohne Flush
+   (iGPU startet erst beim nächsten blockierenden Call), die Far-Wartezeit wird dann der
+   Nahfeld-Phase zugebucht — der Host-Timer ist hier KEIN Beweis. Mit dem V1-Fork-Profiler
+   (knowledge/performance.md-Methodik: messen, nicht Theorie-Audit) nachmessen, BEVOR die
+   near→far-Rückkopplung auf dieselbe Schleife aufsetzt; ein echtes Überlappen halbiert ggf.
+   den Grobschritt-Anteil und verschiebt die Kosten-Rechnung von Punkt 8+9.
 
 ---
 
