@@ -1753,7 +1753,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
                         , global float* fac_pu // PEMA-Zustand 6 float je Facette: P-quer (xyz) + u-quer (xyz)
 )+"#endif"+R( // FACETTEN_PEMA
 )+"#ifdef FACETTEN_DIAGZ"+R(
-                        , global float* fac_diag // 16-float-Kettenprotokoll der Diagnose-Facette
+                        , global float* fac_diag // 18-float-Kettenprotokoll ([16] Selektor, [17] alpha) der Diagnose-Facette
 )+"#endif"+R( // FACETTEN_DIAGZ
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return;

@@ -1,6 +1,6 @@
 # FACETTEN.md — Leitdokument Facetten-Wandmodell (C1b)
 
-Stand **2026-08-16 abends** (Repo 2a8bd20). Dieses Dokument ist der Einstieg; die acht
+Stand **2026-08-17** (Stufe 3 abgeschlossen; J4-α-Korrektur drin, siehe §2/§4). Dieses Dokument ist der Einstieg; die acht
 FACETTEN-*-Altdateien sind Archiv (Belegkette, Lesekarte in Abschnitt 5 und FACETTEN-ARCHIV.md).
 Bei Widersprüchen zwischen Altdateien gilt die jüngste Messung — die Auflösungen stehen hier.
 
@@ -74,17 +74,17 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 - **Akkumulator `fac_tau`, 6 float je Facette** (nur bei tatsächlicher Modifikation):
   [0] Σ tw physisch (y⁺-Quelle) · [1..3] Ist-Wandkraft xyz (inkl. Sn-Terme) ·
   [4] Δm-Leck · [5] Normalaustausch-REST (nach 3×3-Nullung); dazu `fac_tau_n` (Zähler).
-- **Zählerpuffer `rho_clamp_hits`, 18 Slots (0–17):** [0/1] RHO_CLAMP unten/oben ·
+- **Zählerpuffer `rho_clamp_hits`, 19 Slots (0–18):** [0/1] RHO_CLAMP unten/oben ·
   [2] WFB-Wirkpfad · [3] WFB-τ-Klemme · [4] WFB-u_t≈0-Skip · [5] Ein-Zellen-Spalt ·
   [6] SGS_WANDFREI-Wirkpfad · [7] Facetten-Wirkpfad (Soll = fac_N·⌈n/100⌉, Ist≠Soll = harter
   Fehler) · [8] Facetten-τ-Klemme · [9] Facetten-u_t≈0-Skip · [10] u_s-Klemme (iMEM) ·
   [11] ohne offenes Paar (nur Paararm) · [12] iMEM-Skalar-Fallback · [13] ohne tangential
   wirksamen Link · [14] gekoppelter Rang 2 · [15] gekoppelt Rang 0 → BB · [16] s_n-Klemme ·
-  [17] PEMA-utb-Fallback. Wirkpfad-/Ereignis-Slots gegatet t%100. Gate-Randzone: Lage-1-Zellen
+  [17] PEMA-utb-Fallback · [18] α>u_t (nur ALPHA-Arm). Wirkpfad-/Ereignis-Slots gegatet t%100. Gate-Randzone: Lage-1-Zellen
   können per Float-Rauschen in 15 statt 13 landen — Soll-Formeln prüfen die **Summe 13+15**.
 - **CFD_FAC_DIAGZ** (Iron Rule 3): Ketten-Zeitreihe EINER Facette (Zellindex → Laufzeit-fid,
   Sentinel −1.0f matcht nie) → `facetten_diagz.csv` mit
-  schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon.
+  schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon,alpha.
   Nur iMEM-Arme; Kanal/Torus verdrahtet, Kugel noch nicht (Warnung).
 - **Host-Census** (CFD_FACETTEN_DIAG / baue_facetten-Log): Klassen, y_w-Lagen, |L|, Momente —
   liefert die exakten Slot-Solls VOR jedem Kernellauf.
@@ -102,6 +102,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FAC_EMA` | Lösungs-EMA auf u_s (nur Arme ≥3, emission-gated). **WIDERLEGT** (J3: verschlechtert, filtert die falsche Seite) — bleibt nur für A/B-Vergleiche. |
 | `CFD_FAC_PEMA` | Beidseitige Eingangs-Filterung P̄/ū, a≈0,01 (nur Arme ≥3, emission-gated; ungesetzt = exakt instantaner Pfad). N2 dennoch verletzt — kein hinreichender Fix, Messarm. |
 | `CFD_FAC_SATGATE` | 1 = Saettigungs-Gate (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme; Slots 10/16 = Rueckfaelle. Stufe-3-Abnahme lief damit. Nur Arme 3/4. |
+| `CFD_FAC_ALPHA` | J4-Massenkorrektur, nur Arme 3/4: 0 aus (Default, bitgleich), 1 nur Masse (α=−6(S1·u_s)/S0 additiv; injiziert α·S1-Impuls — reiner Messarm), 2 Masse + Kovarianz-Downdate G′=G−(6/S0)BBᵀ vor dem Solve (Impulsziel inkl. α exakt; Behalter). Slot 18 zählt α>u_t; ebene Wand: beide Stufen bitgleich zum Aus-Arm. |
 | `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
 | `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Nur mit CFD_FACETTEN; mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
@@ -156,12 +157,19 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    eigener Messarm.
 1. ~~Torus-N2-Wiederholung nach Saum-Fix~~ ERLEDIGT 2026-08-16: N2 beide Winkel bestanden
    (0,00118 ≤ 0,00166; 0,001714 ≤ 0,00179), Stufe 3 abgenommen, IR3-Loop geschlossen (37ed98e).
+   **EINSCHRÄNKUNG 2026-08-17 (α-Befund):** der 26,6°-PASS stand teilweise auf dem Δm-Leck —
+   leckfrei (CFD_FAC_ALPHA=2) steigt cf auf 0,001994 > 0,00179, bei 45° hält N2 (0,0011625,
+   α dort inaktiv). Folgearbeit: K4-Ring-Behandlung (y_w=0,188-Lage, 49,5 Mio α>u_t-Ereignisse);
+   Attribution Stufe 1 vs. 2 läuft. Die α-Mechanik selbst ist prüfer-verifiziert.
 2. **Familienfrage SUSPENDIERT bis zur Saum-fixen Messung**: Kompensationsfamilie (iMEM
    instantan/EMA/PEMA) vs. Ersetzungsansatz (PowerFLOW-artige BB/Specular-Gewichtung) vs.
    Richterwechsel Kugel. Davor noch der billige **Klemmskalen-Messarm** (±4ut): fällt c_f
    damit auf BB-Basis, war es der Klemmsaum; bleibt es, ist es P′-Arbeit = Modellgrenze.
-3. **Kugel J4**: Census (|L|-Verteilung, Rang-0-Anteil, Kopplungswinkel), Arme AUS/4/3, beide
-   Cd-Wege, Δρ̄-Drift-Band, FP32-Sprosse (FP16C). N3/F12-Band offiziell hierher verschoben.
+3. **Kugel J4**: Masseleck ERLEDIGT 2026-08-17 (α-Korrektur Stufe 2, s. §2 CFD_FAC_ALPHA):
+   Δm 272,9→−2e-5 am Richter (DX=40), Normal-Rest ~0, Cd-Vorzeichen erstmals physikalisch
+   (+0,05 bei D/dx=11; CPU-DX=25: +0,49). REST: Cd-Wertkalibrierung ist jetzt eine
+   Auflösungsfrage — Census (|L|-Verteilung, Kopplungswinkel), feinere DX-Sprosse, beide
+   Cd-Wege, Δρ̄-Drift-Band, FP32-Sprosse (FP16C). N3/F12-Band weiter hier.
 4. **Hangauf-Arm I2b** (45°-Torus, Antrieb (0,1,1)/√2): misst die R2-Lücke — nur unter iMEM
    möglich; Umbauliste steht (IMEM-Revision Auflage 5).
 5. **Fahrzeug Stufe 5** (Serie ≥6 B70-Läufe à ≤2,5 h): y⁺-Median 1122 → ~140 aus dem
