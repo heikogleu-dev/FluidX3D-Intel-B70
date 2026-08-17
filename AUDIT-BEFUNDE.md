@@ -408,3 +408,16 @@ NEO-Auto-Submit; echte Fenster = Sample-Transfers; flags-Cache-Fix drin, 4d04e1e
    drive_boundary streichen (je A/B mit fdinfo; flags-Cache erledigt).
 4. Dm-Waechter scharf (Schwelle ~1 statt 1e-4*fac_N), K2-Stationaritaetsgate (Offen-Punkt 7).
 5. Danach: Iron-Rule-3-Abschluss-Loop des Stufe-5-Bauabschnitts.
+
+## NACHKORREKTUR (2026-08-18 frueh, Heiko-Rueckfrage): Arm 3 ~= Arm 4 im Hybrid!
+
+cd_druck 0,715/0,718, cd_reib 0,013/0,0115 -- die ZIEL-Differenzierung (Spalding vs Null) ist
+am Fahrzeug-Cd praktisch unsichtbar. Der -11-%-Sprung vs AUS-Anker ist damit NICHT dem
+Spalding-Ziel zuzuschreiben, sondern Mechanismus+SCHAETZER-Differenz (AUS = object_force,
+Arme = Hybrid; K4-Neutralitaet wurde am Fahrzeug NIE geprueft -- kugel-only). y+ 29,7 belegt
+nur: erste Zelle in der Log-Schicht, Instrument ok. To-do-Liste ergaenzt:
+0. (VOR allem anderen) Attribution des -11 %: CFD_FAC_K4-Neutralitaetscheck im dd-AUS-Arm
+   verdrahten (Hybrid-Schaetzer an unbehandeltem BB) -- erst dann ist der Cd-Vergleich sauber.
+   Und: warum differenziert das Ziel nicht? (20 % Gates + Klemmen bei y+~30 -- Budget pruefen.)
+Mozaffari/APG ist wie geplant NOCH NICHT im Serienlauf (kappa ungeeicht) -- nach diesem Befund
+ist er umso wichtiger: er ist der Arm, der wirklich differenzieren soll.
