@@ -1775,7 +1775,11 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float utau = ut/up;
 		tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut;
-		if(tw>tw_max) { tw = tw_max; if(t%100ul==0ul) atomic_inc(&hits[8]); }
+		if(tw>tw_max) { tw = tw_max;
+)+"#ifndef FACETTEN_PEMA"+R(
+			if(t%100ul==0ul) atomic_inc(&hits[8]); // R2-Nachpruefer: auch DIESER Kopf-Increment zaehlt unter PEMA die verworfene Kette -- Klemme bleibt (fac_tau_acc braucht tw), nur der Zaehler ist gegatet
+)+"#endif"+R( // FACETTEN_PEMA
+		}
 		const float twf = tw*faca;
 )+"#ifndef FACETTEN_PEMA"+R(
 		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA zaehlt unten die ANGEWANDTE (gefilterte) Kette (Audit 1/3 MITTEL)
