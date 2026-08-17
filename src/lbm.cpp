@@ -418,6 +418,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		k++;
 	}
 	fac_N = aktiv;
+	const bool diagz_gebaut = fac_diagz_on; // Audit 2/3: Rebind haengt am KONSTRUKTIONS-Zustand, nicht an der (potentiell umgesetzten) Statik
 	if(fac_diagz_on) { // Iron Rule 3: Diagnose-Facette per Zellindex waehlen (CFD_FAC_DIAGZ = n)
 		fac_diag = Memory<float>(device, 18ull); // [17] = alpha (J4); Selektor bleibt [16]
 		for(ulong q=0ull;q<18ull;q++) fac_diag[q]=0.0f;
@@ -434,7 +435,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	kernel_stream_collide.set_parameters(fac_param_pos, fac_geo, fac_idx, fac_tau, fac_tau_n);
 	if(fac_ema_on) { fac_us = Memory<float>(device, 3ull*aktiv); for(ulong q3=0ull;q3<3ull*aktiv;q3++) fac_us[q3]=0.0f; fac_us.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u, fac_us); }
 	if(fac_pema_on) { fac_pu = Memory<float>(device, 6ull*aktiv); for(ulong q6=0ull;q6<6ull*aktiv;q6++) fac_pu[q6]=0.0f; fac_pu.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+(fac_ema_on?5u:4u), fac_pu); }
-	if(s_fac_diagz>=0l&&fac_diag.length()>=18ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
+	if(diagz_gebaut&&fac_diag.length()>=18ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	facetten_bound = true;
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
@@ -805,7 +806,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_ema "+to_string(s_fac_ema,6u)+"f" : (string)"") // EMA nur wenn gesetzt -- ungesetzt bitgleich zum 3x3-ohne-EMA
 	+((s_facetten&&s_fac_imem&&s_fac_satgate) ? (string)"\n	#define FACETTEN_SATGATE" : (string)"") // (a-strich): Klemme -> BB-Rueckfall
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>0u) ? (string)"\n	#define FACETTEN_ALPHA" : (string)"") // J4-alpha: Massenkorrektur, Sum q = 0 je Facette
-	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"") // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
+	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"") /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"
 	"\n	#define def_fac_pema "+to_string(s_fac_pema,6u)+"f" : (string)"") // PEMA (Weg A): Eingangs-Filterung
 	+((s_facetten&&s_fac_imem&&s_fac_diagz>=0l) ? (string)"\n	#define FACETTEN_DIAGZ" : (string)"") // Ziel-fid zur Laufzeit in fac_diag[16]

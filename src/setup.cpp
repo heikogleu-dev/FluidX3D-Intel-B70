@@ -335,7 +335,7 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 // U_b+ > 200 => Abbruch mit Ansage (Gegenpruefer-Befund).
 // ---------------------------------------------------------------------------- C1b Stufe 1: Facettenbau (reine Diagnose)
 // FACETTEN-PLAN.md A1-A4 + Revision: TLS-Ausgleichsebene ueber Halfway-BB-Linkmittelpunkte der
-// 5^3-Nachbarschaft jeder wandnahen Fluidzelle. Host, double, kein Kernel-Eingriff, keine Flag-Bits.
+// 3^3-Nachbarschaft (Default; CFD_FACETTEN_FENSTER) jeder wandnahen Fluidzelle. Host, double, kein Kernel-Eingriff, keine Flag-Bits.
 // wand_flag: 0x41 am Fahrzeug (Fahrbahn/Latsch = Ausschluss), TYPE_S im Kanal-Ankerfall.
 // struct Facette: seit Stufe 2 in lbm.hpp (alloc_facetten braucht den Typ)
 // 3x3-Jacobi in double: Eigenvektor zum kleinsten Eigenwert von M (symmetrisch).
@@ -390,7 +390,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Kandidaten: Fluidzellen mit mindestens einem wand_flag-Nachbarn unter den 18 Richtungen.
 	std::vector<Facette> F;
 	ulong k1=0ull,k2=0ull,k3=0ull,k4=0ull,kori=0ull;
-	std::vector<double> hist_yw, hist_r21, hist_r10, hist_winkel;
+	std::vector<double> hist_yw, hist_winkel; // Audit 3/3 N3: r21/r10-Histogramme waren tot (leben in der Facette/CSV)
 	// ★ Stufe 2 (F6): x/y PERIODISCH gewickelt -- die z-WFB behandelt alle Wandzellen, der
 	// Facettenpfad muss es auch (sonst kein Ist=Soll und keine Kanal-Aequivalenz). z bleibt 1..Nz-2.
 	auto wx = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
@@ -508,7 +508,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	}
 	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
 	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
-	hist_yw.clear(); hist_r21.clear(); hist_r10.clear(); hist_winkel.clear();
+	hist_yw.clear(); hist_winkel.clear();
 	ulong markiert=0ull; k4=0ull; kori=0ull; ulong k_ueberlauf=0ull, k_ms=0ull; // kori seit R3-Nachschliff aus der ENDbitmaske (Glaettungs-Kipp zaehlt mit; Bit 16 ist bewusst sticky)
 	for(const Facette& f : F) {
 		if(f.klasse!=0u) markiert++;
@@ -848,7 +848,7 @@ void main_setup_kanal() {
 			print_info("iMEM-Erhaltung: Delta-m gesamt = "+to_string((float)dm,9u)+" (Kanal-Soll exakt 0), Normalkontamination = "+to_string((float)nk,9u));
 			if(kipp==0u&&dm!=0.0) print_warning("Delta-m am parallelen Kanal nicht exakt 0 -- S1-Komponentenpfad pruefen.");
 		}
-		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt.");
+		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt."); // Audit 1/3: Soll mod 2^32 -- der uint-Zaehler wickelt am Fahrzeugmassstab (fac_N~1e6 x 5000 Gates)
 		if(kipp==0u&&env_u("CFD_FACETTEN",0u)<3u&&zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
@@ -1229,6 +1229,11 @@ void main_setup_kugel() {
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im Kugelfall noch NICHT verdrahtet (IR3-Audit) -- Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
+	  LBM_Domain::s_fac_diagz = -1l; // ★ Audit 2/3: 9. Statik an dieser Stelle -- DIAGZ ist an der Kugel (noch) nicht verdrahtet, Warnung oben
+	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle)."); // Audit 3/3 N2: Ansage-Doktrin auch an der Kugel
+	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
+	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
+	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u;
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
@@ -1340,9 +1345,14 @@ void main_setup_kugel() {
 	std::ofstream fac_csv;
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
+	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u&&env_u("CFD_FACETTEN", 0u)==0u) { // ★ Audit 3/3 M2: der Schalter war im Kugelfall stummer No-Op (DIAG=2 lief als Vollsimulation weiter)
+		baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel-Census");
+		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
+	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
 		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		std::vector<Facette> FF = baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel");
+		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
 		lbm.alloc_facetten(FF);
@@ -1418,16 +1428,19 @@ void main_setup_kugel() {
 	// Fallende begruendet. _exit(0) wie an allen Fallenden. (Der Nachpruefer hat eine zweite
 	// Begruendung gestrichen, die ich hier faelschlich uebertragen hatte: der Kugelfall ist der
 	// else-Zweig der Fallauswahl, nach einem return liefe KEIN weiterer Fall.)
-	if(cd_w.size()<16u) { print_warning("Zu wenige Samples im Mittelungsfenster fuer eine belastbare Statistik."); _exit(0); }
-
+	// ★ Komplett-Audit 2026-08-17 (Pruefer 2, MITTEL): das _exit hier verschluckte Dichteklemme,
+	// K4-Neutralitaet, Facetten-Ist=Soll und Delta-m -- genau die No-Op-Detektoren eines kurzen
+	// Smoke-Tests. Jetzt entfaellt nur die STATISTIK; alle Pruefpfade laufen immer.
+	const bool stat_ok = cd_w.size()>=16u;
+	if(!stat_ok) print_warning("Zu wenige Samples im Mittelungsfenster -- Cd-Statistik entfaellt, Pruefpfade laufen trotzdem.");
+	print_info("---------------------------------------------------------------");
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
+	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd_w.size(); i++) { mcd+=cd_w[i]; mcz+=cz_w[i]; }
 	mcd/=(double)cd_w.size(); mcz/=(double)cz_w.size();
 	double sd=0.0; for(size_t i=0u; i<cd_w.size(); i++) sd += (cd_w[i]-mcd)*(cd_w[i]-mcd);
 	sd = sqrt(sd/(double)cd_w.size());
-
-	print_info("---------------------------------------------------------------");
-	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab t = "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd_w.size())+" Samples:");
 	print_info("  Cd (nominale Flaeche)   = "+to_string((float)mcd,4u)+"     Cz = "+to_string((float)mcz,4u));
 	print_info("  Cd (effektive Flaeche)  = "+to_string((float)(mcd/(double)A_eff_ratio),4u)
@@ -1440,6 +1453,7 @@ void main_setup_kugel() {
 		if(se>=0.0) print_info("      "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)+"   (2 sigma = "+to_string((float)(200.0*se/mcd),3u)+" % von Cd)");
 	}
 	print_info("  Populations-Sigma des Momentansignals: +- "+to_string((float)sd,5u)+"  -- KEIN Fehlerbalken, nur zum Vergleich");
+	} // stat_ok
 	if(env_u("CFD_FACETTEN", 0u)==0u&&env_u("CFD_FAC_K4", 0u)>0u) { // K4: Neutralitaet des neuen Pfads im AUS-Arm
 		const std::vector<double> leer;
 		const FacKraft FK0 = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
@@ -1460,7 +1474,7 @@ void main_setup_kugel() {
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
 			print_info("iMEM-Erhaltung Kugel: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)); }
-		if(wz!=soll) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel.");
+		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel."); // Soll mod 2^32 (Audit 1/3)
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
 		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
@@ -1726,17 +1740,20 @@ static void main_setup_fahrzeug() {
 	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
 		cd.push_back(fx[i]/((double)q_inf*A_ref)); cz.push_back(fz[i]/((double)q_inf*A_ref));
 	}
-	if(cd.size()<16u) { print_warning("Zu wenige Samples fuer eine belastbare Statistik."); _exit(0); }
+	const bool stat_ok = cd.size()>=16u; // ★ Audit 2/3: Dichteklemme lief hinter dem _exit nie bei Kurzlaeufen
+	if(!stat_ok) print_warning("Zu wenige Samples -- Cd-Statistik entfaellt, Dichteklemme laeuft trotzdem.");
+	print_info("---------------------------------------------------------------");
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
+	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
-	print_info("---------------------------------------------------------------");
-	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OF13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OF13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	print_info("  Block-SEM von Cd (ehrlich ist die Zahl bei WENIGEN Bloecken):");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
+	} // stat_ok
 	print_info("---------------------------------------------------------------");
 	_exit(0);
 }
@@ -2072,8 +2089,11 @@ static void main_setup_fahrzeug_dd() {
 		// out_dir des Falls entsteht erst weiter unten -- hier derselbe Ausdruck lokal.
 		const string fac_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 		create_folder(fac_dir);
-		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fac_dir, "dd-Nahfeld");
-		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fac_dir, "dd-Fernfeld");
+		// ★ Audit 2/3 MITTEL: beide Gitter schrieben in DENSELBEN Dateinamen -- das Fernfeld
+		// ueberschrieb den Nahfeld-Census kommentarlos. Jetzt je ein Unterordner.
+		const string fdn = fac_dir+"nah/", fdf = fac_dir+"fern/"; create_folder(fdn); create_folder(fdf);
+		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, "dd-Nahfeld");
+		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
 	lbm_f.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f)); // Bit 2 = x_max
@@ -2488,10 +2508,13 @@ static void main_setup_fahrzeug_dd() {
 	// ★ Audit-Nacharbeit 14: y+ VOR dem Samples-Waechter messen -- vorher fiel die Messung bei
 	// kurzen Laeufen (<16 Kraft-Samples) mit dem _exit zusammen weg, obwohl sie unabhaengig davon ist.
 	if(env_u("CFD_YPLUS", 1u)>0u) messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld");
-	if(cd.size()<16u) { print_warning("Zu wenige Samples fuer eine belastbare Statistik."); _exit(0); }
+	const bool stat_ok = cd.size()>=16u; // ★ Audit 2/3: Dichteklemme/Fx-Anker liefen hinter dem _exit nie bei Kurzlaeufen
+	if(!stat_ok) print_warning("Zu wenige Samples -- Cd-Statistik entfaellt, Dichteklemme/Fx-Anker laufen trotzdem.");
 	double mcd=0.0, mcz=0.0;
+	if(stat_ok) {
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
+	} // stat_ok
 	print_info("---------------------------------------------------------------");
 		{	// ★ Hygiene E6b: fx_c wurde den ganzen Lauf befuellt und nie gelesen. Jetzt als EIN Anker
 		// ausgewiesen: das Mittel der Fernfeld-Fahrzeugkraft AB WARMLAUF (derselbe Filter wie Cd/Cz --
@@ -2503,10 +2526,12 @@ static void main_setup_fahrzeug_dd() {
 		if(nm>0u) print_info("Fernfeld-Fahrzeugkraft Fx (Mittel ab Warmlauf): "+to_string((float)(m/(double)nm),1u)+" N ueber "+to_string(nm)+" Samples (Zeitreihe: Spalte Fx_far_N in forces.csv)");
 	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h); berichte_dichteklemme(lbm_c, "Fernfeld", h); dichteklemme_fazit(h); }
+	if(stat_ok) {
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
+	} // stat_ok
 	print_info("---------------------------------------------------------------");
 	_exit(0);
 }
@@ -2885,7 +2910,8 @@ void main_setup_facetten_test() {
 		ulong di_erlaubt=0ull, di_verboten=0ull, di_still=0ull;
 		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=true; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=1.0f;
 		LBM d(Nx,Ny,Nz,nu_lat); init(d);
-		std::vector<Facette> FD = baue_facetten(d, Nx, Ny, Nz, TYPE_S, get_exe_path()+"../export/facetten_test/", "T2-iMEM");
+		const string t2i_dir = get_exe_path()+"../export/facetten_test/t2imem/"; create_folder(t2i_dir); // Audit 2/3: nicht den T2-Treppen-Census ueberschreiben
+		std::vector<Facette> FD = baue_facetten(d, Nx, Ny, Nz, TYPE_S, t2i_dir, "T2-iMEM");
 		d.alloc_facetten(FD);
 		d.run(1u,1u); d.u.read_from_device();
 		d.lbm_domain[0]->rho_clamp_hits.read_from_device();

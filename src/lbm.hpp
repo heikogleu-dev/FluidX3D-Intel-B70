@@ -168,7 +168,7 @@ public:
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
-	Memory<float> fac_diag;  // 16-float-Kettenprotokoll
+	Memory<float> fac_diag;  // 18-float-Kettenprotokoll ([16] Selektor, [17] alpha)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)
 	bool fac_ema_on = false;

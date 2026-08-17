@@ -18,7 +18,7 @@ fi
 echo $$ > logs/queue.lock
 trap 'rm -f logs/queue.lock' EXIT INT TERM
 : > "$Q"
-n=0; gesamt=$(grep -c '::' "$1")
+n=0; gesamt=$(grep -v '^[[:space:]]*#' "$1" | grep -c '::')
 hb() { while [ -f logs/queue.lock ] && kill -0 $$ 2>/dev/null; do echo "[$(date +%H:%M:%S)] LAEUFT (Herzschlag)" >> "$Q"; sleep 120; done; }
 hb & HB=$!
 # ★ R2-Befund: Signal-Handler MUSS exit-en -- sonst setzt bash die Schleife nach dem Handler
@@ -36,7 +36,7 @@ while IFS= read -r zeile; do
 	[ "${zeile#*::}" = "${zeile##*::}" ] || { echo "UEBERSPRUNGEN (mehrfaches '::'): $zeile" | tee -a "$Q"; continue; }
 	n=$((n+1))
 	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name" | tee -a "$Q"
-	env $env_teil CFD_RUN_NAME="$name" bin/FluidX3D 2 > "logs/$name.log" 2>&1
+	env $env_teil CFD_RUN_NAME="$name" bin/FluidX3D "${CFD_QUEUE_DEV:-2}" > "logs/$name.log" 2>&1
 	rc=$?
 	m=""; [ $rc -ne 0 ] && m=" FEHLER"
 	echo "[$(date +%H:%M:%S)] ENDE  $n/$gesamt: $name (rc=$rc$m, cf=$(tail -1 "export/$name/kanal_zeit.csv" 2>/dev/null | cut -d, -f6))" | tee -a "$Q"

@@ -18,8 +18,7 @@ Bei Widersprüchen zwischen Altdateien gilt die jüngste Messung — die Auflös
   Orientierung per Solidnachbar-Gegenprobe; Normalen-Glättung flächengewichtet (eigene_links).
 - **Konditionsklassen** (markiert = reiner BB bleibt): K1 N<6 · K2 Kante **r21 > 0,15**
   (geeicht: saubere Population endet bei q80 = 0,10) · K3 Linie r10 < 0,02 (leer, Sicherheitsnetz)
-  · K4 y_w ∉ [yw_min; 2,0], Default yw_min = 0,2 (Fahrzeug: Spalt-/Eckklasse) · Orientierungs-
-  konflikt · Klasse 16 Glättungs-Kipp · **Klasse 64 = MS-Ausschluss** (Nachbarn bewegter Wände,
+  · K4 y_w ∉ [yw_min; 2,0], Default yw_min = 0,2 (Fahrzeug: Spalt-/Eckklasse) · Bit 16 = Orientierungskonflikt UND Glättungs-Kipp (gleiches Bit, bewusst sticky) · Klasse 32 = Stützpunkt-Überlauf (markieren+zählen) · **Klasse 64 = MS-Ausschluss** (Nachbarn bewegter Wände,
   host-seitig über u≠0 der Solidzelle erkannt — TYPE_MS entsteht erst in initialize()).
   Fahrzeug 8 mm: 21,9 % markiert (unter der 30-%-Planschwelle).
 - **z_per-Parameter**: z-periodischer Bau für den Kipp-Torus; Default false ⇒ Kanal/Fahrzeug
@@ -104,7 +103,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FAC_SATGATE` | 1 = Saettigungs-Gate (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme; Slots 10/16 = Rueckfaelle. Stufe-3-Abnahme lief damit. Nur Arme 3/4. |
 | `CFD_FAC_ALPHA` | J4-Massenkorrektur, nur Arme 3/4: 0 aus (Default, bitgleich), 1 nur Masse (α=−6(S1·u_s)/S0 additiv; injiziert α·S1-Impuls — reiner Messarm), 2 Masse + Kovarianz-Downdate G′=G−(6/S0)BBᵀ vor dem Solve (Impulsziel inkl. α exakt; Behalter). Slot 18 zählt α>u_t; ebene Wand: beide Stufen bitgleich zum Aus-Arm. |
 | `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
-| `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Nur mit CFD_FACETTEN; mit CFD_WANDFUNKTION = harter Fehler. |
+| `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Auch OHNE CFD_FACETTEN gültig (= BB-Basis-Arm, so entstehen die N2-Referenzen t45_bb/t26_bb); mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
 | `CFD_FAC_CD_EVERY` | Kadenz der Druck-Projektions-Samples im Cd-Pfad (Default 1 = jede object_force-Kadenz). |
 | `CFD_SPALDING_IT` | Spalding-Newton-Iterationen, Default 3 (min 1); in WFB- UND Facetten-Arm identisch emittiert. |

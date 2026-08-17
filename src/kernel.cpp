@@ -1777,7 +1777,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float tw_max = 0.5f*rhon*ut;
 		if(tw>tw_max) { tw = tw_max; if(t%100ul==0ul) atomic_inc(&hits[8]); }
 		const float twf = tw*faca;
-		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]);
+)+"#ifndef FACETTEN_PEMA"+R(
+		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA zaehlt unten die ANGEWANDTE (gefilterte) Kette (Audit 1/3 MITTEL)
+)+"#endif"+R( // FACETTEN_PEMA
 		twe = fmin(twf, tw_max);
 	}
 	float t1x=utx/ut, t1y=uty/ut, t1z=utz/ut;                     // Tangentialbasis (Gl. 6; unter PEMA aus dem gefilterten u neu gesetzt)
@@ -1835,6 +1837,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	{
 		const uxx e = 6ul*(uxx)fid;
 		if(fac_tau_cnt[fid]==0u) { // Warmstart: erster Besuch uebernimmt Momentanwerte statt 0
+			// LATENT (Audit 1/3): cnt zaehlt nur VOLLE Anwendungen -- gatet eine Facette anfangs
+			// dauerhaft (PEMA x SATGATE), re-seedet der Warmstart jeden Schritt und der Filter baut
+			// keine Historie auf, bis das erste Gate besteht. Nach dem ersten Erfolg korrekt.
 			fac_pu[e]=Pvx; fac_pu[e+1ul]=Pvy; fac_pu[e+2ul]=Pvz;
 			fac_pu[e+3ul]=uxn; fac_pu[e+4ul]=uyn; fac_pu[e+5ul]=uzn;
 		} else {
@@ -1860,6 +1865,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			const float utaub = utb/upb;
 			float twb = rhon*utaub*utaub;
 			const float twmb = 0.5f*rhon*utb;
+			if((twb>twmb||twb*faca>twmb)&&t%100ul==0ul) atomic_inc(&hits[8]); // Slot 8: Klemmen der ANGEWANDTEN Kette (Audit 1/3 -- vorher zaehlte die verworfene Kopf-Kette)
 			if(twb>twmb) twb = twmb;
 			twe = fmin(twb*faca, twmb);
 			ut = utb; // Klemmskalen folgen der gefilterten Basis
@@ -1940,6 +1946,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	}
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
 )+"#ifdef FACETTEN_EMA"+R(
+	// LATENT (Audit 1/3): unter EMA x SATGATE prueft das Gate die GELOESTEN s, angewandt wird die
+	// EMA-Mischung -- die bei fallendem ut das Budget ueberschreiten kann. EMA ist widerlegter
+	// Legacy-Arm; wer ihn je reaktiviert, muss das Gate hinter den Filter ziehen.
 	// ★ Asmuth Gl. 29/30 / A6-Plan: EMA von u_s im xyz-Rahmen (frame-stabil) -- das instantane
 	// Nullziel jagte P-Fluktuationen und pumpte mit +-2ut-Oszillation selbst Turbulenz (J0-Befund
 	// 45 Grad: Klemmquote 8 %, Ist-Reibung 84 % der Wandreibung trotz Nullziel).
@@ -1977,7 +1986,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#endif"+R(
 )+"#endif"+R( // FACETTEN_ALPHA
 	const float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
-	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] IST-Wandkraft (ungeklemmt == twe*t1, Wirkpfadnachweis)
+	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] Ist-Wandkraft (ungeklemmt == twe*t1; unter PEMA MODELLKRAFT: P gefiltert, P-Fluktuation laeuft als BB durch -- Audit 1/3)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
 )+"#ifdef FACETTEN_ALPHA"+R(
 	fac_tau_acc[a+4ul] += fma(alph, S0, 6.0f*(S1x*usx+S1y*usy+S1z*usz)); // Delta-m-REST unter alpha: Soll ~float-ulp (Leck-Formel bleibt im #else als A/B-Referenz)
@@ -1998,7 +2007,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	fac_tau_cnt[fid] += 1u;
 )+"#ifdef FACETTEN_DIAGZ"+R(
 	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
-	// Facette schreibt ihre komplette Kette jeden Schritt in einen 16er-Puffer; der Host sampelt
+	// Facette schreibt ihre komplette Kette jeden Schritt in einen 18er-Puffer; der Host sampelt
 	// je Chunk in eine CSV -- Plausibilitaet an kleinen Faellen SELBST nachvollziehbar.
 	if((float)fid==fac_diag[16]) { // float-Vergleich: Sentinel -1.0f matcht nie (IR3-Audit: (uint)(-1.0f) war UB und haette fid 0 stumm geloggt)
 		fac_diag[0]=ut; fac_diag[1]=twe; fac_diag[2]=P1; fac_diag[3]=P2;
