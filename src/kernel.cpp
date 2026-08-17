@@ -1800,11 +1800,12 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// diesem Block) -- fuer einen Gradienten dokumentiert akzeptabel.
 		float num=0.0f, den=0.0f;
 		for(uint ia=1u; ia<def_velocity_set; ia++) {
-			const uint iba = (ia%2u==1u) ? ia+1u : ia-1u;
-			if((flags[j[iba]]&TYPE_BO)==TYPE_S) continue; // nur Fluid/TYPE_E-Nachbarn (gueltiges rho)
+			// ★ Pruefer-Befund HOCH (270cd99): j[opposite(ia)] ist der Nachbar bei n MINUS c_ia --
+			// der Gradient war GESPIEGELT (tw stieg im APG statt zu sinken). j[ia] = Nachbar bei +c_ia.
+			if((flags[j[ia]]&TYPE_BO)==TYPE_S) continue; // nur Fluid/TYPE_E-Nachbarn (gueltiges rho)
 			const float ct1a = c(ia)*t1x+c(def_velocity_set+ia)*t1y+c(2u*def_velocity_set+ia)*t1z;
 			const float wia = w(ia);
-			num = fma(wia*ct1a, rho[j[iba]]-rhon, num);
+			num = fma(wia*ct1a, rho[j[ia]]-rhon, num);
 			den = fma(wia, ct1a*ct1a, den);
 		}
 		fac_dpds = (den>=1e-6f) ? num/(3.0f*den) : 0.0f; // Entartung (alles solid): Korrektur exakt 0

@@ -366,3 +366,18 @@ aufloesbar, das effektive Verhalten ist subkritisch (deshalb das 0,45-0,5-Band a
 (b) noch nicht voll konvergiert (18->37,5 hebt +0,08); (c) das Leck des Alt-Arms SKALIERT mit
 der Aufloesung (272 bei DX40 -> 13.149 bei DX12) -- die alpha-Korrektur wird zum Fahrzeug hin
 also WICHTIGER, nicht unwichtiger. F12/N3-Wertrichter-Frage damit beantwortet.
+
+## APG-Messarm (270cd99 -> Korrektur): Pruefagent fing ZWEI Blocker
+
+1x KRITISCH: mein Aufraeum-Edit brach den Baum (fehlendes // vor einem Sternchen-Kommentar) --
+und ich hatte den Build-Fehler im tail-1 uebersehen: die 270cd99-Testzahlen liefen gegen das
+VORHERIGE Binary. Lehre: BUILD-RC IMMER echoen, nie nur tail.
+1x HOCH: der dp/ds-Schaetzer war GESPIEGELT -- j[opposite(ia)] ist der Nachbar bei n MINUS c_ia
+(Rechenprobe des Pruefers: linearer Gradient ergab exakt -dp/ds). Der Arm hob tw im APG statt
+zu senken; die 270cd99-Kugelzahl (+0,35) validierte die Zielphysik NICHT.
+Beide gefixt; Retest auf verifiziert frischem Binary: Suite 5x, Arm-3-Anker exakt (Emissions-
+Nulltest), Kugel DX40-Kurzlauf: APG=0 -0,003 / APG=1 +1,091, Slot 19 = 2829, Delta-m exakt 0,
+kein RHO_CLAMP. Richtung und Stabilitaet damit belegt; kappa=1 uebersteuert am groben Kurzlauf
+(Band 0,45-0,5) -- kappa-Eichung + Aufloesungsleiter = Messprogramm vor jedem Fahrzeug-APG-Arm.
+Positivliste des Pruefers: Differenzform exakt 0 bei uniformem rho, Einbauort/Klemmen/Puffer/
+Symmetrie/PEMA-Sperre alle verifiziert.
