@@ -333,3 +333,14 @@ set-u-fest, Slot-7-Modulo auch am Wickelpunkt korrekt, nichts Eingeschlepptes. N
 Slot-8-Quoten sind zwischen PEMA- und Nicht-PEMA-Armen nicht 1:1 vergleichbar (max 1 vs. 2
 Inkremente je Besuch); DIAG==2 im aktiven Arm exitet vor dem census_n-Waechter (harmlos).
 Regression nach R2-Fix: Tests 5x gruen, beide Anker-Hashes exakt.
+
+## Komplett-Audit Runde 3 (Nachpruefer auf 9ffa588): KEINE BEFUNDE
+
+Splice klammersauber (Muster byte-gleich zu bewaehrten Nachbarn, Emissionsmechanik verifiziert),
+Nicht-PEMA-Arm tokenstrom-identisch zum Vorzustand, PEMA-Arm zaehlt nur noch die angewandte
+Kette, R2-Protokoll faktisch korrekt, nichts Eingeschlepptes.
+
+**Der Komplett-Audit 2026-08-17 ist damit nach Iron Rule 3 formal geschlossen** (3 Pruefer ->
+Fix-Batch -> Regression -> 2 Nachpruefrunden bis leer). Kein HOCH-Befund im gesamten Audit;
+Regressionsanker final: facetten_test 5x bestanden, Arm-1-Hash 12755646098055097704,
+Arm-3-Hash 887930967142844785 (Reproduktion: logs/anker/).
