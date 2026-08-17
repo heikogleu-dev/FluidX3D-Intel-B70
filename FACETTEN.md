@@ -172,6 +172,25 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    mit y_w = 0,5.
 7. K2-Instrument: 1-%-Band gilt nur für hinreichend stationäre Fenster (ETT=80/WARM=20 lief
    auf 1,035–1,042 in BEIDEN Mechanismen) — Gate vor Torus-Abnahmen nachziehen.
+8. **Far-Geometrie-Nullmodell (CC-Ideenskizze 2026-08-17, geprüft):** Das 16-mm-Fernfeld
+   umströmt einen 4× gröber getreppten Körper → falsches Verdrängungs-/Druckfeld an den
+   Nahfeld-Rändern. Korrektur NICHT über Bouzidi-artiges interpoliertes BB (EP/FP16C-heikel),
+   sondern über den VORHANDENEN Additivpfad: iMEM-Maschine mit Geometrie-Ziel — u_s so, dass
+   das linear extrapolierte Profil bei y_w statt bei 0,5 verschwindet (kein Spalding, kein
+   Wandmodell-Anspruch). Facetten-Fit läuft im dd-Fall bereits auf BEIDEN Gittern
+   (CFD_FACETTEN_DIAG); r21-Statistik bei 16 mm damit heute messbar. ABHÄNGIG von Punkt 3
+   (α-Massenkorrektur — Fahrzeug im Far ist gekrümmte Geometrie); Vorvalidierung an der
+   groben Kugel. Perf-Gate: Fernfeld liegt bei 79 % der Feinzeit, +5–8 % Facettenkosten
+   messen (iGPU darf nicht zum Flaschenhals werden). Reihenfolge: nach Stufe-5-Basis.
+9. **near→far-Rückkopplung als Nudging (CC-Ideenskizze 2026-08-17, geprüft):** Wake-Abdruck
+   des Nahfelds ins Fernfeld zurückprägen. NICHT über TYPE_E/u-Überschreiben (hartes
+   Dirichlet = Ghost-Mode-Falle), sondern als Volumenkraft-Nudging über das aktive
+   FORCE_FIELD: F ∝ ρ·(ū_near − u_far), Wirkung in der Kollision, paritätsschonend, nur u
+   (ρ/p rechnet das Far selbst). Zeitmittel über die ratio Substeps + 4³-Raumrestriktion
+   AUF DER B70 in einen grob aufgelösten Akkumulator (~40–50 MB Transfer/Grobschritt statt
+   2,6 GB roh; VRAM ~50 MB). Blending 100→0 % zu den Kopplungsrändern (Zirkularitätsschutz).
+   Falsifikation: Interface-Sprung an den Deckungspunkten mit/ohne (Instrument existiert im
+   Wirksamkeitsnachweis). Eigener Messarm, NACH Punkt 8, nie gleichzeitig einführen.
 
 ---
 
