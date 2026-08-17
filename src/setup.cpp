@@ -2604,6 +2604,13 @@ static void main_setup_fahrzeug_dd() {
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 	} // stat_ok
+	if(env_u("CFD_FACETTEN", 0u)==0u&&env_u("CFD_FAC_K4", 0u)>0u) { // ★ K4 am FAHRZEUG (Heiko 2026-08-18): Hybrid-Schaetzer vs object_force am unbehandelten BB -- ohne diese Eichung ist kein AUS-vs-Facetten-Cd-Vergleich belastbar
+		const std::vector<double> leer;
+		const FacKraft FK0 = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
+		const float3 Fo = lbm_f.object_force(TYPE_S|TYPE_X);
+		print_info("K4 dd (AUS-Arm): kraft_facetten Fx = "+to_string((float)FK0.px,6u)+" vs object_force Fx = "+to_string(Fo.x,6u)
+			+" (rel. Abw. "+to_string((float)(Fo.x!=0.0f?fabs(FK0.px/(double)Fo.x-1.0):0.0),8u)+", Soll < 1e-5); Fz: "+to_string((float)FK0.pz,6u)+" vs "+to_string(Fo.z,6u));
+	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];
 		df->rho_clamp_hits.read_from_device();
