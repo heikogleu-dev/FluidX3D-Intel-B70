@@ -551,10 +551,14 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 // Facettennachbarn: voller F (dort gilt reiner BB). fbi-Formel WOERTLICH wie messe_yplus.
 struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; };
 FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uchar marker,
-                        const ulong fenster, const std::vector<double>& snap, const bool z_per=false) {
+                        const ulong fenster, const std::vector<double>& snap, const bool z_per=false, const bool flags_aktuell=false) {
 	L.update_force_field();
 	LBM_Domain* D = L.lbm_domain[0];
-	D->F.read_from_device(); L.flags.read_from_device();
+	D->F.read_from_device();
+	// ★ Profiler-Befund 2026-08-19 (Heiko): flags sind nach initialize() STATISCH -- der
+	// Voll-Domaenen-Read je Sample war reine PCIe-Verschwendung (~0,5 GB im dd). Heisse
+	// Schleifen lesen EINMAL nach run(0) und uebergeben flags_aktuell=true.
+	if(!flags_aktuell) L.flags.read_from_device();
 	FacKraft K; K.px=K.py=K.pz=K.rx=K.ry=K.rz=0.0; K.n_voll=K.n_proj=K.n_unklar=0ull;
 	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
 	const bool fac = D->facetten_on;
@@ -1393,7 +1397,8 @@ void main_setup_kugel() {
 			fac_cd_i++;
 			if((fac_cd_i-1ull)%(ulong)max(1u,env_u("CFD_FAC_CD_EVERY",1u))==0ull) {
 				const std::vector<double> leer;
-				const FacKraft FS = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
+				if(fac_pn==0ull) lbm.flags.read_from_device(); // einmalig: TYPE_MS aus initialize() in den Host-Spiegel
+				const FacKraft FS = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), 1ull, leer, false, true);
 				fac_px+=FS.px; fac_py+=FS.py; fac_pz+=FS.pz; fac_pn++;
 				if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv << "# Druck-Zeitreihe des projizierten Cd-Pfads (Reibung: exaktes Fenster-Delta im Endreport)\nt_si,cd_druck_x,cd_druck_z\n"; }
 				fac_csv << ts.back() << "," << (double)units.si_F((float)FS.px)/((double)q_inf*(double)A_nom) << "," << (double)units.si_F((float)FS.pz)/((double)q_inf*(double)A_nom) << "\n" << std::flush;
@@ -2518,11 +2523,12 @@ static void main_setup_fahrzeug_dd() {
 				LBM_Domain* df = lbm_f.lbm_domain[0];
 				if(fac_snap.empty()) { // Reibungs-Snapshot am Fensteranfang (erst ab Warmup)
 					df->fac_tau.read_from_device();
+					lbm_f.flags.read_from_device(); // einmalig fuer alle folgenden kraft_facetten-Aufrufe (flags statisch)
 					fac_snap.resize(3ull*df->fac_N);
 					for(ulong i=0ull;i<df->fac_N;i++){ fac_snap[3ull*i]=(double)df->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)df->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)df->fac_tau[6ull*i+3ull]; }
 					fac_snap_outer = outer+1ull;
 				} else {
-					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap);
+					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap, false, true);
 					fac_px += FK.px; fac_pz += FK.pz; fac_pn++;
 					fac_dm=0.0; fac_rest=0.0; // fac_tau ist durch kraft_facetten frisch -- Delta-m huckepack ohne Extra-Transfer
 					for(ulong i=0ull;i<df->fac_N;i++){ fac_dm+=(double)df->fac_tau[6ull*i+4ull]; fac_rest+=(double)df->fac_tau[6ull*i+5ull]; }
