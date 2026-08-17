@@ -1846,7 +1846,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// mit cq = S1/S0 -- eine Kovarianz, garantiert PSD. Der Solve erreicht sein Impulsziel damit
 	// INKLUSIVE des alpha-Terms exakt (Sum q c = G'*u_s), und die sn-Nullung nullt die TATSAECHLICHE
 	// Normalinjektion inkl. alpha. Einzellink-Facette: G' == 0 analytisch -> faellt sauber in
-	// Rang-0-BB; der relative Waechter haelt das float-Restrauschen (~eps*G) aus der Kaskade
+	// Slot-13-Return (Entkopplung, nicht Slot 15!) -- statische Einzellink-Population; Waechter haelt eps*G-Rauschen aus der Kaskade
 	// (J4-Flicker-Lehre: absolute Schwellen lagen exakt auf dem Rauschen).
 	if(S0>0.0f) {
 		const float G11r=G11, G22r=G22, Snnr=Snn;

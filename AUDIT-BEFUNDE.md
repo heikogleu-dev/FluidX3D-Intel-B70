@@ -421,3 +421,21 @@ nur: erste Zelle in der Log-Schicht, Instrument ok. To-do-Liste ergaenzt:
    Und: warum differenziert das Ziel nicht? (20 % Gates + Klemmen bei y+~30 -- Budget pruefen.)
 Mozaffari/APG ist wie geplant NOCH NICHT im Serienlauf (kappa ungeeicht) -- nach diesem Befund
 ist er umso wichtiger: er ist der Arm, der wirklich differenzieren soll.
+
+---
+
+# Iron-Rule-3-Audit Stufe-5-Bauabschnitt (2026-08-18 nachts): KEIN Ziel-Verschlucker-Bug
+
+Kernergebnis (alles NACHGERECHNET): Arm3~=Arm4 ist STRUKTURELLE PHYSIK, kein Defekt --
+Spalding-Mehrbedarf |ds1| = 0,04 % des Gate-Budgets bei y+~30 (Gate kappt NICHTS); die
+Ziel-Differenz ist konstruktiv auf die Reibungsskala (1,8 % von Cd) gedeckelt und durch 43 %
+Rueckfaelle + Heck-Auslöschung auf die gemessenen 0,0015 gedaempft. ohneTang 16,8 % = STATISCHE
+Einzellink-Population (G'=0 analytisch, by design) -- sitzt aber an den konvexen Abrisskanten:
+dokumentiertes Abdeckungsloch. Normal-Rest -500 = EHRLICHES Konto realer Injektion (Identitaet
+downgedatete Momente == roh+alpha*Bn algebraisch bewiesen), Rate 8e-3/Schritt = 4 Ordnungen
+unter der Cz-Kraftskala -- keine Gefaehrdung. Befunde gefixt: cd_reib-Semantik ehrlich
+(residuendominiert, Zielanteil = Arm-Differenz), Slot-13-Kommentar, [4]/[5]-Fenster-Snapshot
+(dm/rest jetzt Warmup-bereinigt), APG-Klemmen-Census als NIEDRIG-Rest notiert (Slot-8-Luecke
+bei guenstigem Gradienten), Slot-7-Wrap bei 3x laengeren Serien notiert. Regression: Suite 5x,
+Arm-3-Anker exakt. Einzellink-Census in baue_facetten + Kanten-Abdeckung = neue Messpunkte
+fuer die APG-/Abloesungs-Etappe.

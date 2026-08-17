@@ -2341,7 +2341,7 @@ static void main_setup_fahrzeug_dd() {
 	// die aufgepraegte Schubspannung wirkt als Impulssenke, sie verschiebt keinen Abloesepunkt --
 	// Gleichgewichts-Wandmodell ohne APG-Term (FACETTEN.md Paragraph 4 Punkt 0).
 	std::vector<double> fac_snap; ulong fac_snap_outer=0ull, fac_pn=0ull, fac_smp=0ull;
-	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0;
+	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0, fac_dm0=0.0, fac_rest0=0.0;
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_info("C7-Notiz: Facetten-Schubspannung = Impulssenke (Gleichgewichtsmodell, kein APG) -- Abloeselage bleibt modellfrei; Cd/Cz-Bewegung dokumentieren, nicht versprechen.");
@@ -2524,14 +2524,16 @@ static void main_setup_fahrzeug_dd() {
 				if(fac_snap.empty()) { // Reibungs-Snapshot am Fensteranfang (erst ab Warmup)
 					df->fac_tau.read_from_device();
 					lbm_f.flags.read_from_device(); // einmalig fuer alle folgenden kraft_facetten-Aufrufe (flags statisch)
+					for(ulong i0=0ull;i0<df->fac_N;i0++){ fac_dm0+=(double)df->fac_tau[6ull*i0+4ull]; fac_rest0+=(double)df->fac_tau[6ull*i0+5ull]; } // Audit S5: [4]/[5]-Snapshot -- Fenster-Delta statt Warmup-Historie
 					fac_snap.resize(3ull*df->fac_N);
 					for(ulong i=0ull;i<df->fac_N;i++){ fac_snap[3ull*i]=(double)df->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)df->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)df->fac_tau[6ull*i+3ull]; }
 					fac_snap_outer = outer+1ull;
 				} else {
 					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap, false, true);
 					fac_px += FK.px; fac_pz += FK.pz; fac_pn++;
-					fac_dm=0.0; fac_rest=0.0; // fac_tau ist durch kraft_facetten frisch -- Delta-m huckepack ohne Extra-Transfer
-					for(ulong i=0ull;i<df->fac_N;i++){ fac_dm+=(double)df->fac_tau[6ull*i+4ull]; fac_rest+=(double)df->fac_tau[6ull*i+5ull]; }
+					double dm_b=0.0, rest_b=0.0; // fac_tau frisch durch kraft_facetten (kein Extra-Transfer)
+					for(ulong i=0ull;i<df->fac_N;i++){ dm_b+=(double)df->fac_tau[6ull*i+4ull]; rest_b+=(double)df->fac_tau[6ull*i+5ull]; }
+					fac_dm=dm_b-fac_dm0; fac_rest=rest_b-fac_rest0; // FENSTER-Delta (Audit S5): Warmup-Historie abgezogen
 					if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv.precision(8); fac_csv << "time_s,cd_druck,cz_druck,cd_reib,cz_reib,dm,rest\n"; }
 					const double qA=(double)q_inf*A_ref;
 					fac_csv << t_si << "," << (double)units_fine.si_F((float)FK.px)/qA << "," << (double)units_fine.si_F((float)FK.pz)/qA << ","
@@ -2643,7 +2645,7 @@ static void main_setup_fahrzeug_dd() {
 		if(fac_pn>0ull) { const double qA=(double)q_inf*A_ref;
 			print_info("Cd-Pfad Nahfeld: Cd_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_px/(double)fac_pn))/qA),4u)
 				+" (Zeitmittel, "+to_string(fac_pn)+" Samples), Cz_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_pz/(double)fac_pn))/qA),4u)
-				+" -- Reibung: letzte Zeile cd_facetten.csv (exaktes Fenster-Delta)."); }
+				+" -- Reibung: letzte Zeile cd_facetten.csv. ACHTUNG Audit S5: cd_reib ist residuendominiert (88 % zielUNabhaengige Querresiduen der Rang-2-Pfade) -- ehrlicher Zielanteil = ARM-DIFFERENZ, nicht der Absolutwert."); }
 		print_info("ACHTUNG: forces.csv/Cd oben enthaelt an behandelten Links PHANTOM-Reibung (object_force) -- fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
 	}
 	print_info("---------------------------------------------------------------");
