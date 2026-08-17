@@ -536,9 +536,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	print_info("  Winkel zur dominanten Achse: Median "+to_string((float)quantil(hist_winkel,0.5),1u)
 		+" Grad, q90 "+to_string((float)quantil(hist_winkel,0.9),1u)+" Grad");
 	std::ofstream fh(out_dir+"facetten_histogramme.csv");
-	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,r21,r10,klasse,achse,n_punkte,eigene_links\n";
+	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,r21,r10,klasse,achse,n_punkte,eigene_links,n\n"; // ★ K4-Ring-Etappe: Zellindex n als letzte Spalte -- ohne ihn war keine DIAGZ-Zielwahl aus dem Census moeglich
 	for(const Facette& f : F) fh << f.yw << "," << (acos(fmin(1.0f,fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0f/3.14159265f)
-		<< "," << f.r21_ << "," << f.r10_ << "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "\n";
+		<< "," << f.r21_ << "," << f.r10_ << "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "," << f.n << "\n";
 	fh.close();
 	print_info("  CSV: "+out_dir+"facetten_histogramme.csv");
 	return F;

@@ -162,7 +162,10 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    α dort inaktiv). Folgearbeit: K4-Ring-Behandlung (y_w=0,188-Lage, 49,5 Mio α>u_t-Ereignisse);
    Attribution: Stufe 1 bleibt im Band (0,0016455), injiziert aber −35k Normalimpuls —
    beide "Pässe" lehnten an je einer Erhaltungsverletzung; der voll erhaltungstreue Arm
-   liegt 11 % drüber. → K4-Ring-Frage; die α-Mechanik selbst ist prüfer-verifiziert.
+   liegt 11 % drüber. K4-Ring-Diagnose 2026-08-17 ABGESCHLOSSEN (DIAGZ alle 3 Lagen): kein
+   Flicker, keine Rails — Regime-Wechsel entkoppelt→gekoppelt (Snn 1,0→0,141) plus Rang-2-Lage
+   ist der strukturelle Preis exakter Erhaltung. OFFEN als Messprogramm: N2-Band-Neueichung
+   mit erhaltungstreuer Referenz vs. Ring-Spalding-Ziel (Details AUDIT-BEFUNDE.md).
 2. **Familienfrage SUSPENDIERT bis zur Saum-fixen Messung**: Kompensationsfamilie (iMEM
    instantan/EMA/PEMA) vs. Ersetzungsansatz (PowerFLOW-artige BB/Specular-Gewichtung) vs.
    Richterwechsel Kugel. Davor noch der billige **Klemmskalen-Messarm** (±4ut): fällt c_f
