@@ -171,8 +171,12 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    damit auf BB-Basis, war es der Klemmsaum; bleibt es, ist es P′-Arbeit = Modellgrenze.
 3. **Kugel J4**: Masseleck ERLEDIGT 2026-08-17 (α-Korrektur Stufe 2, s. §2 CFD_FAC_ALPHA):
    Δm 272,9→−2e-5 am Richter (DX=40), Normal-Rest ~0, Cd-Vorzeichen erstmals physikalisch
-   (+0,05 bei D/dx=11; CPU-DX=25: +0,49). REST: Cd-Wertkalibrierung ist jetzt eine
-   Auflösungsfrage — Census (|L|-Verteilung, Kopplungswinkel), feinere DX-Sprosse, beide
+   (+0,05 bei D/dx=11; CPU-DX=25: +0,49). ERLEDIGT 2026-08-18 auch der Wertrichter:
+   Auflösungsleiter kr_dx* konvergiert monoton an den unteren Bandrand (0,436 bei D/dx=37,5;
+   Band 0,45–0,5 Achenbach), BB-Basis 0,717 liegt ~55 % drüber, Alt-Arm-Leck skaliert mit der
+   Auflösung (13.149 bei DX12) — Facetten+iMEM+α2 ist am Kugelfall belegt REALISTISCHER als BB
+   (Details AUDIT-BEFUNDE.md). REST: Feinkonvergenz/Census als Kür — keine Blockade mehr. Alt:
+   Cd-Wertkalibrierung ist jetzt eine Auflösungsfrage — Census (|L|-Verteilung, Kopplungswinkel), feinere DX-Sprosse, beide
    Cd-Wege, Δρ̄-Drift-Band, FP32-Sprosse (FP16C). N3/F12-Band weiter hier.
 4. **Hangauf-Arm I2b** (45°-Torus, Antrieb (0,1,1)/√2): misst die R2-Lücke — nur unter iMEM
    möglich; Umbauliste steht (IMEM-Revision Auflage 5).

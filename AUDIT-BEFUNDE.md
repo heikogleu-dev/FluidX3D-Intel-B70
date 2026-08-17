@@ -344,3 +344,25 @@ Kette, R2-Protokoll faktisch korrekt, nichts Eingeschlepptes.
 Fix-Batch -> Regression -> 2 Nachpruefrunden bis leer). Kein HOCH-Befund im gesamten Audit;
 Regressionsanker final: facetten_test 5x bestanden, Arm-1-Hash 12755646098055097704,
 Arm-3-Hash 887930967142844785 (Reproduktion: logs/anker/).
+
+## Kugel-Wertrichter: Aufloesungsleiter 2026-08-18 (kr_dx*, Arm 3+alpha2, YWMIN=0,15, SATGATE)
+
+| D/dx | Cd-Hybrid (Summe) | Delta-m |
+|---|---|---|
+| 11 (DX40) | 0,046 | -1,7e-5 |
+| 18 (DX25) | 0,344 | +2,3e-5 |
+| 25 (DX18) | 0,355 | -6,7e-5 |
+| 37,5 (DX12) | **0,436** | -3,3e-5 |
+| DX12 BB-Basis | **0,717** (object_force, gueltig) | -- |
+| DX12 Alt-Arm (alpha aus) | 0,330 | **+13.149** (!) |
+
+Literaturband (FACETTEN-LITERATUR): subkritische Referenz Cd 0,45-0,5 (Achenbach); Bodennaehe
+h/D=0,167 erhoeht eher bzw. laesst neutral (Tsutsui-Logik, mitbewegter Boden ohne direkte Kurve).
+**Urteil: der erhaltungstreue Arm konvergiert monoton von unten an den unteren Bandrand (0,436
+bei D/dx=37,5), waehrend die BB-Basis mit 0,717 ~50-60 % DRUEBER liegt. Erstmals ist am
+Kugelfall belegt: Facetten+iMEM+alpha2 ist REALISTISCHER als reines BB.** Ehrliche Grenzen:
+(a) Re_D=9,1e5 ist nominal superkritisch -- die Drag-Krise ist bei diesen Aufloesungen nicht
+aufloesbar, das effektive Verhalten ist subkritisch (deshalb das 0,45-0,5-Band als Referenz);
+(b) noch nicht voll konvergiert (18->37,5 hebt +0,08); (c) das Leck des Alt-Arms SKALIERT mit
+der Aufloesung (272 bei DX40 -> 13.149 bei DX12) -- die alpha-Korrektur wird zum Fahrzeug hin
+also WICHTIGER, nicht unwichtiger. F12/N3-Wertrichter-Frage damit beantwortet.
