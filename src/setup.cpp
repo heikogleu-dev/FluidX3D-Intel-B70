@@ -1983,8 +1983,25 @@ static void main_setup_fahrzeug_dd() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
-	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
+	// ★ STUFE 5 (Plan 2026-08-18): Facetten/iMEM im NAHFELD. Kugel-Muster; alle 9 Statiken.
+	{ const uint fc = env_u("CFD_FACETTEN", 0u);
+	  if(fc>4u) print_error("CFD_FACETTEN kennt nur 0..4 (1/2 Paartausch voll/Tausch, 3/4 iMEM voll/Nullziel).");
+	  LBM_Domain::s_facetten = fc>0u; LBM_Domain::s_fac_imem = fc>=3u;
+	  LBM_Domain::s_fac_ema = (fc>=3u) ? env_f("CFD_FAC_EMA", 0.0f) : 0.0f;
+	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
+	  LBM_Domain::s_fac_diagz = -1l;
+	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im dd-Fall NICHT verdrahtet -- Ketten-Diagnose nur im Kanal/Torus.");
+	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
+	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle).");
+	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
+	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: als Messarm wertlos (IR3-Audit).");
+	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A): alpha = "+to_string(LBM_Domain::s_fac_pema,5u));
+	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u;
+	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate).");
+	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+" -- Slot 18 zaehlt alpha>u_t.");
+	  if(fc==3u&&(LBM_Domain::s_fac_alpha<2u||!LBM_Domain::s_fac_satgate)) print_warning("Arm 3 ohne SATGATE+ALPHA2 an gekruemmter Geometrie -- Kugel-J4-Lehre: nur als bewusster Messarm fahren.");
+	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
+	  if(fc>0u) print_info(string("Facettenpfad NAHFELD: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Fernfeld bleibt bewusst reines BB (16-mm-Treppenkoerper = Offen-Punkt 8)."); }
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
 
 	// ---------------------------------------------------------------- Grobes Gitter bauen
@@ -2096,10 +2113,22 @@ static void main_setup_fahrzeug_dd() {
 		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
+	// ★ Stufe 5: aktiver Facettenbau NUR Nahfeld (nach set_bcs/Kontaktflaeche -- Revision Auflage 6).
+	std::vector<Facette> FFn;
+	if(env_u("CFD_FACETTEN", 0u)>0u) {
+		const string fdir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
+		create_folder(fdir);
+		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_f.get_N();n++) if(lbm_f.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		FFn = baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdir, "dd-Nahfeld");
+		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_f.get_N();n++) if(lbm_f.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
+		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
+	}
 	lbm_f.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f)); // Bit 2 = x_max
 	lbm_c.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f));
 	lbm_f.finalize_sparse_tiles();
 	lbm_c.finalize_sparse_tiles();
+	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn); // vor run(0) -- der run()-Guard verlangt die Bindung
 
 	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN
 	// Nicht der Code oben wird berichtet, sondern der ZUSTAND danach: fuer jede der sechs Flaechen
@@ -2293,6 +2322,15 @@ static void main_setup_fahrzeug_dd() {
 	// auswertbar. Die Vektoren bleiben zusaetzlich fuer die Statistik am Ende.
 	std::ofstream fcsv(out_dir+"forces.csv"); fcsv.precision(8);
 	fcsv << "time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N\n" << std::flush;
+	// ★ Stufe 5: Facetten-Cd-Pfad (Hybrid, Kugel-Muster E6): Druck als Zeitmittel an der Kadenz,
+	// Reibung als exaktes Fenster-Delta ab Snapshot. C7-Notiz VOR der Schleife (ARBEITSLISTE 167):
+	// die aufgepraegte Schubspannung wirkt als Impulssenke, sie verschiebt keinen Abloesepunkt --
+	// Gleichgewichts-Wandmodell ohne APG-Term (FACETTEN.md Paragraph 4 Punkt 0).
+	std::vector<double> fac_snap; ulong fac_snap_outer=0ull, fac_pn=0ull, fac_smp=0ull;
+	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0;
+	std::ofstream fac_csv;
+	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
+	if(env_u("CFD_FACETTEN", 0u)>0u) print_info("C7-Notiz: Facetten-Schubspannung = Impulssenke (Gleichgewichtsmodell, kein APG) -- Abloeselage bleibt modellfrei; Cd/Cz-Bewegung dokumentieren, nicht versprechen.");
 	// ★ B2: Wandprofil ueber die Zeit, je Gitter eine Saeule und eine CSV (Begruendung bei
 	// schreibe_wandprofil). Die Saeule wird EINMAL gesucht -- die Flags sind nach initialize statisch.
 	uint wp_fx=0u, wp_fy=0u, wp_cx=0u, wp_cy=0u;
@@ -2467,6 +2505,25 @@ static void main_setup_fahrzeug_dd() {
 			ts.push_back(t_si); fx.push_back(Fx_si); fz.push_back(Fz_si); fx_c.push_back(Fx_far);
 			fcsv << t_si << "," << Fx_si << "," << Fz_si << "," << Fx_si/((double)q_inf*A_ref) << ","
 			     << Fz_si/((double)q_inf*A_ref) << "," << Fx_far << "\n" << std::flush; // sofort auf Platte, siehe oben
+			if(env_u("CFD_FACETTEN", 0u)>0u && t_si>=(double)t_warmup && (++fac_smp)%fac_cd_every==0ull) { // ★ Stufe 5 (PCIe ~2,5 GB je Aufruf -- Kadenz!)
+				LBM_Domain* df = lbm_f.lbm_domain[0];
+				if(fac_snap.empty()) { // Reibungs-Snapshot am Fensteranfang (erst ab Warmup)
+					df->fac_tau.read_from_device();
+					fac_snap.resize(3ull*df->fac_N);
+					for(ulong i=0ull;i<df->fac_N;i++){ fac_snap[3ull*i]=(double)df->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)df->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)df->fac_tau[6ull*i+3ull]; }
+					fac_snap_outer = outer+1ull;
+				} else {
+					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap);
+					fac_px += FK.px; fac_pz += FK.pz; fac_pn++;
+					fac_dm=0.0; fac_rest=0.0; // fac_tau ist durch kraft_facetten frisch -- Delta-m huckepack ohne Extra-Transfer
+					for(ulong i=0ull;i<df->fac_N;i++){ fac_dm+=(double)df->fac_tau[6ull*i+4ull]; fac_rest+=(double)df->fac_tau[6ull*i+5ull]; }
+					if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv.precision(8); fac_csv << "time_s,cd_druck,cz_druck,cd_reib,cz_reib,dm,rest\n"; }
+					const double qA=(double)q_inf*A_ref;
+					fac_csv << t_si << "," << (double)units_fine.si_F((float)FK.px)/qA << "," << (double)units_fine.si_F((float)FK.pz)/qA << ","
+					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest << "\n" << std::flush;
+					if(fabs(fac_dm)>1e-4*(double)df->fac_N) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N -- in Arm 4 eichen)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
+				}
+			}
 			const auto _t5 = t_now();
 			if(slice_dt>0.0f && (float)t_si>=slice_next) {
 				slice_next = (float)t_si + slice_dt;
@@ -2532,6 +2589,41 @@ static void main_setup_fahrzeug_dd() {
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 	} // stat_ok
+	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
+		LBM_Domain* df = lbm_f.lbm_domain[0];
+		df->rho_clamp_hits.read_from_device();
+		const ulong wz=(ulong)df->rho_clamp_hits[7], soll=df->fac_N*(ulong)((n_outer*(ulong)ratio+99ull)/100ull);
+		print_info("Facetten-Wirkpfad Nahfeld: "+to_string(wz)+" (Soll "+to_string(soll)+" mod 2^32), tau-Klemme "+to_string((ulong)df->rho_clamp_hits[8])
+			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
+			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
+			+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
+			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])):string("")));
+		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Nahfeld -- Lookup oder Bindung defekt.");
+		lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		if((ulong)lbm_c.lbm_domain[0]->rho_clamp_hits[7]!=0ull) print_error("Fernfeld zaehlt Facetten-Wirkpfad -- es MUSS unberuehrt sein (Offen-Punkt 8 noch nicht gebaut).");
+		else print_info("Negativ-Kontrolle: Fernfeld-Wirkpfad = 0 (unberuehrt, wie gefordert).");
+		df->fac_tau.read_from_device(); df->fac_tau_n.read_from_device(); // Stale-Falle: frisch lesen
+		double dm=0.0, nk=0.0; for(ulong i=0ull;i<df->fac_N;i++){ dm+=(double)df->fac_tau[6ull*i+4ull]; nk+=(double)df->fac_tau[6ull*i+5ull]; }
+		print_info("iMEM-Erhaltung Nahfeld: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)+" (Referenz Kugel-alpha2: -2e-5)");
+		{	// ★ Facetten-y+: je Facette y_w aus fac_geo (NICHT hartkodiert 0,5 -- Audit-Rest #6 nicht wiederholen)
+			std::vector<float> yp; yp.reserve(df->fac_N);
+			std::ofstream ycsv(out_dir+"yplus_facetten.csv"); ycsv << "yplus\n";
+			for(ulong i=0ull;i<df->fac_N;i++) if(df->fac_tau_n[i]>0u) {
+				const float tw=df->fac_tau[6ull*i]/(float)df->fac_tau_n[i];
+				const float ypl=sqrt(fmax(0.0f,tw))*df->fac_geo[8ull*i+3ull]/nu_lat_f;
+				yp.push_back(ypl); ycsv << ypl << "\n";
+			}
+			if(!yp.empty()) { std::sort(yp.begin(), yp.end());
+				print_info("Facetten-y+ (Akkumulator, y_w je Facette): Median "+to_string(yp[yp.size()/2ull],1u)
+					+", q25 "+to_string(yp[yp.size()/4ull],1u)+", q75 "+to_string(yp[(3ull*yp.size())/4ull],1u)
+					+" ueber "+to_string((ulong)yp.size())+" Facetten (BB-Anker: 1122). CSV: yplus_facetten.csv"); }
+		}
+		if(fac_pn>0ull) { const double qA=(double)q_inf*A_ref;
+			print_info("Cd-Pfad Nahfeld: Cd_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_px/(double)fac_pn))/qA),4u)
+				+" (Zeitmittel, "+to_string(fac_pn)+" Samples), Cz_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_pz/(double)fac_pn))/qA),4u)
+				+" -- Reibung: letzte Zeile cd_facetten.csv (exaktes Fenster-Delta)."); }
+		print_info("ACHTUNG: forces.csv/Cd oben enthaelt an behandelten Links PHANTOM-Reibung (object_force) -- fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
+	}
 	print_info("---------------------------------------------------------------");
 	_exit(0);
 }
