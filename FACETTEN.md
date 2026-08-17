@@ -160,7 +160,9 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    **EINSCHRÄNKUNG 2026-08-17 (α-Befund):** der 26,6°-PASS stand teilweise auf dem Δm-Leck —
    leckfrei (CFD_FAC_ALPHA=2) steigt cf auf 0,001994 > 0,00179, bei 45° hält N2 (0,0011625,
    α dort inaktiv). Folgearbeit: K4-Ring-Behandlung (y_w=0,188-Lage, 49,5 Mio α>u_t-Ereignisse);
-   Attribution Stufe 1 vs. 2 läuft. Die α-Mechanik selbst ist prüfer-verifiziert.
+   Attribution: Stufe 1 bleibt im Band (0,0016455), injiziert aber −35k Normalimpuls —
+   beide "Pässe" lehnten an je einer Erhaltungsverletzung; der voll erhaltungstreue Arm
+   liegt 11 % drüber. → K4-Ring-Frage; die α-Mechanik selbst ist prüfer-verifiziert.
 2. **Familienfrage SUSPENDIERT bis zur Saum-fixen Messung**: Kompensationsfamilie (iMEM
    instantan/EMA/PEMA) vs. Ersetzungsansatz (PowerFLOW-artige BB/Specular-Gewichtung) vs.
    Richterwechsel Kugel. Davor noch der billige **Klemmskalen-Messarm** (±4ut): fällt c_f
