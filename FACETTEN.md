@@ -102,6 +102,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FAC_PEMA` | Beidseitige Eingangs-Filterung P̄/ū, a≈0,01 (nur Arme ≥3, emission-gated; ungesetzt = exakt instantaner Pfad). N2 dennoch verletzt — kein hinreichender Fix, Messarm. |
 | `CFD_FAC_SATGATE` | 1 = Saettigungs-Gate (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme; Slots 10/16 = Rueckfaelle. Stufe-3-Abnahme lief damit. Nur Arme 3/4. |
 | `CFD_FAC_ALPHA` | J4-Massenkorrektur, nur Arme 3/4: 0 aus (Default, bitgleich), 1 nur Masse (α=−6(S1·u_s)/S0 additiv; injiziert α·S1-Impuls — reiner Messarm), 2 Masse + Kovarianz-Downdate G′=G−(6/S0)BBᵀ vor dem Solve (Impulsziel inkl. α exakt; Behalter). Slot 18 zählt α>u_t; ebene Wand: beide Stufen bitgleich zum Aus-Arm. |
+| `CFD_FAC_APG` | float κ (Default 0 = aus, bitgleich): tw-Ziel = Spalding − κ·y_w·dp/ds (dünne-GS-Impulsbilanz, LS-Differenzgradient aus Fluid-Nachbar-ρ). Untere Klemme auf 0 (Slot 19, G8-Lehre). Nur Arme 3/4; mit PEMA noch gesperrt. Messarm, Kugel = Richter. |
 | `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
 | `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Auch OHNE CFD_FACETTEN gültig (= BB-Basis-Arm, so entstehen die N2-Referenzen t45_bb/t26_bb); mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |

@@ -155,7 +155,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 19 Slots (3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
+	Memory<uint> rho_clamp_hits; // 20 Slots (3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme auf 0 (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -164,7 +164,8 @@ public:
 	static float s_fac_ema;  // EMA-Faktor fuer u_s (CFD_FAC_EMA; 0 = aus; WIDERLEGT in J3 -- filtert die falsche Seite, bleibt als A/B-Arm)
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
-	static uint s_fac_alpha; // J4-alpha-Massenkorrektur: 0 aus (Default, bitgleich), 1 nur Masse, 2 + Momenten-Downdate (CFD_FAC_ALPHA)
+	static uint s_fac_alpha;
+	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich) // J4-alpha-Massenkorrektur: 0 aus (Default, bitgleich), 1 nur Masse, 2 + Momenten-Downdate (CFD_FAC_ALPHA)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)

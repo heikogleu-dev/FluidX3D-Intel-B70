@@ -1753,8 +1753,11 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
                         , global float* fac_pu // PEMA-Zustand 6 float je Facette: P-quer (xyz) + u-quer (xyz)
 )+"#endif"+R( // FACETTEN_PEMA
 )+"#ifdef FACETTEN_DIAGZ"+R(
-                        , global float* fac_diag // 18-float-Kettenprotokoll ([16] Selektor, [17] alpha) der Diagnose-Facette
+                        , global float* fac_diag // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds) der Diagnose-Facette
 )+"#endif"+R( // FACETTEN_DIAGZ
+)+"#ifdef FACETTEN_APG"+R(
+                        , const global float* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
+)+"#endif"+R( // FACETTEN_APG
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return;
 	const uint fid = fac_idx[fbi];
@@ -1788,6 +1791,29 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	}
 	float t1x=utx/ut, t1y=uty/ut, t1z=utz/ut;                     // Tangentialbasis (Gl. 6; unter PEMA aus dem gefilterten u neu gesetzt)
 	float t2x=ny*t1z-nz*t1y, t2y=nz*t1x-nx*t1z, t2z=nx*t1y-ny*t1x;
+)+"#ifdef FACETTEN_APG"+R(
+	float fac_dpds=0.0f;
+	{ // ★ APG (Plan 2026-08-18): duenne-GS-Impulsbilanz tau(y_w) = tau_w + y_w*dp/ds -- Ziel
+		// tw_apg = tw - kappa*y_w*dp_ds. dp_ds als 1-Parameter-LS-DIFFERENZFORM ueber die
+		// FLUID-Nachbarn (Rohform ergaebe am wandgestutzten Stencil einen Scheingradienten bei
+		// uniformem rho). rho[j] traegt je Scheduling t-1 oder t (UPDATE_FIELDS schreibt nach
+		// diesem Block) -- fuer einen Gradienten dokumentiert akzeptabel.
+		float num=0.0f, den=0.0f;
+		for(uint ia=1u; ia<def_velocity_set; ia++) {
+			const uint iba = (ia%2u==1u) ? ia+1u : ia-1u;
+			if((flags[j[iba]]&TYPE_BO)==TYPE_S) continue; // nur Fluid/TYPE_E-Nachbarn (gueltiges rho)
+			const float ct1a = c(ia)*t1x+c(def_velocity_set+ia)*t1y+c(2u*def_velocity_set+ia)*t1z;
+			const float wia = w(ia);
+			num = fma(wia*ct1a, rho[j[iba]]-rhon, num);
+			den = fma(wia, ct1a*ct1a, den);
+		}
+		fac_dpds = (den>=1e-6f) ? num/(3.0f*den) : 0.0f; // Entartung (alles solid): Korrektur exakt 0
+		float tw1 = fma(-def_fac_apg*yw, fac_dpds, tw);
+		if(tw1<0.0f) { tw1=0.0f; if(t%100ul==0ul) atomic_inc(&hits[19]); } // Slot 19: APG-Klemme auf 0 (G8: kein negatives Ziel = kein vorzeichen-definiter Injektor)
+		tw = tw1;
+		twe = fmin(tw*faca, 0.5f*rhon*ut); // obere Klemme unveraendert (Slot 8 zaehlt im Kopf)
+	}
+)+"#endif"+R( // FACETTEN_APG
 	float G11=0.0f, G22=0.0f, G12=0.0f, P1=0.0f, P2=0.0f;         // Linkmengen-Momente (Gl. 4/7)
 )+"#ifdef FACETTEN_PEMA"+R(
 	float Pvx=0.0f, Pvy=0.0f, Pvz=0.0f;
@@ -2023,6 +2049,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_ALPHA"+R(
 		fac_diag[17]=alph;
 )+"#endif"+R( // FACETTEN_ALPHA
+)+"#ifdef FACETTEN_APG"+R(
+		fac_diag[18]=fac_dpds;
+)+"#endif"+R( // FACETTEN_APG
 	}
 )+"#endif"+R( // FACETTEN_DIAGZ
 } // apply_facette_imem()
@@ -2097,6 +2126,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifdef FACETTEN_DIAGZ"+R(
 		, fac_diag
 )+"#endif"+R( // FACETTEN_DIAGZ
+)+"#ifdef FACETTEN_APG"+R(
+		, rho
+)+"#endif"+R( // FACETTEN_APG
 	)+");"+R(
 )+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
