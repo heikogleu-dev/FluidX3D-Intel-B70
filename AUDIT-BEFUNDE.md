@@ -381,3 +381,30 @@ kein RHO_CLAMP. Richtung und Stabilitaet damit belegt; kappa=1 uebersteuert am g
 (Band 0,45-0,5) -- kappa-Eichung + Aufloesungsleiter = Messprogramm vor jedem Fahrzeug-APG-Arm.
 Positivliste des Pruefers: Differenzform exakt 0 bei uniformem rho, Einbauort/Klemmen/Puffer/
 Symmetrie/PEMA-Sperre alle verifiziert.
+
+---
+
+# Stufe-5-Erstserie s5b (2026-08-18 nachts, 500-ms-Deckel/Heiko): ABGESCHLOSSEN
+
+| Arm | Cd (Fenster 0,2-0,5) | Cz | Zweck/Befund |
+|---|---|---|---|
+| aus (BB-Anker) | 0,818 (Spaet 0,76) | -0,41 | Anker; Drift-Rest bis ~0,4 s = Fernfeld-Erstflush |
+| arm4 (Nullziel) | Druck 0,82 / Reib 0,01 | -- | Mechanik-Beweis: Ist=Soll 1,31 Mrd EXAKT, Far=0, Dm -0,114 |
+| arm3+alpha2 (Hybrid) | **0,728+-0,10 (Spaet 0,71)** | -0,44 | **-11 % Richtung OF 0,599; Cz unveraendert = C7-These bestaetigt** |
+
+Facetten-y+ Median 29,7 (2,11 Mio Facetten, q25 19,7/q75 46,4) -- Log-Schicht, Instrument
+arm-konsistent. Dm-Gelbband geeicht: Rauschbett ~0,12 -> Schwelle ~1. Slot-Matrix zielunabhaengig
+stabil (Rang2 317M, Gates 20 %, alpha 169M aktiv). OFFENER PRUEFAUFTRAG: Normal-Rest akkumuliert
+linear, arm-UNABHAENGIG (-505 arm4 / -478 arm3) -- systematisch/geometriegebunden, ~1 Ordnung
+ueber Torus-Niveau normiert; VOR Cz-Interpretationen klaeren. Async geklaert (kein Flush V1+V2,
+NEO-Auto-Submit; echte Fenster = Sample-Transfers; flags-Cache-Fix drin, 4d04e1e).
+
+## To-dos 2026-08-18
+1. Normal-Rest-Diagnose (arm-unabhaengig -> Verdacht sn-Kaskade/Klemmen an Fahrzeugkruemmung;
+   DIAGZ-artige Stichprobe + Slot-15/16-Attribution) -- VOR Cz-Aussagen.
+2. APG: kappa-Eichung an der Kugel-Leiter (DX40/25/12, kappa 0,25/0,5/1), dann 4. Fahrzeuglauf
+   s5b_arm3_apg (der Cz-Hebel).
+3. Perf-Fixe aus der Async-Liste: clFlush nach run_async, Sync-Buendelung Extract, finish in
+   drive_boundary streichen (je A/B mit fdinfo; flags-Cache erledigt).
+4. Dm-Waechter scharf (Schwelle ~1 statt 1e-4*fac_N), K2-Stationaritaetsgate (Offen-Punkt 7).
+5. Danach: Iron-Rule-3-Abschluss-Loop des Stufe-5-Bauabschnitts.

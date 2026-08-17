@@ -181,8 +181,11 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    Cd-Wege, Δρ̄-Drift-Band, FP32-Sprosse (FP16C). N3/F12-Band weiter hier.
 4. **Hangauf-Arm I2b** (45°-Torus, Antrieb (0,1,1)/√2): misst die R2-Lücke — nur unter iMEM
    möglich; Umbauliste steht (IMEM-Revision Auflage 5).
-5. **Fahrzeug Stufe 5** (Serie ≥6 B70-Läufe à ≤2,5 h): y⁺-Median 1122 → ~140 aus dem
-   Akkumulator; Arme AUS/4/3; Δm-Wächter; Cd/Cz mit C7-Notiz davor.
+5. **Fahrzeug Stufe 5 — ERSTSERIE ABGESCHLOSSEN 2026-08-18** (s5b, 500-ms-Deckel):
+   Cd 0,818 (BB) → **0,728** (Wandmodell, −11 % Richtung OF 0,599), Cz unverändert (C7/APG-These
+   bestätigt), y⁺-Median 29,7, Mechanik Ist=Soll bei 1,31 Mrd Ereignissen, Δm-Band geeicht.
+   OFFEN: Normal-Rest-Diagnose (arm-unabhängig −500) VOR Cz-Aussagen; APG-κ-Eichung → 4. Lauf;
+   Perf-Fixe (Flush/Sync-Bündelung). Details/To-dos: AUDIT-BEFUNDE.md.
 6. **Niedrige Audit-Reste (IR3)**: Statik-Symmetrie diagz (s_fac_diagz nicht an allen
    Konstruktorstellen) · Kugel-Report: Slots 10-17 seit b1f2caf/IR3-Abschluss vollstaendig; Rest-Item war stale · cf_m-Normierung am Torus ·
    fac_diag-float-Grenzen (fid-Vergleich als float) · y⁺-Report rechnet am Torus hartkodiert
