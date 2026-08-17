@@ -216,6 +216,18 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    (knowledge/performance.md-Methodik: messen, nicht Theorie-Audit) nachmessen, BEVOR die
    near→far-Rückkopplung auf dieselbe Schleife aufsetzt; ein echtes Überlappen halbiert ggf.
    den Grobschritt-Anteil und verschiebt die Kosten-Rechnung von Punkt 8+9.
+   **GEKLÄRT (Code-Agent + fdinfo-Livemessung 2026-08-19 nachts):** clFlush existiert weder in
+   V2 noch in V1 — die V1-Überlappung (98,4 % B70, 2,3 % seriell, findings/2026-06-23) beruhte
+   schon immer auf NEO-Auto-Submit; Arm-3-Livemessung zeigt auch in V2 Überlappung (B70 95 %,
+   iGPU-Bursts). Die ECHTEN B70-Wartefenster sind die Sample-Block-Transfers: kraft_facetten
+   liest je Aufruf ~2,5 GB inkl. eines NUTZLOSEN Voll-Domänen-flags-Reads (statisch!) + single-
+   threaded Host-Scan; dazu Slices (u+flags beider Domänen) und ~8 überflüssige Host-Syncs je
+   outer (finish in drive_boundary auf In-order-Queue, 4× finish+blocking-read im Extract).
+   Fix-Liste priorisiert: (1) clFlush nach run_async (1 Zeile, macht Coarse-Start deterministisch),
+   (2) flags-Read cachen + Facetten-Host-Scan parallelisieren, (3) Syncs bündeln (non-blocking
+   Reads, ein Finish), (4) V1 hatte zudem eine dedizierte cl_transfer_queue (in V2 entfallen).
+   near→far-Restriktion: exakt in V1s validiertes couple_n2f-Fenster (nach coarse.finish, vor
+   Extract, 1-outer-Lag) — V1 HATTE bereits eine near→far-Kopplung als Vorbild (V1-setup 2226).
 
 ---
 
