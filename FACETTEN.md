@@ -1,6 +1,6 @@
 # FACETTEN.md — Leitdokument Facetten-Wandmodell (C1b)
 
-Stand **2026-08-17** (Stufe 3 abgeschlossen; J4-α-Korrektur drin, siehe §2/§4). Dieses Dokument ist der Einstieg; die acht
+Stand **2026-08-19** (Stufe 3 + J4 abgeschlossen, Stufe-5-Erstserien gelaufen, Spalding B=5,5-Fix, Bodenband-Messarm; siehe §2/§4 und AUDIT-BEFUNDE.md). Dieses Dokument ist der Einstieg; die acht
 FACETTEN-*-Altdateien sind Archiv (Belegkette, Lesekarte in Abschnitt 5 und FACETTEN-ARCHIV.md).
 Bei Widersprüchen zwischen Altdateien gilt die jüngste Messung — die Auflösungen stehen hier.
 
@@ -79,7 +79,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
   Fehler) · [8] Facetten-τ-Klemme · [9] Facetten-u_t≈0-Skip · [10] u_s-Klemme (iMEM) ·
   [11] ohne offenes Paar (nur Paararm) · [12] iMEM-Skalar-Fallback · [13] ohne tangential
   wirksamen Link · [14] gekoppelter Rang 2 · [15] gekoppelt Rang 0 → BB · [16] s_n-Klemme ·
-  [17] PEMA-utb-Fallback · [18] α>u_t (nur ALPHA-Arm) · [19] APG-Klemme auf 0 (nur APG-Arm). Wirkpfad-/Ereignis-Slots gegatet t%100. Gate-Randzone: Lage-1-Zellen
+  [17] PEMA-utb-Fallback · [18] α>u_t (nur ALPHA-Arm) · [19] APG-Klemme unten 0 ODER oben 2·tw (nur APG-Arm). Wirkpfad-/Ereignis-Slots gegatet t%100. Gate-Randzone: Lage-1-Zellen
   können per Float-Rauschen in 15 statt 13 landen — Soll-Formeln prüfen die **Summe 13+15**.
 - **CFD_FAC_DIAGZ** (Iron Rule 3): Ketten-Zeitreihe EINER Facette (Zellindex → Laufzeit-fid,
   Sentinel −1.0f matcht nie) → `facetten_diagz.csv` mit
@@ -103,7 +103,9 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FAC_PEMA` | Beidseitige Eingangs-Filterung P̄/ū, a≈0,01 (nur Arme ≥3, emission-gated; ungesetzt = exakt instantaner Pfad). N2 dennoch verletzt — kein hinreichender Fix, Messarm. |
 | `CFD_FAC_SATGATE` | 1 = Saettigungs-Gate (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme; Slots 10/16 = Rueckfaelle. Stufe-3-Abnahme lief damit. Nur Arme 3/4. |
 | `CFD_FAC_ALPHA` | J4-Massenkorrektur, nur Arme 3/4: 0 aus (Default, bitgleich), 1 nur Masse (α=−6(S1·u_s)/S0 additiv; injiziert α·S1-Impuls — reiner Messarm), 2 Masse + Kovarianz-Downdate G′=G−(6/S0)BBᵀ vor dem Solve (Impulsziel inkl. α exakt; Behalter). Slot 18 zählt α>u_t; ebene Wand: beide Stufen bitgleich zum Aus-Arm. |
-| `CFD_FAC_APG` | float κ (Default 0 = aus, bitgleich): tw-Ziel = Spalding − κ·y_w·dp/ds (dünne-GS-Impulsbilanz, LS-Differenzgradient aus Fluid-Nachbar-ρ). Untere Klemme auf 0 (Slot 19, G8-Lehre). Nur Arme 3/4; mit PEMA noch gesperrt. Messarm, Kugel = Richter. |
+| `CFD_KOPPLUNG_BODENBAND` | dd: N unterste Grobzeilen der x⁻-Einlasskopplung per fmax auf w·u_inf HEBEN (Rampe bis 2N, inkl. y-Kantenspalten seit B3-1); 0 = bitidentisch aus. Messarm gegen das Fernfeld-Bodenschicht-Erbe; u-only nachweislich begrenzt (Cd-Staukraft) — druckkonsistenter Weg = Punkt 8/9. |
+| `CFD_SGS_WANDFREI` | ν_t-Abschaltung in wandnahen Zellen (18er-Nachbarschaft). Am ebenen Kanal GESCHEITERT (cf-Kollaps, K2 disqualifiziert — Turbulenz nicht selbsttragend); van Driest ist der verbleibende Kandidat. |
+| `CFD_FAC_APG` | float κ (Default 0 = aus, bitgleich): tw-Ziel = Spalding − κ·y_w·dp/ds, Klemmen [0, 2·tw] (Slot 19 zählt BEIDE). Nur Arme 3/4; mit PEMA gesperrt (jetzt im Konstruktor). **STATUS 2026-08-19: GEPARKT — ehrlich gekappt ohne Autorität (Kugel fällt auf Basis, Fahrzeug wirkungslos); die ungekappte κ-Eichung war ein Überdehnungs-Artefakt.** |
 | `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
 | `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Auch OHNE CFD_FACETTEN gültig (= BB-Basis-Arm, so entstehen die N2-Referenzen t45_bb/t26_bb); mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
@@ -117,7 +119,9 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 
 - **Kanal-Anker EXAKT** (Stufe 1, CPU N=38): alle Klassen 0, y_w überall 0,500.
 - **Stufe-2-Äquivalenz BITGLEICH** (Paartausch vs. z-WFB): Feld-Hash(u) CPU/316 Schritte
-  **12755646098055097704** (bleibt Kontrollarm-Regressionsanker); iGPU/12.666 Schritte
+  **12755646098055097704** (HISTORISCH — galt für B=11,11; seit Spalding-Fix 1f2dac1 sind die
+  B=5,5-Anker gültig: Arm0 14650994849991271562 · Arm1 1367576470905661998 · Arm3
+  4032664999240533470, logs/anker/*_B55.log); iGPU/12.666 Schritte
   7540097450125369907; Wirkpfad 1.798.320 = Soll exakt; R1 auf DDF-Ebene bewiesen (T2:
   512 Differenzen, 0 verbotene).
 - **J2 iMEM-3×3-Regression BITGLEICH**: entkoppelter Pfad == 2×2 (Hash 8879…785, voller Wert
@@ -215,7 +219,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    (α-Massenkorrektur — Fahrzeug im Far ist gekrümmte Geometrie); Vorvalidierung an der
    groben Kugel. Perf-Gate: Fernfeld liegt bei 79 % der Feinzeit, +5–8 % Facettenkosten
    messen (iGPU darf nicht zum Flaschenhals werden). Reihenfolge: nach Stufe-5-Basis.
-9. **near→far-Rückkopplung als Nudging (CC-Ideenskizze 2026-08-17, geprüft):** Wake-Abdruck
+9. **[PRIORITÄT HOCH seit 2026-08-19, gemeinsam mit P8] near→far-Rückkopplung als Nudging (CC-Ideenskizze 2026-08-17, geprüft):** Wake-Abdruck
    des Nahfelds ins Fernfeld zurückprägen. NICHT über TYPE_E/u-Überschreiben (hartes
    Dirichlet = Ghost-Mode-Falle), sondern als Volumenkraft-Nudging über das aktive
    FORCE_FIELD: F ∝ ρ·(ū_near − u_far), Wirkung in der Kollision, paritätsschonend, nur u

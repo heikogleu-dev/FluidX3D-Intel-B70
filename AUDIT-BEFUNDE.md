@@ -621,3 +621,23 @@ Arm3+Band = Cz -0,526+-0,009 bei Cd 0,89. KONSEQUENZ: Offen-Punkte 8/9 (Far-Geom
 Nudging = druckkonsistente Bodenschicht) steigen von "spaeter" zu "der eigentliche Weg".
 S5f-Screening (DX=8-Sprosse, ~7 min/Lauf) rankt Band-N/zoff/Kombis -- neue Werkzeug-Stufe
 fuer Variantensuche (Heiko-Auftrag: kuerzere Testcases).
+
+## TIEFEN-AUDIT 2026-08-19 nachts (3 Pruefer, nichts vorausgesetzt): Runde 1 komplett gefixt
+
+Pruefer 2 (Host): 10 Befunde -- WICHTIGSTER: mein MultiGPU/F-BBox-Guard vom Mittag war TOTER
+CODE (prue fte die read-once-genullte Statik; Pruefer 3 fand dasselbe unabhaengig als HOCH-No-Op)
+-> Member-Pruefung. Dazu Laengsprofil-DX-Etikett, x- zuletzt treiben, fmax-Ansage, awk-exakt,
+yb-Klemme, Latent-/Inertnotizen.
+Pruefer 3 (Zusammenspiel/Doku): Band-Naht wanderte durch B5 nur zu den y-Verifies -> KANTEN-
+LIFT der geteilten y-Spalten; Falsifikationslauf: ALLE vier Verifies 0,00000000 unter aktivem
+Band. Doku-Wahrheiten: BODENBAND+SGS_WANDFREI in die Schaltertabelle, toter 12755...-Anker als
+HISTORISCH etikettiert (B55-Anker massgeblich), Slot-19/fac_diag-Legenden, APG-Zeile auf
+GEPARKT (Kappen-Ernuechterung), P9-Prioritaet, Kopf-Stand; K4-Soll ehrlich 5e-5 (Atomik
+skaliert mit N); e_cf_arm3-rc=1-Vorbehalt (K2/P7) nachgetragen; messe_yplus-dd-Etikett
+(druckkontaminiert). 15/15 nachgerechnete Messtag-Zahlen exakt.
+Pruefer 1 (Kernel): KEINE HOCH-Befunde; SGSFREI-Kollaps = PHYSIK (Gate korrekt, K2 fing die
+Nichtschliessung); WFB-Gating bricht keinen Test (Soll-Formel + Anker 1798320 verifiziert);
+Spalding-Neumessung numerisch reproduziert. 5 NIEDRIG gefixt: SGS-Kommentar/Ansage 18er,
+APG-Nachklemm-Zaehlung Slot 8, APG-x-PEMA-Sperre in den KONSTRUKTOR (setup-unabhaengig),
+WFB-Report-Sampling-Etikett.
+Regression nach Batch: Suite 5x, Arm-3-B55-Anker exakt, Band-Naht-Falsifikation 4x 0,0.

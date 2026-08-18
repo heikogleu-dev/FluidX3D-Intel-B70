@@ -1819,7 +1819,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		if(tw1<0.0f) { tw1=0.0f; if(t%100ul==0ul) atomic_inc(&hits[19]); } // Slot 19: beide APG-Klemmen (unten 0 / oben 2*tw)
 		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(t%100ul==0ul) atomic_inc(&hits[19]); }
 		tw = tw1;
-		twe = fmin(tw*faca, 0.5f*rhon*ut); // obere Klemme unveraendert (Slot 8 zaehlt im Kopf)
+		if(tw*faca>0.5f*rhon*ut&&t%100ul==0ul) atomic_inc(&hits[8]); // Tiefen-Audit A1-B2: Klemme der NACH-APG-Kette zaehlen (Kopf zaehlte die verworfene Vor-APG-Kette)
+		twe = fmin(tw*faca, 0.5f*rhon*ut);
 	}
 )+"#endif"+R( // FACETTEN_APG
 	float G11=0.0f, G22=0.0f, G12=0.0f, P1=0.0f, P2=0.0f;         // Linkmengen-Momente (Gl. 4/7)
@@ -2265,8 +2266,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// Block und ueberspringt ihn (statt w hinterher zurueckzusetzen): so entfallen auch die
 	// fneq-Produkte, SPONGE liest danach das laminare w und rampt korrekt, TRT leitet wm aus dem
 	// finalen w ab. Wanderkennung ueber das etablierte Idiom (flags[j[i]]&TYPE_BO)==TYPE_S auf den
-	// sechs geometrischen Flaechennachbarn j[1..6] -- bewusst NICHT ueber TYPE_MS, denn ruhende
-	// Waende (Kanal!) markieren keine MS-Zellen. Kostet 6 uchar-Reads je Zelle (+~6 %); der
+	// ALLEN 18 Nachbarn (seit 2a64a18 -- Diagonal-Facettenzellen!) -- bewusst NICHT ueber TYPE_MS,
+	// denn ruhende Waende markieren keine MS-Zellen. Kostet 18 uchar-Reads je Zelle (im
+	// FACETTEN-Build cache-neutral, iMEM liest dieselben Flags); der
 	// Kontrollarm zahlt nichts, weil ungesetzt gar nicht emittiert wird.
 	bool sgs_wand = false;
 	for(uint i=1u; i<def_velocity_set; i++) sgs_wand = sgs_wand||(flags[j[i]]&TYPE_BO)==TYPE_S; // ★ WM-Blick D (MITTEL): vorher nur j[1..6] -- Diagonal-Facettenzellen (Kanten/Kugel/Fahrzeug) behielten die nu_t-Rueckkopplung im WANDFREI-Arm; jetzt alle 18

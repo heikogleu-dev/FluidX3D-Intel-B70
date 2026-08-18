@@ -232,7 +232,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 	if(LBM_Domain::s_sgs_wandfrei) {
 		ulong wz=0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); wz+=(ulong)L.lbm_domain[d]->rho_clamp_hits[6]; }
-		print_info(string("  SGS_WANDFREI ")+wo+": "+to_string(wz)+" gezaehlte Gate-Zellen (solider Flaechennachbar, inkl. TYPE_E; t%100)");
+		print_info(string("  SGS_WANDFREI ")+wo+": "+to_string(wz)+" gezaehlte Gate-Zellen (solider 18er-Nachbar; t%100)");
 		if(wz==0ull) print_error(string("CFD_SGS_WANDFREI war gesetzt, aber der Wirkpfad-Zaehler ist NULL (")+wo+") -- lautloser No-Op.");
 	}
 #ifdef RHO_CLAMP
@@ -657,7 +657,7 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate).");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
-	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt Klemmen auf 0.");
+	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
@@ -845,7 +845,7 @@ void main_setup_kanal() {
 		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
 		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
 		const ulong s12=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[12], s13=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[13], s10=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[10];
-		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)
+		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"; Ereignis-Slots t%100-gesampelt seit 405be0f), tau-Klemme "+to_string(kl)
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
@@ -1246,7 +1246,7 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate).");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
-	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt Klemmen auf 0.");
+	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
@@ -2042,7 +2042,7 @@ static void main_setup_fahrzeug_dd() {
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate).");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
-	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt Klemmen auf 0.");
+	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc==3u&&(LBM_Domain::s_fac_alpha<2u||!LBM_Domain::s_fac_satgate)) print_warning("Arm 3 ohne SATGATE+ALPHA2 an gekruemmter Geometrie -- Kugel-J4-Lehre: nur als bewusster Messarm fahren.");
 	  if(fc==4u&&LBM_Domain::s_fac_apg!=0.0f) print_warning("Arm 4 (Nullziel) + APG: tw/[0]-Akkumulator und y+-Report tragen APG-Korrektur, Ziel bleibt 0 -- reine Diagnose-Kombination (Gross-Audit N17).");
@@ -2417,7 +2417,7 @@ static void main_setup_fahrzeug_dd() {
 		// ★ BODENBAND-Messarm (Heiko/OF13-Befund 2026-08-19): das Fernfeld liefert am x-Einlass eine
 		// kollabierte Bodenschicht (0,63 u_inf bei -2,4 m), weil sein 16-mm-Spalt praktisch zu ist --
 		// OF13 zeigt dort 1,2-1,4 u_inf (postProcessing/sampleY0). CFD_KOPPLUNG_BODENBAND=N ersetzt in
-		// der GROBEN x--Einlassflaeche die untersten N Zellreihen durch u_inf (linear auf 0 gerampt bis
+		// der GROBEN x--Einlassflaeche die untersten N Zellreihen per fmax auf w*u_inf HEBEN (Rampe bis
 		// 2N), NUR ux/uy/uz -- rho bleibt Fernfeld. 0/ungesetzt = exakt bisheriges Verhalten.
 		{	static const uint bb_n = env_u("CFD_KOPPLUNG_BODENBAND", 0u); // LATENT (B9): static ueberlebt zweiten Fall-Aufruf im Prozess; fmax maskiert zudem Fernfeld-NaN im Band still (statt Bit-Test im Drive-Kernel)
 			if(bb_n>0u) { const uint ea=cp[0].extent_a; // Ebene x-: a=y, b=z (gid = a + b*ea)
@@ -2428,6 +2428,16 @@ static void main_setup_fahrzeug_dd() {
 						// DEFIZIT-ANHEBUNG: nur kollabierte Werte auf w*u_inf heben, gesunde Fernfeld-
 						// Struktur (inkl. uy/uz) bleibt unangetastet.
 						face[0][e4+1ull] = fmax(face[0][e4+1ull], w_bb*u_lat); }
+				}
+				// B3-1: dieselbe Anhebung auf den GETEILTEN Kantenspalten der y-Ebenen (a=0 = x-Einlass-
+				// Ecke; Achse 1 spannt a=x, b=z) -- sonst wandert die 1-Zellen-Naht nur zum y-Verify.
+				for(uint p2=2u; p2<4u; p2++) {
+					const uint ea2=cp[p2].extent_a;
+					for(uint b2=0u; b2<min(2u*bb_n, cp[p2].extent_b); b2++) {
+						const float w2 = (b2<bb_n) ? 1.0f : 1.0f-(float)(b2-bb_n+1u)/(float)(bb_n+1u);
+						const ulong e42=((ulong)0u+(ulong)b2*(ulong)ea2)*4ull;
+						face[p2][e42+1ull] = fmax(face[p2][e42+1ull], w2*u_lat);
+					}
 				}
 			}
 		}
@@ -2633,7 +2643,7 @@ static void main_setup_fahrzeug_dd() {
 	}
 	// ★ Audit-Nacharbeit 14: y+ VOR dem Samples-Waechter messen -- vorher fiel die Messung bei
 	// kurzen Laeufen (<16 Kraft-Samples) mit dem _exit zusammen weg, obwohl sie unabhaengig davon ist.
-	if(env_u("CFD_YPLUS", 1u)>0u) messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld");
+	if(env_u("CFD_YPLUS", 1u)>0u) { print_info("HINWEIS (WM-Blick C): messe_yplus ist am Fahrzeug DRUCKKONTAMINIERT (tangentiale F-Komponente an Voxeltreppen) -- nur als Anker-Kontinuitaet lesen, nicht absolut."); messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld"); }
 	const bool stat_ok = cd.size()>=16u; // ★ Audit 2/3: Dichteklemme/Fx-Anker liefen hinter dem _exit nie bei Kurzlaeufen
 	if(!stat_ok) print_warning("Zu wenige Samples -- Cd-Statistik entfaellt, Dichteklemme/Fx-Anker laufen trotzdem.");
 	double mcd=0.0, mcz=0.0;
@@ -2706,7 +2716,7 @@ static void main_setup_fahrzeug_dd() {
 		const FacKraft FK0 = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
 		const float3 Fo = lbm_f.object_force(TYPE_S|TYPE_X);
 		print_info("K4 dd (AUS-Arm): kraft_facetten Fx = "+to_string((float)FK0.px,6u)+" vs object_force Fx = "+to_string(Fo.x,6u)
-			+" (rel. Abw. "+to_string((float)(Fo.x!=0.0f?fabs(FK0.px/(double)Fo.x-1.0):0.0),8u)+", Soll < 1e-5); Fz: "+to_string((float)FK0.pz,6u)+" vs "+to_string(Fo.z,6u));
+			+" (rel. Abw. "+to_string((float)(Fo.x!=0.0f?fabs(FK0.px/(double)Fo.x-1.0):0.0),8u)+", Soll < 5e-5 -- Atomik-Reihenfolge skaliert mit N, produktiv gemessen 1,4e-5); Fz: "+to_string((float)FK0.pz,6u)+" vs "+to_string(Fo.z,6u));
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];

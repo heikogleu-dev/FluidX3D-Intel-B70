@@ -144,6 +144,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fac_ema>0.0f&&s_fac_ema<5e-7f) print_error("CFD_FAC_EMA > 0 aber unter der Emissionsquantisierung (to_string 6 Stellen) -- der Filter froere still auf dem Warmstart ein.");
 	if(s_fac_pema>0.0f&&s_fac_pema<5e-7f) print_error("CFD_FAC_PEMA > 0 aber unter der Emissionsquantisierung -- der Filter froere still ein.");
 	if(s_fac_apg!=0.0f&&fabs(s_fac_apg)<5e-7f) print_error("CFD_FAC_APG zu klein fuer die 6-Stellen-Emission -- wuerde still zu 0.000000 (No-Op-Arm)."); // Gross-Audit N
+	if(s_fac_apg!=0.0f&&s_fac_pema>0.0f) print_error("APG + PEMA: die gefilterte Kette verwirft die APG-Korrektur still -- Kombination gesperrt (Tiefen-Audit A1-B3: Sperre jetzt IM Konstruktor, setup-unabhaengig)."); 
 	if(getenv("CFD_SPALDING_IT")&&env_u("CFD_SPALDING_IT",3u)==0u) print_warning("CFD_SPALDING_IT=0 wird auf 1 GEKLEMMT (min 1; Default ohne Env ist 3) -- Gross-Audit N16.");
 	if(env_u("CFD_SPALDING_IT", 0u)>0u&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
 #ifndef TRT
