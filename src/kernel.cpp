@@ -1591,7 +1591,12 @@ float wf_spalding_uplus(const float Y) {
 	// nicht reichen. N=38-Kanal (Y~2400): ~0,1 % in tau_w, unkritisch; bei hoeherem Re_tau
 	// Iterationszahl erhoehen. X geklemmt auf <=100: kappa*X <= 41, exp davon ist
 	// FP32-sicher -- noetig, weil -cl-finite-math-only NaN/INF zu undefiniertem Verhalten macht.
-	const float kap=0.41f, emkB=0.010517092f; // exp(-kappa*B) mit B=5,5
+	// ★ GROSS-AUDIT HOCH (2026-08-19, Pruefer 1): hier stand 0.010517092f -- das ist (e^0.1 - 1)/10,
+	// ein Uebertragungsfehler, effektiv B = 11,11 statt 5,5. Folge: u+ zu gross, tau_w = rho*(ut/u+)^2
+	// systematisch 16-38 % zu klein in ALLEN Wandmodell-Pfaden (WFB, Paararm, iMEM, PEMA) seit dem
+	// WFB-Bau; erklaert einen Grossteil des -68-%-Kanalbefunds. Die dokumentierte "1e-13"-Genauigkeit
+	// war Bisektion DERSELBEN Gleichung mit DERSELBEN Konstante -- selbstkonsistent, blind dafuer.
+	const float kap=0.41f, emkB=0.104874f; // exp(-kappa*B) mit B=5,5 = 0.1048735
 	float x = log(fmin(100.0f, sqrt(fmax(Y, 1e-12f))));
 	for(uint it=0u; it<def_wf_spalding_it; it++) { // Iterationszahl als Define (Stufe-2-Auflage 8; Default 3)
 		const float X = fmin(100.0f, exp(x));

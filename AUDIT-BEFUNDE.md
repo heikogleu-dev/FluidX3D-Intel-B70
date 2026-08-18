@@ -489,3 +489,28 @@ Einbruch an der VORDERACHSE (-53 % seitliche Leckage), der bewegte Boden laedt h
 auf (Q 0,91->1,42). Moving-Floor-Mechanik ENTLASTET (Impulsuebertrag exakt 0,025/Schritt,
 0 % Abweichung, beide Domaenen). Fernfeld sekundaerer Verstaerker (Spalt <2 Grobzellen).
 Entscheidender A/B: CFD_Z_OFFSET_MM=16 (V1-Schwebe; V1-Referenz sah mittig 1,14 u_inf).
+
+---
+
+# GROSS-AUDIT 2026-08-19 (Heiko-Auftrag: ALLES, 3 Pruefer) -- Runde 1
+
+**HOCH (Pruefer 1, unabhaengig nachgerechnet und verifiziert): Spalding-Konstante um Faktor 10
+falsch.** kernel.cpp:1594 hatte emkB = 0.010517092 = (e^0.1-1)/10 (Uebertragungsfehler) statt
+exp(-0.41*5.5) = 0.104874 -- effektiv B = 11,11 statt 5,5, tau_w damit 16-38 % zu klein in ALLEN
+Wandmodell-Pfaden (WFB, Paararm, iMEM, PEMA) seit dem WFB-Bau. Die dokumentierte 1e-13-
+Genauigkeit war selbstkonsistente Bisektion derselben Gleichung -- konstantenblind. GEFIXT.
+KONSEQUENZEN: (a) alle Spalding-basierten Messwerte (Kanal-cf-Arm3, Kugel-Leiter, APG-kappa-
+Eichung, Fahrzeug-Arm3) sind mit B=11,11 gerechnet und werden neu vermessen; (b) Stufe-3-N2-
+Abnahme UEBERLEBT (Arm 4 = Nullziel ist Spalding-unabhaengig); (c) der historische -68-%-
+Kanalbefund ist zu einem Grossteil hierdurch erklaert (-38 % allein bei Y~2400).
+NEUE REGRESSIONSANKER (B=5,5; Kontrollarm 0 zusaetzlich): Arm1 1367576470905661998,
+Arm3 4032664999240533470, Arm0 14650994849991271562 (logs/anker/*_B55.log); Suite 5x gruen.
+
+Weitere Befunde der drei Pruefer (Fix-Batch laeuft): MITTEL Kernel: isfinite-Waechter unter
+finite-math toter Code (Bit-Test noetig), transfer_F/graphics ohne F-BBox-Bewusstsein (latent,
+Guards); MITTEL Host: Torus-Kanalprofil falsch normiert+unetikettiert, NaN-/Einfrier-Waechter
++ CSV-Flush fehlen in kugel/fahrzeug; MITTEL Doku: 25-30-mm-Schlitz-These widerlegt (STL
+vermessen: Buglippe 80-85 mm -- konsistent mit Heikos 50-55 mm real und 68 mm Voxel),
+Fenster-Etikett s5b (-11 % ist fensterrein -8,6 %), CFD_COARSE_NU existiert nicht (FERN_NU);
+MITTEL Zusammenspiel: PO_FACES still ignoriert in dd/fernfeld, diagz-Spaet-Lese-Pfad (latent),
+units-Global im Zwei-Einheiten-Fall (latent). Dazu ~20 NIEDRIG.
