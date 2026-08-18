@@ -625,7 +625,7 @@ fuer Variantensuche (Heiko-Auftrag: kuerzere Testcases).
 ## TIEFEN-AUDIT 2026-08-19 nachts (3 Pruefer, nichts vorausgesetzt): Runde 1 komplett gefixt
 
 Pruefer 2 (Host): 10 Befunde -- WICHTIGSTER: mein MultiGPU/F-BBox-Guard vom Mittag war TOTER
-CODE (prue fte die read-once-genullte Statik; Pruefer 3 fand dasselbe unabhaengig als HOCH-No-Op)
+CODE (pruefte die read-once-genullte Statik; Pruefer 3 fand dasselbe unabhaengig als HOCH-No-Op)
 -> Member-Pruefung. Dazu Laengsprofil-DX-Etikett, x- zuletzt treiben, fmax-Ansage, awk-exakt,
 yb-Klemme, Latent-/Inertnotizen.
 Pruefer 3 (Zusammenspiel/Doku): Band-Naht wanderte durch B5 nur zu den y-Verifies -> KANTEN-
@@ -641,3 +641,12 @@ Spalding-Neumessung numerisch reproduziert. 5 NIEDRIG gefixt: SGS-Kommentar/Ansa
 APG-Nachklemm-Zaehlung Slot 8, APG-x-PEMA-Sperre in den KONSTRUKTOR (setup-unabhaengig),
 WFB-Report-Sampling-Etikett.
 Regression nach Batch: Suite 5x, Arm-3-B55-Anker exakt, Band-Naht-Falsifikation 4x 0,0.
+
+## Tiefen-Audit Runde 2 (auf a618a00+4279d9b): 3x NIEDRIG, gefixt
+
+Slot-8-Kopfzaehlung jetzt auch unter APG abgeschaltet (bis 3x je Besuch moeglich gewesen --
+Spiegel des PEMA-Musters); bb_n auf < cez/2 geklemmt (z+-Verify-Schein bei sinnfreiem Band);
+K4-Tabellenzeile um dd erweitert; Tippfehler. Positivliste R2: MultiGPU-Guard-Reihenfolge
+bewiesen korrekt (Member vor allocate), Kanten-Lift-Index a=0 == x--Ecke verifiziert,
+Konstruktor-Sperre erreichbar, alle drei B55-Hashes in den Ankerlogs wiedergefunden, awk
+aequivalent. Regression: Suite 5x, B55-Anker exakt.

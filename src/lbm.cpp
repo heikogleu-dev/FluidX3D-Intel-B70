@@ -362,7 +362,7 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 	}
 
-	if(get_D()>1u&&(fbnx!=Nx||fbny!=Ny||fbnz!=Nz)) print_error("F-BBox + Multi-GPU ist NICHT gebaut (transfer_F/graphics indizieren F voll-domaenig -- OOB)."); // ★ Tiefen-Audit B1: vorher prue fte er die read-once-GENULLTE Statik = toter Code; jetzt die aufgeloesten Member
+	if(get_D()>1u&&(fbnx!=Nx||fbny!=Ny||fbnz!=Nz)) print_error("F-BBox + Multi-GPU ist NICHT gebaut (transfer_F/graphics indizieren F voll-domaenig -- OOB)."); // ★ Tiefen-Audit B1: vorher pruefte er die read-once-GENULLTE Statik = toter Code; jetzt die aufgeloesten Member
 	if(get_D()>1u) allocate_transfer(device);
 }
 

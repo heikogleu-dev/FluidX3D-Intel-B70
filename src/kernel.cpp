@@ -1784,12 +1784,16 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float tw_max = 0.5f*rhon*ut;
 		if(tw>tw_max) { tw = tw_max;
 )+"#ifndef FACETTEN_PEMA"+R(
-			if(t%100ul==0ul) atomic_inc(&hits[8]); // R2-Nachpruefer: auch DIESER Kopf-Increment zaehlt unter PEMA die verworfene Kette -- Klemme bleibt (fac_tau_acc braucht tw), nur der Zaehler ist gegatet
+)+"#ifndef FACETTEN_APG"+R(
+			if(t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA/APG zaehlt die ANGEWANDTE Kette (Tiefen-Audit R2: sonst bis 3x je Besuch)
+)+"#endif"+R( // FACETTEN_APG
 )+"#endif"+R( // FACETTEN_PEMA
 		}
 		const float twf = tw*faca;
 )+"#ifndef FACETTEN_PEMA"+R(
-		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA zaehlt unten die ANGEWANDTE (gefilterte) Kette (Audit 1/3 MITTEL)
+)+"#ifndef FACETTEN_APG"+R(
+		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA/APG zaehlt die angewandte Kette (Audit 1/3 + Tiefen-R2)
+)+"#endif"+R( // FACETTEN_APG
 )+"#endif"+R( // FACETTEN_PEMA
 		twe = fmin(twf, tw_max);
 	}

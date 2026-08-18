@@ -2419,7 +2419,7 @@ static void main_setup_fahrzeug_dd() {
 		// OF13 zeigt dort 1,2-1,4 u_inf (postProcessing/sampleY0). CFD_KOPPLUNG_BODENBAND=N ersetzt in
 		// der GROBEN x--Einlassflaeche die untersten N Zellreihen per fmax auf w*u_inf HEBEN (Rampe bis
 		// 2N), NUR ux/uy/uz -- rho bleibt Fernfeld. 0/ungesetzt = exakt bisheriges Verhalten.
-		{	static const uint bb_n = env_u("CFD_KOPPLUNG_BODENBAND", 0u); // LATENT (B9): static ueberlebt zweiten Fall-Aufruf im Prozess; fmax maskiert zudem Fernfeld-NaN im Band still (statt Bit-Test im Drive-Kernel)
+		{	static const uint bb_n = min(env_u("CFD_KOPPLUNG_BODENBAND", 0u), cez/2u>1u?cez/2u-1u:0u); // R2-2: Band+Rampe muessen unter der Decke bleiben (sonst z+-Verify-Schein); LATENT (B9): static ueberlebt zweiten Fall-Aufruf im Prozess; fmax maskiert zudem Fernfeld-NaN im Band still (statt Bit-Test im Drive-Kernel)
 			if(bb_n>0u) { const uint ea=cp[0].extent_a; // Ebene x-: a=y, b=z (gid = a + b*ea)
 				for(uint b=0u; b<min(2u*bb_n, cp[0].extent_b); b++) {
 					const float w_bb = (b<bb_n) ? 1.0f : 1.0f-(float)(b-bb_n+1u)/(float)(bb_n+1u); // 1 im Band, Rampe darueber

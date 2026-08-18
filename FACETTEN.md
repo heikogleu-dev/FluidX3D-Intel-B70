@@ -111,7 +111,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
 | `CFD_FAC_CD_EVERY` (Default: Kugel 1, dd 4) | Kadenz der Druck-Projektions-Samples im Cd-Pfad (Default 1 = jede object_force-Kadenz). |
 | `CFD_SPALDING_IT` | Spalding-Newton-Iterationen, Default 3 (min 1); in WFB- UND Facetten-Arm identisch emittiert. |
-| `CFD_FAC_K4` | Kugel, nur AUS-Arm: K4-Neutralitätsprüfung kraft_facetten vs. object_force. |
+| `CFD_FAC_K4` (seit 18.8. auch fahrzeug_dd, Soll dort 5e-5) | Kugel, nur AUS-Arm: K4-Neutralitätsprüfung kraft_facetten vs. object_force. |
 
 ---
 
