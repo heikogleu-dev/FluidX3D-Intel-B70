@@ -664,3 +664,27 @@ bleibt (0,54 -> 0,33). Cz an der Screening-Sprosse nicht belastbar. NAECHSTER 4-
 Arm3 + FERN_BODENKLEMME=8 (bei 16 mm Far) gegen Arm3+Band8 (-0,526). Drei Slice-Agenten
 (Punkte 1-6) laufen: Boden-Mechanik (warum baut das Fernfeld ueberhaupt eine unmoegliche
 Boden-GS auf?), Einlassprofil/eckige Aufstauung, Dach/Akustik.
+
+---
+
+# SLICE-OFFENSIVE 2026-08-20 (6 Heiko-Befunde, 3 Agenten): ALLE AUFGEKLAERT
+
+**P5+P6 (KERNBEFUND): Moving-Floor-Injektion landet in einer STAGGERED-MODE.** z=1 traegt ein
+echtes Periode-2-Schachbrett (Autokorr. 0,96 @Lag2, Phasenwechsel je Frame), z=2 stirbt als
+aktive Impulssenke; Defizitzone 4-6x dicker als eine STEHENDE Wand erzeugen koennte. Ermoeglicht
+durch tau_grob=0,500007 (ungedaempft). Einlass-Ecken-Hypothese widerlegt; Render-Artefakt
+ausgeschlossen. V1-Kur dokumentiert: apply_floor_velocity = Equilibrium-Reset mit LOKALEM rho
+auf z=1..N (druckerhaltend; V1 kernel.cpp:1769-1800; wirkte auf exakt diese MS-Lage, Cz -31 %).
+FIXPLAN (morgen, Bauabschnitt 1): (a) V1-Port CFD_BODEN_EQ=N fuer NAH+FERN (die TYPE_E-Klemme
+war der Beweis-Arm, der Port die produktive Form), (b) Staggered-Daempfer (TRT/nu-Floor in den
+2 Bodenlagen) als Wurzelbehandlung, (c) audit_bewegte_waende-Output nach out_dir persistieren.
+**P1+P4:** Bandkante 112-128mm schneidet die Staublase (Defizit lebt <48mm) -> Band=3 oder
+Referenzzeilen-Hub; Unterboden-Abbau = tote Waende + fehlender Diffusor-Sog, KEINE Leckage
+(Q-Bilanz +-2 %); Near-Profil invertiert (z1=0,66>z2=0,51) = Boden zieht nicht; Couette-
+Rechnung: mit ziehendem Boden Plateau ~0,9-1,0 -> OF13 1,087 VOLLSTAENDIG erklaert.
+**P2+P3:** OF13-Abloese-Soll extrahiert (anliegend bis Heckscheibenfuss Nase+3,64m); Haupt-
+verdaechtiger Dach = stiller YWMIN-0,2-K4-Ausschluss (15-38 % der Scheibenflaechen pures BB in
+Treppenstreifen; dd-Warnung ergaenzt, D2-Lauf mit 0,15 laeuft). Akustik: Init-Puls (Cd-Start
+48,7) + TYPE_E-Kavitaet (15,9 Hz ~ c/2L); CFD_SPONGE_N=64 war in allen s5d-Laeufen AUS -> an.
+**Fern-Klemme-Experiment (Heiko):** wirkt an der Quelle (Profil Mitte 0,81 vs Band 0,6 --
+Seitenrand-Nachfuellung), Beweis der V1-Fix-Klasse am dd.
