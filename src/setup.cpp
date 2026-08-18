@@ -2606,6 +2606,30 @@ static void main_setup_fahrzeug_dd() {
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 	} // stat_ok
+	{	// ★ UNTERBODEN-SONDE (Heiko 2026-08-19: Unterboden in ALLEN s5b-Slices tot, arm-unabhaengig).
+		// Je x-Spalte unter dem Fahrzeug: mittleres u_x/u_inf ueber alle Fluidzellen im Spalt
+		// zwischen Fahrbahn (z=1) und Unterbodenflaeche (erste TYPE_X-Zelle der Saeule). Laeuft in
+		// JEDEM Arm -- das A/B AUS vs. Facetten entscheidet Architektur- vs. Mechanismus-Ursache.
+		lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
+		std::ofstream ub(out_dir+"unterboden_sonde.csv"); ub << "x_m,u_rel,n_zellen" << std::endl; ub.precision(6);
+		double su_min=1e300, su_sum=0.0; ulong nx_mit=0ull;
+		for(uint x=0u; x<fNx; x++) {
+			double su=0.0; ulong nc=0ull;
+			for(uint y=0u; y<fNy; y++) {
+				uint zdach=0u; // erste Fahrzeugzelle der Saeule
+				for(uint z=1u; z<fNz; z++) { const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)fNy)*(ulong)fNx; if((lbm_f.flags[n]&TYPE_X)!=0u) { zdach=z; break; } }
+				if(zdach<2u) continue; // kein Fahrzeug ueber dieser Saeule oder Latsch (zdach=1 = Kontakt)
+				for(uint z=1u; z<zdach; z++) { const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)fNy)*(ulong)fNx;
+					if((lbm_f.flags[n]&(TYPE_S|TYPE_E))==0u) { su+=(double)lbm_f.u.x[n]; nc++; } }
+			}
+			if(nc>0ull) { const double ur=su/((double)nc*(double)u_lat);
+				ub << (near_x0+(double)x*dx_f) << "," << ur << "," << nc << std::endl;
+				su_min=fmin(su_min,ur); su_sum+=ur; nx_mit++; }
+		}
+		if(nx_mit>0ull) print_info("Unterboden-Sonde: u_x/u_inf Mittel "+to_string((float)(su_sum/(double)nx_mit),3u)
+			+", Minimum "+to_string((float)su_min,3u)+" ueber "+to_string(nx_mit)+" x-Spalten (Soll deutlich > 0; CSV: unterboden_sonde.csv)");
+		if(nx_mit>0ull&&su_sum/(double)nx_mit<0.1) print_warning("UNTERBODEN TOT (< 10 % u_inf im Mittel) -- Abtrieb kann so nicht entstehen (Cz-Blocker, arm-unabhaengig pruefen).");
+	}
 	if(env_u("CFD_FACETTEN", 0u)==0u&&env_u("CFD_FAC_K4", 0u)>0u) { // ★ K4 am FAHRZEUG (Heiko 2026-08-18): Hybrid-Schaetzer vs object_force am unbehandelten BB -- ohne diese Eichung ist kein AUS-vs-Facetten-Cd-Vergleich belastbar
 		const std::vector<double> leer;
 		const FacKraft FK0 = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);

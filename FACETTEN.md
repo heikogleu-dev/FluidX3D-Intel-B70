@@ -73,17 +73,17 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 - **Akkumulator `fac_tau`, 6 float je Facette** (nur bei tatsächlicher Modifikation):
   [0] Σ tw physisch (y⁺-Quelle) · [1..3] Ist-Wandkraft xyz (inkl. Sn-Terme) ·
   [4] Δm-Leck · [5] Normalaustausch-REST (nach 3×3-Nullung); dazu `fac_tau_n` (Zähler).
-- **Zählerpuffer `rho_clamp_hits`, 19 Slots (0–18):** [0/1] RHO_CLAMP unten/oben ·
+- **Zählerpuffer `rho_clamp_hits`, 20 Slots (0–19):** [0/1] RHO_CLAMP unten/oben ·
   [2] WFB-Wirkpfad · [3] WFB-τ-Klemme · [4] WFB-u_t≈0-Skip · [5] Ein-Zellen-Spalt ·
   [6] SGS_WANDFREI-Wirkpfad · [7] Facetten-Wirkpfad (Soll = fac_N·⌈n/100⌉, Ist≠Soll = harter
   Fehler) · [8] Facetten-τ-Klemme · [9] Facetten-u_t≈0-Skip · [10] u_s-Klemme (iMEM) ·
   [11] ohne offenes Paar (nur Paararm) · [12] iMEM-Skalar-Fallback · [13] ohne tangential
   wirksamen Link · [14] gekoppelter Rang 2 · [15] gekoppelt Rang 0 → BB · [16] s_n-Klemme ·
-  [17] PEMA-utb-Fallback · [18] α>u_t (nur ALPHA-Arm). Wirkpfad-/Ereignis-Slots gegatet t%100. Gate-Randzone: Lage-1-Zellen
+  [17] PEMA-utb-Fallback · [18] α>u_t (nur ALPHA-Arm) · [19] APG-Klemme auf 0 (nur APG-Arm). Wirkpfad-/Ereignis-Slots gegatet t%100. Gate-Randzone: Lage-1-Zellen
   können per Float-Rauschen in 15 statt 13 landen — Soll-Formeln prüfen die **Summe 13+15**.
 - **CFD_FAC_DIAGZ** (Iron Rule 3): Ketten-Zeitreihe EINER Facette (Zellindex → Laufzeit-fid,
   Sentinel −1.0f matcht nie) → `facetten_diagz.csv` mit
-  schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon,alpha.
+  schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon,alpha,dp_ds.
   Nur iMEM-Arme; Kanal/Torus verdrahtet, Kugel noch nicht (Warnung).
 - **Host-Census** (CFD_FACETTEN_DIAG / baue_facetten-Log): Klassen, y_w-Lagen, |L|, Momente —
   liefert die exakten Slot-Solls VOR jedem Kernellauf.
@@ -192,6 +192,13 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    mit y_w = 0,5.
 7. K2-Instrument: 1-%-Band gilt nur für hinreichend stationäre Fenster (ETT=80/WARM=20 lief
    auf 1,035–1,042 in BEIDEN Mechanismen) — Gate vor Torus-Abnahmen nachziehen.
+7b. **UNTERBODEN/MOVING FLOOR (Heiko, Slices aller s5b-Läufe 2026-08-19): Unterboden TOT,
+   arm-unabhängig = vorbestehender Architektur-Befund und aktueller Cz-Blocker** (ohne
+   Durchströmung kein Abtrieb, egal welches Wandmodell). Abdeckung entlastet (73–86 % aktiv).
+   Sonde eingebaut (unterboden_sonde.csv, alle Arme). Ursachen-Kandidaten: Fernfeld-Erbe
+   (16-mm-Treppe löst den Spalt kaum auf → Ränder liefern toten Spalt), Einlauflänge
+   (CFD_NEAR_OFF_X-Messarm im Code vorgesehen), Moving-Floor-Impulsübertrag unter dem Wagen
+   (audit_bewegte_waende prüfte nur Init). VOR dem APG-Fahrzeuglauf attribuieren.
 8. **Far-Geometrie-Nullmodell (CC-Ideenskizze 2026-08-17, geprüft):** Das 16-mm-Fernfeld
    umströmt einen 4× gröber getreppten Körper → falsches Verdrängungs-/Druckfeld an den
    Nahfeld-Rändern. Korrektur NICHT über Bouzidi-artiges interpoliertes BB (EP/FP16C-heikel),
