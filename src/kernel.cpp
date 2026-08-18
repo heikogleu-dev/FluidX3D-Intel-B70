@@ -2604,10 +2604,13 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 +R(kernel void boden_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nz, const uint nz_down, const uint x_split TS_P) {
 	const uxx n = get_global_id(0);
 	if(n>=(uxx)def_N||is_halo(n)) return;
+)+"#ifdef SPARSE_TILES"+R(
+	if(is_dead_tile(n, tile_slot)) return; // XL-Audit B1
+)+"#endif"+R( // SPARSE_TILES
 	const uchar bo = flags[n]&TYPE_BO;
 	if(bo==TYPE_S||bo==TYPE_E) return;
 	const uint3 xyz = coordinates(n);
-	const uint nz_eff = (xyz.x>=x_split) ? nz_down : nz; // V1-x_split: ab Nase nz_down (Default 0 = unterm Wagen/Wake AUS), stromauf nz
+	const uint nz_eff = (xyz.x>=x_split) ? nz_down : nz; // B4-Notiz: nz_down=0 heisst hier AUS ab Nase (V1: uniform nz) -- bewusste Abweichung (Kraefteschutz), V1-A/Bs mit nz_down=0 nicht bitvergleichbar // V1-x_split: ab Nase nz_down (Default 0 = unterm Wagen/Wake AUS), stromauf nz
 	if(nz_eff==0u||!(xyz.z>=1u&&xyz.z<=nz_eff)) return;
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);

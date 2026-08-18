@@ -242,6 +242,7 @@ bool LBM_Domain::s_fac_satgate = false;
 uint LBM_Domain::s_boden_eq_n = 0u;
 uint LBM_Domain::s_boden_eq_down = 0u;
 uint LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu;
+float LBM_Domain::s_boden_eq_u = 0.075f; // Setup kann eigenes u_lat durchreichen (XL-Audit B6)
 uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
@@ -282,7 +283,7 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u); // Parameter t/u/nz/nz_down/x_split je Enqueue
-	boden_eq_n = s_boden_eq_n; boden_eq_u = 0.075f; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
+	boden_eq_n = s_boden_eq_n; boden_eq_u = s_boden_eq_u; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
 
 #ifdef FORCE_FIELD
 	// FORK -- F-BBox: die Box wurde bereits im Konstruktor aufgeloest (sie muss vor device_defines()
@@ -364,6 +365,7 @@ void LBM_Domain::allocate(Device& device) {
 		kernel_update_fields.add_parameters(tile_slot);
 #ifdef FORCE_FIELD
 		kernel_update_force_field.add_parameters(tile_slot);
+		kernel_boden_eq.add_parameters(tile_slot); // XL-Audit B1: fehlte -- Sparse+BODEN_EQ war CL_INVALID_KERNEL_ARGS (V1 hatte die Bindung)
 #endif // FORCE_FIELD
 	}
 
