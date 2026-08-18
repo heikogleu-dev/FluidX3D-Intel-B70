@@ -808,3 +808,15 @@ noch bei aktivem EQ; Einzelgitter-Warnliste + FERN_DOWN; kanal/fernfeld/facetten
 die ganze Familie; 1,045->1,044 (CSV-exakt); "damals N<=2 gefahren"-Etikett. Severity-Verlauf
 der Schleife: R1 mehrere HOCH -> R2 1 HOCH (Doku) -> R3 nur Warntext-Asymmetrien. Regression
 je Runde: Suite 5x, B55-Anker 4032664999240533470 exakt.
+
+## Perf-Fixbatch 1 (die zwei bitidentischen Hebel aus dem Perf-Audit)
+
+1. boden_eq: z-Band-Test VOR den flags-Load gezogen -- die Enqueue streamte sonst je Schritt das
+   komplette flags-Feld (N x 1 B) fuer ein Band von <2 % der Zellen (V1-Erbdefekt, ~1-5 %).
+2. clFlush nach run_async (Device/LBM_Domain::flush_queue) -- der iGPU-Overlap der dd-Kopplung
+   hing bisher am NEO-Treiberverhalten, jetzt garantiert.
+Pruefagent: KEINE BEFUNDE (Kommutierbarkeit der Early-outs fuer alle Zellklassen bewiesen, Flush
+trifft die richtige Queue nach allen Enqueues, initialized-Guard deckt den Freigabe-Fall).
+Regression: Suite 5x, Anker exakt, dd-Kombiproof mit EXAKT identischen Wirkpfad-Zaehlern
+(1.851.472/207.646) -- Bitidentitaet am Objekt belegt. Offene Perf-Hebel (naechste Baurunde,
+GPU-Leiter): kraft_facetten-GPU-Reduktion, Slice-Ebenen-Read, UPDATE_FIELDS-A/B, FP16S-A/B.

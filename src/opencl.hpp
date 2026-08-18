@@ -333,6 +333,7 @@ public:
 	}
 	inline Device() {} // default constructor
 	inline void barrier(const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { cl_queue.enqueueBarrierWithWaitList(event_waitlist, event_returned); }
+	inline void flush_queue() { cl_queue.flush(); } // FORK Perf-Audit 2026-08-20: enqueued-Arbeit an den Treiber uebergeben ohne zu warten (macht den dd-Overlap treiberfest)
 	inline void finish_queue() {
 		// FORK (Intel Arc Pro B70): der NEO-Treiber kann in finish() haengen bleiben (Intel-Issue #904).
 		// Ein stiller Hang ist von "die Simulation rechnet halt lange" nicht zu unterscheiden -- deshalb

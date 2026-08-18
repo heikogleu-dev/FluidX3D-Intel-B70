@@ -248,6 +248,7 @@ public:
 	void increment_time_step(const ulong steps=1ull); // increment time step
 	void reset_time_step(); // reset time step
 	void finish_queue();
+	void flush_queue();
 
 	const Device& get_device() const { return device; }
 	uint get_Nx() const { return Nx; } // get (local) lattice dimensions in x-direction

@@ -598,6 +598,8 @@ void LBM_Domain::reset_time_step() {
 	t_last_update_fields = t;
 #endif // UPDATE_FIELDS
 }
+void LBM_Domain::flush_queue() { device.flush_queue(); } // Perf-Audit: siehe run_async
+
 void LBM_Domain::finish_queue() {
 	device.finish_queue();
 }
@@ -1521,6 +1523,7 @@ void LBM::run_async(const ulong steps) {
 	if(!initialized) { print_error("LBM::run_async vor der Initialisierung aufgerufen. Erst run() einmal rufen, dann run_async."); return; }
 	info.append(steps, max_ulong, get_t());
 	for(ulong i=1ull; i<=steps; i++) do_time_step(false);
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->flush_queue(); // Perf-Audit 2026-08-20: ohne Flush haengt die Submission am NEO-Treiberverhalten -- der iGPU-Overlap war bisher Glueck, jetzt Garantie
 }
 
 void LBM::finish() { // FORK: Barriere ueber alle Warteschlangen dieser LBM-Instanz
