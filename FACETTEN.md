@@ -85,6 +85,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
   Sentinel −1.0f matcht nie) → `facetten_diagz.csv` mit
   schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon,alpha,dp_ds.
   Nur iMEM-Arme; Kanal/Torus verdrahtet, Kugel noch nicht (Warnung).
+- **cd_facetten.csv (dd)**: Spalten dm/rest = FENSTER-Delta ab Reibungs-Snapshot (Endreport-Δm dagegen kumulativ seit Start — Etikett im Print).
 - **Host-Census** (CFD_FACETTEN_DIAG / baue_facetten-Log): Klassen, y_w-Lagen, |L|, Momente —
   liefert die exakten Slot-Solls VOR jedem Kernellauf.
 

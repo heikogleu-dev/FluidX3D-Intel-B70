@@ -450,3 +450,12 @@ unabhaengig. TO-DO (vor APG-Fahrzeuglauf): Unterboden-Durchstroemungssonde (mitt
 Spalt unter dem Boden laengs des Fahrzeugs, je Arm in die CSV) + A/B AUS vs Facetten-Arm:
 ist der Unterboden auch im AUS-Arm tot (-> Architektur/Einlauf/Fernfeld-Erbe, vorbestehend)
 oder erst im Facetten-Arm (-> Mechanismus)? Slices aller drei s5b-Laeufe liegen in export/.
+
+## S5-Loop Runde 2 (Nachpruefer auf 1c0d712/e58a03c/d67a7f5): keine schweren Befunde
+
+4x NIEDRIG gefixt: Sonde ueberspringt Ueberhang-Saeulen (>0,35 m zdach -- Spiegel/Fluegel
+zaehlten freie Seitenstroemung als Spalt), MS-Schicht-Ausschluss kommentiert (bewusst),
+dm-Semantik etikettiert (Endreport kumulativ vs. CSV Fenster-Delta) inkl. FACETTEN.md-Zeile,
+Gelbband-Notiz nennt den Semantikwechsel. Positivliste: Fenster-Snapshot beweisbar korrekt
+(monotones +=, Einmal-Zweig), K4-Vergleich fair (identische Zellmengen), Slot-13-Kommentar
+faktisch richtig, nichts Eingeschleppt. Regression: Suite 5x gruen.

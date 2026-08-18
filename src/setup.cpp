@@ -2538,7 +2538,7 @@ static void main_setup_fahrzeug_dd() {
 					const double qA=(double)q_inf*A_ref;
 					fac_csv << t_si << "," << (double)units_fine.si_F((float)FK.px)/qA << "," << (double)units_fine.si_F((float)FK.pz)/qA << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest << "\n" << std::flush;
-					if(fabs(fac_dm)>1e-4*(double)df->fac_N) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N -- in Arm 4 eichen)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
+					if(fabs(fac_dm)>1e-4*(double)df->fac_N) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N auf das FENSTER-Delta -- Arm-4-Eichung: Rauschbett ~0,12 kumulativ, Schwelle ~1 vormerken)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
 				}
 			}
 			const auto _t5 = t_now();
@@ -2619,8 +2619,9 @@ static void main_setup_fahrzeug_dd() {
 				uint zdach=0u; // erste Fahrzeugzelle der Saeule
 				for(uint z=1u; z<fNz; z++) { const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)fNy)*(ulong)fNx; if((lbm_f.flags[n]&TYPE_X)!=0u) { zdach=z; break; } }
 				if(zdach<2u) continue; // kein Fahrzeug ueber dieser Saeule oder Latsch (zdach=1 = Kontakt)
+				if((float)zdach*dx_f>0.35f) continue; // R2-Nachpruefer: Ueberhang-Saeulen (Spiegel/Fluegel) zaehlen sonst freie Seitenstroemung als "Spalt"
 				for(uint z=1u; z<zdach; z++) { const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)fNy)*(ulong)fNx;
-					if((lbm_f.flags[n]&(TYPE_S|TYPE_E))==0u) { su+=(double)lbm_f.u.x[n]; nc++; } }
+					if((lbm_f.flags[n]&(TYPE_S|TYPE_E))==0u) { su+=(double)lbm_f.u.x[n]; nc++; } } // schliesst TYPE_MS (z=1-Schicht) BEWUSST aus: Band-Mitschleppung ist keine Durchstroemung (R2)
 			}
 			if(nc>0ull) { const double ur=su/((double)nc*(double)u_lat);
 				ub << (near_x0+(double)x*dx_f) << "," << ur << "," << nc << std::endl;
@@ -2652,7 +2653,7 @@ static void main_setup_fahrzeug_dd() {
 		else print_info("Negativ-Kontrolle: Fernfeld-Wirkpfad = 0 (unberuehrt, wie gefordert).");
 		df->fac_tau.read_from_device(); df->fac_tau_n.read_from_device(); // Stale-Falle: frisch lesen
 		double dm=0.0, nk=0.0; for(ulong i=0ull;i<df->fac_N;i++){ dm+=(double)df->fac_tau[6ull*i+4ull]; nk+=(double)df->fac_tau[6ull*i+5ull]; }
-		print_info("iMEM-Erhaltung Nahfeld: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)+" (Referenz Kugel-alpha2: -2e-5)");
+		print_info("iMEM-Erhaltung Nahfeld: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)+" (KUMULATIV seit Start; CSV-Spalten dm/rest = Fenster-Delta ab Snapshot -- R2-Etikett)");
 		{	// ★ Facetten-y+: je Facette y_w aus fac_geo (NICHT hartkodiert 0,5 -- Audit-Rest #6 nicht wiederholen)
 			std::vector<float> yp; yp.reserve(df->fac_N);
 			std::ofstream ycsv(out_dir+"yplus_facetten.csv"); ycsv << "yplus\n";
