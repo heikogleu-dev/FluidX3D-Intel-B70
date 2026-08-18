@@ -650,3 +650,8 @@ K4-Tabellenzeile um dd erweitert; Tippfehler. Positivliste R2: MultiGPU-Guard-Re
 bewiesen korrekt (Member vor allocate), Kanten-Lift-Index a=0 == x--Ecke verifiziert,
 Konstruktor-Sperre erreichbar, alle drei B55-Hashes in den Ankerlogs wiedergefunden, awk
 aequivalent. Regression: Suite 5x, B55-Anker exakt.
+
+## Tiefen-Audit Runde 3: KEINE BEFUNDE -- **der ausfuehrliche Tiefen-Audit-Loop ist GESCHLOSSEN**
+(3 Pruefer auf alles, nichts vorausgesetzt -> ~23 Befunde ueber 2 Fix-Runden, kein HOCH im
+Kernel, 1 toter Guard als HOCH-No-Op gefunden+gefixt, Band-Naht geschlossen und falsifiziert,
+Slot-8-Zaehlsemantik je Arm jetzt genau 1 Zaehlstelle. Anker final B=5,5, Suite 5x.)
