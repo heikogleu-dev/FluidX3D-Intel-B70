@@ -1397,7 +1397,12 @@ void main_setup_kugel() {
 			else if(nfroz>=2u) grund="die Kraft steht seit drei Abtastungen BITGLEICH";
 			else if((double)((float)(step+chunk)*dt)>0.02&&(fabs((double)units.si_F(F_lat.x))>20.0*(double)q_inf*(double)A_nom||fabs((double)units.si_F(F_lat.z))>20.0*(double)q_inf*(double)A_nom)) grund="|Cd| oder |Cz| ueber 20 (Explosion)"; // R2: dritter Zweig wie dd/fahrzeug
 			// LATENT (R2): static nfroz/Fxp ueberleben einen zweiten Fall-Aufruf im Prozess -- heute unerreichbar (ein Setup je Prozess).
-			if(grund!="") print_error("Kugel-Lauf gekippt bei Schritt "+to_string(step+chunk)+": "+grund);
+			if(grund!="") { // R3: Teilreihe retten wie im fahrzeug-Fall
+				std::ofstream fr(out_dir+"forces_abbruch.csv"); fr.precision(8); fr<<"time_s,Fx_N,Fy_N,Fz_N\n";
+				const size_t nn=std::min(ts.size(), fx.size());
+				for(size_t i2=0u;i2<nn;i2++) fr<<ts[i2]<<","<<fx[i2]<<","<<fy[i2]<<","<<fz[i2]<<"\n"; fr.close();
+				print_error("Kugel-Lauf gekippt bei Schritt "+to_string(step+chunk)+": "+grund+". Teilreihe: forces_abbruch.csv");
+			}
 			nfroz = (F_lat.x==Fxp&&F_lat.z==Fzp) ? nfroz+1u : 0u; Fxp=F_lat.x; Fzp=F_lat.z;
 		}
 		// ★ Druck-Zeitmittel: je Kadenz-Sample im Mittelungsfenster die Druckprojektion summieren.

@@ -539,3 +539,10 @@ Explosions-Zweig nachgezogen; rho ebenfalls bit-getestet im Lift-Waechter; Arm0-
 archiviert; static-Waechter-Latenz kommentiert. Positivliste R2: Konstante/Newton-Stabilitaet/
 Bit-Test/Waechter-Rahmen/alle Batch-Fixes verifiziert, nichts Eingeschleppt.
 Regression: Suite 5x, Arm-3-Anker exakt.
+
+## Gross-Audit Runde 3: 2x NIEDRIG (Kommentar-Etiketten, Kugel-Teilreihen-Dump) -- gefixt.
+**Der Gross-Audit-Loop (Heiko-Auftrag: ALLES) ist damit formal geschlossen** (3 Pruefer ->
+Spalding-HOCH-Fix -> Batch -> 2 Nachpruefrunden). Anker final (B=5,5): Arm0 1465099484999127
+1562, Arm1 1367576470905661998, Arm3 4032664999240533470 (logs/anker/*_B55.log). NAECHSTE
+PFLICHT vor neuen Wert-Aussagen: Neumessung aller Spalding-Eichungen (Kanal-Arm3-cf,
+Kugel-Leiter, APG-kappa) mit B=5,5.

@@ -1585,15 +1585,11 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 float wf_spalding_uplus(const float Y) {
 	// Loese X*S(X) = Y fuer X = u+ (Spalding, kappa=0,41, B=5,5 wie Han et al. 2021, Gl. 16).
 	// Log-Log-Newton, Start sqrt(Y), FIX drei Iterationen ohne Konvergenzabfrage (Branch-Divergenz).
-	// Genauigkeit (R2 nachgemessen, Bisektion als Referenz): ~1e-13 nur fuer kleines/mittleres Y;
-	// rel. Fehler in u+ = 2,8e-4 bei Y=1e3, 4e-3 bei Y=5e3, 1,2e-2 bei Y=1e4 (tau_w ~ u+^-2 =>
-	// bis ~2,3 % zu klein), weil der Start bei Y>1e4 auf X=100 klemmt und 3 Newton-Schritte dort
-	// nicht reichen. N=38-Kanal (Y~2400): ~0,1 % in tau_w, unkritisch; bei hoeherem Re_tau
-	// Iterationszahl erhoehen. X geklemmt auf <=100: kappa*X <= 41, exp davon ist
+	// Genauigkeit (Messung 2026-08-19 MIT korrekter Konstante, FP32 gegen double-Bisektion, it=3):
+	// tau_w-Fehler -0,44 % bei Y~2400, -4,4 % bei Y=1e4, <1e-4 bei Y<=330 (Fahrzeugbereich);
+	// bei hohem Re_tau Iterationszahl erhoehen. (Die frueheren "R2"-Zahlen ~0,1 %/2,3 % galten
+	// fuer die FALSCHE Konstante und sind hinfaellig -- R3-Etikettenbereinigung.) X geklemmt auf <=100: kappa*X <= 41, exp davon ist
 	// FP32-sicher -- noetig, weil -cl-finite-math-only NaN/INF zu undefiniertem Verhalten macht.
-	// R2-Nachmessung MIT korrekter Konstante (FP32-Sim gegen double-Bisektion): it=3 -> tau-Fehler
-	// -0,44 % bei Y~2400, -4,4 % bei Y=1e4, <1e-4 bei Y<=330 (Fahrzeug-Bereich). Die aelteren
-	// "~0,1 %"-Zahlen im Umfeld galten fuer die FALSCHE Konstante und sind hinfaellig.
 	// ★ GROSS-AUDIT HOCH (2026-08-19, Pruefer 1): hier stand 0.010517092f -- das ist (e^0.1 - 1)/10,
 	// ein Uebertragungsfehler, effektiv B = 11,11 statt 5,5. Folge: u+ zu gross, tau_w = rho*(ut/u+)^2
 	// systematisch 16-38 % zu klein in ALLEN Wandmodell-Pfaden (WFB, Paararm, iMEM, PEMA) seit dem
