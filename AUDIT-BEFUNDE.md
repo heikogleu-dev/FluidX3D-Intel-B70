@@ -715,3 +715,9 @@ Rauschen, wirksam ab 4 mm. ACHTUNG: damit verschieben sich die 4-mm-Anker (s5b_a
 neue Basislaeufe noetig. Klein-Todos: BODEN_EQ-Schalterzeilen in FACETTEN.md, Band als
 "durch BODEN_EQ ersetzt" etikettiert, Audit-Persist via Queue-Logs abgedeckt (logs/<lauf>.log
 archiviert jede Konsole -- kein Refactor noetig), alpha-Kommentar entklebt.
+
+## NEUSTANDARD VALIDIERT (f_neustandard, DX=8): zoff-3 + Arm3+alpha2+SATGATE + BODEN_EQ 2/1
+OF13-Lage aktiv, Wirkpfad 147.166.750 = Soll exakt, Delta-m -0,003, Unterboden-Profil auf
+OF13-Niveau ueber die volle Laenge (1,00/1,215/1,015/0,82), Cz -0,611 = bester Facetten-Arm
+der Sprosse. DIES ist die 4-mm-Startaufstellung. XL-Audit-1-Fixes drin (tile_slot-Bindung,
+dead-tile, u_road konfigurierbar); Pruefer 2+3 laufen, Schleife geht weiter bis leer.
