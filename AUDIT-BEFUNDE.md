@@ -699,7 +699,7 @@ Seitenrand-Nachfuellung), Beweis der V1-Fix-Klasse am dd.
 | Port N=2+Split | 1,47 | +0,30 | 0,709 | KRAFTNEUTRAL bestaetigt; Senke kehrt stromab zurueck |
 | **Port N=2/DOWN=1** | 1,93 | **-0,68** | **1,216** | **OF13-Profil hergestellt; Rest-Kontamination Reifen-adjazent** |
 
-Heiko-Vorgaben eingebaut: N<=2, x_split ab Nase (V1: "Fahrzeug stand AUF der Schicht" ->
+Heiko-Vorgaben eingebaut: damals N<=2 gefahren (Vorgabe: max 3, besser 2 -- R3-Etikett), x_split ab Nase (V1: "Fahrzeug stand AUF der Schicht" ->
 V2-stehend: DOWN=1 laeuft bei 68 mm Freiheit beruehungsfrei unterm Wagen durch, Kontakt nur
 Reifen-Nachbarn). 4-MM-KANDIDAT MORGEN: Arm3+alpha2+SATGATE + BODEN_EQ=2/DOWN=1 (+FERN dito),
 Erwartung: Kontamination halbiert sich relativ (4 vs 8 mm Zwangszelle), Cz erstmals Richtung
@@ -798,3 +798,13 @@ Attribution zurueckgezogen; schaetzerreiner facettenfreier BODEN_EQ-Anker auf -3
 allen Reststellen (x=1,29=Nase), In-place-Marker an P0/P5/7b, DIAGZ-Wahrheit (nur Kanal/Torus),
 Kopfdaten, N<=3-Konsistenz, P3.2-Marker am Listenitem. Verifiziert log-exakt: f_zoffm3, f_aus,
 f_d2, f_neustandard (Wirkpfad 147.166.750=Soll), Leiterzahlen.
+
+## XL-Abschlussrunde 3: kein HOCH, 1 MITTEL + 5 NIEDRIG -- direkt gefixt, SCHLEIFE GESCHLOSSEN
+
+R3 verifizierte alle R2-Fixes gruen (Warnungen feuern richtig und genau einmal, H1-Korrektur
+widerspruchsfrei, read-once ueberall). Gefixt: FERN-Seite bekam N>3- und DOWN-ohne-EQ-Guards
+(die FACETTEN-Behauptung "Code warnt ab N>3" gilt jetzt nah/fern/kugel); ABSTAND>3-Warnung nur
+noch bei aktivem EQ; Einzelgitter-Warnliste + FERN_DOWN; kanal/fernfeld/facetten_test warnen
+die ganze Familie; 1,045->1,044 (CSV-exakt); "damals N<=2 gefahren"-Etikett. Severity-Verlauf
+der Schleife: R1 mehrere HOCH -> R2 1 HOCH (Doku) -> R3 nur Warntext-Asymmetrien. Regression
+je Runde: Suite 5x, B55-Anker 4032664999240533470 exakt.
