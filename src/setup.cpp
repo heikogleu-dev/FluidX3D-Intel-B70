@@ -1394,7 +1394,7 @@ void main_setup_kugel() {
 			static float Fxp=1e30f, Fzp=1e30f; static uint nfroz=0u;
 			string grund="";
 			if(!std::isfinite(F_lat.x)||!std::isfinite(F_lat.z)) grund="die Kraft ist keine Zahl mehr";
-			else if(nfroz>=2u) grund="die Kraft steht seit drei Abtastungen BITGLEICH";
+			else if(nfroz>=2u) grund="die Kraft steht seit drei Abtastungen BITGLEICH"; // B7: bewusst -- ein absichtlich laminarer Messarm wuerde hier fallen (dann Waechter-Env nachruesten)
 			else if((double)((float)(step+chunk)*dt)>0.02&&(fabs((double)units.si_F(F_lat.x))>20.0*(double)q_inf*(double)A_nom||fabs((double)units.si_F(F_lat.z))>20.0*(double)q_inf*(double)A_nom)) grund="|Cd| oder |Cz| ueber 20 (Explosion)"; // R2: dritter Zweig wie dd/fahrzeug
 			// LATENT (R2): static nfroz/Fxp ueberleben einen zweiten Fall-Aufruf im Prozess -- heute unerreichbar (ein Setup je Prozess).
 			if(grund!="") { // R3: Teilreihe retten wie im fahrzeug-Fall
@@ -2377,7 +2377,7 @@ static void main_setup_fahrzeug_dd() {
 	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0, fac_dm0=0.0, fac_rest0=0.0;
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
-	if(env_u("CFD_KOPPLUNG_BODENBAND", 0u)>0u) print_info("BODENBAND-Messarm aktiv: unterste "+to_string(env_u("CFD_KOPPLUNG_BODENBAND",0u))+" Grobzeilen der x--Einlasskopplung = u_inf (Rampe bis 2N) -- OF13-Befund, Fernfeld-Erbe-Test.");
+	if(env_u("CFD_KOPPLUNG_BODENBAND", 0u)>0u) print_info("BODENBAND-Messarm aktiv: unterste "+to_string(env_u("CFD_KOPPLUNG_BODENBAND",0u))+" Grobzeilen der x--Einlasskopplung: DEFIZIT-ANHEBUNG fmax(u_far, w*u_inf), Rampe bis 2N (B4-Korrektur: keine Ersetzung) -- OF13-Befund.");
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_info("C7-Notiz: Facetten-Schubspannung = Impulssenke (Gleichgewichtsmodell, kein APG) -- Abloeselage bleibt modellfrei; Cd/Cz-Bewegung dokumentieren, nicht versprechen.");
 	// ★ B2: Wandprofil ueber die Zeit, je Gitter eine Saeule und eine CSV (Begruendung bei
 	// schreibe_wandprofil). Die Saeule wird EINMAL gesucht -- die Flags sind nach initialize statisch.
@@ -2419,7 +2419,7 @@ static void main_setup_fahrzeug_dd() {
 		// OF13 zeigt dort 1,2-1,4 u_inf (postProcessing/sampleY0). CFD_KOPPLUNG_BODENBAND=N ersetzt in
 		// der GROBEN x--Einlassflaeche die untersten N Zellreihen durch u_inf (linear auf 0 gerampt bis
 		// 2N), NUR ux/uy/uz -- rho bleibt Fernfeld. 0/ungesetzt = exakt bisheriges Verhalten.
-		{	static const uint bb_n = env_u("CFD_KOPPLUNG_BODENBAND", 0u);
+		{	static const uint bb_n = env_u("CFD_KOPPLUNG_BODENBAND", 0u); // LATENT (B9): static ueberlebt zweiten Fall-Aufruf im Prozess; fmax maskiert zudem Fernfeld-NaN im Band still (statt Bit-Test im Drive-Kernel)
 			if(bb_n>0u) { const uint ea=cp[0].extent_a; // Ebene x-: a=y, b=z (gid = a + b*ea)
 				for(uint b=0u; b<min(2u*bb_n, cp[0].extent_b); b++) {
 					const float w_bb = (b<bb_n) ? 1.0f : 1.0f-(float)(b-bb_n+1u)/(float)(bb_n+1u); // 1 im Band, Rampe darueber
@@ -2431,7 +2431,8 @@ static void main_setup_fahrzeug_dd() {
 				}
 			}
 		}
-		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio);
+		for(uint p=2u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio); // Tiefen-Audit B5: y/z zuerst...
+		if(drive_face[0]) lbm_f.drive_boundary_from_coarse(fp[0], face[0], cp[0].extent_a, cp[0].extent_b, ratio); // ...x- ZULETZT -- sonst ueberschreiben die y-Ebenen die gelifteten Kantenspalten (1-Zellen-Naht) und der Kopplungsnachweis meldet Schein-Abweichungen
 		const auto _t1 = t_now();
 		lbm_f.run((ulong)ratio, n_outer*(ulong)ratio);
 		const auto _t2 = t_now();
@@ -2685,8 +2686,10 @@ static void main_setup_fahrzeug_dd() {
 		{	// ★ Boden-Laengsprofil (Heiko 2026-08-19, V1-Instrument): u_x in z=1..5 entlang x ueber den
 			// Mittelstreifen (y_mid +- 25 Zellen), INKLUSIVE Einlaufstrecke -- macht den beobachteten
 			// Einbruch direkt nach dem Einlass quantitativ (Verdacht: Fernfeld-Erbe, Spalt grob <2 Zellen).
-			std::ofstream bl(out_dir+"boden_laengsprofil.csv"); bl << "x_m,u_rel_z1_5,n_zellen" << std::endl; bl.precision(6);
-			const uint ymid=fNy/2u, yb=25u;
+			std::ofstream bl(out_dir+"boden_laengsprofil.csv");
+			bl << "# dx_mm=" << dx_f*1000.0f << " band_z=1..5 = " << dx_f*1000.0f << ".." << 5.0f*dx_f*1000.0f << " mm, y_mid+-" << 25u << " Zellen -- Tiefen-Audit B2: GITTERBAND, zwischen DX-Sprossen NICHT direkt vergleichbar" << std::endl;
+			bl << "x_m,u_rel_z1_5,n_zellen" << std::endl; bl.precision(6);
+			const uint ymid=fNy/2u, yb=min(25u, fNy/2u>1u?fNy/2u-1u:0u); // B6: uint-Unterlauf bei schmalem Nahfeld
 			for(uint x=0u; x<fNx; x++) {
 				double su2=0.0; ulong nc2=0ull;
 				for(uint y=ymid-yb; y<=ymid+yb; y++) for(uint z=1u; z<=5u; z++) {
@@ -2737,7 +2740,7 @@ static void main_setup_fahrzeug_dd() {
 		if(fac_pn>0ull) { const double qA=(double)q_inf*A_ref;
 			print_info("Cd-Pfad Nahfeld: Cd_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_px/(double)fac_pn))/qA),4u)
 				+" (Zeitmittel, "+to_string(fac_pn)+" Samples), Cz_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_pz/(double)fac_pn))/qA),4u)
-				+" (n_voll/proj/unklar folgen im Lattice-Print) -- Reibung: letzte Zeile cd_facetten.csv. ACHTUNG Audit S5: cd_reib ist residuendominiert (88 % zielUNabhaengige Querresiduen der Rang-2-Pfade) -- ehrlicher Zielanteil = ARM-DIFFERENZ, nicht der Absolutwert."); }
+				+" -- Reibung: letzte Zeile cd_facetten.csv. ACHTUNG Audit S5: cd_reib ist residuendominiert (88 % zielUNabhaengige Querresiduen der Rang-2-Pfade) -- ehrlicher Zielanteil = ARM-DIFFERENZ, nicht der Absolutwert."); }
 		print_info("ACHTUNG: forces.csv/Cd oben enthaelt an behandelten Links PHANTOM-Reibung (object_force) -- fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
 	}
 	print_info("---------------------------------------------------------------");
@@ -2924,7 +2927,7 @@ static const FacPaar FAC_TAB[3][2][2] = {
 };
 void main_setup_facetten_test() {
 	print_info("facetten_test: ALLE CFD_FACETTEN*/CFD_FAC_*-Env-Werte werden IGNORIERT (Arme hart verdrahtet); kein sichere_lauf, fester Ordner export/facetten_test (Gross-Audit-Ansage).");
-	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N sind im facetten_test WIRKUNGSLOS.");
+	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N/CFD_SPARSE_TILES/CFD_WANDFUNKTION sind im facetten_test WIRKUNGSLOS (B10).");
 	print_info("C1b T1: Paartabelle unabhaengig aus FZ_C herleiten und gegen die Kernel-Kopie pruefen.");
 	uint fehler=0u;
 	for(uint a=0u; a<3u; a++) for(uint s=0u; s<2u; s++) {

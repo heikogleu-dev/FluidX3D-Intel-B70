@@ -18,7 +18,7 @@ fi
 ( set -o noclobber; echo $$ > logs/queue.lock ) 2>/dev/null || { echo "VERWEIGERT: queue.lock-Wettlauf (zweite Kette gleichzeitig gestartet)." >&2; exit 3; } # atomar (Gross-Audit TOCTOU)
 trap 'rm -f logs/queue.lock' EXIT INT TERM
 : > "$Q"
-n=0; gesamt=$(awk '{gsub(/^[ \t]+|[ \t]+$/,"")} /^($|#)/{next} {n=gsub(/::/,"::"); if(n==1) c++} END{print c+0}' "$1") # exakt wie der Schleifenfilter (Gross-Audit)
+n=0; gesamt=$(awk '{gsub(/^[ \t]+|[ \t]+$/,"")} $0==""{next} substr($0,1,1)=="#"{next} {n=gsub(/::/,"::"); if(n!=1) next; split($0,t,"::"); gsub(/ /,"",t[2]); if(t[2]!="") c++} END{print c+0}' "$1") # B8: exakt wie der Schleifenfilter inkl. Leername-Skip, mawk-portabel
 hb() { while [ -f logs/queue.lock ] && kill -0 $$ 2>/dev/null; do echo "[$(date +%H:%M:%S)] LAEUFT (Herzschlag)" >> "$Q"; sleep 120; done; }
 hb & HB=$!
 # ★ R2-Befund: Signal-Handler MUSS exit-en -- sonst setzt bash die Schleife nach dem Handler
