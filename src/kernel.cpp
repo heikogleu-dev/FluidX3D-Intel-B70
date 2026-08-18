@@ -1591,6 +1591,9 @@ float wf_spalding_uplus(const float Y) {
 	// nicht reichen. N=38-Kanal (Y~2400): ~0,1 % in tau_w, unkritisch; bei hoeherem Re_tau
 	// Iterationszahl erhoehen. X geklemmt auf <=100: kappa*X <= 41, exp davon ist
 	// FP32-sicher -- noetig, weil -cl-finite-math-only NaN/INF zu undefiniertem Verhalten macht.
+	// R2-Nachmessung MIT korrekter Konstante (FP32-Sim gegen double-Bisektion): it=3 -> tau-Fehler
+	// -0,44 % bei Y~2400, -4,4 % bei Y=1e4, <1e-4 bei Y<=330 (Fahrzeug-Bereich). Die aelteren
+	// "~0,1 %"-Zahlen im Umfeld galten fuer die FALSCHE Konstante und sind hinfaellig.
 	// ★ GROSS-AUDIT HOCH (2026-08-19, Pruefer 1): hier stand 0.010517092f -- das ist (e^0.1 - 1)/10,
 	// ein Uebertragungsfehler, effektiv B = 11,11 statt 5,5. Folge: u+ zu gross, tau_w = rho*(ut/u+)^2
 	// systematisch 16-38 % zu klein in ALLEN Wandmodell-Pfaden (WFB, Paararm, iMEM, PEMA) seit dem
@@ -2898,7 +2901,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(!(v[0]>0.5f&&v[0]<2.0f)) return;
 	// ★ Gross-Audit M: isfinite ist unter -cl-finite-math-only toter Code (Compiler faltet zu true) --
 	// Bit-Test auf Exponent 0xFF faengt NaN/Inf treiberunabhaengig.
-	if((as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return;
+	if((as_uint(v[0])&0x7F800000u)==0x7F800000u||(as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return; // R2: auch rho bit-testen (Bereichsvergleich ist unter finite-math NaN-unzuverlaessig)
 	rho[n] = v[0];
 	u[                 n] = v[1];
 	u[    def_N+(ulong)n] = v[2];

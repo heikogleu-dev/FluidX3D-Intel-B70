@@ -530,3 +530,12 @@ im dd, s_sparse_T ohne Read-once, SPALDING_IT-Doppel-Default (explizit 0 -> stil
 utau_ist aus f_akt, facetten_test ohne sichere_lauf/Ansagen, Queue-stdin/</dev/null, WFB-Slots
 3-5 ungegatet, Arm4xAPG-tw-Verfaelschung des y+-Reports, fernfeld-PO_FACES-Ansage.
 Regression nach Batch: Suite 5x gruen, NEUE Anker exakt (Arm1 1367..., Arm3 4032...).
+
+## Gross-Audit Runde 2 (auf 1f2dac1+e98d369): 6x NIEDRIG, alle gefixt
+
+Spalding-Genauigkeitskommentar neu vermessen (it=3: -0,44 % bei Y~2400, -4,4 % bei 1e4, <1e-4
+im Fahrzeugbereich Y<=330 -- alte Zahlen galten fuer die falsche Konstante); Kugel-Waechter
+Explosions-Zweig nachgezogen; rho ebenfalls bit-getestet im Lift-Waechter; Arm0-Ankerlog
+archiviert; static-Waechter-Latenz kommentiert. Positivliste R2: Konstante/Newton-Stabilitaet/
+Bit-Test/Waechter-Rahmen/alle Batch-Fixes verifiziert, nichts Eingeschleppt.
+Regression: Suite 5x, Arm-3-Anker exakt.

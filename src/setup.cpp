@@ -1395,6 +1395,8 @@ void main_setup_kugel() {
 			string grund="";
 			if(!std::isfinite(F_lat.x)||!std::isfinite(F_lat.z)) grund="die Kraft ist keine Zahl mehr";
 			else if(nfroz>=2u) grund="die Kraft steht seit drei Abtastungen BITGLEICH";
+			else if((double)((float)(step+chunk)*dt)>0.02&&(fabs((double)units.si_F(F_lat.x))>20.0*(double)q_inf*(double)A_nom||fabs((double)units.si_F(F_lat.z))>20.0*(double)q_inf*(double)A_nom)) grund="|Cd| oder |Cz| ueber 20 (Explosion)"; // R2: dritter Zweig wie dd/fahrzeug
+			// LATENT (R2): static nfroz/Fxp ueberleben einen zweiten Fall-Aufruf im Prozess -- heute unerreichbar (ein Setup je Prozess).
 			if(grund!="") print_error("Kugel-Lauf gekippt bei Schritt "+to_string(step+chunk)+": "+grund);
 			nfroz = (F_lat.x==Fxp&&F_lat.z==Fzp) ? nfroz+1u : 0u; Fxp=F_lat.x; Fzp=F_lat.z;
 		}
