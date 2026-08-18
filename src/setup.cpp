@@ -2663,6 +2663,21 @@ static void main_setup_fahrzeug_dd() {
 		if(nx_mit>0ull) print_info("Unterboden-Sonde: u_x/u_inf Mittel "+to_string((float)(su_sum/(double)nx_mit),3u)
 			+", Minimum "+to_string((float)su_min,3u)+" ueber "+to_string(nx_mit)+" x-Spalten (Soll deutlich > 0; CSV: unterboden_sonde.csv)");
 		if(nx_mit>0ull&&su_sum/(double)nx_mit<0.1) print_warning("UNTERBODEN TOT (< 10 % u_inf im Mittel) -- Abtrieb kann so nicht entstehen (Cz-Blocker, arm-unabhaengig pruefen).");
+		{	// ★ Boden-Laengsprofil (Heiko 2026-08-19, V1-Instrument): u_x in z=1..5 entlang x ueber den
+			// Mittelstreifen (y_mid +- 25 Zellen), INKLUSIVE Einlaufstrecke -- macht den beobachteten
+			// Einbruch direkt nach dem Einlass quantitativ (Verdacht: Fernfeld-Erbe, Spalt grob <2 Zellen).
+			std::ofstream bl(out_dir+"boden_laengsprofil.csv"); bl << "x_m,u_rel_z1_5,n_zellen" << std::endl; bl.precision(6);
+			const uint ymid=fNy/2u, yb=25u;
+			for(uint x=0u; x<fNx; x++) {
+				double su2=0.0; ulong nc2=0ull;
+				for(uint y=ymid-yb; y<=ymid+yb; y++) for(uint z=1u; z<=5u; z++) {
+					const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)fNy)*(ulong)fNx;
+					if((lbm_f.flags[n]&(TYPE_S|TYPE_E))==0u) { su2+=(double)lbm_f.u.x[n]; nc2++; }
+				}
+				if(nc2>0ull) bl << (near_x0+(double)x*dx_f) << "," << su2/((double)nc2*(double)u_lat) << "," << nc2 << std::endl;
+			}
+			print_info("Boden-Laengsprofil geschrieben: boden_laengsprofil.csv (Mittelstreifen, z=1..5).");
+		}
 	}
 	if(env_u("CFD_FACETTEN", 0u)==0u&&env_u("CFD_FAC_K4", 0u)>0u) { // ★ K4 am FAHRZEUG (Heiko 2026-08-18): Hybrid-Schaetzer vs object_force am unbehandelten BB -- ohne diese Eichung ist kein AUS-vs-Facetten-Cd-Vergleich belastbar
 		const std::vector<double> leer;
