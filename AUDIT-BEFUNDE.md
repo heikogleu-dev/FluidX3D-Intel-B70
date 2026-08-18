@@ -472,3 +472,20 @@ Monotone, gut konditionierte kappa-Antwort; Delta-m ueberall ~1e-5; APG-Klemmen 
 kappa=0,5 ist an BEIDEN Sprossen band-gueltig (0,45-0,5 Achenbach) -> geeichter Wert fuer
 Fahrzeuglauf 4 (leichte Aufloesungsabhaengigkeit dokumentiert: feiner -> frueher an der
 Bandkante; kappa=0,25 als konservative Reserve).
+
+## Kappen-Revalidierung + Unterboden-Attribution (2026-08-19 mittags)
+
+**APG-Ernuechterung:** Mit ehrlicher relativer Kappung [0, 2*tw] faellt der Kugel-APG-Effekt
+auf die Basis zurueck (DX25 0,345 / DX12 0,439 vs. Basis 0,344/0,436) -- der ungekappte
+Band-Treffer (0,490/0,498) lebte von Korrekturen >> tw, also AUSSERHALB der linearen
+Duennschicht-Gueltigkeit. Die kappa-Eichung von heute frueh ist damit als Ueberdehnungs-
+Artefakt einzuordnen; im Gueltigkeitsbereich hat der lineare APG-Term wenig Autoritaet.
+Fahrzeug-Test des gekappten Terms laeuft trotzdem (anderes Regime: echtes Heck-APG bei y+~30).
+
+**Unterboden-Attribution (Agent, alle Zahlen quellenbelegt): VERSORGUNGSBEGRENZT, kein Defekt.**
+Aufstand (Z_OFFSET=0) -> Nasenschlitz ~25-30 mm, Reifen dichten die Korridore; Maximal-
+versorgung rechnerisch u_rel<=0,30, gemessen 0,247 (arithmetisch geschlossen). Q-Profil:
+Einbruch an der VORDERACHSE (-53 % seitliche Leckage), der bewegte Boden laedt hinten wieder
+auf (Q 0,91->1,42). Moving-Floor-Mechanik ENTLASTET (Impulsuebertrag exakt 0,025/Schritt,
+0 % Abweichung, beide Domaenen). Fernfeld sekundaerer Verstaerker (Spalt <2 Grobzellen).
+Entscheidender A/B: CFD_Z_OFFSET_MM=16 (V1-Schwebe; V1-Referenz sah mittig 1,14 u_inf).
