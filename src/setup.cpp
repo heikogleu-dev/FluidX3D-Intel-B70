@@ -2424,8 +2424,10 @@ static void main_setup_fahrzeug_dd() {
 				for(uint b=0u; b<min(2u*bb_n, cp[0].extent_b); b++) {
 					const float w_bb = (b<bb_n) ? 1.0f : 1.0f-(float)(b-bb_n+1u)/(float)(bb_n+1u); // 1 im Band, Rampe darueber
 					for(uint a=0u; a<ea; a++) { const ulong e4=((ulong)a+(ulong)b*(ulong)ea)*4ull;
-						face[0][e4+1ull] = fma(w_bb, u_lat-face[0][e4+1ull], face[0][e4+1ull]);
-						face[0][e4+2ull] *= 1.0f-w_bb; face[0][e4+3ull] *= 1.0f-w_bb; }
+						// ★ Lauf-4/6-Lehre (s5d_aus_bb8): harte Ersetzung ueberfuettert (Cd 1,07-Strahl).
+						// DEFIZIT-ANHEBUNG: nur kollabierte Werte auf w*u_inf heben, gesunde Fernfeld-
+						// Struktur (inkl. uy/uz) bleibt unangetastet.
+						face[0][e4+1ull] = fmax(face[0][e4+1ull], w_bb*u_lat); }
 				}
 			}
 		}
