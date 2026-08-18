@@ -2377,6 +2377,7 @@ static void main_setup_fahrzeug_dd() {
 	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0, fac_dm0=0.0, fac_rest0=0.0;
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
+	if(env_u("CFD_KOPPLUNG_BODENBAND", 0u)>0u) print_info("BODENBAND-Messarm aktiv: unterste "+to_string(env_u("CFD_KOPPLUNG_BODENBAND",0u))+" Grobzeilen der x--Einlasskopplung = u_inf (Rampe bis 2N) -- OF13-Befund, Fernfeld-Erbe-Test.");
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_info("C7-Notiz: Facetten-Schubspannung = Impulssenke (Gleichgewichtsmodell, kein APG) -- Abloeselage bleibt modellfrei; Cd/Cz-Bewegung dokumentieren, nicht versprechen.");
 	// ★ B2: Wandprofil ueber die Zeit, je Gitter eine Saeule und eine CSV (Begruendung bei
 	// schreibe_wandprofil). Die Saeule wird EINMAL gesucht -- die Flags sind nach initialize statisch.
@@ -2413,6 +2414,21 @@ static void main_setup_fahrzeug_dd() {
 		outer_clock.start();
 		const auto _t0 = t_now();
 		lbm_c.run_async(1u);
+		// ★ BODENBAND-Messarm (Heiko/OF13-Befund 2026-08-19): das Fernfeld liefert am x-Einlass eine
+		// kollabierte Bodenschicht (0,63 u_inf bei -2,4 m), weil sein 16-mm-Spalt praktisch zu ist --
+		// OF13 zeigt dort 1,2-1,4 u_inf (postProcessing/sampleY0). CFD_KOPPLUNG_BODENBAND=N ersetzt in
+		// der GROBEN x--Einlassflaeche die untersten N Zellreihen durch u_inf (linear auf 0 gerampt bis
+		// 2N), NUR ux/uy/uz -- rho bleibt Fernfeld. 0/ungesetzt = exakt bisheriges Verhalten.
+		{	static const uint bb_n = env_u("CFD_KOPPLUNG_BODENBAND", 0u);
+			if(bb_n>0u) { const uint ea=cp[0].extent_a; // Ebene x-: a=y, b=z (gid = a + b*ea)
+				for(uint b=0u; b<min(2u*bb_n, cp[0].extent_b); b++) {
+					const float w_bb = (b<bb_n) ? 1.0f : 1.0f-(float)(b-bb_n+1u)/(float)(bb_n+1u); // 1 im Band, Rampe darueber
+					for(uint a=0u; a<ea; a++) { const ulong e4=((ulong)a+(ulong)b*(ulong)ea)*4ull;
+						face[0][e4+1ull] = fma(w_bb, u_lat-face[0][e4+1ull], face[0][e4+1ull]);
+						face[0][e4+2ull] *= 1.0f-w_bb; face[0][e4+3ull] *= 1.0f-w_bb; }
+				}
+			}
+		}
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio);
 		const auto _t1 = t_now();
 		lbm_f.run((ulong)ratio, n_outer*(ulong)ratio);

@@ -562,3 +562,16 @@ Klemm-Ansage, utau_ist-Etikett, PO_FACES-Ansage auch fernfeld, facetten_test-Ans
 stdin=/dev/null + atomarer noclobber-Lock (TOCTOU) + exakter gesamt-Zaehler, SURFACE x
 SPARSE_TILES = #error, alte Schlitz-These im Protokoll als WIDERLEGT markiert.
 Regression: Suite 5x, beide B55-Anker exakt.
+
+## OF13-Unterboden-Referenz (Agent, sampleY0 t=1200) + Bodenband-Messarm
+
+**Referenz-Durchbruch:** OF13 stroemt im selben Spalt (aufstehender Wagen, Reifen -3 mm) mit
+**1,18 u_inf im Mittel** (Nase 1,39, VA 1,19 OHNE Einbruch, Min 1,087 Wagenmitte, HA 1,25 --
+klassischer Venturi-Bodeneffekt = die Cz-Quelle). Unser LBM: 0,247 = Faktor 4,8 zu langsam,
+mit -53 %-VA-Einbruch. Meine "ehrliche Physik des tiefen Wagens"-Deutung ist damit WIDERLEGT --
+die Unterboden-Versorgung ist ein Setup-Defekt (Fernfeld-Erbe: Bodenschicht am x-Einlass 0,63
+statt ~1,3; V1-Einzelgitter hatte 1,14). Boden-BC identisch (OF13 bottom fixedValue 30 0 0).
+**Neu: CFD_KOPPLUNG_BODENBAND=N** (unterste N Grobzeilen der x--Einlasskopplung = u_inf,
+Rampe bis 2N, nur u, rho bleibt Fernfeld; 0 = bitidentisch alt). CPU-Mini-A/B: Unterboden
+0,304->0,331 allein durch die Einlasskorrektur -- Mechanismus bestaetigt. Dazu geplant:
+Z_OFFSET=-3-Arm (OF13-Reifeneinsenkung) und Boden-Laengsprofil-Instrument (drin).
