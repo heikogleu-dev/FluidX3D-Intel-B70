@@ -69,7 +69,7 @@ V1 hatte zwei Mechanismen an genau dieser Stelle. Beide sind laut Prüfung vom 2
 | `FLOOR_VELOCITY_INLET` (Bodenprägung, 3 Zellen) | 2026-06-06 als **akustische Quelle disqualifiziert** — verschlimmert genau das hier beschriebene Problem |
 | `INLET_VELOCITY_CLAMP` (Einlassklemme, 3 grobe Zellen) | ★ **KORRIGIERT 2026-08-08:** hier stand, das Gate greife womöglich gar nicht. Das ist **falsch**. Im **gekoppelten** Bauzustand ist es gesetzt (`setup.cpp:1637`), und der Flag-Wächter-Fehler trifft nur `TYPE_MS`-Zellen — im groben Gitter also **eine** von 552 z-Lagen. **99,8 % der Einlassebene wurden geklemmt.** Das ist der stärkste Kandidat dafür, warum V1 lief |
 | Sponge-Layer | in V1 entfernt; die Entfernung ließ das u-Feld **bit-identisch** — er war wirkungslos |
-| `CFD_COARSE_NU` (ν-Anhebung im Fernfeld) | vorhanden, Default 1,0 = aus. Der einzige der vier, der am Kern ansetzt |
+| `CFD_FERN_NU` (ν-Faktor, NUR Diagnosefall fernfeld — im gekoppelten dd existiert KEIN solcher Schalter; Gross-Audit: hier stand der nie existente CFD_COARSE_NU) | Default 1,0. Der einzige der vier, der am Kern ansetzt |
 
 Bemerkenswert: V1 hat das Fernfeld-Klingeln **beobachtet** und beschrieben — „quasi-inviszide
 Coarse → Akustik-Wellen radieren ungedämpft → global verrauscht, Kräfte 10× daneben" — es
@@ -85,7 +85,7 @@ Kopplung, nur der grobe Kanal mit seinen Rändern. Ringt er schon leer, ist die 
 eindeutig Rand plus Viskosität und nichts anderes. Das ist billig und trennt sauber.
 
 **2. Dissipation im Fernfeld.** Die molekulare Viskosität des groben Gitters anheben
-(`CFD_COARSE_NU`). Physikalisch ist das eine bewusste Über-Dissipation des Fernfelds — es
+(`CFD_FERN_NU`, nur fernfeld-Diagnosefall). Physikalisch ist das eine bewusste Über-Dissipation des Fernfelds — es
 gehört begründet und beziffert, nicht heimlich gedreht. Das Fernfeld muss die Verdrängung
 tragen, nicht die Grenzschicht auflösen; ein zu großes ν dort ist verkraftbar, ein klingelndes
 Feld nicht.

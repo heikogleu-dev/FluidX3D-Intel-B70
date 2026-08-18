@@ -472,8 +472,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		const double ax=fabs(nxd), ay=fabs(nyd), az=fabs(nzd);
 		f.achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); // Tie-Break: kleinste Achsnummer
 		F.push_back(f);
-		hist_yw.push_back(yw); // r21/r10 leben in der Facette (Schwelleneichung liest die CSV) -- die Erstpass-Histogramme waren toter Leerlauf (IR3-Abschluss)
-		hist_winkel.push_back(acos(fmin(1.0,fmax(ax,fmax(ay,az))))*180.0/3.14159265358979);
+		// Erstpass-Histogramme entfernt (Gross-Audit N18): wurden vor jeder Nutzung geleert -- der Endzustands-Pass fuellt neu.
 	}
 	// Normalen-Glaettung (A6): 1 Pass, flaechengewichtet (w = n_punkte), 3^3-Nachbarfacetten.
 	{
@@ -722,7 +721,8 @@ void main_setup_kanal() {
 	// y_w=0,500, Klasse 0 liefern (FACETTEN-PLAN A3, Gegenpruefer-verifiziert). =2: nur Diagnose.
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
 		// Randstreifen x/y (1..N-2-Ausschluss, kein periodischer Wrap) fehlen bewusst: ~5 % Diagnose-only (Nachpruefer B5).
-		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, kipp>0u?"Kipp-Census":"Kanal-Anker", kipp>0u);
+		const string cdir = out_dir+"census/"; create_folder(cdir); // Gross-Audit N21: nicht den Echtbau-Census ueberschreiben
+		baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, cdir, kipp>0u?"Kipp-Census":"Kanal-Anker", kipp>0u);
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
@@ -818,6 +818,7 @@ void main_setup_kanal() {
 	print_info("Kanal: u_tau IST = "+to_string((float)utau_ist,6u)+" gegen Ziel "+to_string(utau_lat,6u)
 		+" (Faktor "+to_string((float)(utau_ist/(double)utau_lat),3u)+") -> Re_tau IST = "+to_string((float)(utau_ist*(double)delta_lat/(double)nu_lat),0u));
 	pcsv << "# utau_ist=" << utau_ist << " utau_ziel=" << utau_lat << " nu_lat=" << nu_lat << "\n";
+	if(kipp>0u) pcsv << "# ACHTUNG kipp>0: Ebenenmittel durch Nx*Ny geteilt (enthaelt Solid-Anteil ~3-7 % zu klein) und zw = VERTIKALER Abstand -- an gekippten Waenden nur als Verlaufsindikator brauchbar (Gross-Audit M).\n";
 	pcsv << "z,yplus,Uplus,uu_plus,ww_plus,uw_plus,tau_gesamt_soll\n";
 	const double ut2=utau_ist*utau_ist;
 	for(uint z=1u; z<Nz-1u; z++) {
@@ -1389,6 +1390,14 @@ void main_setup_kugel() {
 		lbm.update_force_field();
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
 		ts.push_back((double)((float)(step+chunk)*dt));
+		{	// ★ Gross-Audit M: Waechter wie im dd-Fall (NaN / 3x bitgleich / Explosion)
+			static float Fxp=1e30f, Fzp=1e30f; static uint nfroz=0u;
+			string grund="";
+			if(!std::isfinite(F_lat.x)||!std::isfinite(F_lat.z)) grund="die Kraft ist keine Zahl mehr";
+			else if(nfroz>=2u) grund="die Kraft steht seit drei Abtastungen BITGLEICH";
+			if(grund!="") print_error("Kugel-Lauf gekippt bei Schritt "+to_string(step+chunk)+": "+grund);
+			nfroz = (F_lat.x==Fxp&&F_lat.z==Fzp) ? nfroz+1u : 0u; Fxp=F_lat.x; Fzp=F_lat.z;
+		}
 		// ★ Druck-Zeitmittel: je Kadenz-Sample im Mittelungsfenster die Druckprojektion summieren.
 		// kraft_facetten ruft update_force_field erneut -- der t_last_force_field-Guard macht das
 		// zum No-Op (R3-Pruefer), die Reibungs-Slots des Ergebnisses werden hier ignoriert
@@ -1730,6 +1739,21 @@ static void main_setup_fahrzeug() {
 		const float3 F = lbm.object_force(TYPE_S|TYPE_X);
 		const double t_si = (double)((float)(step+chunk)*dt);
 		ts.push_back(t_si); fx.push_back((double)units.si_F(F.x)); fz.push_back((double)units.si_F(F.z));
+		{	// ★ Gross-Audit M: NaN-/Einfrier-/Explosions-Waechter (dd-Muster) -- vorher lief eine
+			// Divergenz hier stundenlang weiter, und ein Abbruch verlor SAEMTLICHE Samples.
+			static double Fxp=1e300, Fzp=1e300; static uint nfroz=0u;
+			const double q_A=(double)q_inf*A_ref;
+			string grund="";
+			if(!std::isfinite(fx.back())||!std::isfinite(fz.back())) grund="die Kraft ist keine Zahl mehr";
+			else if(nfroz>=2u) grund="die Kraft steht seit drei Abtastungen BITGLEICH (Zahlenformat gesaettigt)";
+			else if(t_si>0.02&&(fabs(fx.back())>20.0*q_A||fabs(fz.back())>20.0*q_A)) grund="|Cd| oder |Cz| ueber 20";
+			if(grund!="") {
+				std::ofstream fr(out_dir+"forces_abbruch.csv"); fr.precision(8); fr<<"time_s,Fx_N,Fz_N\n";
+				for(size_t i2=0u;i2<ts.size();i2++) fr<<ts[i2]<<","<<fx[i2]<<","<<fz[i2]<<"\n"; fr.close();
+				print_error("Lauf gekippt bei t = "+to_string((float)t_si,5u)+" s: "+grund+". Teilreihe: forces_abbruch.csv");
+			}
+			nfroz = (fx.back()==Fxp&&fz.back()==Fzp) ? nfroz+1u : 0u; Fxp=fx.back(); Fzp=fz.back();
+		}
 		if(slice_dt>0.0f && (float)t_si>=slice_next) {
 			slice_next = (float)t_si + slice_dt;
 			lbm.u.read_from_device(); lbm.flags.read_from_device();
@@ -2138,6 +2162,7 @@ static void main_setup_fahrzeug_dd() {
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
 	}
+	if(getenv("CFD_PO_FACES")) print_warning("CFD_PO_FACES wird im dd-Fall NICHT angewandt (Maske hart x_max -- Gross-Audit M10)."); // Ansage-Doktrin
 	lbm_f.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f)); // Bit 2 = x_max
 	lbm_c.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f));
 	lbm_f.finalize_sparse_tiles();

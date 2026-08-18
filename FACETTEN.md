@@ -84,7 +84,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 - **CFD_FAC_DIAGZ** (Iron Rule 3): Ketten-Zeitreihe EINER Facette (Zellindex → Laufzeit-fid,
   Sentinel −1.0f matcht nie) → `facetten_diagz.csv` mit
   schritt,ut,twe,P1,P2,s1,s2,sn,phi1,phi2,G11,G22,Snn,Sn1,Sn2,t_kernel,rhon,alpha,dp_ds.
-  Nur iMEM-Arme; Kanal/Torus verdrahtet, Kugel noch nicht (Warnung).
+  Nur iMEM-Arme; Kanal/Torus verdrahtet, Kugel und fahrzeug_dd noch nicht (je Warnung).
 - **cd_facetten.csv (dd)**: Spalten dm/rest = FENSTER-Delta ab Reibungs-Snapshot (Endreport-Δm dagegen kumulativ seit Start — Etikett im Print).
 - **Host-Census** (CFD_FACETTEN_DIAG / baue_facetten-Log): Klassen, y_w-Lagen, |L|, Momente —
   liefert die exakten Slot-Solls VOR jedem Kernellauf.
@@ -107,7 +107,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
 | `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Auch OHNE CFD_FACETTEN gültig (= BB-Basis-Arm, so entstehen die N2-Referenzen t45_bb/t26_bb); mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
-| `CFD_FAC_CD_EVERY` | Kadenz der Druck-Projektions-Samples im Cd-Pfad (Default 1 = jede object_force-Kadenz). |
+| `CFD_FAC_CD_EVERY` (Default: Kugel 1, dd 4) | Kadenz der Druck-Projektions-Samples im Cd-Pfad (Default 1 = jede object_force-Kadenz). |
 | `CFD_SPALDING_IT` | Spalding-Newton-Iterationen, Default 3 (min 1); in WFB- UND Facetten-Arm identisch emittiert. |
 | `CFD_FAC_K4` | Kugel, nur AUS-Arm: K4-Neutralitätsprüfung kraft_facetten vs. object_force. |
 
@@ -183,7 +183,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 4. **Hangauf-Arm I2b** (45°-Torus, Antrieb (0,1,1)/√2): misst die R2-Lücke — nur unter iMEM
    möglich; Umbauliste steht (IMEM-Revision Auflage 5).
 5. **Fahrzeug Stufe 5 — ERSTSERIE ABGESCHLOSSEN 2026-08-18** (s5b, 500-ms-Deckel):
-   Cd 0,818 (BB) → **0,728** (Wandmodell, −11 % Richtung OF 0,599), Cz unverändert (C7/APG-These
+   Cd 0,797 (BB, fensterrein 0,2–0,5) → **0,728** (Wandmodell, −8,6 % Richtung OF 0,599; Gross-Audit-Korrektur — und mit B=11,11-Spalding gemessen, Neumessung folgt), Cz unverändert (C7/APG-These
    bestätigt), y⁺-Median 29,7, Mechanik Ist=Soll bei 1,31 Mrd Ereignissen, Δm-Band geeicht.
    OFFEN: Normal-Rest-Diagnose (arm-unabhängig −500) VOR Cz-Aussagen; APG-κ-Eichung → 4. Lauf;
    Perf-Fixe (Flush/Sync-Bündelung). Details/To-dos: AUDIT-BEFUNDE.md.

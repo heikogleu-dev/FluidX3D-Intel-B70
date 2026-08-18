@@ -2896,7 +2896,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	}
 	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
 	if(!(v[0]>0.5f&&v[0]<2.0f)) return;
-	if(!isfinite(v[1])||!isfinite(v[2])||!isfinite(v[3])) return;
+	// ★ Gross-Audit M: isfinite ist unter -cl-finite-math-only toter Code (Compiler faltet zu true) --
+	// Bit-Test auf Exponent 0xFF faengt NaN/Inf treiberunabhaengig.
+	if((as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return;
 	rho[n] = v[0];
 	u[                 n] = v[1];
 	u[    def_N+(ulong)n] = v[2];

@@ -514,3 +514,19 @@ vermessen: Buglippe 80-85 mm -- konsistent mit Heikos 50-55 mm real und 68 mm Vo
 Fenster-Etikett s5b (-11 % ist fensterrein -8,6 %), CFD_COARSE_NU existiert nicht (FERN_NU);
 MITTEL Zusammenspiel: PO_FACES still ignoriert in dd/fernfeld, diagz-Spaet-Lese-Pfad (latent),
 units-Global im Zwei-Einheiten-Fall (latent). Dazu ~20 NIEDRIG.
+
+## Gross-Audit Fix-Batch Runde 1 (nach dem Spalding-Fix)
+
+GEFIXT: isfinite->Bit-Test im Lift-Waechter (unter finite-math war er toter Code); NaN-/
+Einfrier-/Explosions-Waechter jetzt auch in kugel (auf F_lat) und fahrzeug (inkl. Teilreihen-
+Dump forces_abbruch.csv); Torus-Profil-CSV traegt Kipp-Warnetikett (Normierung + zw vertikal);
+PO_FACES-Ansage im dd; kanal-DIAG-Census in eigenen Unterordner (Ueberschreib-Falle); tote
+Erstpass-Pushes wirklich entfernt; APG-Quantisierungswaechter (kappa<5e-7 = harter Fehler);
+Doku: CFD_COARSE_NU->FERN_NU (existierte nicht!), DIAGZ/CD_EVERY/Slot-19-Legenden, s5b-Fenster
+fensterrein (-8,6 % statt -11 %, dazu B=11,11-Vorbehalt bis zur Neumessung).
+DOKUMENTIERT-LATENT (Folgepunkte, kein Fix noetig heute): transfer_F/graphics ohne F-BBox-
+Bewusstsein (nur Multi-GPU+BBox, Guard-Kommentar folgt), diagz-Spaet-Lese-Pfad, units-Global
+im dd, s_sparse_T ohne Read-once, SPALDING_IT-Doppel-Default (explizit 0 -> still 1),
+utau_ist aus f_akt, facetten_test ohne sichere_lauf/Ansagen, Queue-stdin/</dev/null, WFB-Slots
+3-5 ungegatet, Arm4xAPG-tw-Verfaelschung des y+-Reports, fernfeld-PO_FACES-Ansage.
+Regression nach Batch: Suite 5x gruen, NEUE Anker exakt (Arm1 1367..., Arm3 4032...).
