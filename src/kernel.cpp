@@ -1630,7 +1630,7 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 	float rhon, uxn, uyn, uzn;
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt, y = 0,5)
 	const float ut = sqrt(uxn*uxn+uyn*uyn);
-	float tau_x = 0.0f, tau_y = 0.0f;
+	float tau_x = 0.0f, tau_y = 0.0f; // WM-Blick B: bei achse==2 wird utz nie angewandt -- dominante-Achsen-Naeherung des KONTROLLARMS (iMEM traegt volles 3D-u_s)
 	if(ut>=1e-6f) {
 		const float Y  = ut*def_wf_Y; // = |u_t| * 0,5/nu
 		const float up = wf_spalding_uplus(Y);
@@ -1837,7 +1837,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float wi=w(i);
 		const float ct1=cx*t1x+cy*t1y+cz*t1z, ct2=cx*t2x+cy*t2y+cz*t2z, cn=cx*nx+cy*ny+cz*nz;
 		G11 = fma(6.0f*wi, ct1*ct1, G11); G22 = fma(6.0f*wi, ct2*ct2, G22); G12 = fma(6.0f*wi, ct1*ct2, G12);
-		P1 = fma(2.0f*ct1, fhn[i], P1); P2 = fma(2.0f*ct2, fhn[i], P2); // Phi^f-Tangentialkomponenten (geshiftete DDFs, Offset hebt sich per Gl. 5)
+		P1 = fma(2.0f*ct1, fhn[i], P1); P2 = fma(2.0f*ct2, fhn[i], P2); // Phi^f-Tangentialkomponenten (geshiftete DDFs; Offset hebt sich zellweise NUR bei symmetrischer Linkmenge -- an Treppen ist P1 der DEVIATORISCHE Austausch, im Flaechenintegral exakt 0: WM-Blick B)
 )+"#ifdef FACETTEN_PEMA"+R(
 		Pvx = fma(2.0f*cx, fhn[i], Pvx); Pvy = fma(2.0f*cy, fhn[i], Pvy); Pvz = fma(2.0f*cz, fhn[i], Pvz); // Phi^f als xyz-Vektor (Filterrahmen)
 )+"#endif"+R( // FACETTEN_PEMA
@@ -2269,7 +2269,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// Waende (Kanal!) markieren keine MS-Zellen. Kostet 6 uchar-Reads je Zelle (+~6 %); der
 	// Kontrollarm zahlt nichts, weil ungesetzt gar nicht emittiert wird.
 	bool sgs_wand = false;
-	for(uint i=1u; i<7u; i++) sgs_wand = sgs_wand||(flags[j[i]]&TYPE_BO)==TYPE_S;
+	for(uint i=1u; i<def_velocity_set; i++) sgs_wand = sgs_wand||(flags[j[i]]&TYPE_BO)==TYPE_S; // ★ WM-Blick D (MITTEL): vorher nur j[1..6] -- Diagonal-Facettenzellen (Kanten/Kugel/Fahrzeug) behielten die nu_t-Rueckkopplung im WANDFREI-Arm; jetzt alle 18
 	if(sgs_wand&&t%100ul==0ul) atomic_inc(&rho_clamp_hits[6]); // R2: Wirkpfad-Nachweis (Befund-2-Rest), Slot 6, gegatet wie der WFB-Zaehler
 	if(!sgs_wand)
 )+"#endif"+R( // SGS_WANDFREI
