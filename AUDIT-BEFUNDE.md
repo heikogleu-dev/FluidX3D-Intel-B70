@@ -573,5 +573,8 @@ die Unterboden-Versorgung ist ein Setup-Defekt (Fernfeld-Erbe: Bodenschicht am x
 statt ~1,3; V1-Einzelgitter hatte 1,14). Boden-BC identisch (OF13 bottom fixedValue 30 0 0).
 **Neu: CFD_KOPPLUNG_BODENBAND=N** (unterste N Grobzeilen der x--Einlasskopplung = u_inf,
 Rampe bis 2N, nur u, rho bleibt Fernfeld; 0 = bitidentisch alt). CPU-Mini-A/B: Unterboden
-0,304->0,331 allein durch die Einlasskorrektur -- Mechanismus bestaetigt. Dazu geplant:
+0,304->0,331 allein durch die Einlasskorrektur -- Mechanismus bestaetigt. **V1-Vorlaeufer (Heiko): apply_floor_velocity** -- dieselbe
+Defektklasse; dessen Reparatur bewegte in V1 Cz um 31 % (Commit-Historie). V2-Unterschied:
+Nahfeld-Bodenmechanik ist sauber, das Defizit kommt ueber die x--Einlass-Kopplung herein --
+der Bodenband-Arm setzt am Leck an statt flaechig am Boden. Dazu geplant:
 Z_OFFSET=-3-Arm (OF13-Reifeneinsenkung) und Boden-Laengsprofil-Instrument (drin).
