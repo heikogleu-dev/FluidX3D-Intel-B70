@@ -459,3 +459,16 @@ dm-Semantik etikettiert (Endreport kumulativ vs. CSV Fenster-Delta) inkl. FACETT
 Gelbband-Notiz nennt den Semantikwechsel. Positivliste: Fenster-Snapshot beweisbar korrekt
 (monotones +=, Einmal-Zweig), K4-Vergleich fair (identische Zellmengen), Slot-13-Kommentar
 faktisch richtig, nichts Eingeschleppt. Regression: Suite 5x gruen.
+
+## APG-kappa-Eichung (2026-08-19 frueh, Kugel-Leiter): kappa = 0,5
+
+| kappa | DX25 (Basis 0,344) | DX12 (Basis 0,436) |
+|---|---|---|
+| 0,25 | 0,410 | 0,466 (Band) |
+| 0,5 | 0,490 (Band) | 0,498 (Bandkante) |
+| 1,0 | 0,692 (drueber) | -- |
+
+Monotone, gut konditionierte kappa-Antwort; Delta-m ueberall ~1e-5; APG-Klemmen stabil ~39k.
+kappa=0,5 ist an BEIDEN Sprossen band-gueltig (0,45-0,5 Achenbach) -> geeichter Wert fuer
+Fahrzeuglauf 4 (leichte Aufloesungsabhaengigkeit dokumentiert: feiner -> frueher an der
+Bandkante; kappa=0,25 als konservative Reserve).
