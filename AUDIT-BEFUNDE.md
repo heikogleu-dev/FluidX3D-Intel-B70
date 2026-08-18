@@ -820,3 +820,22 @@ trifft die richtige Queue nach allen Enqueues, initialized-Guard deckt den Freig
 Regression: Suite 5x, Anker exakt, dd-Kombiproof mit EXAKT identischen Wirkpfad-Zaehlern
 (1.851.472/207.646) -- Bitidentitaet am Objekt belegt. Offene Perf-Hebel (naechste Baurunde,
 GPU-Leiter): kraft_facetten-GPU-Reduktion, Slice-Ebenen-Read, UPDATE_FIELDS-A/B, FP16S-A/B.
+
+## Tagesabschluss 2026-08-20 / Plan 2026-08-21
+
+Heute (Commits dc18ded..9d95eec): XL-Audit-Schleife GESCHLOSSEN (R1: 3 Pruefer, mehrere HOCH ->
+R2: 1 Doku-HOCH -> R3: nur Warntexte); BODEN_EQ-Wirkpfad Slot 20 im Binary; Heiko-Reifenschutz
+CFD_BODEN_EQ_ABSTAND eingebaut (UNGETESTET, A/B offen); Cz-Korrektur f_neustandard = Cz_druck
+-0,611 (Phantom-Mischung zurueckgezogen); Perf-Audit 3 Pruefer + Fixbatch 1 (bitidentisch).
+KEINE Produktion (Heiko-Ansage).
+
+MORGEN, in dieser Reihenfolge:
+1. 8-mm-Screening (Queue!): (a) facettenfreier BODEN_EQ-Anker auf -3-Lage (schaetzerreiner
+   Vergleichspunkt, fehlt!), (b) ABSTAND-A/B (0 vs 2) auf -3-Lage. Erwartung: ABSTAND senkt die
+   Reifen-Kontamination im Cd, Cz-Ordnung bleibt.
+2. 4-mm-Produktionslauf Startaufstellung: zoff-3 + Arm3+alpha2+SATGATE + BODEN_EQ=2/DOWN=1
+   (+FERN dito, ABSTAND nach A/B-Ausgang). Neue 4-mm-Basis noetig (Referenzlagen-Verschiebung).
+3. Perf-Baurunde 2 (CPU->iGPU->B70-Leiter): kraft_facetten-GPU-Reduktion zuerst (~12,5 %),
+   dann Slice-Ebenen-Read; UPDATE_FIELDS-Abloesung und FP16S nur als validierte A/Bs.
+4. Danach offen: YWMIN-0,15-Einzelarm (Dach), P8/P9 (Far-Facetten + couple_n2f-Nudging),
+   Unterboden-Abloesung (Arm3+Facetten am Pan, ggf. u_road-Drossel ~0,9).
