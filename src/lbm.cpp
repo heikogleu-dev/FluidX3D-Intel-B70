@@ -239,6 +239,7 @@ bool LBM_Domain::s_fac_imem = false;
 float LBM_Domain::s_fac_ema = 0.0f;
 float LBM_Domain::s_fac_pema = 0.0f;
 bool LBM_Domain::s_fac_satgate = false;
+uint LBM_Domain::s_boden_eq_n = 0u;
 uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
@@ -278,6 +279,8 @@ void LBM_Domain::allocate(Device& device) {
 	rho_clamp_hits = Memory<uint>(device, 20ull); // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
+	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u); // Parameter t/u/nz je Enqueue
+	boden_eq_n = s_boden_eq_n; boden_eq_u = 0.075f; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
 
 #ifdef FORCE_FIELD
 	// FORK -- F-BBox: die Box wurde bereits im Konstruktor aufgeloest (sie muss vor device_defines()
@@ -501,6 +504,10 @@ void LBM_Domain::enqueue_initialize() { // call kernel_initialize
 }
 void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to perform one LBM time step
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz).enqueue_run();
+}
+void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
+	if(boden_eq_n==0u) return;
+	kernel_boden_eq.set_parameters(2u, t, boden_eq_u, boden_eq_n).enqueue_run();
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
@@ -1447,6 +1454,7 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_velocity_inlet(); // FORK: rho am Einlass mitlaufen lassen
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_boden_eq(); // V1-Port (No-Op wenn aus)
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS

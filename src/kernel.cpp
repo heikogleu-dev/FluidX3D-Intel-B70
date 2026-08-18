@@ -2596,6 +2596,25 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 // wiederbelebt, bekommt an behandelten Wandzellen rho/u aus den getauschten fi ohne Spiegel-/
 // Facettenlogik -- erst nachziehen. (Host-Kommentar, bewusst NICHT emittiert: das
 // CFD_DUMP_CL-Diff-Instrument soll kommentarfrei vergleichbar bleiben -- R3-Nachschliff.)
+// ★ BODEN_EQ (Heiko 2026-08-20): V1-apply_floor_velocity-PORT gegen die Staggered-Mode der
+// Moving-Floor-Injektion (Slice-Offensive P5/P6): post-stream Equilibrium-Reset mit LOKALEM
+// rho (druckerhaltend) auf den Fluidzellen z=1..nz. TYPE_MS ist FLUID und wird BEHANDELT
+// (V1-MS-Guard-Lehre 2f705ba; V1-Verifikation: Cz -31 %). Signatur V1-wortgetreu in EINEM
+// R()-Block (Klammern balanciert -- Werkzeugfalle Variante 2).
++R(kernel void boden_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nz TS_P) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N||is_halo(n)) return;
+	const uchar bo = flags[n]&TYPE_BO;
+	if(bo==TYPE_S||bo==TYPE_E) return;
+	const uint3 xyz = coordinates(n);
+	if(!(xyz.z>=1u&&xyz.z<=nz)) return;
+	uxx j[def_velocity_set]; neighbors(n, j);
+	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
+	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz);
+	float feq[def_velocity_set]; calculate_f_eq(rho_local, u_road, 0.0f, 0.0f, feq);
+	store_f(n, feq, fi, j, t TS_A);
+}
+)
 +R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important

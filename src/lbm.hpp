@@ -46,7 +46,8 @@ private:
 	Device device; // OpenCL device associated with this LBM domain
 	Kernel kernel_initialize; // initialization kernel
 	Kernel kernel_stream_collide; // main LBM kernel
-	Kernel kernel_update_fields; // reads DDFs and updates (rho, u, T) in device memory
+	Kernel kernel_update_fields;
+	Kernel kernel_boden_eq; // V1-apply_floor_velocity-Port // reads DDFs and updates (rho, u, T) in device memory
 	Memory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device memory
 	ulong t_last_update_fields = max_ulong; // optimization to not call kernel_update_fields multiple times if (rho, u, T) are already up-to-date
 	// FORK -- Block-Tiling (sparse solid): fi nur fuer aktive Tiles allozieren. VRAM-gegen-Tempo-Regler,
@@ -164,11 +165,13 @@ public:
 	static float s_fac_ema;  // EMA-Faktor fuer u_s (CFD_FAC_EMA; 0 = aus; WIDERLEGT in J3 -- filtert die falsche Seite, bleibt als A/B-Arm)
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
+	static uint s_boden_eq_n; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_fac_alpha;
 	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich) // J4-alpha-Massenkorrektur: 0 aus (Default, bitgleich), 1 nur Masse, 2 + Momenten-Downdate (CFD_FAC_ALPHA)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
+	uint boden_eq_n = 0u; float boden_eq_u = 0.0f; // Konstruktionszeit-Kopien (BODEN_EQ)
 	long fac_diagz_wert = -1l; // Konstruktionszeit-Kopie von s_fac_diagz (Gross-Audit: Spaet-Lese-Pfad geschlossen)
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
@@ -220,6 +223,7 @@ public:
 	void enqueue_initialize(); // write all data fields to device and call kernel_initialize
 	void enqueue_stream_collide(); // call kernel_stream_collide to perform one LBM time step
 	void enqueue_update_fields(); // update fields (rho, u, T) manually
+	void enqueue_boden_eq(); // V1-apply_floor_velocity-Port
 	void enqueue_apply_pressure_outlet(); // FORK: Druck-Auslass, No-op ohne konfigurierte Flaechen
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out); // FORK: TYPE_E-Zellen der Aussenflaechen sammeln und Kernel bauen
 #ifdef SURFACE
