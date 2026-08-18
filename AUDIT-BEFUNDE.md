@@ -721,3 +721,59 @@ OF13-Lage aktiv, Wirkpfad 147.166.750 = Soll exakt, Delta-m -0,003, Unterboden-P
 OF13-Niveau ueber die volle Laenge (1,00/1,215/1,015/0,82), Cz -0,611 = bester Facetten-Arm
 der Sprosse. DIES ist die 4-mm-Startaufstellung. XL-Audit-1-Fixes drin (tile_slot-Bindung,
 dead-tile, u_road konfigurierbar); Pruefer 2+3 laufen, Schleife geht weiter bis leer.
+
+## XL-Audit R1, Pruefer 3 (Zusammenspiel/Doku): 16 Befunde, alle DIREKT eingearbeitet
+
+Positivliste des Pruefers: boden_eq gegen Esoteric-Pull KORREKT hergeleitet (rho tauschinvariant,
+u verworfen, store adressiert t+1 richtig); kein Facetten-Doppeleingriff (z=1 ist Klasse-64/BB);
+Zeitschritt-Einbau sauber; Z_OFFSET-3-Vertraeglichkeit real; >15 Messzahlen exakt reproduziert.
+
+Fixes dieser Runde (Commit siehe unten):
+- M2: BODEN_EQ-Wirkpfad-Zaehler Slot 20 IM Binary (t%100), dd-Report mit Null-Fehler (Iron Rule 3).
+- M3: dd-Ansage nennt jetzt DOWN/split/ABSTAND + Kontaminationswarnung.
+- M1/M4: Anker-Verschiebung auch 8 mm dokumentiert (f_aus 1,444/+0,062 vs f_zoffm3 1,222/+0,208);
+  BODEN_EQ-Leiter = Alt-Lage 0, NICHT gegen f_neustandard (-3) vergleichbar. FACETTEN.md: Z_OFFSET_MM-
+  und FERN_BODENKLEMME-Zeilen ergaenzt, 7b ueberholt, P5/P0 gestrichen, Profil-Etikett (Nase!) korrigiert.
+- N5-N13: alpha-Kommentar wirklich entklebt, kernel_boden_eq-Kommentar (schreibt NUR fi, pre-Reset-
+  Anzeige), Einzelgitter-Lage-Ansage + Kommentarblock, fernfeld/kanal-Schluck-Warnungen, Kugel-MG0-
+  Guard, Slot-Legenden 21, D>1 weiter latent (D=1 ueberall, B7-Kommentar im Kernel).
+- NEU (Heiko 2026-08-20): CFD_BODEN_EQ_ABSTAND -- reifennahe Bandzellen (Chebyshev<=A zu TYPE_S,
+  Ebene+oberhalb, Boden ausgenommen) werden ausgespart. UNGETESTET, A/B im naechsten Screening-Fenster.
+
+### Nachprotokolliert (XL-3 N16, fehlten in den .md):
+- f_zoffm3 (DX8, nur Z_OFFSET=-3): Cd 1,222 / Cz +0,208 (Basis f_aus 1,444/+0,062) -- der Referenzlage-A/B.
+- f_d2_ywmin_klemme (D2; YWMIN 0,15 + Fernklemme 4 + Sponge 64 KOMBINIERT -- Arm-Disziplin-Verstoss,
+  eingestanden): object_force-Cd 8,70 (phantombehaftet) / Cz +0,37. Nicht einzeln attributierbar.
+- f_neustandard (DX8, zoff-3 + Arm3+alpha2+SATGATE + BODEN_EQ=2/DOWN=1 + FERN dito): Cd_druck 2,10,
+  Cz -0,16, Sonde 0,601, Profil@1,29 1,22; object_force 9,48 phantombehaftet. Cz liegt ueber dem
+  facettenfreien -0,68 der Leiter; ~+0,15 davon erklaert die Referenzlage (M1), Rest offen.
+- Evidenzluecke zref_mini: der -3mm-Smoke (CPU/DX16, dirty auf 5579a02) hat KEIN archiviertes
+  Konsolen-Log -- "Checks gruen" ist nicht mehr belegbar. Lehre: auch Einzelaeufe ueber die Queue.
+
+## Pruefagent R2 (ABSTAND+Zaehler-Diff): keine HOCH-Befunde, 1 MITTEL + Kleinigkeiten gefixt
+
+Verifiziert: Argumentreihenfolge boden_eq 0..8 + tile_slot 9 exakt (keine diag/tile_slot-Kollision),
+index()/uint3-Literal gueltig, Fahrbahn z=0 fuer den ABSTAND-Scan BEWEISBAR unerreichbar (dz>=0, z>=1),
+(flags&TYPE_BO)==TYPE_S matcht auch TYPE_S|TYPE_X-Reifen, Statik-read-once an allen 9 Setzstellen.
+Gefixt: MITTEL-1 boden_eq-Sparse-Bindungen aus #ifdef FORCE_FIELD gezogen (TS_P haengt nur an
+SPARSE_TILES -- im BENCHMARK-Build waere B1/B2 sonst zurueckgekehrt); N1 fernfeld-Warntext (BODEN_EQ
+wirkt auch kugel); N2 Kugel setzt down/split explizit (Statik-Symmetrie VOLL); N3 Kugel bekommt
+eigenen Slot-20-Wirkpfad-Report. Bewusst belassen (N4): BODEN_EQ-Nullcheck steht VOR den Facetten-
+Reports -- Disqualifikation darf Detail-Reports kosten; sehr grosser ABSTAND kann den Fehler ehrlich
+ausloesen (Band komplett ausgespart = konfigurierter No-Op). N5: Slot-20-uint-Wickel Faktor 7-40
+unter 2^32, praktisch irrelevant.
+
+## Performance-Audit (3 Pruefer, 2026-08-20, Heiko-Auftrag): Befunde fuer die naechste Baurunde
+
+Konvergenz aller drei: (1) kraft_facetten liest volle F-Box (~2-2,5 GB PCIe) je Kraftfenster =
+~12,5 % Gesamtlaufzeit in Facetten-Armen -- Fix: Markerzellen-Indexliste + GPU-Gather/Reduktion
+(Muster object_sum). (2) UPDATE_FIELDS fest an = ~10-15 % auf beiden Gittern; Abloesung braucht
+po/vi-Mini-Kernel UND Vorsicht: update_fields wuerde TYPE_E-Kopplungsraender aus fi klobbern
+(pruefagentenpflichtiger Umbau, A/B). (3) Slices lesen ~6,5-9 GB je Ereignis fuer eine y-Ebene
+(~10-15 MB noetig). (4) boden_eq: flags-Read VOR dem z-Test + Full-N-Launch (V1-Erbdefekt, 1-5 %).
+(5) clFlush nach run_async fehlt (Overlap ist heute Treiberglueck). (6) FP16S statt FP16C =
+~12,5 %-Kandidat, nur als A/B (Formatgrenzen!). Entwarnung: Zero-Copy iGPU korrekt, dd-Domaenen
+laufen echt parallel (Fernfeld 0,2-0,4 % im Schatten), Kopplung 1,2 %, Sparse-Aus kostenlos,
+Queue kompiliert nichts. V2-Index ~9.100-9.890 liegt schon ~24 % unter V1 (~12.000).
+Reihenfolge naechste Runde: kraft_facetten-Reduktion -> Slice-Ebenen-Read -> clFlush ->
+boden_eq-Early-out (bitidentisch) -> UPDATE_FIELDS/FP16S als validierte A/Bs (CPU->iGPU->B70).

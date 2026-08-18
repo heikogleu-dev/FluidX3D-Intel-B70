@@ -2601,7 +2601,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 // rho (druckerhaltend) auf den Fluidzellen z=1..nz. TYPE_MS ist FLUID und wird BEHANDELT
 // (V1-MS-Guard-Lehre 2f705ba; V1-Verifikation: Cz -31 %). Signatur V1-wortgetreu in EINEM
 // R()-Block (Klammern balanciert -- Werkzeugfalle Variante 2).
-+R(kernel void boden_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nz, const uint nz_down, const uint x_split TS_P) {
++R(kernel void boden_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nz, const uint nz_down, const uint x_split, const uint abstand, volatile global uint* diag TS_P) {
 	const uxx n = get_global_id(0);
 	if(n>=(uxx)def_N||is_halo(n)) return;
 )+"#ifdef SPARSE_TILES"+R(
@@ -2612,9 +2612,19 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	const uint3 xyz = coordinates(n);
 	const uint nz_eff = (xyz.x>=x_split) ? nz_down : nz; // B4-Notiz: nz_down=0 heisst hier AUS ab Nase (V1: uniform nz) -- bewusste Abweichung (Kraefteschutz), V1-A/Bs mit nz_down=0 nicht bitvergleichbar // V1-x_split: ab Nase nz_down (Default 0 = unterm Wagen/Wake AUS), stromauf nz
 	if(nz_eff==0u||!(xyz.z>=1u&&xyz.z<=nz_eff)) return;
+	if(abstand>0u) { // Heiko 2026-08-20: reifennahe Zellen NICHT aufpraegen (Kraefteschutz). Scan nur gleiche Ebene und OBERHALB -- die Fahrbahn z=0 liegt unterhalb und zaehlt bewusst nicht als Solid.
+		const int a = (int)abstand; bool nah = false;
+		for(int dz=0; dz<=a&&!nah; dz++) for(int dy=-a; dy<=a&&!nah; dy++) for(int dx=-a; dx<=a&&!nah; dx++) {
+			const int xx=(int)xyz.x+dx, yy=(int)xyz.y+dy, zz=(int)xyz.z+dz;
+			if(xx<0||yy<0||xx>=(int)def_Nx||yy>=(int)def_Ny||zz>=(int)def_Nz) continue;
+			if((flags[index((uint3)((uint)xx,(uint)yy,(uint)zz))]&TYPE_BO)==TYPE_S) nah = true;
+		}
+		if(nah) return; // Aufpraegung wuerde adjazente Kraefte kontaminieren (V1-Lehre)
+	}
+	if(t%100ul==0ul) atomic_inc(&diag[20]); // XL-3 M2: Wirkpfad-Nachweis IM Binary (Iron Rule 3; die V1-Vorlage war jahrelang stiller No-Op)
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
-	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz);
+	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz); // XL-B8: post-stream-load = Paare vertauscht -> u waere NEGIERT (nur rho ist invariant und wird genutzt); XL-B7: coordinates() lokal -- Multi-Domain braeuchte def_O-Offsets (heute D=1)
 	float feq[def_velocity_set]; calculate_f_eq(rho_local, u_road, 0.0f, 0.0f, feq);
 	store_f(n, feq, fi, j, t TS_A);
 }

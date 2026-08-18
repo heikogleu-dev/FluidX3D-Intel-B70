@@ -296,3 +296,5 @@ Fahrzeugzahl aus dem dd-Fall hängt also an diesem Pfad.
 Rücklesevorgang zu trennen; (2) den Fernfeld-Fall auf der iGPU mit kleinerem Gitter fahren, bis die
 Puffer unter 1 GB liegen, und sehen, ob der Fehler verschwindet; (3) bis dahin **keine
 dd-Ergebniszahl als belastbar behandeln**.
+
+**P3.2 ERLEDIGT (2026-08-20):** "Bodengeschwindigkeits-Praegung -- messen, nicht portieren" ist ueberholt: nach Staggered-Mode-Befund wurde der V1-Port (BODEN_EQ) DOCH gebaut und validiert (f_neustandard); Messung kam zuerst (Sonden/Profil), Port danach -- der Geist des Punkts wurde eingehalten.
