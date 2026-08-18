@@ -686,12 +686,12 @@ Rechnung: mit ziehendem Boden Plateau ~0,9-1,0 -> OF13 1,087 VOLLSTAENDIG erklae
 verdaechtiger Dach = stiller YWMIN-0,2-K4-Ausschluss (15-38 % der Scheibenflaechen pures BB in
 Treppenstreifen; dd-Warnung ergaenzt, D2-Lauf mit 0,15 laeuft). Akustik: Init-Puls (Cd-Start
 48,7) + TYPE_E-Kavitaet (15,9 Hz ~ c/2L); CFD_SPONGE_N=64 war in allen s5d-Laeufen AUS -> an.
-**Fern-Klemme-Experiment (Heiko):** wirkt an der Quelle (Profil Mitte 0,81 vs Band 0,6 --
+**Fern-Klemme-Experiment (Heiko):** wirkt an der Quelle (Profil@1,29 0,81 [Nase-Etikett, R2-Korrektur: Wagenmitte nur 0,600] vs Band 0,6 --
 Seitenrand-Nachfuellung), Beweis der V1-Fix-Klasse am dd.
 
 ## BODEN_EQ-Leiter (V1-Port, 2026-08-20 nachts, DX=8) -- der Cz-Pfad steht
 
-| Variante | Cd | Cz | Profil Mitte | Urteil |
+| Variante | Cd | Cz | Profil@x≈1,29 (Nase; R2-Etikettkorrektur — Wagenmitte deutlich niedriger: f_v1port3 1,044, OF13-Soll 1,087) | Urteil |
 |---|---|---|---|---|
 | Basis | 1,44 | +0,06 | schwach | Staggered-Senke |
 | TYPE_E-Klemme 4 | 1,68 | +0,03 | 0,81 | Beweis-Arm |
@@ -723,6 +723,7 @@ der Sprosse. DIES ist die 4-mm-Startaufstellung. XL-Audit-1-Fixes drin (tile_slo
 dead-tile, u_road konfigurierbar); Pruefer 2+3 laufen, Schleife geht weiter bis leer.
 
 ## XL-Audit R1, Pruefer 3 (Zusammenspiel/Doku): 16 Befunde, alle DIREKT eingearbeitet
+(Zaehlungs-Notiz R2: N14 = OFFENE-PUNKTE-P3.2-Vermerk, N15 = zref_mini-Evidenzluecke -- beide unter "Nachprotokolliert" bzw. in OFFENE-PUNKTE.md abgedeckt.)
 
 Positivliste des Pruefers: boden_eq gegen Esoteric-Pull KORREKT hergeleitet (rho tauschinvariant,
 u verworfen, store adressiert t+1 richtig); kein Facetten-Doppeleingriff (z=1 ist Klasse-64/BB);
@@ -745,8 +746,11 @@ Fixes dieser Runde (Commit siehe unten):
 - f_d2_ywmin_klemme (D2; YWMIN 0,15 + Fernklemme 4 + Sponge 64 KOMBINIERT -- Arm-Disziplin-Verstoss,
   eingestanden): object_force-Cd 8,70 (phantombehaftet) / Cz +0,37. Nicht einzeln attributierbar.
 - f_neustandard (DX8, zoff-3 + Arm3+alpha2+SATGATE + BODEN_EQ=2/DOWN=1 + FERN dito): Cd_druck 2,10,
-  Cz -0,16, Sonde 0,601, Profil@1,29 1,22; object_force 9,48 phantombehaftet. Cz liegt ueber dem
-  facettenfreien -0,68 der Leiter; ~+0,15 davon erklaert die Referenzlage (M1), Rest offen.
+  Cz_druck -0,611; object_force 9,48/-0,16 BEIDE phantombehaftet (Facetten-Arm!). Sonde 0,601,
+  Profil@1,29 1,22. R2-KORREKTUR (H1): die fruehere "+0,15-Restluecke" verglich den PHANTOM-Cz
+  (-0,16) mit dem gueltigen object_force-Cz der facettenfreien Leiter (-0,68) -- Schaetzer-Mischung,
+  nicht belastbar. Schaetzerrein gilt nur: Referenzlage-Shift ~+0,15 fuer object_force-Paare
+  (f_aus vs f_zoffm3); ein facettenfreier BODEN_EQ-Lauf auf -3-Lage als sauberer Anker fehlt noch.
 - Evidenzluecke zref_mini: der -3mm-Smoke (CPU/DX16, dirty auf 5579a02) hat KEIN archiviertes
   Konsolen-Log -- "Checks gruen" ist nicht mehr belegbar. Lehre: auch Einzelaeufe ueber die Queue.
 
@@ -762,6 +766,7 @@ eigenen Slot-20-Wirkpfad-Report. Bewusst belassen (N4): BODEN_EQ-Nullcheck steht
 Reports -- Disqualifikation darf Detail-Reports kosten; sehr grosser ABSTAND kann den Fehler ehrlich
 ausloesen (Band komplett ausgespart = konfigurierter No-Op). N5: Slot-20-uint-Wickel Faktor 7-40
 unter 2^32, praktisch irrelevant.
+Regression dieser Runde: Suite 5x, B55-Anker exakt, Sparse+ABSTAND-Kombiproof gruen (Commit c091f0b).
 
 ## Performance-Audit (3 Pruefer, 2026-08-20, Heiko-Auftrag): Befunde fuer die naechste Baurunde
 
@@ -777,3 +782,19 @@ laufen echt parallel (Fernfeld 0,2-0,4 % im Schatten), Kopplung 1,2 %, Sparse-Au
 Queue kompiliert nichts. V2-Index ~9.100-9.890 liegt schon ~24 % unter V1 (~12.000).
 Reihenfolge naechste Runde: kraft_facetten-Reduktion -> Slice-Ebenen-Read -> clFlush ->
 boden_eq-Early-out (bitidentisch) -> UPDATE_FIELDS/FP16S als validierte A/Bs (CPU->iGPU->B70).
+
+## XL-Nachpruefrunde 2: R1-Fixes VOLLSTAENDIG verifiziert, Restbefunde direkt gefixt
+
+Code-Pruefer: KEINE HOCH-Befunde, alle R1-Fixes korrekt (Sparse-Bindungen fuer alle Build-
+Varianten stimmig, Argumentindizes 0..8+tile_slot=9, Slot 20 nullinitialisiert und bitgleich
+im Kontrollarm, ABSTAND-Scan OpenCL-gueltig, Default-Pfad bitidentisch). Gefixt: Einzelgitter-
+Fahrzeugfall verschluckte CFD_BODEN_EQ stumm (Warnschleife), Kugel-Warnungen (DOWN/FERN wirken
+dort nicht, N>3-Hinweis), ABSTAND>3-Perf-Warnung (nah+kugel), Scan-Kommentar nennt jetzt die
+geometrieabhaengige Annahme (diagonal-untere Solids ignoriert; konvexe Reifen decken das ab).
+Doku-Pruefer: H1 = eigener Schaetzer-Mischfehler im f_neustandard-Nachprotokoll (Phantom-Cz
+-0,16 mit gueltigem Leiter-Cz -0,68 verglichen) -- korrigiert: Cz_druck -0,611, Restluecken-
+Attribution zurueckgezogen; schaetzerreiner facettenfreier BODEN_EQ-Anker auf -3-Lage FEHLT noch
+(naechstes Screening-Fenster). Dazu: Slot-Legende 21 in FACETTEN.md, "Profil Mitte"-Etiketten an
+allen Reststellen (x=1,29=Nase), In-place-Marker an P0/P5/7b, DIAGZ-Wahrheit (nur Kanal/Torus),
+Kopfdaten, N<=3-Konsistenz, P3.2-Marker am Listenitem. Verifiziert log-exakt: f_zoffm3, f_aus,
+f_d2, f_neustandard (Wirkpfad 147.166.750=Soll), Leiterzahlen.

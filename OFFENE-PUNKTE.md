@@ -173,7 +173,7 @@ Grundlage ist die Prüfung in [V1-GEGEN-V2.md](V1-GEGEN-V2.md): **nur was in V1 
 gewirkt hat**.
 
 1. **RHO_CLAMP** — jetzt P0, siehe oben.
-2. **Bodengeschwindigkeits-Prägung.** Cz −31 % in V1, der größte gemessene Einzelhebel dort —
+2. **[ERLEDIGT 2026-08-20 — Port nach Staggered-Mode-Befund DOCH gebaut und validiert, s. Vermerk am Dateiende]** **Bodengeschwindigkeits-Prägung.** Cz −31 % in V1, der größte gemessene Einzelhebel dort —
    und der am schlechtesten begründete. V1 selbst schreibt: „Möglicherweise ist die richtige
    Antwort: ersatzlos entfernen." **Messen, nicht portieren.**
 3. **Mozaffari-APG** — −0,87 % auf Cd, gemessen. Gehört ins Fehlerbudget.

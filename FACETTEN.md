@@ -1,6 +1,6 @@
 # FACETTEN.md — Leitdokument Facetten-Wandmodell (C1b)
 
-Stand **2026-08-19** (Stufe 3 + J4 abgeschlossen, Stufe-5-Erstserien gelaufen, Spalding B=5,5-Fix, Bodenband-Messarm; siehe §2/§4 und AUDIT-BEFUNDE.md). Dieses Dokument ist der Einstieg; die acht
+Stand **2026-08-20** (BODEN_EQ-Port + Referenzlage −3 + XL-Audit-Schleife; davor: Stufe 3 + J4 abgeschlossen, Stufe-5-Erstserien gelaufen, Spalding B=5,5-Fix, Bodenband-Messarm; siehe §2/§4 und AUDIT-BEFUNDE.md). Dieses Dokument ist der Einstieg; die acht
 FACETTEN-*-Altdateien sind Archiv (Belegkette, Lesekarte in Abschnitt 5 und FACETTEN-ARCHIV.md).
 Bei Widersprüchen zwischen Altdateien gilt die jüngste Messung — die Auflösungen stehen hier.
 
@@ -73,7 +73,7 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 - **Akkumulator `fac_tau`, 6 float je Facette** (nur bei tatsächlicher Modifikation):
   [0] Σ tw physisch (y⁺-Quelle) · [1..3] Ist-Wandkraft xyz (inkl. Sn-Terme) ·
   [4] Δm-Leck · [5] Normalaustausch-REST (nach 3×3-Nullung); dazu `fac_tau_n` (Zähler).
-- **Zählerpuffer `rho_clamp_hits`, 20 Slots (0–19):** [0/1] RHO_CLAMP unten/oben ·
+- **Zählerpuffer `rho_clamp_hits`, 21 Slots (0–20; [20] BODEN_EQ-Wirkpfad, t%100):** [0/1] RHO_CLAMP unten/oben ·
   [2] WFB-Wirkpfad · [3] WFB-τ-Klemme · [4] WFB-u_t≈0-Skip · [5] Ein-Zellen-Spalt ·
   [6] SGS_WANDFREI-Wirkpfad · [7] Facetten-Wirkpfad (Soll = fac_N·⌈n/100⌉, Ist≠Soll = harter
   Fehler) · [8] Facetten-τ-Klemme · [9] Facetten-u_t≈0-Skip · [10] u_s-Klemme (iMEM) ·
@@ -103,14 +103,14 @@ Sample-Kadenz (CFD_FAC_CD_EVERY, cd_facetten.csv) — die End-Momentaufnahme war
 | `CFD_FAC_PEMA` | Beidseitige Eingangs-Filterung P̄/ū, a≈0,01 (nur Arme ≥3, emission-gated; ungesetzt = exakt instantaner Pfad). N2 dennoch verletzt — kein hinreichender Fix, Messarm. |
 | `CFD_FAC_SATGATE` | 1 = Saettigungs-Gate (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme; Slots 10/16 = Rueckfaelle. Stufe-3-Abnahme lief damit. Nur Arme 3/4. |
 | `CFD_FAC_ALPHA` | J4-Massenkorrektur, nur Arme 3/4: 0 aus (Default, bitgleich), 1 nur Masse (α=−6(S1·u_s)/S0 additiv; injiziert α·S1-Impuls — reiner Messarm), 2 Masse + Kovarianz-Downdate G′=G−(6/S0)BBᵀ vor dem Solve (Impulsziel inkl. α exakt; Behalter). Slot 18 zählt α>u_t; ebene Wand: beide Stufen bitgleich zum Aus-Arm. |
-| `CFD_BODEN_EQ` / `CFD_BODEN_EQ_DOWN` (nah), `CFD_FERN_BODEN_EQ` / `_DOWN` (fern) | **V1-apply_floor_velocity-Port (DER Boden-Fix):** post-stream Equilibrium-Reset (lokales rho) auf z=1..N; stromauf der Nase N, ab Nase DOWN (Heiko: N≤2, DOWN=1 läuft bei 68 mm Freiheit berührungsfrei unterm Wagen; Aufprägung verfälscht Kräfte adjazenter Zellen — deshalb Split). 8-mm-Beleg: Profil 1,216 bei x≈1,29 m (**Nase**, nicht Wagenmitte — dort 1,045 vs OF13-Soll 1,087, XL-3-Etikettkorrektur); Cz −0,68 ist Screening-**Ordnung**, nicht absolut belastbar. Wirkpfad-Zähler Slot 20 (Ist>0-Pflicht am Laufende). |
-| `CFD_BODEN_EQ_ABSTAND` | **Heiko-Idee 2026-08-20 (Reifenschutz):** Bandzellen mit TYPE_S näher als A Zellen (Chebyshev, gleiche Ebene + oberhalb; Fahrbahn z=0 zählt nicht) werden NICHT aufgeprägt — gegen Kraft-Kontamination reifenadjazenter Zellen. 0 = V1-Verhalten. Gilt für nah UND fern. UNGETESTET (Einbau 2026-08-20, A/B steht aus). |
+| `CFD_BODEN_EQ` / `CFD_BODEN_EQ_DOWN` (nah), `CFD_FERN_BODEN_EQ` / `_DOWN` (fern) | **V1-apply_floor_velocity-Port (DER Boden-Fix):** post-stream Equilibrium-Reset (lokales rho) auf z=1..N; stromauf der Nase N, ab Nase DOWN (Heiko: max 3, besser 2 — Code warnt ab N>3; DOWN=1 läuft bei 68 mm Freiheit berührungsfrei unterm Wagen; Aufprägung verfälscht Kräfte adjazenter Zellen — deshalb Split). 8-mm-Beleg: Profil 1,216 bei x≈1,29 m (**Nase**, nicht Wagenmitte — dort 1,045 vs OF13-Soll 1,087, XL-3-Etikettkorrektur); Cz −0,68 ist Screening-**Ordnung**, nicht absolut belastbar. Wirkpfad-Zähler Slot 20 (Ist>0-Pflicht am Laufende). Wirkt auch im Kugel-Messarm (dort uniformes Band ohne Split/DOWN). |
+| `CFD_BODEN_EQ_ABSTAND` | **Heiko-Idee 2026-08-20 (Reifenschutz):** Bandzellen mit TYPE_S näher als A Zellen (Chebyshev, gleiche Ebene + oberhalb; Fahrbahn z=0 zählt nicht) werden NICHT aufgeprägt (Aussparung bei Abstand ≤ A) — gegen Kraft-Kontamination reifenadjazenter Zellen. 0 = V1-Verhalten. Gilt nah + fern + kugel. UNGETESTET (Einbau 2026-08-20, A/B steht aus). |
 | `CFD_Z_OFFSET_MM` | Fahrzeuglage relativ z=0, **Default −3 (OF13-Referenzlage seit 2026-08-20)**. ACHTUNG Anker-Verschiebung auch bei 8 mm massiv: f_aus (Lage 0) Cd 1,444/Cz +0,062 vs f_zoffm3 (−3) 1,222/+0,208 — die komplette BODEN_EQ-Leiter (f_aus…f_v1port3) lief auf Alt-Lage 0 und ist mit f_neustandard (−3) NICHT direkt vergleichbar (ΔCz≈0,15 allein aus der Lage). |
 | `CFD_FERN_BODENKLEMME` | Diagnose-Arm: N unterste Fernfeld-Zeilen als TYPE_E (u=u_inf) festgenagelt; nur fahrzeug_dd (fernfeld-Fall warnt jetzt). Durch FERN_BODEN_EQ praktisch abgelöst. |
 | `CFD_KOPPLUNG_BODENBAND` (weitgehend DURCH BODEN_EQ ERSETZT — behalten als Interface-Diagnose) | dd: N unterste Grobzeilen der x⁻-Einlasskopplung per fmax auf w·u_inf HEBEN (Rampe bis 2N, inkl. y-Kantenspalten seit B3-1); 0 = bitidentisch aus. Messarm gegen das Fernfeld-Bodenschicht-Erbe; u-only nachweislich begrenzt (Cd-Staukraft) — druckkonsistenter Weg = Punkt 8/9. |
 | `CFD_SGS_WANDFREI` | ν_t-Abschaltung in wandnahen Zellen (18er-Nachbarschaft). Am ebenen Kanal GESCHEITERT (cf-Kollaps, K2 disqualifiziert — Turbulenz nicht selbsttragend); van Driest ist der verbleibende Kandidat. |
 | `CFD_FAC_APG` | float κ (Default 0 = aus, bitgleich): tw-Ziel = Spalding − κ·y_w·dp/ds, Klemmen [0, 2·tw] (Slot 19 zählt BEIDE). Nur Arme 3/4; mit PEMA gesperrt (jetzt im Konstruktor). **STATUS 2026-08-19: GEPARKT — ehrlich gekappt ohne Autorität (Kugel fällt auf Basis, Fahrzeug wirkungslos); die ungekappte κ-Eichung war ein Überdehnungs-Artefakt.** |
-| `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; Kugel unverdrahtet). |
+| `CFD_FAC_DIAGZ` | Zellindex n der Diagnose-Facette → facetten_diagz.csv (nur Arme ≥3; keine aktive Facette an n = hart AUS mit Warnung; NUR Kanal/Torus verdrahtet — Kugel/dd/fahrzeug nicht, R2). |
 | `CFD_KANAL_KIPP` | 0 parallel (wortgleich Alt-Pfad) · 45 · 26 (= 26,565°): y-periodischer Torus-Slab. Auch OHNE CFD_FACETTEN gültig (= BB-Basis-Arm, so entstehen die N2-Referenzen t45_bb/t26_bb); mit CFD_WANDFUNKTION = harter Fehler. |
 | `CFD_KANAL_PHASE` | Störphase des Kanal-Inits für Rauschboden-/Wiederholbarkeitsmessungen; 0 = bitidentisch zum Alt-Init. |
 | `CFD_FAC_CD_EVERY` (Default: Kugel 1, dd 4) | Kadenz der Druck-Projektions-Samples im Cd-Pfad (Default 1 = jede object_force-Kadenz). |
@@ -156,9 +156,9 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 
 ---
 
-## 4. Offene Punkte (Stand 2026-08-17)
+## 4. Offene Punkte (Stand 2026-08-17; Marker [ÜBERHOLT/GESTRICHEN] = 2026-08-20, s. Korrekturen am Dateiende)
 
-0. **APG-Term als Cz-Hebel (externe Zweitmeinung, 2026-08-17):** Der Spalding-Fit ist ein
+0. **[ÜBERHOLT 2026-08-20 — APG GEPARKT, s. Korrekturen am Dateiende]** APG-Term als Cz-Hebel (externe Zweitmeinung, 2026-08-17): Der Spalding-Fit ist ein
    GLEICHGEWICHTS-Wandmodell — die falsche Ablösung am Fahrzeug (der eigentliche Cz-Fehler)
    hängt am Druckgradienten-Term, nicht an der iMEM-Mechanik selbst. Vor bzw. parallel zu
    Stufe 5 prüfen: Nicht-Gleichgewichts-Erweiterung der Zielschubspannung um den APG-Term
@@ -191,17 +191,16 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 4. **Hangauf-Arm I2b** (45°-Torus, Antrieb (0,1,1)/√2): misst die R2-Lücke — nur unter iMEM
    möglich; Umbauliste steht (IMEM-Revision Auflage 5).
 5. **Fahrzeug Stufe 5 — ERSTSERIE ABGESCHLOSSEN 2026-08-18** (s5b, 500-ms-Deckel):
-   Cd 0,797 (BB, fensterrein 0,2–0,5) → **0,728** (Wandmodell, −8,6 % Richtung OF 0,599; Gross-Audit-Korrektur — und mit B=11,11-Spalding gemessen, Neumessung folgt), Cz unverändert (C7/APG-These
+   Cd 0,797 (BB, fensterrein 0,2–0,5) → **0,728** (Wandmodell, −8,6 % Richtung OF 0,599; Gross-Audit-Korrektur — und mit B=11,11-Spalding gemessen; B=5,5-Neumessung erfolgt: s5d_arm3_b55 Cd 0,732, praktisch identisch), Cz unverändert (C7/APG-These
    bestätigt), y⁺-Median 29,7, Mechanik Ist=Soll bei 1,31 Mrd Ereignissen, Δm-Band geeicht.
-   OFFEN: Normal-Rest-Diagnose (arm-unabhängig −500) VOR Cz-Aussagen; APG-κ-Eichung → 4. Lauf;
-   Perf-Fixe (Flush/Sync-Bündelung). Details/To-dos: AUDIT-BEFUNDE.md.
+   OFFEN: Normal-Rest-Diagnose (arm-unabhängig −500) VOR Cz-Aussagen; ~~APG-κ-Eichung → 4. Lauf~~ (GESTRICHEN 2026-08-20: APG GEPARKT); Perf-Fixe (Flush/Sync-Bündelung; volles Perf-Audit 2026-08-20 → AUDIT-BEFUNDE.md). ACHTUNG: alle s5b-Zahlen liegen auf Alt-Lage Z_OFFSET 0 (Anker-Verschiebung durch −3-Default, s. §2). Details/To-dos: AUDIT-BEFUNDE.md.
 6. **Niedrige Audit-Reste (IR3)**: Statik-Symmetrie diagz (s_fac_diagz nicht an allen
    Konstruktorstellen) · Kugel-Report: Slots 10-17 seit b1f2caf/IR3-Abschluss vollstaendig; Rest-Item war stale · cf_m-Normierung am Torus ·
    fac_diag-float-Grenzen (fid-Vergleich als float) · y⁺-Report rechnet am Torus hartkodiert
    mit y_w = 0,5.
 7. K2-Instrument: 1-%-Band gilt nur für hinreichend stationäre Fenster (ETT=80/WARM=20 lief
    auf 1,035–1,042 in BEIDEN Mechanismen) — Gate vor Torus-Abnahmen nachziehen.
-7b. **UNTERBODEN/MOVING FLOOR (Heiko, Slices aller s5b-Läufe 2026-08-19): Unterboden TOT,
+7b. **[ÜBERHOLT 2026-08-20: Ursache = Staggered-Mode der MS-Injektion, Kur = BODEN_EQ (V1-Port) — s. Korrekturen am Dateiende]** UNTERBODEN/MOVING FLOOR (Heiko, Slices aller s5b-Läufe 2026-08-19): Unterboden TOT,
    arm-unabhängig = vorbestehender Architektur-Befund und aktueller Cz-Blocker** (ohne
    Durchströmung kein Abtrieb, egal welches Wandmodell). Abdeckung entlastet (73–86 % aktiv).
    Sonde eingebaut (unterboden_sonde.csv, alle Arme). Ursachen-Kandidaten: Fernfeld-Erbe
@@ -355,5 +354,5 @@ jetzt loesbar, da Einzellinks BB sind).
 
 - **7b (Unterboden-Ursachenkandidaten) ist ÜBERHOLT**: Ursache war der Staggered-Mode der MS-Boden-Injektion (Autokorr 0,96@Lag2); Kur = BODEN_EQ (V1-Port). Die alten Kandidaten in 7b gelten nicht mehr.
 - **P5 (APG-κ-Eichung) und P0 (APG prüfen) GESTRICHEN** — Widerspruch zur §2-Zeile: APG ist GEPARKT (gekappt ohne Autorität; ungekappte Eichung = Überdehnungsartefakt).
-- **CFD_FAC_DIAGZ**: in fahrzeug_dd UNVERDRAHTET (nur Einzelgitter/Kugel-Pfade; §1.4 hatte es korrekt, die §2-Zeile 110 verschwieg es).
+- **CFD_FAC_DIAGZ**: nur Kanal/Torus verdrahtet — Kugel, fahrzeug_dd UND fahrzeug-Einzelgitter sind unverdrahtet (R2-Präzisierung; die §2-Zeile nannte nur die Kugel).
 - **rho/u-Anzeige der Bandzellen** zeigt unter BODEN_EQ den VOR-Reset-Stand (Kernel schreibt nur fi) — betrifft Sonden/Slices/Kopplungs-Extraktion; die unterboden_sonde ist durch den MS-Ausschluss ohnehin nicht direkt auf der Aufprägung.

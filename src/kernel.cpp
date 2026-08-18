@@ -2612,7 +2612,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	const uint3 xyz = coordinates(n);
 	const uint nz_eff = (xyz.x>=x_split) ? nz_down : nz; // B4-Notiz: nz_down=0 heisst hier AUS ab Nase (V1: uniform nz) -- bewusste Abweichung (Kraefteschutz), V1-A/Bs mit nz_down=0 nicht bitvergleichbar // V1-x_split: ab Nase nz_down (Default 0 = unterm Wagen/Wake AUS), stromauf nz
 	if(nz_eff==0u||!(xyz.z>=1u&&xyz.z<=nz_eff)) return;
-	if(abstand>0u) { // Heiko 2026-08-20: reifennahe Zellen NICHT aufpraegen (Kraefteschutz). Scan nur gleiche Ebene und OBERHALB -- die Fahrbahn z=0 liegt unterhalb und zaehlt bewusst nicht als Solid.
+	if(abstand>0u) { // Heiko 2026-08-20: reifennahe Zellen NICHT aufpraegen (Kraefteschutz). Scan nur gleiche Ebene und OBERHALB (dz>=0) -- die Fahrbahn z=0 zaehlt bewusst nicht; damit werden AUCH diagonal-untere Solids ignoriert. Bei unterhalb der Achse konvexen Reifen faengt der In-Ebenen-Scan diese Faelle mit ab (geometrieabhaengige Annahme, XL-R2).
 		const int a = (int)abstand; bool nah = false;
 		for(int dz=0; dz<=a&&!nah; dz++) for(int dy=-a; dy<=a&&!nah; dy++) for(int dx=-a; dx<=a&&!nah; dx++) {
 			const int xx=(int)xyz.x+dx, yy=(int)xyz.y+dy, zz=(int)xyz.z+dz;
