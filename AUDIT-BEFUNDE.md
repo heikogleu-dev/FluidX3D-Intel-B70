@@ -655,3 +655,12 @@ aequivalent. Regression: Suite 5x, B55-Anker exakt.
 (3 Pruefer auf alles, nichts vorausgesetzt -> ~23 Befunde ueber 2 Fix-Runden, kein HOCH im
 Kernel, 1 toter Guard als HOCH-No-Op gefunden+gefixt, Band-Naht geschlossen und falsifiziert,
 Slot-8-Zaehlsemantik je Arm jetzt genau 1 Zaehlstelle. Anker final B=5,5, Suite 5x.)
+
+## FERN-BODENKLEMME-Experiment (Heiko, 2026-08-20 frueh, DX=8): V1-Fix-Klasse WIRKT an der Quelle
+
+f_fernklemme4 (Fernfeld z=1..4 TYPE_E u_inf): UB-Sonde 0,49, Profil MITTE 0,81 (Band8: ~0,6 --
+die Klemme fuellt auch die y-Seitenraender nach, das Band nur x-), Diffusor-Abfall ab 2 m
+bleibt (0,54 -> 0,33). Cz an der Screening-Sprosse nicht belastbar. NAECHSTER 4-mm-KANDIDAT:
+Arm3 + FERN_BODENKLEMME=8 (bei 16 mm Far) gegen Arm3+Band8 (-0,526). Drei Slice-Agenten
+(Punkte 1-6) laufen: Boden-Mechanik (warum baut das Fernfeld ueberhaupt eine unmoegliche
+Boden-GS auf?), Einlassprofil/eckige Aufstauung, Dach/Akustik.
