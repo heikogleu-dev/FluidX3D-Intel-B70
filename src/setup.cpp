@@ -2146,6 +2146,21 @@ static void main_setup_fahrzeug_dd() {
 	};
 	set_bcs(lbm_f, fNx, fNy, fNz);
 	set_bcs(lbm_c, cNx, cNy, cNz);
+	{	// ★ FERN-BODENKLEMME (Heiko 2026-08-20, V1-apply_floor_velocity-Klasse): die untersten N
+		// Fluidzeilen des FERNFELDS werden als TYPE_E auf u_inf geklemmt -- Diagnose-Arm gegen die
+		// beobachtete, physikalisch unmoegliche Bodengrenzschicht ab Fernfeld-Einlass (Slice-Punkt 5).
+		// Solid (Fahrzeug/Latsch) und bestehende Raender bleiben unangetastet; die Kopplungs-
+		// Entnahmeebenen liegen im Klemmband und speisen das Near damit automatisch korrekt.
+		const uint fbk = env_u("CFD_FERN_BODENKLEMME", 0u);
+		if(fbk>0u) { ulong nk=0ull;
+			for(uint z=1u; z<=min(fbk, cNz-2u); z++) for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) {
+				const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
+				if((lbm_c.flags[n]&(TYPE_S|TYPE_E))!=0u) continue;
+				lbm_c.flags[n]=TYPE_E; lbm_c.u.x[n]=u_lat; lbm_c.u.y[n]=0.0f; lbm_c.u.z[n]=0.0f; nk++;
+			}
+			print_info("FERN-BODENKLEMME aktiv (V1-Moving-Floor-Fix-Klasse): Fernfeld z=1.."+to_string(fbk)+" als TYPE_E u_inf ("+to_string(nk)+" Zellen; Diagnose-Arm).");
+		}
+	}
 	// ★ C1b Stufe 1: jede Instanz baut ihre Facetten aus den EIGENEN flags (FACETTEN-PLAN Stufe 5);
 	// hier nach set_bcs (Revision Auflage 6). Nahfeld ist das Abnahmegitter.
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
