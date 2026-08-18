@@ -200,7 +200,12 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    (16-mm-Treppe löst den Spalt kaum auf → Ränder liefern toten Spalt), Einlauflänge
    (CFD_NEAR_OFF_X-Messarm im Code vorgesehen), Moving-Floor-Impulsübertrag unter dem Wagen
    (audit_bewegte_waende prüfte nur Init). VOR dem APG-Fahrzeuglauf attribuieren.
-8. **Far-Geometrie-Nullmodell (CC-Ideenskizze 2026-08-17, geprüft):** Das 16-mm-Fernfeld
+7c. **SPALDING-ZIEL ENTBEHRLICH an der Kugel (S5e-Arm4-Leiter 2026-08-19):** Arm 4 == Arm 3
+   auf der ganzen Leiter — der Wert liegt im Mechanismus, nicht im Ziel. Nullziel+α2 = neuer
+   Standard-Kandidat (billiger). Kanal-cf B=5,5: −55 % Rest (Selbsterhalt), SGS_WANDFREI
+   gescheitert (Turbulenz-Kollaps) → van Driest als verbleibender Messarm.
+8. **[PRIORITÄT HOCH seit 2026-08-19: der eigentliche Cz-Weg — reine u-Korrektur an der
+   Kopplung nachweislich begrenzt (Kolbenprofil ohne Druckfeld → Cd-Staukraft)]** Far-Geometrie-Nullmodell (CC-Ideenskizze 2026-08-17, geprüft):** Das 16-mm-Fernfeld
    umströmt einen 4× gröber getreppten Körper → falsches Verdrängungs-/Druckfeld an den
    Nahfeld-Rändern. Korrektur NICHT über Bouzidi-artiges interpoliertes BB (EP/FP16C-heikel),
    sondern über den VORHANDENEN Additivpfad: iMEM-Maschine mit Geometrie-Ziel — u_s so, dass

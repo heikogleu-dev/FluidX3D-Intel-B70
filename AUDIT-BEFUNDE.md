@@ -596,3 +596,28 @@ Cz -1,1..-1,45 -- unser Cz -0,38 erklaert KEIN Vergleichbarkeitsterm, nur der Un
 D (Interaktionen): kein unentdeckter Doppelzaehl-Konflikt; SGS_WANDFREI-Gate-Luecke an
 Diagonalzellen GEFIXT (18 Nachbarn); APG+PEMA-Nichtkommutativitaet korrekt host-gesperrt.
 Serie S5e definiert: Kanal-cf-B55 (BB/Arm3/SGSFREI), Kugel-Arm4-Leiter, K4-dd produktiv.
+
+---
+
+# Messtag-Protokoll 2026-08-19 abends (Serien S5d/S5e, vor dem Tiefen-Audit)
+
+**Kanal-cf B=5,5 (erste gueltige Wandmodell-Zahl):** Arm 3 cf = 0,00154 (alt 0,00107-0,00114
+mit B=11,11 -- der Konstantenfix lieferte exakt die prognostizierten +40 %). Referenz 0,00344:
+vom historischen -68-%-Befund bleiben ehrliche -55 % = Turbulenz-Selbsterhaltungsproblem.
+BB-Basis 0,01067. SGS_WANDFREI am Kanal GESCHEITERT (cf-Kollaps 9,7e-5, K2 disqualifiziert
+ordnungsgemaess) -> van Driest ist der verbleibende nu_t-Messarm.
+**Kugel-Arm4-Leiter: 0,342/0,436 == Arm 3 (0,348/0,446).** Blick-A-Schluesselfrage beantwortet:
+das Spalding-Ziel ist an der Kugel ENTBEHRLICH -- der gesamte 0,72->0,44-Gewinn ist Mechanismus
+(Erhaltung + BB-Ersetzungsstruktur). Nullziel-Arm = billigerer gleichwertiger Standard-Kandidat.
+**K4 produktiv am Fahrzeug:** 1,4e-5 rel. bei 294 N -- Schaetzer-Paritaet am vollen Massstab.
+**Fahrzeug B=5,5 (s5d_arm3_b55):** Cd 0,732 / Cz -0,446 -- identisch zu B=11,11; Modell-tau
+stieg (y+ 29,7->37,4 = tau +58 %), Werte strukturbedingt unbewegt. Konstantenfix ist fuer
+Kanal/Kugel/Ehrlichkeit relevant, fuer Fahrzeug-Cd/Cz neutral (Audit-Prognose bestaetigt).
+**Bodenband-Serie:** hartes Band: Unterboden 0,25->0,67, Cd 1,07 (Strahl); max-Variante
+(Defizit-Anhebung): 0,641 / Cd 1,031 / Cz -0,471 -- max==hart, weil Fernfeld im Band ueberall
+unter u_inf liegt. LEHRE: reine u-Korrektur an der Kopplung hat eine nachgewiesene Grenze
+(Kolbenprofil ohne konsistentes Druckfeld -> Staukraft). Beste Cz-Balance bisher:
+Arm3+Band = Cz -0,526+-0,009 bei Cd 0,89. KONSEQUENZ: Offen-Punkte 8/9 (Far-Geometrie/
+Nudging = druckkonsistente Bodenschicht) steigen von "spaeter" zu "der eigentliche Weg".
+S5f-Screening (DX=8-Sprosse, ~7 min/Lauf) rankt Band-N/zoff/Kombis -- neue Werkzeug-Stufe
+fuer Variantensuche (Heiko-Auftrag: kuerzere Testcases).
