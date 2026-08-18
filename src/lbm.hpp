@@ -165,13 +165,13 @@ public:
 	static float s_fac_ema;  // EMA-Faktor fuer u_s (CFD_FAC_EMA; 0 = aus; WIDERLEGT in J3 -- filtert die falsche Seite, bleibt als A/B-Arm)
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
-	static uint s_boden_eq_n; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
+	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_fac_alpha;
 	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich) // J4-alpha-Massenkorrektur: 0 aus (Default, bitgleich), 1 nur Masse, 2 + Momenten-Downdate (CFD_FAC_ALPHA)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
-	uint boden_eq_n = 0u; float boden_eq_u = 0.0f; // Konstruktionszeit-Kopien (BODEN_EQ)
+	uint boden_eq_n = 0u; float boden_eq_u = 0.0f; uint boden_eq_down = 0u, boden_eq_split = 0xFFFFFFFFu; // Konstruktionszeit-Kopien (BODEN_EQ)
 	long fac_diagz_wert = -1l; // Konstruktionszeit-Kopie von s_fac_diagz (Gross-Audit: Spaet-Lese-Pfad geschlossen)
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;

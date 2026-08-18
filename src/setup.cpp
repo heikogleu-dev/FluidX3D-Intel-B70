@@ -2051,6 +2051,8 @@ static void main_setup_fahrzeug_dd() {
 	  if(fc==4u&&LBM_Domain::s_fac_apg!=0.0f) print_warning("Arm 4 (Nullziel) + APG: tw/[0]-Akkumulator und y+-Report tragen APG-Korrektur, Ziel bleibt 0 -- reine Diagnose-Kombination (Gross-Audit N17).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); // V1-Port fuers NAHFELD (vor lbm_f-Konstruktion)
+	  LBM_Domain::s_boden_eq_down = env_u("CFD_BODEN_EQ_DOWN", 0u); // V1-x_split: ab Nase (Default 0 = unterm Wagen aus)
+	  LBM_Domain::s_boden_eq_split = (uint)fmax(0.0f, (veh_x0-near_x0)/dx_f);
 	  if(LBM_Domain::s_boden_eq_n>0u) print_info("BODEN_EQ NAHFELD aktiv (V1-apply_floor_velocity-Port): z=1.."+to_string(LBM_Domain::s_boden_eq_n)+" post-stream auf u_road-Equilibrium (lokales rho).");
 	  if(fc>0u) print_info(string("Facettenpfad NAHFELD: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Fernfeld bleibt bewusst reines BB (16-mm-Treppenkoerper = Offen-Punkt 8)."); }
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
@@ -2077,6 +2079,8 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 kaeme im Fernfeld der Kopplungs-Entnahmeebene x- (152 Zellen) zu nahe.");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); // V1-Port fuers FERNFELD (eigener Schalter, vor lbm_c-Konstruktion)
+	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
+	LBM_Domain::s_boden_eq_split = (uint)fmax(0.0f, (veh_x0-far_x0)/dx_c);
 	if(LBM_Domain::s_boden_eq_n>0u) print_info("BODEN_EQ FERNFELD aktiv (V1-Port): z=1.."+to_string(LBM_Domain::s_boden_eq_n)+" post-stream auf u_road-Equilibrium.");
 	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
 

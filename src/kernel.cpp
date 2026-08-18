@@ -2601,13 +2601,14 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 // rho (druckerhaltend) auf den Fluidzellen z=1..nz. TYPE_MS ist FLUID und wird BEHANDELT
 // (V1-MS-Guard-Lehre 2f705ba; V1-Verifikation: Cz -31 %). Signatur V1-wortgetreu in EINEM
 // R()-Block (Klammern balanciert -- Werkzeugfalle Variante 2).
-+R(kernel void boden_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nz TS_P) {
++R(kernel void boden_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nz, const uint nz_down, const uint x_split TS_P) {
 	const uxx n = get_global_id(0);
 	if(n>=(uxx)def_N||is_halo(n)) return;
 	const uchar bo = flags[n]&TYPE_BO;
 	if(bo==TYPE_S||bo==TYPE_E) return;
 	const uint3 xyz = coordinates(n);
-	if(!(xyz.z>=1u&&xyz.z<=nz)) return;
+	const uint nz_eff = (xyz.x>=x_split) ? nz_down : nz; // V1-x_split: ab Nase nz_down (Default 0 = unterm Wagen/Wake AUS), stromauf nz
+	if(nz_eff==0u||!(xyz.z>=1u&&xyz.z<=nz_eff)) return;
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
 	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz);

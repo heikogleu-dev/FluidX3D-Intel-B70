@@ -240,6 +240,8 @@ float LBM_Domain::s_fac_ema = 0.0f;
 float LBM_Domain::s_fac_pema = 0.0f;
 bool LBM_Domain::s_fac_satgate = false;
 uint LBM_Domain::s_boden_eq_n = 0u;
+uint LBM_Domain::s_boden_eq_down = 0u;
+uint LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu;
 uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
@@ -279,8 +281,8 @@ void LBM_Domain::allocate(Device& device) {
 	rho_clamp_hits = Memory<uint>(device, 20ull); // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
-	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u); // Parameter t/u/nz je Enqueue
-	boden_eq_n = s_boden_eq_n; boden_eq_u = 0.075f; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
+	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u); // Parameter t/u/nz/nz_down/x_split je Enqueue
+	boden_eq_n = s_boden_eq_n; boden_eq_u = 0.075f; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
 
 #ifdef FORCE_FIELD
 	// FORK -- F-BBox: die Box wurde bereits im Konstruktor aufgeloest (sie muss vor device_defines()
@@ -507,7 +509,7 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;
-	kernel_boden_eq.set_parameters(2u, t, boden_eq_u, boden_eq_n).enqueue_run();
+	kernel_boden_eq.set_parameters(2u, t, boden_eq_u, boden_eq_n, boden_eq_down, boden_eq_split).enqueue_run();
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
