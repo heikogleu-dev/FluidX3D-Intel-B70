@@ -1574,7 +1574,7 @@ static void main_setup_fahrzeug() {
 	// 16 mm schweben (4 Zellen bei 4 mm) -- ein rein numerischer Versatz ohne physikalische Entsprechung,
 	// der den Unterbodenspalt kuenstlich vergroessert und damit genau die Groesse verfaelscht, um die es
 	// beim Abtrieb geht. CFD_Z_OFFSET_MM stellt den alten Zustand her, falls man A/B fahren will.
-	const float z_offset_cells = 0.001f*env_f("CFD_Z_OFFSET_MM", 0.0f)/dx;
+	const float z_offset_cells = 0.001f*env_f("CFD_Z_OFFSET_MM", -3.0f)/dx; // OF13-Referenzlage -3 mm (Heiko 2026-08-20)
 
 	LBM_Domain::s_sparse_tiles_on = env_on("CFD_SPARSE_TILES");
 	if(LBM_Domain::s_sparse_tiles_on) {
@@ -1917,7 +1917,12 @@ static void main_setup_fahrzeug_dd() {
 	const float veh_x0  = 0.0f;                                      // Nase
 	const float veh_x1  = veh_x0 + si_length;                        // Heck
 	// Das Fahrzeug steht AUF der Fahrbahn (Heiko-Vorgabe). V1 liess es 16 mm schweben.
-	const float veh_z0  = 0.001f*env_f("CFD_Z_OFFSET_MM", 0.0f);
+	// ★ HEIKO 2026-08-20: REFERENZLAGE = OF13 -- Reifen 3 mm in den Boden eingesenkt (STL z_min=-3
+	// im mr2v40H-Fall, snappy-Kontaktflecken-Konvention). Default war 0 (Aufstand auf z=0); die
+	// Einsenkung verbreitert die Latsch-Flecken wie in der Referenz. Vertraeglichkeit: Voxelbereich
+	// z<0 wird von der z=0-Fahrbahnreihe absorbiert, handover_contact/Klasse-64/BODEN_EQ unveraendert.
+	const float veh_z0  = 0.001f*env_f("CFD_Z_OFFSET_MM", -3.0f);
+	if(getenv("CFD_Z_OFFSET_MM")==nullptr) print_info("Fahrzeuglage: OF13-Referenz -3 mm (Reifen eingesenkt; CFD_Z_OFFSET_MM uebersteuert).");
 
 	const uint cNx = n_cells(far_Lx, dx_c), cNy = n_cells(far_Ly, dx_c), cNz = n_cells(far_Lz, dx_c);
 	const uint cex = n_cells(near_Lx, dx_c), cez = n_cells(near_Lz, dx_c);

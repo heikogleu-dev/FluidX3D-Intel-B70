@@ -705,3 +705,13 @@ Reifen-Nachbarn). 4-MM-KANDIDAT MORGEN: Arm3+alpha2+SATGATE + BODEN_EQ=2/DOWN=1 
 Erwartung: Kontamination halbiert sich relativ (4 vs 8 mm Zwangszelle), Cz erstmals Richtung
 -0,7..-0,9 bei ehrlicher Kraft-Etikettierung. Danach: YWMIN-0,15-Einzelarm (Dach), dann
 P8/P9-Bauabschnitt (Far-Facetten + couple_n2f-Rueckkopplung) als druckkonsistenter Endausbau.
+
+## Referenzlage + Konsolidierung (Heiko 2026-08-20 frueh)
+
+**NEUE REFERENZ: Fahrzeug -3 mm unter z0 (OF13-Konvention, Reifen eingesenkt)** -- Default in
+dd + Einzelgitter; CFD_Z_OFFSET_MM uebersteuert. Vertraeglichkeit CPU-verifiziert (Aufstand-/
+Kontakt-/MS-Checks gruen, BODEN_EQ kompatibel); bei 16 mm ist die Fleckenzahl Subzellen-
+Rauschen, wirksam ab 4 mm. ACHTUNG: damit verschieben sich die 4-mm-Anker (s5b_aus etc.) --
+neue Basislaeufe noetig. Klein-Todos: BODEN_EQ-Schalterzeilen in FACETTEN.md, Band als
+"durch BODEN_EQ ersetzt" etikettiert, Audit-Persist via Queue-Logs abgedeckt (logs/<lauf>.log
+archiviert jede Konsole -- kein Refactor noetig), alpha-Kommentar entklebt.
