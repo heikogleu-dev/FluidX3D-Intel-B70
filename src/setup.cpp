@@ -815,7 +815,7 @@ void main_setup_kanal() {
 	// 5186/137), und die Spannungsbilanz KONNTE mit den Spalten nicht aufgehen. Jetzt: u_tau_ist
 	// aus der Kraftbilanz des Laufendes, beide Werte im Kopf ausgewiesen.
 	const double utau_ist = sqrt((double)f_akt*(double)delta_lat);
-	print_info("Kanal: u_tau IST = "+to_string((float)utau_ist,6u)+" gegen Ziel "+to_string(utau_lat,6u)
+	print_info("Kanal: u_tau IST = "+to_string((float)utau_ist,6u)+" (aus f_akt, Ein-Chunk-Versatz -- CSV-Kopf) gegen Ziel "+to_string(utau_lat,6u)
 		+" (Faktor "+to_string((float)(utau_ist/(double)utau_lat),3u)+") -> Re_tau IST = "+to_string((float)(utau_ist*(double)delta_lat/(double)nu_lat),0u));
 	pcsv << "# utau_ist=" << utau_ist << " utau_ziel=" << utau_lat << " nu_lat=" << nu_lat << "\n";
 	if(kipp>0u) pcsv << "# ACHTUNG kipp>0: Ebenenmittel durch Nx*Ny geteilt (enthaelt Solid-Anteil ~3-7 % zu klein) und zw = VERTIKALER Abstand -- an gekippten Waenden nur als Verlaufsindikator brauchbar (Gross-Audit M).\n";
@@ -2045,6 +2045,7 @@ static void main_setup_fahrzeug_dd() {
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt Klemmen auf 0.");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc==3u&&(LBM_Domain::s_fac_alpha<2u||!LBM_Domain::s_fac_satgate)) print_warning("Arm 3 ohne SATGATE+ALPHA2 an gekruemmter Geometrie -- Kugel-J4-Lehre: nur als bewusster Messarm fahren.");
+	  if(fc==4u&&LBM_Domain::s_fac_apg!=0.0f) print_warning("Arm 4 (Nullziel) + APG: tw/[0]-Akkumulator und y+-Report tragen APG-Korrektur, Ziel bleibt 0 -- reine Diagnose-Kombination (Gross-Audit N17).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  if(fc>0u) print_info(string("Facettenpfad NAHFELD: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Fernfeld bleibt bewusst reines BB (16-mm-Treppenkoerper = Offen-Punkt 8)."); }
 	LBM lbm_f(uint3(fNx, fNy, fNz), nu_lat_f, dev_fine);
@@ -2798,6 +2799,7 @@ static void main_setup_fernfeld() {
 		else if(x==0u || x==Nx-1u || y==0u || y==Ny-1u || z==Nz-1u) { lbm.flags[n] = TYPE_E; lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
 		else { lbm.u.x[n] = u_lat; lbm.u.y[n] = 0.0f; lbm.u.z[n] = 0.0f; }
 	}
+	if(getenv("CFD_PO_FACES")) print_warning("CFD_PO_FACES wird im fernfeld-Fall NICHT angewandt (Maske hart x_max -- Gross-Audit).");
 	lbm.set_pressure_outlet_faces(2u, env_f("CFD_PO_RHO", 1.0f));
 	// ★★ GEMESSEN UND VERWORFEN, 2026-08-08. Der Geschwindigkeits-Einlass (u vorgeschrieben, rho aus
 	// der Innenzelle) sollte die Ueberbestimmung des Randes beheben. Er tut es NICHT -- A/B im leeren
@@ -2887,6 +2889,8 @@ static const FacPaar FAC_TAB[3][2][2] = {
 	{ {{9,16,10,15},{11,18,12,17}}, {{15,10,16,9},{17,12,18,11}} } // achse 2: nz>0 (Boden), nz<0 (Decke)
 };
 void main_setup_facetten_test() {
+	print_info("facetten_test: ALLE CFD_FACETTEN*/CFD_FAC_*-Env-Werte werden IGNORIERT (Arme hart verdrahtet); kein sichere_lauf, fester Ordner export/facetten_test (Gross-Audit-Ansage).");
+	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N sind im facetten_test WIRKUNGSLOS.");
 	print_info("C1b T1: Paartabelle unabhaengig aus FZ_C herleiten und gegen die Kernel-Kopie pruefen.");
 	uint fehler=0u;
 	for(uint a=0u; a<3u; a++) for(uint s=0u; s<2u; s++) {
@@ -3129,7 +3133,7 @@ void main_setup_facetten_test() {
 	_exit(0);
 }
 
-void main_setup() { // Fallauswahl: CFD_CASE=kugel (Default), fahrzeug, fahrzeug_dd oder fernfeld
+void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeug | fahrzeug_dd | fernfeld | facetten_test
 	const char* c = getenv("CFD_CASE");
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
 	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).

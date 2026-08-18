@@ -121,6 +121,10 @@
 #define VIS_PHI_RAYTRACE  0b01000000
 #define VIS_PARTICLES     0b10000000
 
+#if defined(SURFACE) && defined(SPARSE_TILES)
+#error SURFACE x SPARSE_TILES: die SURFACE-Kernel rufen load_f/store_f ohne TS_A -- Kombination nicht gebaut (Gross-Audit N)
+#endif
+
 #if defined(FP16S) || defined(FP16C)
 #define fpxx ushort
 #else // FP32

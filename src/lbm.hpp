@@ -155,7 +155,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 20 Slots (3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme unten 0 ODER oben 2*tw (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
+	Memory<uint> rho_clamp_hits; // 20 Slots (3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme unten 0 ODER oben 2*tw (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme (t%100), [4] u_t~0-Skips (t%100), [5] Ein-Zellen-Spalt (t%100; alle drei seit Gross-Audit gegen uint-Wickel gegatet), [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -169,6 +169,7 @@ public:
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
+	long fac_diagz_wert = -1l; // Konstruktionszeit-Kopie von s_fac_diagz (Gross-Audit: Spaet-Lese-Pfad geschlossen)
 	Memory<float> fac_diag;  // 18-float-Kettenprotokoll ([16] Selektor, [17] alpha)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)

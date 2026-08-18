@@ -144,6 +144,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fac_ema>0.0f&&s_fac_ema<5e-7f) print_error("CFD_FAC_EMA > 0 aber unter der Emissionsquantisierung (to_string 6 Stellen) -- der Filter froere still auf dem Warmstart ein.");
 	if(s_fac_pema>0.0f&&s_fac_pema<5e-7f) print_error("CFD_FAC_PEMA > 0 aber unter der Emissionsquantisierung -- der Filter froere still ein.");
 	if(s_fac_apg!=0.0f&&fabs(s_fac_apg)<5e-7f) print_error("CFD_FAC_APG zu klein fuer die 6-Stellen-Emission -- wuerde still zu 0.000000 (No-Op-Arm)."); // Gross-Audit N
+	if(getenv("CFD_SPALDING_IT")&&env_u("CFD_SPALDING_IT",3u)==0u) print_warning("CFD_SPALDING_IT=0 wird auf 1 GEKLEMMT (min 1; Default ohne Env ist 3) -- Gross-Audit N16.");
 	if(env_u("CFD_SPALDING_IT", 0u)>0u&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
 #ifndef TRT
 	// ★ Audit-Nacharbeit 4: CFD_LAMBDA liegt in der TRT-Emission -- unter SRT (aktueller Build) ist
@@ -183,7 +184,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	}
 	sparse_on = s_sparse_tiles_on;
 	sparse_T  = s_sparse_T;
-	s_sparse_tiles_on = false; // read-once: eine zweite Domaene erbt das Tiling nicht
+	s_sparse_tiles_on = false; s_sparse_T = 8u; // read-once beidseitig (Gross-Audit N13: T erbte sonst)
 	string opencl_c_code;
 #ifdef GRAPHICS
 	graphics = Graphics(this);
@@ -340,7 +341,7 @@ void LBM_Domain::allocate(Device& device) {
 		if(fac_ema_on) { fac_us = Memory<float>(device, 3ull); kernel_stream_collide.add_parameters(fac_us); } // Signatur-Paritaet mit #ifdef FACETTEN_EMA
 		fac_pema_on = s_fac_imem&&s_fac_pema>0.0f;
 		if(fac_pema_on) { fac_pu = Memory<float>(device, 6ull); kernel_stream_collide.add_parameters(fac_pu); }
-		fac_diagz_on = s_fac_imem&&s_fac_diagz>=0l;
+		fac_diagz_on = s_fac_imem&&s_fac_diagz>=0l; fac_diagz_wert = s_fac_diagz; // Gross-Audit: Konstruktionswert einfrieren -- alloc_facetten liest sonst die Statik der falschen Instanz
 		if(fac_diagz_on) { fac_diag = Memory<float>(device, 19ull); kernel_stream_collide.add_parameters(fac_diag); } // 19: [17] alpha, [18] dp_ds
 	}
 
@@ -360,6 +361,7 @@ void LBM_Domain::allocate(Device& device) {
 #endif // FORCE_FIELD
 	}
 
+	if(get_D()>1u&&LBM_Domain::s_fbbox[3]>0u) print_error("F-BBox + Multi-GPU ist NICHT gebaut (transfer_F/graphics indizieren F voll-domaenig -- OOB; Gross-Audit)."); // Guard statt stiller Falle
 	if(get_D()>1u) allocate_transfer(device);
 }
 
@@ -425,12 +427,12 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		fac_diag = Memory<float>(device, 19ull); // [17] alpha, [18] dp_ds; Selektor bleibt [16]
 		for(ulong q=0ull;q<19ull;q++) fac_diag[q]=0.0f;
 		fac_diag[16] = -1.0f; ulong k2=0ull;
-		for(const Facette& f : F) { if(f.klasse!=0u) { continue; } if(f.n==(ulong)s_fac_diagz) { fac_diag[16]=(float)k2; fac_diag_fid=(uint)k2; } k2++; }
-		if(fac_diag[16]<0.0f) { fac_diagz_on=false; print_warning("CFD_FAC_DIAGZ: Zelle "+to_string((ulong)s_fac_diagz)+" traegt keine AKTIVE Facette -- Diagnose HART AUS."); }
+		for(const Facette& f : F) { if(f.klasse!=0u) { continue; } if(f.n==(ulong)fac_diagz_wert) { fac_diag[16]=(float)k2; fac_diag_fid=(uint)k2; } k2++; }
+		if(fac_diag[16]<0.0f) { fac_diagz_on=false; print_warning("CFD_FAC_DIAGZ: Zelle "+to_string((ulong)fac_diagz_wert)+" traegt keine AKTIVE Facette -- Diagnose HART AUS."); }
 		// ★ Nachpruefer Stufe-3: auch im Hart-Aus-Fall REBINDEN -- das Move-Assignment hat den als
 		// Kernel-Arg gebundenen Platzhalter zerstoert (Use-after-free auf der iGPU-Zero-Copy);
 		// der neue Puffer traegt den -1-Sentinel, der Kernelvergleich matcht nie.
-		else print_info("Diagnose-Facette: Zelle "+to_string((ulong)s_fac_diagz)+" -> fid "+to_string((ulong)fac_diag_fid));
+		else print_info("Diagnose-Facette: Zelle "+to_string((ulong)fac_diagz_wert)+" -> fid "+to_string((ulong)fac_diag_fid));
 		fac_diag.write_to_device();
 	}
 	fac_geo.write_to_device(); fac_idx.write_to_device(); fac_tau.write_to_device(); fac_tau_n.write_to_device();

@@ -489,6 +489,10 @@ Einbruch an der VORDERACHSE (-53 % seitliche Leckage), der bewegte Boden laedt h
 auf (Q 0,91->1,42). Moving-Floor-Mechanik ENTLASTET (Impulsuebertrag exakt 0,025/Schritt,
 0 % Abweichung, beide Domaenen). Fernfeld sekundaerer Verstaerker (Spalt <2 Grobzellen).
 Entscheidender A/B: CFD_Z_OFFSET_MM=16 (V1-Schwebe; V1-Referenz sah mittig 1,14 u_inf).
+**WIDERLEGT (Gross-Audit Pruefer 3 + eigene Voxelmessung + Heiko real 50-55 mm): die
+"25-30-mm-Schlitz"-Zahl war falsch -- STL-Buglippe 80-85 mm, Voxel-Unterboden 68 mm. Die
+Versorgungs-These bleibt qualitativ (0,247 gemessen, -53 % Vorderachs-Leckage), die
+Arithmetik dazu ist hinfaellig; Moving-Floor-Entlastung und Q-Profil gelten weiter.**
 
 ---
 
@@ -546,3 +550,15 @@ Spalding-HOCH-Fix -> Batch -> 2 Nachpruefrunden). Anker final (B=5,5): Arm0 1465
 1562, Arm1 1367576470905661998, Arm3 4032664999240533470 (logs/anker/*_B55.log). NAECHSTE
 PFLICHT vor neuen Wert-Aussagen: Neumessung aller Spalding-Eichungen (Kanal-Arm3-cf,
 Kugel-Leiter, APG-kappa) mit B=5,5.
+
+
+## NIEDRIG-Komplettabbau (Heiko: keine Latentliste!) -- 22 Fixes in einem Batch
+
+WFB-Slots 3/4/5 jetzt t%100-gegatet (uint-Wickel), transfer_F/graphics mit Guard (F-BBox+
+Multi-GPU = harter Fehler statt stillem OOB) + Latentkommentaren, diagz-Spaet-Lese-Pfad
+GESCHLOSSEN (Konstruktionswert eingefroren), s_sparse_T read-once-symmetrisch, SPALDING_IT=0-
+Klemm-Ansage, utau_ist-Etikett, PO_FACES-Ansage auch fernfeld, facetten_test-Ansagen
+(Env ignoriert), Arm4xAPG-Diagnose-Warnung, main_setup-Kommentar vollstaendig, Queue:
+stdin=/dev/null + atomarer noclobber-Lock (TOCTOU) + exakter gesamt-Zaehler, SURFACE x
+SPARSE_TILES = #error, alte Schlitz-These im Protokoll als WIDERLEGT markiert.
+Regression: Suite 5x, beide B55-Anker exakt.

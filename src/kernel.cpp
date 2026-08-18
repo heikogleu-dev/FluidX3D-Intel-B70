@@ -1626,7 +1626,7 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 	const bool boden = (flags[j[6]]&TYPE_BO)==TYPE_S; // Solid unter der Zelle (-z)
 	const bool decke = (flags[j[5]]&TYPE_BO)==TYPE_S; // Solid ueber der Zelle (+z)
 	if(!boden&&!decke) return;
-	if(boden&&decke) { if(zaehle) atomic_inc(&wf_hits[5]); return; } // Spalt von 1 Zelle: unbehandelt, aber GEZAEHLT
+	if(boden&&decke) { if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[5]); return; } // Spalt von 1 Zelle: unbehandelt, aber GEZAEHLT
 	float rhon, uxn, uyn, uzn;
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt, y = 0,5)
 	const float ut = sqrt(uxn*uxn+uyn*uyn);
@@ -1637,10 +1637,10 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 		const float utau = ut/up;
 		float tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut; // physikalische Klemme; Treffer werden gezaehlt
-		if(tw>tw_max) { tw = tw_max; if(zaehle) atomic_inc(&wf_hits[3]); } // Slot 3: NUR tau-Klemme
+		if(tw>tw_max) { tw = tw_max; if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[3]); } // Slot 3: NUR tau-Klemme
 		tau_x = -def_wf_tau*tw*uxn/ut; // Widerstand GEGEN u_t (Han Gl. 15)
 		tau_y = -def_wf_tau*tw*uyn/ut;
-	} else if(zaehle) atomic_inc(&wf_hits[4]); // Slot 4: u_t~0-Skips (Audit: vorher mit Slot 3 vermischt)
+	} else if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[4]); // Slot 4: u_t~0-Skips (Audit: vorher mit Slot 3 vermischt)
 	if(boden) { // einlaufende Diagonalen: 9=(+1,0,+1)/16=(-1,0,+1) und 11=(0,+1,+1)/18=(0,-1,+1)
 		const float a=fhn[9]; fhn[9]=fhn[16]+0.5f*tau_x; fhn[16]=a-0.5f*tau_x;
 		const float b=fhn[11]; fhn[11]=fhn[18]+0.5f*tau_y; fhn[18]=b-0.5f*tau_y;
@@ -3228,6 +3228,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	F[    def_N+(ulong)n] = transfer_buffer[   A+a];
 	F[2ul*def_N+(ulong)n] = transfer_buffer[2u*A+a];
 }
+// ★ Gross-Audit LATENT->FIX: transfer_extract_F/insert_F indizieren F voll-domaenig -- mit F-BBox
+// (F nur 3*def_FBN gross) waere das OOB. Multi-GPU+BBox ist deshalb host-seitig hart verweigert
+// (lbm.cpp, Konstruktor-Guard); wer die Kombination baut, muss hier auf f_bbox() umstellen.
 )+R(kernel void transfer_extract_F(const uint direction, const ulong t, global float* transfer_buffer_p, global float* transfer_buffer_m, const global float* F) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
@@ -3550,7 +3553,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(!(not_xp||not_ym)) draw_line(p5, p6, c, camera_cache, bitmap, zbuffer);
 )+"#ifdef FORCE_FIELD"+R(
 	if(flagsn_bo==TYPE_S) {
-		const float3 Fn = def_scale_F*load3(F, n);
+		const float3 Fn = def_scale_F*load3(F, n); // LATENT (Gross-Audit): voll-domaeniger Index -- unter F-BBox OOB; GRAPHICS ist wegkompiliert, bei Wiederbelebung load3_F verwenden
 		const float Fnl = length(Fn);
 		if(Fnl>0.0f) {
 			const int c = colorscale_iron(Fnl); // color boundaries depending on the force on them
