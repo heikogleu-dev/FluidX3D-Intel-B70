@@ -439,3 +439,14 @@ unter der Cz-Kraftskala -- keine Gefaehrdung. Befunde gefixt: cd_reib-Semantik e
 bei guenstigem Gradienten), Slot-7-Wrap bei 3x laengeren Serien notiert. Regression: Suite 5x,
 Arm-3-Anker exakt. Einzellink-Census in baue_facetten + Kanten-Abdeckung = neue Messpunkte
 fuer die APG-/Abloesungs-Etappe.
+
+## Unterboden-Befund (Heiko, Slices 2026-08-18): tote Unterbodenstroemung
+
+Census-Gegenprobe: Abdeckung ist NICHT die Ursache -- z=4-60mm: 73 % aktive Facetten (26,7 %
+markiert, davon 10 % MS-Saum Fahrbahn/Latsch); 64-160mm: 86 % aktiv. Verdacht damit: STAGNIERENDES
+FLUID unter dem Wagen (der bekannte Architektur-Punkt, gegen den der kurze Einlauf gebaut wurde)
+-- erklaert direkt Cz -0,44 statt -1,301, denn ohne Durchstroemung kein Abtrieb, wandmodell-
+unabhaengig. TO-DO (vor APG-Fahrzeuglauf): Unterboden-Durchstroemungssonde (mittleres u_x im
+Spalt unter dem Boden laengs des Fahrzeugs, je Arm in die CSV) + A/B AUS vs Facetten-Arm:
+ist der Unterboden auch im AUS-Arm tot (-> Architektur/Einlauf/Fernfeld-Erbe, vorbestehend)
+oder erst im Facetten-Arm (-> Mechanismus)? Slices aller drei s5b-Laeufe liegen in export/.
