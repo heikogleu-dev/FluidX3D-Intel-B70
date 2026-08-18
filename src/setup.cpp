@@ -2654,6 +2654,7 @@ static void main_setup_fahrzeug_dd() {
 	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
+	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cz,k); if(se>=0.0) print_info("      Block-SEM Cz ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); } // WM-Blick C: Cz lief ohne Fehlerbalken -- ehrlich >=0,03, Delta-Cz-0,1-Aussagen sind 2-sigma
 	} // stat_ok
 	{	// ★ UNTERBODEN-SONDE (Heiko 2026-08-19: Unterboden in ALLEN s5b-Slices tot, arm-unabhaengig).
 		// Je x-Spalte unter dem Fahrzeug: mittleres u_x/u_inf ueber alle Fluidzellen im Spalt
@@ -2734,7 +2735,7 @@ static void main_setup_fahrzeug_dd() {
 		if(fac_pn>0ull) { const double qA=(double)q_inf*A_ref;
 			print_info("Cd-Pfad Nahfeld: Cd_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_px/(double)fac_pn))/qA),4u)
 				+" (Zeitmittel, "+to_string(fac_pn)+" Samples), Cz_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_pz/(double)fac_pn))/qA),4u)
-				+" -- Reibung: letzte Zeile cd_facetten.csv. ACHTUNG Audit S5: cd_reib ist residuendominiert (88 % zielUNabhaengige Querresiduen der Rang-2-Pfade) -- ehrlicher Zielanteil = ARM-DIFFERENZ, nicht der Absolutwert."); }
+				+" (n_voll/proj/unklar folgen im Lattice-Print) -- Reibung: letzte Zeile cd_facetten.csv. ACHTUNG Audit S5: cd_reib ist residuendominiert (88 % zielUNabhaengige Querresiduen der Rang-2-Pfade) -- ehrlicher Zielanteil = ARM-DIFFERENZ, nicht der Absolutwert."); }
 		print_info("ACHTUNG: forces.csv/Cd oben enthaelt an behandelten Links PHANTOM-Reibung (object_force) -- fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
 	}
 	print_info("---------------------------------------------------------------");

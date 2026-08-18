@@ -578,3 +578,21 @@ Defektklasse; dessen Reparatur bewegte in V1 Cz um 31 % (Commit-Historie). V2-Un
 Nahfeld-Bodenmechanik ist sauber, das Defizit kommt ueber die x--Einlass-Kopplung herein --
 der Bodenband-Arm setzt am Leck an statt flaechig am Boden. Dazu geplant:
 Z_OFFSET=-3-Arm (OF13-Reifeneinsenkung) und Boden-Laengsprofil-Instrument (drin).
+
+## WM-Tiefenblicke A-D (4 Agenten, 2026-08-19 nachmittags) -- Kernergebnisse
+
+A (Physik): Formulierung KORREKT (ersetzen, nicht addieren -- verifiziert), y+ 11-100 = Standard-
+WMLES-Regime; First-Cell-Sampling kostet +-10-20 % tau_w (=0,2-0,4 % Cd) -- Bewertung auf
+Abloesung/Cz umstellen. Kugel-Arm4-Leiter = Schluessel-A/B (ist Spalding-Ziel noetig?);
+van-Driest bei y+~30 wieder legitimer Messarm (alte Widerlegung galt y+=137).
+B (Neuherleitung): Kette mathematisch geschlossen -- faca 45 Grad exakt, Spalding-Y einheiten-
+rein, P1 = korrektes DEVIATORISCHES Ziel, Vorzeichen konsistent, Klemmen B-fix-fest. Keine Bugs.
+C (Mess-Pipeline): (a) Facetten-y+ SELBSTREFERENZIELL (Modell-tau), physikalische Zelle-1 bei
+y+ 70-140, Modell-tau ~5x unter OF13 (Anteil Konstante vs. Unterboden: B55-Neumessung); (b)
+messe_yplus am Fahrzeug absolut TOT (druckkontaminiert, 180 Pa); (c) Kanal-cf nach B=5,5
+KOMPLETT unvermessen (alte -68-%-Tabelle = B=11,11); (d) Cz lief ohne SEM (ehrlich >=0,03 --
+GEFIXT: Cz-Block-SEM im dd-Report); (e) OF13-Korridor fuer perfekten LBM-Lauf: Cd 0,58-0,70,
+Cz -1,1..-1,45 -- unser Cz -0,38 erklaert KEIN Vergleichbarkeitsterm, nur der Unterboden.
+D (Interaktionen): kein unentdeckter Doppelzaehl-Konflikt; SGS_WANDFREI-Gate-Luecke an
+Diagonalzellen GEFIXT (18 Nachbarn); APG+PEMA-Nichtkommutativitaet korrekt host-gesperrt.
+Serie S5e definiert: Kanal-cf-B55 (BB/Arm3/SGSFREI), Kugel-Arm4-Leiter, K4-dd produktiv.
