@@ -688,3 +688,20 @@ Treppenstreifen; dd-Warnung ergaenzt, D2-Lauf mit 0,15 laeuft). Akustik: Init-Pu
 48,7) + TYPE_E-Kavitaet (15,9 Hz ~ c/2L); CFD_SPONGE_N=64 war in allen s5d-Laeufen AUS -> an.
 **Fern-Klemme-Experiment (Heiko):** wirkt an der Quelle (Profil Mitte 0,81 vs Band 0,6 --
 Seitenrand-Nachfuellung), Beweis der V1-Fix-Klasse am dd.
+
+## BODEN_EQ-Leiter (V1-Port, 2026-08-20 nachts, DX=8) -- der Cz-Pfad steht
+
+| Variante | Cd | Cz | Profil Mitte | Urteil |
+|---|---|---|---|---|
+| Basis | 1,44 | +0,06 | schwach | Staggered-Senke |
+| TYPE_E-Klemme 4 | 1,68 | +0,03 | 0,81 | Beweis-Arm |
+| Port N=3 ohne Split | 3,87 | -0,73 | 1,073 | Physik-Beweis, Kraft-Artefakt (Heikos V1-Lehre live) |
+| Port N=2+Split | 1,47 | +0,30 | 0,709 | KRAFTNEUTRAL bestaetigt; Senke kehrt stromab zurueck |
+| **Port N=2/DOWN=1** | 1,93 | **-0,68** | **1,216** | **OF13-Profil hergestellt; Rest-Kontamination Reifen-adjazent** |
+
+Heiko-Vorgaben eingebaut: N<=2, x_split ab Nase (V1: "Fahrzeug stand AUF der Schicht" ->
+V2-stehend: DOWN=1 laeuft bei 68 mm Freiheit beruehungsfrei unterm Wagen durch, Kontakt nur
+Reifen-Nachbarn). 4-MM-KANDIDAT MORGEN: Arm3+alpha2+SATGATE + BODEN_EQ=2/DOWN=1 (+FERN dito),
+Erwartung: Kontamination halbiert sich relativ (4 vs 8 mm Zwangszelle), Cz erstmals Richtung
+-0,7..-0,9 bei ehrlicher Kraft-Etikettierung. Danach: YWMIN-0,15-Einzelarm (Dach), dann
+P8/P9-Bauabschnitt (Far-Facetten + couple_n2f-Rueckkopplung) als druckkonsistenter Endausbau.
