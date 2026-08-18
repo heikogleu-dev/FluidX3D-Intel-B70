@@ -1810,7 +1810,10 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		}
 		fac_dpds = (den>=1e-6f) ? num/(3.0f*den) : 0.0f; // Entartung (alles solid): Korrektur exakt 0
 		float tw1 = fma(-def_fac_apg*yw, fac_dpds, tw);
-		if(tw1<0.0f) { tw1=0.0f; if(t%100ul==0ul) atomic_inc(&hits[19]); } // Slot 19: APG-Klemme auf 0 (G8: kein negatives Ziel = kein vorzeichen-definiter Injektor)
+		// ★ Lauf-4-Befund (Fahrzeug): |Korrektur| >> tw an Staupunkt/Heck -- 46 % 0-Klemmen, y+ x10,
+		// +0,085 Cd Reibungsstrafe. RELATIVE Kappung (Planer-Reserve): Ziel bleibt in [0, 2*tw].
+		if(tw1<0.0f) { tw1=0.0f; if(t%100ul==0ul) atomic_inc(&hits[19]); } // Slot 19: beide APG-Klemmen (unten 0 / oben 2*tw)
+		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(t%100ul==0ul) atomic_inc(&hits[19]); }
 		tw = tw1;
 		twe = fmin(tw*faca, 0.5f*rhon*ut); // obere Klemme unveraendert (Slot 8 zaehlt im Kopf)
 	}
