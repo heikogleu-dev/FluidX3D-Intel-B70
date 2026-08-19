@@ -409,22 +409,29 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 // Puffern erzeugen -- kein Platzhalter-Bind-später (die DIAGZ-Use-after-free-Klasse). MUSS nach
 // finalize_sparse_tiles laufen (fi ist dann final gebunden; im dd-Fall hat das Grobgitter ohnehin
 // kein Tiling, und das Setup ruft alloc erst nach run(0)).
-void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const uint ratio) {
+void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus) {
 	const ulong n = (ulong)liste.size();
 	if(n==0ull) { print_error("alloc_schale mit leerer Liste."); return; }
 	if(n>0xFFFFFFFFull) { print_error("alloc_schale: Liste ueberschreitet 2^32 Zellen -- uint-Kernel-Argument wuerde stumm abschneiden."); return; }
 	if(ratio==0u) { print_error("alloc_schale: ratio=0 (Blockmittel-Fenster waere leer)."); return; }
+	if((ulong)gewichte.size()!=n) { print_error("alloc_schale: gewichte ("+to_string((ulong)gewichte.size())+") passt nicht zur Liste ("+to_string(n)+") -- der Kernel laese daneben."); return; }
+	for(ulong i=0ull; i<n; i++) if(!(gewichte[i]>=0.0f&&gewichte[i]<=1.0f)) { print_error("alloc_schale: gewicht["+to_string(i)+"] = "+to_string(gewichte[i],6u)+" liegt nicht in [0;1] (NaN faengt die Negativform mit)."); return; }
+	if(modus>2u) { print_error("alloc_schale: modus = "+to_string(modus)+" (gueltig: 0 EQ, 1 FNEQ, 2 IDENT-Debug)."); return; }
 	schale_n = (uint)n;
+	schale_modus = modus;
 	schale_liste = Memory<ulong>(device, n);
 	for(ulong i=0ull; i<n; i++) schale_liste[i] = liste[i];
 	schale_liste.write_to_device();
 	schale_unear = Memory<float>(device, 3ull*n); // Blend-Eingang (Host-Upload); Ctor-Nullinit -> vor dem ersten Upload waere unear 0, deshalb macht das Setup einen 1-Outer-Vorlauf wie bei der Hinkopplung
 	schale_uout  = Memory<float>(device, 3ull*n); // Extract-Ausgang (getrennt, damit der Waechter-Extract unear nicht ueberschreibt)
+	schale_gewicht = Memory<float>(device, n); // Gradient-Blend: Zellgewichte (Lagen-Rampe), wirken als a = alpha*gewicht[gid]
+	for(ulong i=0ull; i<n; i++) schale_gewicht[i] = gewichte[i];
+	schale_gewicht.write_to_device();
 	kernel_schale_extract = Kernel(device, n, "schale_extract", u, flags, schale_liste, (uint)n, ratio, 1u, schale_uout); // mittel (Pos. 5) je Enqueue
-	kernel_schale_blend   = Kernel(device, n, "schale_blend", fi, flags, t, 0.0f, schale_liste, (uint)n, schale_unear, rho_clamp_hits); // t/alpha (Pos. 2/3) je Enqueue
+	kernel_schale_blend   = Kernel(device, n, "schale_blend", fi, flags, t, 0.0f, schale_liste, (uint)n, schale_unear, schale_gewicht, modus, rho_clamp_hits); // t/alpha (Pos. 2/3) je Enqueue; gewicht+modus VOR diag (Plan-Vorgabe)
 	if(sparse_on) kernel_schale_blend.add_parameters(tile_slot); // TS_P haengt NUR an SPARSE_TILES (XL-Audit-B1-Lektion); der Blend laeuft zwar nur im Fernfeld (ohne Tiling), aber die Signatur muss zur Emission der Domaene passen
-	print_info("N2F-Schale: "+to_string(n)+" Zellen a 2x3 floats + Indexliste = "
-		+to_string((float)(n*32ull)/1048576.0f,2u)+" MB auf "+device.info.name+" (alpha dieser Domaene: "+to_string(schale_alpha,3u)+").");
+	print_info("N2F-Schale: "+to_string(n)+" Zellen a 2x3+1 floats + Indexliste = "
+		+to_string((float)(n*36ull)/1048576.0f,2u)+" MB auf "+device.info.name+" (alpha dieser Domaene: "+to_string(schale_alpha,3u)+", modus "+to_string(modus)+(modus==2u?" IDENT-Debug":modus==1u?" FNEQ":" EQ")+").");
 }
 
 void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend (nach einlass_eq)
@@ -1913,10 +1920,10 @@ void LBM::drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vec
 }
 
 // ★ P9c N2F-SCHALE: LBM-Ebenen-Wrapper (Muster alloc_coupling_planes/extract_plane_macros).
-void LBM::alloc_schale(const std::vector<ulong>& liste, const uint ratio) {
+void LBM::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus) {
 	if(get_D()!=1u) { print_error("N2F-Schale: nur fuer je eine Domaene je LBM-Instanz gebaut."); return; }
 	if(!initialized) { print_error("alloc_schale vor der Initialisierung. Erst run(0) rufen."); return; }
-	lbm_domain[0]->alloc_schale(liste, ratio);
+	lbm_domain[0]->alloc_schale(liste, gewichte, ratio, modus);
 }
 
 void LBM::schale_extract_u(std::vector<float>& out, const uint mittel) {

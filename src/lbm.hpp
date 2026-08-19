@@ -152,11 +152,13 @@ public:
 	// Extract auf dem Fernfeld das hochgeladene unear nicht ueberschreibt.
 	Memory<ulong> schale_liste;
 	Memory<float> schale_unear, schale_uout; // je 3 float pro Schalenzelle (ux,uy,uz)
+	Memory<float> schale_gewicht; // ★ Gradient-Blend: Zellgewicht in [0;1] (Lagen-Rampe innen 1 -> aussen 1/N; x+ skalierbar); wirkt im Kernel als a = alpha*gewicht[gid]
 	Kernel kernel_schale_extract, kernel_schale_blend;
 	uint schale_n = 0u;          // 0 = nicht alloziert = alle Schale-Aufrufe No-Op
+	uint schale_modus = 0u;      // 0 = EQ-Arm (Altverhalten), Bit 0 = FNEQ (Nichtgleichgewichtsanteil erhalten), 2 = IDENT-Debug (exaktes No-Op, Paritaetsbeweis)
 	float schale_alpha = 0.0f;   // Konstruktionszeit-Kopie von s_schale_alpha (read-once wie EINLASS_EQ)
 	static float s_schale_alpha; // CFD_N2F_SCHALE: Blendfaktor u_neu=(1-a)*u_far+a*u_near; 0 = aus. Setup setzt lbm_f EXPLIZIT 0 (Blend laeuft NUR im Fernfeld).
-	void alloc_schale(const std::vector<ulong>& liste, const uint ratio); // Muster alloc_coupling_planes: echte Puffer, Kernel mit echten Puffern; NACH finalize_sparse_tiles rufen (fi-Bindung!)
+	void alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus); // Muster alloc_coupling_planes: echte Puffer, Kernel mit echten Puffern; NACH finalize_sparse_tiles rufen (fi-Bindung!)
 	void enqueue_schale_blend(); // post-stream Blend; No-Op bei schale_n==0 ODER schale_alpha==0
 
 	// ★★ Daempfungszone -- PRO DOMAENE, und das ist keine Kosmetik. Vorpruefung 2026-08-09:
@@ -649,7 +651,8 @@ public:
 	// je Kopplungsfenster schale_extract_u() auf der feinen (mittel=1: Blockmittel) und
 	// schale_upload_unear() auf der groben Instanz. Der Blend selbst laeuft in do_time_step
 	// (enqueue_schale_blend, nach einlass_eq) und ist ueber s_schale_alpha nur im Fernfeld scharf.
-	void alloc_schale(const std::vector<ulong>& liste, const uint ratio);
+	// Gradient-Blend: gewichte (je Listenzelle, [0;1]) und modus (0 EQ / Bit 0 FNEQ / 2 IDENT-Debug).
+	void alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus);
 	void schale_extract_u(std::vector<float>& out, const uint mittel); // Kernel-Run + Read des out-Puffers (blockierend)
 	void schale_upload_unear(const std::vector<float>& unear); // Host -> schale_unear (Blend-Eingang)
 	void reset(); // reset simulation (takes effect in following run() call)

@@ -1082,3 +1082,28 @@ Ziel. HEIKO-SLICE-BEFUNDE: (1) uniforme alpha=0,5-Schale zeichnet sichtbares Kop
 in Far -> Gradient-Variante (innen alpha=1, zum Rand auf 0 geblendet) = Heikos urspruengliche
 Idee, Planungsagent laeuft; (2) NEAR-Inlet weiterhin Schlieren trotz sauberem Far-Inlet ->
 Quellendiagnose laeuft (Hypothesen: Streifen-Nachwachsen bis zur Entnahmeebene / Lift-Artefakt).
+
+## Gradient-Blend-Schale + Ebenen-Glaettung: implementiert, abgenommen, geprueft
+
+GRADIENT (Heikos Rampen-Idee + f_neq-Erhalt gegen den vermessenen Gradienten-Kollaps):
+CFD_N2F_SCHALE_LAGEN (Default 4, w linear 1,0->0,25, 88.014 Zellen; 0 = Kontrollarm exakt
+Altverhalten), _FNEQ (f_neu = feq_blend + ftrue - feq_loc; Paarung per IDENT-Modus BITEXAKT
+bewiesen -- 88.014 store-Schreibungen/Schritt ohne Feldwirkung), _XPLUS_SKAL, _IDENT.
+Waechter/Negation/Kipp auf Aussenlage, Fixpunkt-Schwellenformel. Alle 5 CPU-Abnahmen gruen.
+GLAETTUNG (Schlieren-Verdikt A): CFD_KOPPLUNG_GLATT = 1-2-1-Binomialfilter auf den getriebenen
+Ebenen VOR Bodenband/Drive; Instrument liest ungefiltert; kraftneutral; bitidentisch bei aus.
+NEBENBEFUND (ehrlich): forces.csv ist PRINZIPIELL nie bitreproduzierbar (atomic_add_f;
+Basis-Basis-Doppellauf streut 2,0e-4 > jede Patch-Differenz) -- Bit-Doktrin projektweit auf
+"deterministische CSVs bitgleich + Kraefte im Rauschband" umgestellt; abn_p8s0_dd als Referenz
+ausgemustert. Nahfeld-Feld-CSVs lauf-zu-lauf nicht bitreproduzierbar (vorbestehend, OFFEN).
+Pruefagent Gesamt-Diff: KEIN HOCH; M1 (inneres z+-Lagen-Loch vs boden_eq-Band) + N1/N4 gefixt,
+M2 = FNEQ-Laufzeit-Paritaetsbeweis (a=0-Test) OFFEN -> ERSTE AUFGABE MORGEN; heutiger 8mm-Lauf
+faehrt FNEQ als deklarierten Messarm unter Waechter+Kipp. Anker-Hash nach allen Fixes exakt.
+
+## Diagnose-Steckbriefe (nachprotokolliert): Schalen-Artefakt M1-M6 + Schlieren-Verdikt A
+
+Artefakt alpha=0,5: Gradienten-Kollaps Faktor 6 (feq vernichtet Scherspannung), Dach-Peak
+1,14->1,04, Fernwake -0,18, x+-Barriere (x- +12 Pa, y-Asym x4); Metriken M1-M6 als A/B-Soll.
+Schlieren: Far-Streifen wachsen in den letzten ~8 Sponge-Zellen nach, Faktor 24 an der
+Entnahmeebene, Vererbung r=0,82, Feingitter verstaerkt auf lambda=ratio; Fix = Ebenen-Filter
+(zweites einlass_eq-Band und Sponge-Verlaengerung begruendet verworfen).

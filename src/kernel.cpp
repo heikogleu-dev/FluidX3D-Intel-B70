@@ -3033,7 +3033,21 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 // Guards: TYPE_S/E return, TYPE_MS wird BEHANDELT (MS-Guard-Lehre 2f705ba); NaN-Bit-Test auf
 // unear (Zelle ohne gueltiges Nah-Mittel bleibt unangetastet -- Census dazu macht der Host beim
 // Listenbau, KEIN eigener Diag-Slot).
-)+R(kernel void schale_blend(global fpxx* fi, const global uchar* flags, const ulong t, const float alpha, const global ulong* liste, const uint n, const global float* unear, volatile global uint* diag TS_P) {
+// ★ GRADIENT-BLEND (Heiko-Slice-Befund c646253): je Zelle wirkt a = alpha*gewicht[gid] -- der
+// Host baut die Gewichte (Lagen-Gradient innen 1 -> aussen 1/N), der Kernel bleibt dumm.
+// modus: 0 = EQ-Arm (Altverhalten: f = f_eq(rho_l, u_blend)); Bit 0 (CFD_N2F_SCHALE_FNEQ) =
+// FNEQ-Arm: der Nichtgleichgewichtsanteil der Zelle wird ERHALTEN, f = f_eq(u_blend) + (f_true -
+// f_eq(u_lokal)); 2 = IDENT-Debug-Arm: store_f(f_true) = exaktes No-Op (Paritaetsbeweis der
+// Paarung, s. u.).
+// ★★ PAARUNGS-HERLEITUNG (XL-B8, aus load_f/store_f abgeleitet): stream_collide(t) hat f_post[i]
+// (ungerade i) nach (j[i], Slot t%2?i+1:i) und f_post[i+1] nach (n, Slot t%2?i:i+1) geschrieben.
+// Der post-stream-re-load_f(t) liest fhn[i] von (n, t%2?i:i+1) = f_post[i+1] und fhn[i+1] von
+// (j[i], t%2?i+1:i) = f_post[i] -- also fhn[i] = f_post[pair(i)] mit pair(0)=0, pair(ungerade i)=
+// i+1, pair(gerade i)=i-1 (daher u exakt negiert, rho invariant). store_f(t) schreibt an EXAKT
+// die Slots, aus denen f_post kam -- store_f(f_true) mit f_true[i]=fhn[pair(i)] legt jeden Wert
+// bitgleich zurueck (fpxx->float->fpxx ist verlustfrei): das IDENT-No-Op. Damit ist store_f im
+// TRUE-Frame adressiert und der EQ-Arm (store feq(u_blend), u_blend physikalisch) konsistent.
+)+R(kernel void schale_blend(global fpxx* fi, const global uchar* flags, const ulong t, const float alpha, const global ulong* liste, const uint n, const global float* unear, const global float* gewicht, const uint modus, volatile global uint* diag TS_P) {
 	const uint gid = get_global_id(0);
 	if(gid>=n) return;
 	const uxx nn = (uxx)liste[gid];
@@ -3055,8 +3069,25 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// Gegenstrom-Quelle -- der u-Negations-Nachweis im Setup (mittleres Schalen-u_x gegen u_inf)
 	// und der Waechter schlagen dann beide an.
 	const float ulx=-uxm, uly=-uym, ulz=-uzm;
-	const float ux2=(1.0f-alpha)*ulx+alpha*unx, uy2=(1.0f-alpha)*uly+alpha*uny, uz2=(1.0f-alpha)*ulz+alpha*unz;
+	const float a = alpha*gewicht[gid]; // Gradient: Zellgewicht aus dem Host-Listenbau (Lagen-Rampe innen 1 -> aussen 1/N; x+ skalierbar)
+	const float ux2=(1.0f-a)*ulx+a*unx, uy2=(1.0f-a)*uly+a*uny, uz2=(1.0f-a)*ulz+a*unz;
 	float feq[def_velocity_set]; calculate_f_eq(rho_l, ux2, uy2, uz2, feq);
+	if(modus==0u) { // EQ-Arm (Altverhalten; mit gewicht==1.0 bitidentisch zum alten alpha-Pfad: a = alpha*1.0f ist exakt)
+		store_f(nn, feq, fi, j, t TS_A);
+		return;
+	}
+	float ftrue[def_velocity_set]; // Paarung EXAKT gegen die EsoPull-Konvention (Herleitung im Kopfkommentar): pair(0)=0, pair(2k-1)=2k, pair(2k)=2k-1
+	ftrue[0] = fhn[0];
+	for(uint i=1u; i<def_velocity_set; i+=2u) { ftrue[i]=fhn[i+1u]; ftrue[i+1u]=fhn[i]; }
+	if(modus==2u) { // IDENT-Debug-Arm: exaktes No-Op -- harter Paritaetsbeweis der Paarung (Abnahme d)
+		store_f(nn, ftrue, fi, j, t TS_A);
+		return;
+	}
+	// FNEQ-Arm (modus&1): f_neu = f_eq(u_blend) + (f_true - f_eq(rho_l, u_lokal)) -- feq_loc mit
+	// DENSELBEN negierten Momenten (ulx,uly,ulz) wie der Blend, sonst waere f_neq kein reiner
+	// Nichtgleichgewichtsanteil (bei exakter Equilibrium-Zelle MUSS f_true - feq_loc = 0 sein).
+	float feq_loc[def_velocity_set]; calculate_f_eq(rho_l, ulx, uly, ulz, feq_loc);
+	for(uint i=0u; i<def_velocity_set; i++) feq[i] += ftrue[i]-feq_loc[i];
 	store_f(nn, feq, fi, j, t TS_A);
 } // schale_blend()
 
