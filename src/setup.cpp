@@ -2560,6 +2560,7 @@ static void main_setup_fahrzeug_dd() {
 	const uint n2f_mittel = min(1u, env_u("CFD_N2F_SCHALE_MITTEL", 1u)); // 1 = Blockmittel ueber ratio^3 Feinzellen (Default), 0 = Punktwert am Deckungspunkt
 	if(n2f_alpha>0.0f) {
 		const uint n2f_rand = max(1u, (uint)floor(0.1f/dx_c+0.5f));
+		if(env_u("CFD_FERN_FACETTEN",0u)>0u&&n2f_rand<2u) print_error("N2F-Schale mit rand<2 traefe FERN_FACETTEN-Zellen (Blend wuerde deren fi NACH apply_facette still ueberschreiben; Pruefagent N1).");
 		const uint bx0=(uint)fmax(0.0f, veh_c->pmin.x-(float)n2f_rand), bx1=(uint)fmin((float)cNx-1.0f, veh_c->pmax.x+(float)n2f_rand);
 		const uint by0=(uint)fmax(0.0f, veh_c->pmin.y-(float)n2f_rand), by1=(uint)fmin((float)cNy-1.0f, veh_c->pmax.y+(float)n2f_rand);
 		const uint bz1=(uint)fmin((float)cNz-1.0f, veh_c->pmax.z+(float)n2f_rand);
@@ -2976,7 +2977,7 @@ static void main_setup_fahrzeug_dd() {
 					n2f_neg_geprueft = true;
 					const double m_ux = sw_ng? sw_mux/(double)sw_ng : 0.0;
 					print_info("N2F-Schale u-NEGATIONS-NACHWEIS (1. Waechter-Sample): mittleres Schalen-u_x im Fernfeld-u-Feld = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf (Soll nahe +1; falsches Vorzeichen truege es Richtung "+to_string(2.0f*n2f_alpha-1.0f,2u)+" u_inf); Testzelle 0: u_far = ("+to_string(n2f_ufar[0],6u)+","+to_string(n2f_ufar[1],6u)+","+to_string(n2f_ufar[2],6u)+") vs u_near = ("+to_string(n2f_unear[0],6u)+","+to_string(n2f_unear[1],6u)+","+to_string(n2f_unear[2],6u)+") lat.");
-					if(m_ux<0.5*(double)u_lat) {
+					if(m_ux<fmax(0.5, (double)n2f_alpha)*(double)u_lat) { // Pruefagent M1: Schwelle alphaabhaengig -- bei alpha>0,75 laege das Falsch-Ziel (2a-1) sonst UEBER 0,5 und der Nachweis waere blind
 						swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close();
 						print_error("u-Negations-Nachweis FEHLGESCHLAGEN: Schalen-u_x = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf < 0,5 -- der Blend arbeitet mit falschem Vorzeichen (XL-B8) oder die Schale ist vergiftet. Abgebrochen.");
 					}
