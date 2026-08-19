@@ -1021,3 +1021,26 @@ turbulenz ZURUECKGESTUFT (OF13 ist RANS -- GS per Closure turbulent; eigene Stre
 kraftneutraler unfreiwilliger A/B; Injektion ins tau~0,5-Fernfeld zerfaellt in Akustik).
 6. Operatortausch GEPARKT (doppelt gemessen schlechter; tau+ ohne Parameterpunkt).
 P8-Verdikt bestaetigt das Muster: Druckphysik-Beeinflussung am Grobkoerper drehte nichts am Cz.
+
+## OF13-Referenz GEHOBEN (Agent 2, verifiziert: Druckkraft aus Rohfeldern exakt = forces.dat)
+
+Abloesung: OF13 loest praktisch NICHT ab -- Dach voll angelegt, am Heckscheibenknick x=3,585 m
+(Nase-Konvention) nur 10-cm-Blase mit Wiederanlegen; Diffusor (Kick x=3,49, 8,2 Grad) im
+Zentralkanal bis Fahrzeugende angelegt. Cz-Quellen (Druck): Splitter -0,31, ebener Boden -0,71,
+Diffusor -0,33, HECKFLUEGEL -0,47, Radhaeuser -0,13, Dach +0,57 Lift. 2/3 Unterboden, 1/3 Fluegel.
+Setup: kOmegaSST-RANS, Wall Functions y+~28, 7 Prismenschichten (erste 0,625 mm), Einlass I=5 %/
+L=0,1 m -> nut/nu~6600 (GS per Closure abloeseresistent). PARITAET: bewegter Boden, STEHENDE Raeder
+(wie wir). Referenz 0,599/-1,301 = Fenstermittel 900-1200 reproduziert. Vergleichsdaten:
+postProcessing/sampleY0/1200.
+
+## Diffusor-Mechanik (Agent 4): DER SPALT IST TOT, nicht der Diffusor krank
+
+Spaltmittel Plateau = exakt 0,50 u_inf = COUETTE (Strasse 1,0 / Karosserie 0) -- kein Durchsatz-
+ueberschuss. Die KAROSSERIE-UNTERSEITEN-GS ist ab x=1,6 m totes Wasser, fuellt am Kick (x=3,58,
+8,5 Grad, A2/A1=1,45) die obere Spalthaelfte -> Rampe reisst sofort ab. Entlastet: DOWN-Band
+(reisst nicht ab), ABSTAND (0 Zellen unterm Diffusor, wirkt rein buchhalterisch -- f8-A/B:
+Stroemung identisch, dCz +0,73 reine Reifenkraft), u_road-Drossel (falsche Richtung).
+Bernoulli-Budget funktionierender Diffusor+Induktion: -0,7..-1,0 Cz = exakt die Luecke.
+Messarme dokumentiert+GEPARKT: DOWN-Fenster ab Kick (Diagnose), ABSTAND=3-Bound.
+HEIKO-PRIORISIERUNG 2026-08-21: Grenzschicht-Offensive HINTER P9 angestellt; van-Driest-
+Tiefenrecherche (laeuft) wird dokumentiert und wartet.

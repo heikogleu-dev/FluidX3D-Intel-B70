@@ -2904,6 +2904,10 @@ static void main_setup_fahrzeug_dd() {
 		// erkennbar daran, dass das Profil ueber alle z KONSTANT war statt zur Freistroemung anzusteigen.
 		if(outer==0ull) pruefe_wandwirksamkeit(lbm_c, cNx, cNy, cNz, u_lat, "Fernfeld");
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_c.extract_plane_macros(cp[p], face[p]); // nur die vier getriebenen Flaechen -- x+ ist Druckauslass, siehe oben
+		if(n2f_alpha>0.0f) { // ★ P9c KOPPLUNGSFENSTER (nach lbm_c.finish() + Extracts, VOR dem naechsten run_async): Nahfeld-Blockmittel entnehmen und ins Fernfeld laden -- 1-Outer-Vorlauf wie die Hinkopplung; das Blend des naechsten groben Schritts liest diesen Stand
+			lbm_f.schale_extract_u(n2f_unear, n2f_mittel);
+			lbm_c.schale_upload_unear(n2f_unear);
+		}
 		const auto _t3 = t_now();
 		t_acc += outer_clock.stop(); n_acc++;
 		ph_kopplung += std::chrono::duration<double>(_t1-_t0).count();
@@ -2948,6 +2952,44 @@ static void main_setup_fahrzeug_dd() {
 				ipcsv << t_si << "," << face_name[p] << "," << rmin << "," << rmean << "," << rmax << ","
 				      << dpmin << "," << dpmean << "," << dpmax << "\n" << std::flush;
 			}
+			if(n2f_alpha>0.0f) { // ★ P9c WAECHTER an der Sample-Kadenz: schale_extract(mittel=0) auf lbm_c liest das
+				// grobe u-FELD der Schalenzellen; verglichen wird gegen das in DIESEM Outer hochgeladene
+				// Nahfeld-Blockmittel (beide am selben physikalischen Zeitpunkt). NaN-Eintraege (fluidleere
+				// Bloecke, Census beim Listenbau) werden uebersprungen.
+				lbm_c.schale_extract_u(n2f_ufar, 0u);
+				double sw_s2=0.0, sw_d2max=0.0, sw_mux=0.0; ulong sw_ng=0ull;
+				for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) {
+					const float ax=n2f_unear[3ull*i], ay=n2f_unear[3ull*i+1ull], az=n2f_unear[3ull*i+2ull];
+					if(!std::isfinite(ax)||!std::isfinite(ay)||!std::isfinite(az)) continue; // NaN-Marker
+					const double du=(double)ax-(double)n2f_ufar[3ull*i], dv=(double)ay-(double)n2f_ufar[3ull*i+1ull], dw=(double)az-(double)n2f_ufar[3ull*i+2ull];
+					const double d2=du*du+dv*dv+dw*dw; sw_s2+=d2; sw_d2max=fmax(sw_d2max,d2); sw_ng++;
+					sw_mux += (double)n2f_ufar[3ull*i];
+				}
+				const double sw_rms = sw_ng? sqrt(sw_s2/(double)sw_ng) : 0.0;
+				swcsv << t_si << "," << sw_ng << "," << sw_rms << "," << sqrt(sw_d2max) << "," << sw_rms/(double)u_lat << "\n" << std::flush;
+				if(!n2f_neg_geprueft) { // ★ u-NEGATIONS-NACHWEIS (XL-B8, im Blend TRAGEND): funktionaler Beweis am
+					// laufenden Binary. Der Blend liest post-stream u EXAKT NEGIERT und muss es zurueckdrehen;
+					// waere das Vorzeichen falsch, stuende u_neu = (1-a)*(-u)+a*u_near und das Schalen-u_x
+					// des u-FELDS (das die Blend-Wirkung des Vorschritts traegt) fiele Richtung (2a-1)*u_inf
+					// bzw. darunter -- bei a=0,5 auf ~0. Richtig behandelt bleibt es nahe +u_inf (frueher
+					// Lauf, Stroemung noch kaum entwickelt). Zusaetzlich Testzelle 0 als Zahlenpaar.
+					n2f_neg_geprueft = true;
+					const double m_ux = sw_ng? sw_mux/(double)sw_ng : 0.0;
+					print_info("N2F-Schale u-NEGATIONS-NACHWEIS (1. Waechter-Sample): mittleres Schalen-u_x im Fernfeld-u-Feld = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf (Soll nahe +1; falsches Vorzeichen truege es Richtung "+to_string(2.0f*n2f_alpha-1.0f,2u)+" u_inf); Testzelle 0: u_far = ("+to_string(n2f_ufar[0],6u)+","+to_string(n2f_ufar[1],6u)+","+to_string(n2f_ufar[2],6u)+") vs u_near = ("+to_string(n2f_unear[0],6u)+","+to_string(n2f_unear[1],6u)+","+to_string(n2f_unear[2],6u)+") lat.");
+					if(m_ux<0.5*(double)u_lat) {
+						swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close();
+						print_error("u-Negations-Nachweis FEHLGESCHLAGEN: Schalen-u_x = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf < 0,5 -- der Blend arbeitet mit falschem Vorzeichen (XL-B8) oder die Schale ist vergiftet. Abgebrochen.");
+					}
+				}
+				string kipp = "";
+				if(t_si>=(double)t_warmup&&sw_rms>0.5*(double)u_lat) kipp = "RMS > 0,5*u_inf nach Warmup";
+				sw_steigend = (sw_rms_prev>=0.0&&sw_rms>sw_rms_prev) ? sw_steigend+1u : 0u; sw_rms_prev = sw_rms;
+				if(kipp==""&&sw_steigend>=10u) kipp = "RMS ueber 10 Samples monoton steigend";
+				if(kipp!="") {
+					swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close(); // Abbruchpfad symmetrisch (R-N2-Muster)
+					print_error("N2F-Schale GEKIPPT bei t = "+to_string((float)t_si,5u)+" s: "+kipp+" (RMS = "+to_string((float)sw_rms,6u)+" lat = "+to_string((float)(sw_rms/(double)u_lat),3u)+" u_inf). Die CSV bis hierher steht in "+out_dir+"schale_waechter.csv.");
+				}
+			}
 			const double Fx_si = (double)units_fine.si_F(F.x), Fz_si = (double)units_fine.si_F(F.z);
 			// ★ NaN-WAECHTER (Pruefer-Befund 2026-08-08). Ohne ihn kostet eine Divergenz den ganzen Lauf:
 			// die CSV liefe 2,5 Stunden mit nan voll, Mittelwert und Block-SEM lieferten nan, und gewarnt
@@ -2975,7 +3017,7 @@ static void main_setup_fahrzeug_dd() {
 				else if(n_frozen>=2u) grund = "die Kraft steht seit drei Abtastungen BITGLEICH -- das Feld ist eingefroren (Zahlenformat gesaettigt)";
 				else if(t_si>0.02 && (fabs(Fx_si)>20.0*q_A || fabs(Fz_si)>20.0*q_A)) grund = "die Kraft ist unphysikalisch gross (|Cd| oder |Cz| ueber 20)";
 				if(grund!="") {
-					fcsv << std::flush; fcsv.close(); ipcsv.close(); // R-N2: Abbruchpfad symmetrisch (Zeilen sind ohnehin geflusht)
+					fcsv << std::flush; fcsv.close(); ipcsv.close(); if(swcsv.is_open()) swcsv.close(); // R-N2: Abbruchpfad symmetrisch (Zeilen sind ohnehin geflusht); P9c: Waechter-CSV mit schliessen
 					print_error("Lauf gekippt bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
 						+"): "+grund+". Fx = "+to_string((float)Fx_si,3u)+" N, Fz = "+to_string((float)Fz_si,3u)
 						+" N. Abgebrochen. Die CSV bis hierher steht in "+out_dir+"forces.csv -- dort ist zu sehen, wann es kippt.");
@@ -3063,6 +3105,7 @@ static void main_setup_fahrzeug_dd() {
 	// ---------------------------------------------------------------- Auswertung
 	fcsv.close(); // die Zeilen stehen bereits einzeln auf Platte, siehe Schleife
 	ipcsv.close(); print_info("CSV: "+out_dir+"interface_druck.csv (Interface-Druck der 4 getriebenen Ebenen, waehrend des Laufs geschrieben)"); // _exit(0) ruft keine Destruktoren
+	if(n2f_alpha>0.0f) { swcsv.close(); print_info("CSV: "+out_dir+"schale_waechter.csv (N2F-Schalen-Waechter, waehrend des Laufs geschrieben)"); } // P9c; _exit(0) ruft keine Destruktoren
 	if(zb>0u) { zcsv.close(); print_info("CSV: "+out_dir+"kraft_zband.csv (Band/Rest-Zerlegung, waehrend des Laufs geschrieben)"); } // _exit(0) am Fallende ruft keine Destruktoren -- explizit schliessen
 	print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen, waehrend des Laufs geschrieben)");
 	std::vector<double> cd, cz;
@@ -3184,6 +3227,15 @@ static void main_setup_fahrzeug_dd() {
 		print_info("EINLASS_EQ-Wirkpfad: Fernfeld "+to_string(eqc)+" Spalten-Resets (t%100-Stichprobe), Nahfeld "+to_string(eqf)+" (Soll 0 -- Nah-x- ist Kopplungsebene).");
 		if(eqc==0ull) print_error("CFD_FERN_EINLASS_EQ gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op.");
 		if(eqf!=0ull) print_error("Nahfeld zaehlt EINLASS_EQ-Wirkpfad -- es MUSS unberuehrt bleiben (read-once-Bruch?).");
+	}
+	if(n2f_alpha>0.0f) { // ★ P9c: N2F-SCHALE-Wirkpfad-Endnachweis Slot 22 (Muster EINLASS_EQ)
+		lbm_f.lbm_domain[0]->rho_clamp_hits.read_from_device(); lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		const ulong swf=(ulong)lbm_f.lbm_domain[0]->rho_clamp_hits[22], swc=(ulong)lbm_c.lbm_domain[0]->rho_clamp_hits[22];
+		print_info("N2F-SCHALE-Wirkpfad: Fernfeld "+to_string(swc)+" Blend-Zellen (t%100-Stichprobe; Solid-/NaN-Skips senken den Zaehler ehrlich), Nahfeld "+to_string(swf)+" (Soll 0 -- der Blend laeuft NUR im Fernfeld).");
+		// t laeuft im Blend 1..n_outer (Vorlauf-run(1) hatte t=0 VOR alloc_schale) -- t%100 feuert
+		// floor(n_outer/100) mal; bei Laeufen unter 100 groben Schritten ist 0 also KEIN Befund.
+		if(swc==0ull) { if(n_outer<100ull) print_warning("N2F-SCHALE-Wirkpfad 0, aber der Lauf hat unter 100 grobe Schritte -- die t%100-Stichprobe hat nie gefeuert (kein Befund; laenger laufen fuer den Nachweis)."); else print_error("CFD_N2F_SCHALE gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op (Iron Rule 3)."); }
+		if(swf!=0ull) print_error("Nahfeld zaehlt Schalen-Blend-Wirkpfad -- es MUSS unberuehrt bleiben (alpha-Statik-Bruch: s_schale_alpha muss fuer lbm_f EXPLIZIT 0 sein).");
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];
