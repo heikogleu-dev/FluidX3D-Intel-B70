@@ -184,6 +184,14 @@ public:
 	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
 	Memory<float> fac_tau;   // Akkumulator 6 float je Facette: [0] Summe tau_w (y+), [1..3] Ist-Wandkraft x/y/z (Cd-Reibung), [4] Delta-m-Leck (iMEM; Paararm 0), [5] Normalkontamination (iMEM; Paararm 0); nur Zellen mit tatsaechlicher Modifikation
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
+	// ★ kraft_facetten-GPU-Reduktion: Druckanteil des Cd-Pfads auf dem Geraet statt per Voll-F-Transfer.
+	Memory<ulong> kf_liste;  // Markerzellen-Indexliste (Host-Scan-Reihenfolge der F-BBox)
+	Memory<float> kf_psum;   // 3 float je Arbeitsgruppe: px,py,pz-Teilsummen (atomikfrei)
+	Memory<uint>  kf_pcnt;   // 3 uint je Arbeitsgruppe: voll,proj,unklar
+	Kernel kernel_kraft_facetten;
+	ulong kf_N=0ull; uchar kf_marker=0u; bool kf_zper=false, kf_bound=false; // Bindungsschluessel (marker,z_per) + Waechter
+	void bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per); // Liste hochladen, Kernel binden
+	void kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar); // Kernel + double-Endsumme
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
 	static float s_wf_tau;      // 1 = volle WFB, 0 = nur Free-Slip-Tausch (Zwischenarm)

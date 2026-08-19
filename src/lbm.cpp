@@ -570,6 +570,48 @@ void LBM_Domain::enqueue_object_torque(const float3& rotation_center, const ucha
 	kernel_object_torque.set_parameters(2u, flag_marker, rotation_center.x, rotation_center.y, rotation_center.z).enqueue_run();
 	object_sum.enqueue_read_from_device();
 }
+// ★ kraft_facetten-GPU-Reduktion (Muster init_pressure_outlet/set_pressure_outlet_faces): Liste der
+// Markerzellen hochladen, Gruppenpuffer anlegen, Kernel binden. Der Schluessel (marker,z_per) steht
+// in kf_marker/kf_zper -- der Aufrufer (setup.cpp kraft_facetten) bindet bei Wechsel neu.
+void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per) {
+	kf_N = (ulong)liste.size(); kf_marker = marker; kf_zper = z_per; kf_bound = true;
+	if(kf_N==0ull) return; // leere Liste: kraft_facetten_gpu liefert Nullen ohne Launch
+	kf_liste = Memory<ulong>(device, kf_N); // Ctor-Nullinit + zweiter Voll-Write = ein verschenkter 16-MB-Transfer, EINMALIG beim Bind -- bewusst toleriert (Pruefagent N2)
+	for(ulong i=0ull; i<kf_N; i++) kf_liste[i] = liste[i];
+	kf_liste.write_to_device();
+	const ulong gruppen = (kf_N+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE; // = ceil(kf_N/64.0)
+	kf_psum = Memory<float>(device, 3ull*gruppen);
+	kf_pcnt = Memory<uint>(device, 3ull*gruppen);
+	// Im AUS-Arm (!facetten_on) existieren fac_idx/fac_tau_n/fac_geo NICHT (allocate bindet sie nur
+	// mit facetten_on, s.o.) -- 1-Element-Dummies anlegen, damit der Kernel gueltige Puffer bekommt.
+	// NUR wenn noch nie alloziert (length()==0): ein Move-Assignment auf einen bereits als Kernel-Arg
+	// gebundenen Puffer waere genau der DIAGZ-Use-after-free (Nachpruefer-Lektion in alloc_facetten_domain).
+	if(!facetten_on) {
+		if(fac_idx.length()==0ull)   { fac_idx   = Memory<uint>(device, 1ull);  fac_idx[0]=0xFFFFFFFFu; fac_idx.write_to_device(); }
+		if(fac_tau_n.length()==0ull) { fac_tau_n = Memory<uint>(device, 1ull);  fac_tau_n[0]=0u;        fac_tau_n.write_to_device(); }
+		if(fac_geo.length()==0ull)   { fac_geo   = Memory<float>(device, 8ull); for(ulong q=0ull;q<8ull;q++) fac_geo[q]=0.0f; fac_geo.write_to_device(); }
+	}
+	kernel_kraft_facetten = Kernel(device, kf_N, "kraft_facetten_gpu", F, kf_liste, (uint)kf_N,
+		fac_idx, fac_tau_n, fac_geo, facetten_on?1u:0u, z_per?1u:0u, kf_psum, kf_pcnt);
+}
+void LBM_Domain::kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar) {
+	px=py=pz=0.0; n_voll=n_proj=n_unklar=0ull;
+	if(kf_N==0ull) return; // keine Markerzellen: Nullen ohne Launch
+	// ★ run() MIT finish, nicht enqueue_run(): kf_psum/kf_pcnt sind auf CPU/iGPU ZERO-COPY-Puffer
+	// (CL_MEM_USE_HOST_PTR) -- dort erzwingt der "blockierende" read_from_device KEINE Ausfuehrung
+	// der wartenden Kommandos, und der Kernel lief erst mit dem naechsten Queue-Flush. Gemessen als
+	// Ein-Aufruf-Versatz im PRUEF-Doppellauf (GPU-Werte = Host-Werte des VORHERIGEN Aufrufs, erster
+	// Aufruf Nullen). Die in-order-Queue stellt zugleich sicher, dass enqueue_update_force_field
+	// davor abgearbeitet ist.
+	kernel_kraft_facetten.run();
+	kf_psum.read_from_device();
+	kf_pcnt.read_from_device();
+	const ulong gruppen = (kf_N+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE;
+	for(ulong g=0ull; g<gruppen; g++) { // double-Endsumme in FESTER Gruppenreihenfolge (deterministisch)
+		px += (double)kf_psum[3ull*g]; py += (double)kf_psum[3ull*g+1ull]; pz += (double)kf_psum[3ull*g+2ull];
+		n_voll += (ulong)kf_pcnt[3ull*g]; n_proj += (ulong)kf_pcnt[3ull*g+1ull]; n_unklar += (ulong)kf_pcnt[3ull*g+2ull];
+	}
+}
 #endif // FORCE_FIELD
 #ifdef MOVING_BOUNDARIES
 void LBM_Domain::enqueue_update_moving_boundaries() { // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS

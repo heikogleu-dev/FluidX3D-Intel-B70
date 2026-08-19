@@ -857,3 +857,19 @@ dynamischem Sponge-Guard (NF_OX-32), Nahfeld-Einlauf-Print, Messsaeulen-Welt-x-P
 Pruefagent: kein HOCH; M1 (Sponge-Guard bei N=0/Unterlauf) und M2 (NaN-Input lautlos, UB-Cast)
 plus 4 NIEDRIG direkt gefixt. CPU-Smoke NEAR_VOR=96: Einlauf 0,326 m, Nachlauf 1,990 m
 unveraendert, Kopplungs-Deckung gruen. Bitidentitaet bei NEAR_VOR=0 (+-0.0f) verifiziert.
+
+## Perf-Baurunde 2, Baustein 1: kraft_facetten-GPU-Reduktion (CFD_FAC_GPU, Default AN)
+
+Implementiert nach Planungsagenten-Plan: Markerzellen-Indexliste (einmalig beim Bind), Kernel
+kraft_facetten_gpu mit 64er-Baum-Reduktion OHNE float-Atomics, Host-Endsumme double in fester
+Gruppenreihenfolge; alter Host-Pfad wortgleich unter CFD_FAC_GPU=0; CFD_FAC_GPU_PRUEF=1 rechnet
+beide und druckt Abweichung+Zaehler. Statt ~2-2,5 GB Voll-F-Transfer je Kraftfenster fliessen
+<1 MB Partialsummen. Implementierungsagent fing selbst den Zero-Copy-Versatz (run() statt
+enqueue_run()); Pruefagent fand das SPIEGELBILD im Host-Arm (finish vor F-Spiegel-Read) -- beide
+Richtungen der Falle jetzt gefixt und als Lektion dokumentiert.
+CPU-Abnahmen: Suite 5/5; Kugel-Doppellauf 11 Fenster Zaehler EXAKT gleich, px/pz auf 6 Dezimalen
+identisch; K4 rel 3,5e-7 (Soll 1e-5); Kanal-K3 parallel: GPU wie Host exakt 0, Abweichung
+0,00000000, B55-Anker exakt. Torus kipp=26-Kurzfenster: K3 faellt in BEIDEN Pfaden identisch
+(fallseitig, vorbestehend -- kein Diff-Befund; langes Fenster steht als Klaerung aus).
+AUSSTEHEND (GPU-Leiter): iGPU-PRUEF, dann B70-Index-A/B (Heiko: Perf-Optimierungen IMMER mit
+dem Performance-Index vermessen) -- Soll: Kraefte-Phase ~37 % -> ~1 % im Messfenster, Index ~-10 %.

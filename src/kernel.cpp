@@ -3018,6 +3018,70 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		if(local_sum.z!=0.0f) atomic_add_f(&object_sum[2], local_sum.z);
 	}
 } // object_force()
+)+R(kernel void kraft_facetten_gpu(const global float* F, const global ulong* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
+	// FORK kraft_facetten-GPU: Druckanteil des Facetten-Cd-Pfads ohne Host-F-Transfer. Range =
+	// Markerzellen-Indexliste (der Host baut sie in der Dreifachschleifen-Scan-Reihenfolge der
+	// F-BBox). Klassifikation voll/projiziert/unklar und Projektion AUSDRUCKSGLEICH zum Host-Pfad
+	// kraft_facetten (setup.cpp), Rechnung float; die double-Endsumme bildet der Host in fester
+	// Gruppenreihenfolge. KEINE globalen float-Atomics: Workgroup-Baum-Reduktion (Muster
+	// po_reduce_mean), lid==0 schreibt atomikfrei die exklusiven Slots kf_psum[3*Gruppe+0..2]
+	// (px,py,pz) und kf_pcnt[3*Gruppe+0..2] (voll,proj,unklar).
+	const uint gid = get_global_id(0);
+	const uint lid = get_local_id(0);
+	// D3Q19-Richtungen 1..18 in EXAKT der Host-Reihenfolge (setup.cpp FZ_C) -- NICHT die
+	// velocity_set-Reihenfolge dieses Kernels.
+	const int fzc[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
+		{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+	float px=0.0f, py=0.0f, pz=0.0f; uint cv=0u, cq=0u, cu=0u; // Beitrag dieses Work-Items (Padding-Items bleiben 0)
+	if(gid<kf_N) {
+		const uxx n = (uxx)kf_liste[gid];
+		const uint3 xyz = coordinates(n);
+		uxx fbi;
+		if(f_bbox(n, &fbi)) { // Markerzellen liegen konstruktiv in der F-BBox; der Test bleibt als Waechter
+			const float Fx=F[fbi], Fy=F[def_FBN+(ulong)fbi], Fz=F[2ul*def_FBN+(ulong)fbi]; // wortgleich zu load3_F
+			float nxm=0.0f, nym=0.0f, nzm=0.0f; bool kontaminiert=false;
+			if(fac_on!=0u) for(uint i=1u; i<19u; i++) { // fac_on==0: Nachbarschleife entfaellt, alles zaehlt als voll (object_force-Semantik auf der Liste)
+				// x/y-Wrap, z-Klemme bzw. z_per-Wrap und F-BBox-Clip AUSDRUCKSGLEICH zu setup.cpp (def_FB* statt D->fb*)
+				const int zn0=(int)xyz.z+fzc[i][2]; if(z_per==0u&&(zn0<0||zn0>=(int)def_Nz)) continue;
+				const int zn=z_per!=0u?(int)((zn0%(int)def_Nz+(int)def_Nz)%(int)def_Nz):zn0;
+				const uint xn=(uint)((((int)xyz.x+fzc[i][0])%(int)def_Nx+(int)def_Nx)%(int)def_Nx);
+				const uint yn=(uint)((((int)xyz.y+fzc[i][1])%(int)def_Ny+(int)def_Ny)%(int)def_Ny);
+				if(xn<def_FBX0||yn<def_FBY0||(uint)zn<def_FBZ0||xn>=def_FBX0+def_FBNX||yn>=def_FBY0+def_FBNY||(uint)zn>=def_FBZ0+def_FBNZ) continue;
+				const ulong fbi2=(ulong)(xn-def_FBX0)+((ulong)(yn-def_FBY0)+(ulong)((uint)zn-def_FBZ0)*(ulong)def_FBNY)*(ulong)def_FBNX;
+				const uint fid = fac_idx[fbi2];
+				if(fid==0xFFFFFFFFu||fac_tau_n[fid]==0u) continue;
+				kontaminiert=true;
+				nxm+=fac_geo[8ul*(ulong)fid]; nym+=fac_geo[8ul*(ulong)fid+1ul]; nzm+=fac_geo[8ul*(ulong)fid+2ul];
+			}
+			if(!kontaminiert) { px=Fx; py=Fy; pz=Fz; cv=1u; }
+			else {
+				const float l = sqrt(nxm*nxm+nym*nym+nzm*nzm);
+				if(l<0.5f) { px=Fx; py=Fy; pz=Fz; cu=1u; } // Gegennormalen (Spalt): konservativ voll -- Schwelle wie Host (l<0.5)
+				else {
+					const float nx2=nxm/l, ny2=nym/l, nz2=nzm/l;
+					const float fn = Fx*nx2+Fy*ny2+Fz*nz2;
+					px=fn*nx2; py=fn*ny2; pz=fn*nz2; cq=1u;
+				}
+			}
+		}
+	}
+	local float cache_x[cl_workgroup_size], cache_y[cl_workgroup_size], cache_z[cl_workgroup_size];
+	local uint cnt_v[cl_workgroup_size], cnt_q[cl_workgroup_size], cnt_u[cl_workgroup_size];
+	cache_x[lid]=px; cache_y[lid]=py; cache_z[lid]=pz; cnt_v[lid]=cv; cnt_q[lid]=cq; cnt_u[lid]=cu;
+	barrier(CLK_LOCAL_MEM_FENCE);
+	for(uint s=1u; s<cl_workgroup_size; s*=2u) { // Baum-Reduktion, Muster po_reduce_mean
+		if(lid%(2u*s)==0u) {
+			cache_x[lid]+=cache_x[lid+s]; cache_y[lid]+=cache_y[lid+s]; cache_z[lid]+=cache_z[lid+s];
+			cnt_v[lid]+=cnt_v[lid+s]; cnt_q[lid]+=cnt_q[lid+s]; cnt_u[lid]+=cnt_u[lid+s];
+		}
+		barrier(CLK_LOCAL_MEM_FENCE);
+	}
+	if(lid==0u) { // OHNE Atomik: jede Gruppe schreibt exklusiv ihre drei Slots
+		const uint g = get_group_id(0);
+		kf_psum[3u*g]=cache_x[0]; kf_psum[3u*g+1u]=cache_y[0]; kf_psum[3u*g+2u]=cache_z[0];
+		kf_pcnt[3u*g]=cnt_v[0];   kf_pcnt[3u*g+1u]=cnt_q[0];   kf_pcnt[3u*g+2u]=cnt_u[0];
+	}
+} // kraft_facetten_gpu()
 )+R(kernel void object_torque(const global float* F, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1

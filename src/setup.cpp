@@ -553,16 +553,26 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
                         const ulong fenster, const std::vector<double>& snap, const bool z_per=false, const bool flags_aktuell=false) {
 	L.update_force_field();
 	LBM_Domain* D = L.lbm_domain[0];
-	D->F.read_from_device();
+	// ★ GPU-Reduktion des Druckanteils (Kernel kraft_facetten_gpu): CFD_FAC_GPU=1 (Default) rechnet
+	// auf dem Geraet OHNE Voll-F-Transfer; =0 ist der alte Host-Pfad WORTGLEICH erhalten;
+	// CFD_FAC_GPU_PRUEF=1 rechnet BEIDE Pfade und druckt die maximale Relativabweichung px/py/pz
+	// plus die Zaehlerstaende (GPU vs Host, muessen EXAKT gleich sein).
+	const bool gpu   = env_u("CFD_FAC_GPU", 1u)>0u;
+	const bool pruef = env_u("CFD_FAC_GPU_PRUEF", 0u)>0u;
+	const bool host_rechnen = !gpu||pruef; // Kontrollarm bzw. Pruefdoppel
+	if(host_rechnen) { D->finish_queue(); D->F.read_from_device(); } // im reinen GPU-Zweig ENTFAELLT der Voll-F-Transfer; finish davor (Pruefagent M): auf Zero-Copy-Geraeten ist der Read ein No-Op und erzwingt KEINE Ausfuehrung des enqueueten update_force_field -- ohne finish laese der Host-Arm das F des VORIGEN Updates (Spiegel des GPU-Versatz-Fixes)
 	// ★ Profiler-Befund 2026-08-19 (Heiko): flags sind nach initialize() STATISCH -- der
 	// Voll-Domaenen-Read je Sample war reine PCIe-Verschwendung (~0,5 GB im dd). Heisse
 	// Schleifen lesen EINMAL nach run(0) und uebergeben flags_aktuell=true.
-	if(!flags_aktuell) L.flags.read_from_device();
+	if(host_rechnen&&!flags_aktuell) L.flags.read_from_device();
 	FacKraft K; K.px=K.py=K.pz=K.rx=K.ry=K.rz=0.0; K.n_voll=K.n_proj=K.n_unklar=0ull;
 	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
 	const bool fac = D->facetten_on;
 	if(fac) {
-		D->fac_tau.read_from_device(); D->fac_tau_n.read_from_device();
+		// fac_tau.read_from_device() MUSS auch im GPU-Zweig bleiben: der dd-Fall liest direkt nach
+		// diesem Aufruf die Host-Spiegel [4]/[5] ("fac_tau frisch durch kraft_facetten").
+		D->fac_tau.read_from_device();
+		if(host_rechnen) D->fac_tau_n.read_from_device(); // nur der Host-Druckpfad braucht den Spiegel -- die GPU liest fac_tau_n auf dem Geraet
 		const double fs = fmax(1.0,(double)fenster);
 		for(ulong i=0ull; i<D->fac_N; i++) {
 			K.rx += ((double)D->fac_tau[6ull*i+1ull]-(snap.empty()?0.0:snap[3ull*i+0ull]))/fs;
@@ -570,6 +580,7 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 			K.rz += ((double)D->fac_tau[6ull*i+3ull]-(snap.empty()?0.0:snap[3ull*i+2ull]))/fs;
 		}
 	}
+	if(host_rechnen) {
 	auto wxp = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
 	auto wyp = [&](const int v) { return (uint)((v%(int)Ny+(int)Ny)%(int)Ny); };
 	for(uint z=D->fbz0; z<D->fbz0+D->fbnz; z++) for(uint y=D->fby0; y<D->fby0+D->fbny; y++) for(uint x=D->fbx0; x<D->fbx0+D->fbnx; x++) {
@@ -596,6 +607,34 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		const double nx2=nxm/l, ny2=nym/l, nz2=nzm/l;
 		const double fn = Fx*nx2+Fy*ny2+Fz*nz2;
 		K.px+=fn*nx2; K.py+=fn*ny2; K.pz+=fn*nz2; K.n_proj++;
+	}
+	} // host_rechnen
+	if(gpu) {
+		const FacKraft KH = K; // Host-Druckergebnis fuer den Pruefdruck sichern (nur unter pruef gerechnet)
+		if(!D->kf_bound||D->kf_marker!=marker||D->kf_zper!=z_per) { // Erstbindung oder Schluesselwechsel
+			if(!flags_aktuell&&!host_rechnen) L.flags.read_from_device(); // flags-Spiegel sicherstellen (host_rechnen hat ihn oben schon geholt)
+			std::vector<ulong> liste; // Markerzellen in DERSELBEN Dreifachschleifen-Scan-Reihenfolge wie der Host-Pfad
+			for(uint z=D->fbz0; z<D->fbz0+D->fbnz; z++) for(uint y=D->fby0; y<D->fby0+D->fbny; y++) for(uint x=D->fbx0; x<D->fbx0+D->fbnx; x++) {
+				const ulong n = (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+				if(L.flags[n]!=marker) continue;
+				liste.push_back(n);
+			}
+			D->bind_kraft_facetten(liste, marker, z_per);
+		}
+		double gpx=0.0, gpy=0.0, gpz=0.0; ulong gv=0ull, gq=0ull, gu=0ull;
+		D->kraft_facetten_gpu(gpx, gpy, gpz, gv, gq, gu);
+		K.px=gpx; K.py=gpy; K.pz=gpz; K.n_voll=gv; K.n_proj=gq; K.n_unklar=gu;
+		if(pruef) {
+			auto rel=[](const double a, const double b){ return b!=0.0?fabs(a/b-1.0):(a!=0.0?1.0:0.0); };
+			const double rmax = fmax(rel(K.px,KH.px), fmax(rel(K.py,KH.py), rel(K.pz,KH.pz)));
+			print_info("FAC_GPU-PRUEF: max. Relativabweichung px/py/pz = "+to_string((float)rmax,9u)
+				+" (px GPU "+to_string((float)K.px,6u)+" / Host "+to_string((float)KH.px,6u)
+				+", pz GPU "+to_string((float)K.pz,6u)+" / Host "+to_string((float)KH.pz,6u)
+				+"); Zaehler GPU/Host: voll "+to_string(K.n_voll)+"/"+to_string(KH.n_voll)
+				+", proj "+to_string(K.n_proj)+"/"+to_string(KH.n_proj)
+				+", unklar "+to_string(K.n_unklar)+"/"+to_string(KH.n_unklar)
+				+((K.n_voll!=KH.n_voll||K.n_proj!=KH.n_proj||K.n_unklar!=KH.n_unklar)?" -- ZAEHLER-DIFFERENZ (Achtung: an der l~0,5-Schwelle kann float-GPU vs double-Host ehrlich kippen -- erst Zellen ansehen, dann urteilen; Pruefagent N1)!":" (Zaehler exakt gleich)"));
+		}
 	}
 	return K;
 }
@@ -1396,7 +1435,8 @@ void main_setup_kugel() {
 		// Kein update_fields() mehr noetig: UPDATE_FIELDS ist eingeschaltet (defines.hpp), stream_collide
 		// schreibt u und rho jeden Schritt selbst. Damit sieht der Druck-Auslass das aktuelle Innenfeld
 		// statt eines bis zu CFD_SAMPLE_EVERY Schritte alten -- und die Slices zeigen den echten Zustand.
-		lbm.update_force_field();
+		// (Das explizite update_force_field() hier war redundant: enqueue_object_force ruft
+		// enqueue_update_force_field intern, mit t_last_force_field-Guard.)
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
 		ts.push_back((double)((float)(step+chunk)*dt));
 		{	// ★ Gross-Audit M: Waechter wie im dd-Fall (NaN / 3x bitgleich / Explosion)
@@ -2600,9 +2640,9 @@ static void main_setup_fahrzeug_dd() {
 
 		if((outer+1ull)%(ulong)sample_every==0ull) {
 			const auto _t4 = t_now();
-			lbm_f.update_force_field();
+			// (Die expliziten update_force_field()-Aufrufe hier waren redundant: enqueue_object_force
+			// ruft enqueue_update_force_field intern, mit t_last_force_field-Guard.)
 			const float3 F = lbm_f.object_force(TYPE_S|TYPE_X);
-			lbm_c.update_force_field();
 			const float3 Fc = lbm_c.object_force(TYPE_S|TYPE_X);
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
 			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);
