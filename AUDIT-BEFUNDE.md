@@ -1117,3 +1117,22 @@ Schlieren-Analysen von heute nachmittag gelten als HYPOTHESEN-Generatoren, nicht
 -- Nachmessung an Echtdaten noetig, wo Entscheidungen daran haengen. FEHLENDE INSTRUMENTE
 (Bauliste): Nah-x--Saeule (x=2/10 Feinzellen, wie einlass_saeule), Dachlinien-Abloesesonde,
 Artefakt-Metriken M1-M6 als Feldsonden (z+-Linien-Profil ueber dem Kasten, Fernwake-Sonde).
+
+## Volumen-Blend (Heiko-Bild) + Nah-Saeule + Zeitinterpolation: gebaut, geprueft, vermessen
+
+VOLUMEN-Blend CFD_N2F_VOLUMEN=1: Rot-Kern (Fahrzeug+100mm) w=1, lineare Rampe zur Gruen-Box
+(Fussabdruck-100mm), Schutzzone bis zu den Kopplungsebenen leer; 793k Zellen (358k Kern + 435k
+Rampe) bei 8mm, 18 MB/Fenster; alle CPU-Abnahmen gruen; FERN_FACETTEN hart gesperrt.
+NAH-SAEULE einlass_saeule_nah (Iron-Rule-5-Echtdaten): x_f=2/10, y-Mitte, am Slice-Hook, je
+Sample geflusht. ZEITINTERPOLATION CFD_KOPPLUNG_ZEITINTERP (Lagrava-Zeitanteil, Host-Mix,
+w=1-Bit-Anker): EHRLICH WIDERLEGT -- GPU-A/B quasi-stationaer +-0,2 % Nah-Saeulen-RMS, +4 %
+Kosten -> GEPARKT (Default aus) wie P8. Das Zeit-Halteglied ist NICHT die Schlieren-Quelle;
+naechste Kandidaten via Sonde: x2->x10-Wachstum, GLATT-A/B. NEBENBEFUND BEWIESEN: po_mean
+(atomic_add_f, kernel.cpp:2784) ist FELDWIRKSAM nichtdeterministisch -- dd lauf-zu-lauf nie
+bitgleich (A/A-Beweis); Fix-Kandidat deterministische Reduktion (kraft_facetten-Muster).
+Pruefagent Gesamt-Diff: KEIN HOCH; M1 (Seiten ohne w<0,1-Aussenband jetzt angesagt/gewarnt),
+M2 (MITTEL=0 im Volumen-Modus gesperrt -- Deckungspunkt-im-Solid-Vergiftung), M3 (ZEITINTERP-
+Ansagen ueberall), N1 (sonde_csv-Abbruchpfade) gefixt; N2 (0,1-Stufen-Rundungskosmetik)
+dokumentiert. Anker-Hash nach allen Fixes exakt. GPU-Leiter-PRAEZISIERUNG (Heiko): Host-only-
+AEnderungen + Wirkungs-A/Bs laufen auf der FREIEN GPU; CPU-Sprosse = neue Kernel + geraete-
+konsistente Bit-Referenzen (Anker-Hashes sind GERAETESPEZIFISCH).

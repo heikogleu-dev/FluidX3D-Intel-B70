@@ -734,7 +734,8 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
-	  if(getenv("CFD_N2F_SCHALE")) print_warning("CFD_N2F_SCHALE wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
+	if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden im kanal NICHT angewandt (nur fahrzeug_dd; M3).");
+	  if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im kanal NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	  if(fc>0u) print_info(string("Facettenpfad: ")+(fc==1u?"Paartausch voll (Kontrollarm)":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll (Slip-Velocity-BB)":"iMEM NULLZIEL (tau=0)")); }
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
@@ -1329,7 +1330,8 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&LBM_Domain::s_boden_eq_n>0u) print_warning("CFD_BODEN_EQ_ABSTAND > 3: Scan-Kosten wachsen kubisch (XL-R2).");
 	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
 	  if(getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("CFD_BODEN_EQ_DOWN/CFD_FERN_BODEN_EQ/CFD_FERN_EINLASS_EQ wirken an der Kugel NICHT (uniformes Band ohne Split; XL-R2).");
-	  if(getenv("CFD_N2F_SCHALE")) print_warning("CFD_N2F_SCHALE wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
+	  if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden an der Kugel NICHT angewandt (nur fahrzeug_dd; M3).");
+	  if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird an der Kugel NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2).");
 	  if(LBM_Domain::s_boden_eq_n>0u&&getenv("CFD_KUGEL_MG")&&env_u("CFD_KUGEL_MG",1u)==0u) print_warning("BODEN_EQ mit CFD_KUGEL_MG=0: statischer Boden + u_road-Aufpraegung widersprechen sich (XL-3 B8).");
@@ -1733,8 +1735,8 @@ static void main_setup_fahrzeug() {
 	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im Einzelgitter-Fahrzeugfall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
-	if(getenv("CFD_N2F_SCHALE")) print_warning("CFD_N2F_SCHALE wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
-	{ const char* bq_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_EINLASS_EQ"}; for(const char* b : bq_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im Einzelgitter-Fahrzeugfall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ/ABSTAND auch kugel, CFD_FERN_EINLASS_EQ auch fernfeld -- XL-R2/R3)."); }
+	if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
+	{ const char* bq_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_EINLASS_EQ","CFD_KOPPLUNG_ZEITINTERP","CFD_KOPPLUNG_GLATT"}; for(const char* b : bq_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im Einzelgitter-Fahrzeugfall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ/ABSTAND auch kugel, CFD_FERN_EINLASS_EQ auch fernfeld -- XL-R2/R3)."); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
@@ -2248,16 +2250,27 @@ static void main_setup_fahrzeug_dd() {
 	const uint  n2f_modus = n2f_ident ? 2u : n2f_fneq; // IDENT schlaegt FNEQ (Debug-Arm)
 	const float n2f_xskal = env_f("CFD_N2F_SCHALE_XPLUS_SKAL", 1.0f);
 	if(!(n2f_xskal>=0.0f&&n2f_xskal<=1.0f)) print_error("CFD_N2F_SCHALE_XPLUS_SKAL muss in [0;1] liegen (Gewichtsskalierung; NaN faengt dieser Test mit).");
+	// ★ VOLUMEN-Blend (Heiko-Bild, 2026-08-21): CFD_N2F_VOLUMEN=1 ersetzt den SCHALEN-Listenbauer
+	// durch einen VOLUMEN-Listenbauer -- Rot-Kern (Fahrzeug-BBox+100mm, Gewichtsfeld 1,0) + lineare
+	// Rampe auf 0,0 an der Gruen-Box (Nahfeld-Fussabdruck -100mm je Achse); Schutzzone Gruen->
+	// Fussabdruck bleibt zellfrei. Default 0 = Altverhalten (Schale) UNVERAENDERT. gewicht/modus-
+	// Infrastruktur, schale_blend-/schale_extract-Kernel und Waechter werden WIEDERVERWENDET.
+	const uint n2f_volumen = min(1u, env_u("CFD_N2F_VOLUMEN", 0u));
 	if(n2f_alpha>0.0f) {
 		print_info("N2F-SCHALE aktiv (P9c, Heiko): Fernfeld-Schale um die Fahrzeug-BBox wird post-stream mit dem Nahfeld-Blockmittel relaxiert, alpha = "+to_string(n2f_alpha,3u)+" (u_neu = (1-a)*u_far + a*u_near, rho bleibt lokal; a = alpha*gewicht je Zelle).");
-		if(n2f_lagen>0u) print_info("N2F-SCHALE GRADIENT: "+to_string(n2f_lagen)+" Lagen, Gewichte w_k = (N-k)/N linear (innen 1,000 -> aussen "+to_string(1.0f/(float)n2f_lagen,3u)+"); x+-Skalierung "+to_string(n2f_xskal,3u)+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten)":" (EQ)")+".");
+		if(n2f_volumen>0u) {
+			print_info("N2F-VOLUMEN aktiv (CFD_N2F_VOLUMEN=1, Heiko-Bild): VOLUMEN-Blend ersetzt den Schalen-Listenbauer -- Rot-Kern = Fahrzeug-BBox+100mm (Gewichtsfeld 1,0, wirksam alpha), lineare Rampe (Chebyshev-artig je Achse) auf 0,0 an der Gruen-Box = Nahfeld-Fussabdruck-100mm; Schutzzone Gruen->Fussabdruck zellfrei; z- offen (Volumen endet unten am boden_eq-Band); Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten)":" (EQ)")+".");
+			if(n2f_modus==0u) print_info("N2F-VOLUMEN EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 setzen -- der Volumen-Blend greift bis in den Rot-Kern nahe der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (EQ-Arm wuerde sie je Blend verwerfen).");
+			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im VOLUMEN-Modus (CFD_N2F_VOLUMEN=1) werden sie NICHT angewandt (Ansage-Doktrin).");
+		}
+		else if(n2f_lagen>0u) print_info("N2F-SCHALE GRADIENT: "+to_string(n2f_lagen)+" Lagen, Gewichte w_k = (N-k)/N linear (innen 1,000 -> aussen "+to_string(1.0f/(float)n2f_lagen,3u)+"); x+-Skalierung "+to_string(n2f_xskal,3u)+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten)":" (EQ)")+".");
 		else print_info("N2F-SCHALE KONTROLLARM (CFD_N2F_SCHALE_LAGEN=0): Altverhalten -- uniforme Doppellage bei rand~100mm, Gewicht 1,0; Modus "+to_string(n2f_modus)+".");
 		if(n2f_ident>0u) print_warning("CFD_N2F_SCHALE_IDENT=1: Blend ist ein EXAKTES No-Op (Debug-Paritaetsbeweis) -- dieser Lauf traegt KEINE Schalen-Physik.");
 		if(n2f_ident>0u&&n2f_fneq>0u) print_warning("CFD_N2F_SCHALE_FNEQ wird von CFD_N2F_SCHALE_IDENT=1 ueberstimmt (Debug-Arm).");
-		if(n2f_lagen==0u&&getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL wird im Kontrollarm LAGEN=0 NICHT angewandt (uniformes Gewicht 1,0 ist die Definition des Altverhaltens).");
-		if(n2f_xskal==0.0f) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL=0: x+-Zellen bleiben mit Gewicht 0 in der Liste und wuerden auf ihr LOKALES Gleichgewicht projiziert (a=0 ist im EQ-Arm KEIN No-Op; im FNEQ-Arm nahezu, in IDENT exakt ein No-Op) -- zum Abschalten der Flaeche CFD_N2F_SCHALE_XPLUS=0 nutzen.");
+		if(n2f_volumen==0u&&n2f_lagen==0u&&getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL wird im Kontrollarm LAGEN=0 NICHT angewandt (uniformes Gewicht 1,0 ist die Definition des Altverhaltens).");
+		if(n2f_volumen==0u&&n2f_xskal==0.0f) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL=0: x+-Zellen bleiben mit Gewicht 0 in der Liste und wuerden auf ihr LOKALES Gleichgewicht projiziert (a=0 ist im EQ-Arm KEIN No-Op; im FNEQ-Arm nahezu, in IDENT exakt ein No-Op) -- zum Abschalten der Flaeche CFD_N2F_SCHALE_XPLUS=0 nutzen.");
 	}
-	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT"))) print_warning("CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c).");
+	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT"))) print_warning("CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c).");
 	// ★ P8 (Offen-Punkt 8): FACETTEN AUCH IM FERNFELD. Der 32-mm-Treppenkoerper verdraengt +15,5 %
 	// Volumen (Schritt-0-Census fc0edcf) und praegt dem Nahfeld ueber die Kopplungsebenen ein zu
 	// grobes Druckfeld auf -- der Facettenpfad macht die Fernfeld-Wand druckkonsistenter. Schalter
@@ -2587,10 +2600,101 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<ulong> n2f_liste_c, n2f_liste_f; // grobe Schalenzellen + feine Deckungspunkte, GLEICHE Reihenfolge (Map-Iteration, aufsteigend deterministisch)
 	std::vector<float> n2f_gewicht; // Zellgewicht [0;1] (Lagen-Rampe), gleiche Reihenfolge
 	std::vector<uint>  n2f_lage;    // Lagenindex je Zelle (0 = innen), gleiche Reihenfolge; Waechter/Negations-Nachweis/Kipp laufen NUR auf der aeussersten Lage
-	const uint n2f_lage_aussen = (n2f_lagen>0u) ? n2f_lagen-1u : 0u; // Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
+	const uint n2f_lage_aussen = (n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u); // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
+	float n2f_w_band = 0.0f; // VOLUMEN: groesstes Gewichtsfeld im Aussenband -- traegt in die Negations-Schwelle (w_aussen = alpha*n2f_w_band)
 	ulong n2f_nanblocks = 0ull;
 	const uint n2f_mittel = min(1u, env_u("CFD_N2F_SCHALE_MITTEL", 1u)); // 1 = Blockmittel ueber ratio^3 Feinzellen (Default), 0 = Punktwert am Deckungspunkt
-	if(n2f_alpha>0.0f) {
+	if(n2f_mittel==0u&&env_u("CFD_N2F_VOLUMEN",0u)>0u) print_error("CFD_N2F_SCHALE_MITTEL=0 ist im VOLUMEN-Modus GESPERRT: Punktwert-Extraktion prueft keine Flags -- ein Deckungspunkt im Fein-Solid (Voxelisierungs-Differenz 4 vs 16 mm!) wuerde still vergiftet ins Blend laufen (Pruefagent M2).");
+	if(n2f_alpha>0.0f&&n2f_volumen>0u) { // ---------------- VOLUMEN-Listenbauer (Heiko-Bild; ERSETZT den Schalen-Listenbauer)
+		const uint z_lo = max(1u, env_u("CFD_FERN_BODEN_EQ", 0u)+1u); // Ausschluss wie gehabt: das boden_eq-Band (z=1..N) bleibt unangetastet; Fahrbahn z- offen (kein z--Deckel)
+		if(env_u("CFD_FERN_FACETTEN",0u)>0u) print_error("CFD_N2F_VOLUMEN=1 mit CFD_FERN_FACETTEN>0: der Rot-Kern enthaelt die karosserienahen FERN_FACETTEN-Zellen -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nicht freigegeben.");
+		const uint sz_rand = max(1u, (uint)floor(0.1f/dx_c+0.5f)); // 100 mm auf dx_c gerastert (wie n2f_rand): Rot-Aufweitung UND Schutzzonen-Breite
+		// ROT-Box: Fahrzeug-BBox + sz_rand; innerhalb Gewichtsfeld konstant 1,0 (alpha traegt die Staerke); z- offen bis z_lo
+		const uint rx0=(uint)fmax(0.0f, veh_c->pmin.x-(float)sz_rand), rx1=(uint)fmin((float)cNx-1.0f, veh_c->pmax.x+(float)sz_rand);
+		const uint ry0=(uint)fmax(0.0f, veh_c->pmin.y-(float)sz_rand), ry1=(uint)fmin((float)cNy-1.0f, veh_c->pmax.y+(float)sz_rand);
+		const uint rz1=(uint)fmin((float)cNz-1.0f, veh_c->pmax.z+(float)sz_rand);
+		if(rz1<z_lo) print_error("N2F-Volumen: Rot-Oberkante liegt unter dem boden_eq-Band (rz1 < z_lo) -- kein Rot-Kern moeglich.");
+		// GRUEN-Box: Nahfeld-Fussabdruck MINUS sz_rand nach innen; die Schutzzone Gruen->Fussabdruck-Rand bleibt zellfrei
+		if(cex<=2u*sz_rand||cey<=2u*sz_rand||cez<=sz_rand+1u) print_error("N2F-Volumen: Nahfeld-Fussabdruck ("+to_string(cex)+"x"+to_string(cey)+"x"+to_string(cez)+" Grobzellen) ist zu klein fuer die Schutzzonen-Breite "+to_string(sz_rand)+" -- keine Gruen-Box moeglich.");
+		const uint gx0=NF_OX+sz_rand, gx1=NF_OX+cex-1u-sz_rand;
+		const uint gy0=NF_OY+sz_rand, gy1=NF_OY+cey-1u-sz_rand;
+		const uint gz1=NF_OZ+cez-1u-sz_rand;
+		// Rampenbreiten Rot->Gruen je Achse/Seite (Grobzellen); Gewicht faellt darueber linear 1,0 -> 0,0
+		const int q_xm=(int)rx0-(int)gx0, q_xp=(int)gx1-(int)rx1, q_ym=(int)ry0-(int)gy0, q_yp=(int)gy1-(int)ry1, q_zp=(int)gz1-(int)rz1;
+		print_info("N2F-Volumen Rampenbreiten (Grobzellen): x- "+to_string(q_xm)+" / x+ "+to_string(q_xp)+" / y- "+to_string(q_ym)+" / y+ "+to_string(q_yp)+" / z+ "+to_string(q_zp)+"."); // Pruefagent M1
+		{ const int qs[5]={q_xm,q_xp,q_ym,q_yp,q_zp}; const char* qn[5]={"x-","x+","y-","y+","z+"}; for(int qi=0;qi<5;qi++) if(qs[qi]>=1&&qs[qi]<=10) print_warning(string("N2F-Volumen: Seite ")+qn[qi]+" hat nur "+to_string(qs[qi])+" Rampenstufen -- kleinste Stufe >= 0,1, dort KEIN w<0,1-Aussenband (Waechter/Negation ohne Referenz auf dieser Seite; Pruefagent M1)."); }
+		if(q_xm<1||q_xp<1||q_ym<1||q_yp<1||q_zp<1) print_error("N2F-Volumen: Rot-Box beruehrt oder ueberragt die Gruen-Box (Rampenbreiten x- "+to_string(q_xm)+" / x+ "+to_string(q_xp)+" / y- "+to_string(q_ym)+" / y+ "+to_string(q_yp)+" / z+ "+to_string(q_zp)+" Zellen) -- keine Rampe moeglich; Nahfeld-Box (CFD_NEAR_LX/LY/LZ) vergroessern.");
+		// Zellschleife ueber die GRUEN-Box in aufsteigender Indexreihenfolge (deterministisch wie der
+		// Schalen-Listenbauer): w = 1 - max ueber Achsen(Abstand ausserhalb Rot / Rampenbreite), auf
+		// [0;1] geklemmt; w<=0 (Gruen-Rand und alles dahinter) kommt NICHT in die Liste -- die Rampe
+		// erreicht 0, bevor irgendeine Kopplungs-/Entnahmeebene beruehrt wird. TYPE_S/TYPE_E filtert
+		// der Kernel (deshalb zaehlt der Wirkpfad-Nachweis ehrlich Listenzahl minus Solid-Skips).
+		ulong cen_kern=0ull, cen_rampe=0ull;
+		float wmin_pos=1.0f;
+		for(uint z=z_lo; z<=gz1; z++) for(uint y=gy0; y<=gy1; y++) for(uint x=gx0; x<=gx1; x++) {
+			float fab=0.0f; // normierter Chebyshev-artiger Abstand ausserhalb Rot (z- traegt NICHT bei: Volumen endet unten am z_lo)
+			if(x<rx0) fab=fmax(fab,(float)(rx0-x)/(float)q_xm); else if(x>rx1) fab=fmax(fab,(float)(x-rx1)/(float)q_xp);
+			if(y<ry0) fab=fmax(fab,(float)(ry0-y)/(float)q_ym); else if(y>ry1) fab=fmax(fab,(float)(y-ry1)/(float)q_yp);
+			if(z>rz1) fab=fmax(fab,(float)(z-rz1)/(float)q_zp);
+			const float w = 1.0f-fmin(1.0f,fab);
+			if(w<=0.0f) continue;
+			n2f_liste_c.push_back((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx);
+			n2f_gewicht.push_back(w);
+			if(w==1.0f) cen_kern++; else { cen_rampe++; wmin_pos=fmin(wmin_pos,w); }
+			const uint fdx=(x-NF_OX)*ratio, fdy=(y-NF_OY)*ratio, fdz=(z-NF_OZ)*ratio; // Deckungspunkt (fein = (grob-NF_O)*ratio)
+			n2f_liste_f.push_back((ulong)fdx+((ulong)fdy+(ulong)fdz*(ulong)fNy)*(ulong)fNx);
+		}
+		if(n2f_liste_c.empty()) print_error("N2F-Volumen: Zellliste leer (Gruen-Box ohne Zellen oberhalb z_lo?).");
+		if(cen_kern==0ull) print_error("N2F-Volumen: Rot-Kern leer (w=1 nirgends) -- Rot-Box pruefen.");
+		if(cen_rampe==0ull) print_error("N2F-Volumen: Rampe leer (alle Rampenbreiten 1 Zelle?) -- das Volumen fiele ohne Uebergang auf 0.");
+		// AUSSENBAND (Waechter-Referenzflaeche = die AEUSSERSTE Gewichtsstufe): alle Zellen mit
+		// w < 0,1 -> lage 1, Rest lage 0. Fallback bei sehr schmaler Rampe (kein w < 0,1 vorhanden):
+		// die kleinste vorkommende Gewichtsstufe wird zum Aussenband.
+		float band_schwelle = 0.1f;
+		if(wmin_pos>=0.1f) { band_schwelle = wmin_pos*(1.0f+1e-6f); print_warning("N2F-Volumen: keine Rampenzelle mit w < 0,1 (kleinstes Rampengewicht "+to_string(wmin_pos,3u)+") -- das Aussenband faellt auf die kleinste Gewichtsstufe zurueck."); }
+		ulong band_n=0ull;
+		n2f_lage.resize(n2f_liste_c.size(), 0u);
+		for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) if(n2f_gewicht[i]<band_schwelle) { n2f_lage[i]=1u; band_n++; n2f_w_band=fmax(n2f_w_band, n2f_gewicht[i]); }
+		if(band_n==0ull) print_error("N2F-Volumen: Aussenband leer -- Waechter/Negations-Nachweis/Kipp haetten keine Referenzflaeche.");
+		// Census der fluidleeren Bloecke (Extract schreibt dort den NaN-Marker, der Blend ueberspringt
+		// sie per Bit-Test) -- gesamt und getrennt fuers Aussenband (Waechter-Gueltigkeit).
+		ulong band_nan=0ull;
+		if(n2f_mittel==1u) {
+			const int n2f_r=(int)ratio, n2f_w0=-(n2f_r/2); // Fenster-Konvention wie im Kernel: [-r/2, r-r/2)
+			for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) {
+				const ulong ff = n2f_liste_f[i];
+				const uint fdx=(uint)(ff%(ulong)fNx), fdy=(uint)((ff/(ulong)fNx)%(ulong)fNy), fdz=(uint)(ff/((ulong)fNx*(ulong)fNy));
+				uint fluid=0u;
+				for(int dz=n2f_w0; dz<n2f_w0+n2f_r&&fluid==0u; dz++) for(int dy=n2f_w0; dy<n2f_w0+n2f_r&&fluid==0u; dy++) for(int dx=n2f_w0; dx<n2f_w0+n2f_r&&fluid==0u; dx++) {
+					const int xx=(int)fdx+dx, yy=(int)fdy+dy, zz=(int)fdz+dz;
+					if(xx<0||yy<0||zz<0||xx>=(int)fNx||yy>=(int)fNy||zz>=(int)fNz) continue;
+					const uchar bo = lbm_f.flags[(ulong)xx+((ulong)yy+(ulong)zz*(ulong)fNy)*(ulong)fNx]&(TYPE_S|TYPE_E);
+					if(bo!=TYPE_S&&bo!=TYPE_E) fluid++; // TYPE_MS (S|E) zaehlt als Fluid -- gleiche Konvention wie der Kernel
+				}
+				if(fluid==0u) { n2f_nanblocks++; if(n2f_lage[i]==1u) band_nan++; }
+			}
+		}
+		// ABSTANDS-CHECK (harter Fehler): die aeusserste Listenzelle muss von JEDER getriebenen Ebene
+		// (Fussabdruck-Rand x-, x+, y-, y+, z+) mindestens die Schutzzonen-Breite entfernt sein.
+		int mnx=(int)cNx, mxx=-1, mny=(int)cNy, mxy=-1, mxz=-1;
+		for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) {
+			const ulong nn = n2f_liste_c[i];
+			const int x=(int)(nn%(ulong)cNx), y=(int)((nn/(ulong)cNx)%(ulong)cNy), z=(int)(nn/((ulong)cNx*(ulong)cNy));
+			mnx=min(mnx,x); mxx=max(mxx,x); mny=min(mny,y); mxy=max(mxy,y); mxz=max(mxz,z);
+		}
+		if(mnx<(int)NF_OX||mxx>(int)(NF_OX+cex-1u)||mny<(int)NF_OY||mxy>(int)(NF_OY+cey-1u)||mxz>(int)(NF_OZ+cez-1u))
+			print_error("N2F-Volumen ragt aus dem Nahfeld-Fussabdruck -- Deckungspunkte waeren undefiniert (Konstruktionsfehler).");
+		const int d_xm=mnx-(int)NF_OX, d_xp=(int)(NF_OX+cex-1u)-mxx, d_ym=mny-(int)NF_OY, d_yp=(int)(NF_OY+cey-1u)-mxy, d_zp=(int)(NF_OZ+cez-1u)-mxz;
+		const int d_min = min(min(min(d_xm,d_xp),min(d_ym,d_yp)),d_zp);
+		print_info("N2F-Volumen: Abstand der aeussersten Listenzelle zu den Kopplungs-/Entnahmeebenen (Grobzellen): x- "+to_string(d_xm)+", x+ "+to_string(d_xp)+", y- "+to_string(d_ym)+", y+ "+to_string(d_yp)+", z+ "+to_string(d_zp)+" (Soll >= Schutzzonen-Breite "+to_string(sz_rand)+").");
+		if(d_min<(int)sz_rand) print_error("N2F-Volumen: aeusserste Listenzelle naeher als die Schutzzonen-Breite ("+to_string(sz_rand)+" Grobzellen) an einer getriebenen Ebene -- die Rueckkopplung schriebe in die Naehe der Quelle der Hinkopplung.");
+		// CENSUS + Transfer-Ansage
+		print_info("N2F-Volumen ZELL-CENSUS: Rot-Box x["+to_string(rx0)+".."+to_string(rx1)+"] y["+to_string(ry0)+".."+to_string(ry1)+"] z["+to_string(z_lo)+".."+to_string(rz1)+"] (BBox+"+to_string(sz_rand)+"), Gruen-Box x["+to_string(gx0)+".."+to_string(gx1)+"] y["+to_string(gy0)+".."+to_string(gy1)+"] z["+to_string(z_lo)+".."+to_string(gz1)+"] (Fussabdruck-"+to_string(sz_rand)+"); gesamt "+to_string((ulong)n2f_liste_c.size())+" Zellen = Rot-Kern (w=1) "+to_string(cen_kern)+" + Rampe "+to_string(cen_rampe)+"; Aussenband (w < "+to_string(band_schwelle,3u)+", Waechter-Referenz) "+to_string(band_n)+" Zellen, davon fluidleer "+to_string(band_nan)+"; fluidleere Bloecke gesamt (NaN-Skip im Blend): "+to_string(n2f_nanblocks)+".");
+		print_info("N2F-Volumen TRANSFER: je Kopplungsfenster 2 x 12 Bytes/Zelle (Nahfeld-Extract-Read + Fernfeld-Upload) = "+to_string((float)((ulong)n2f_liste_c.size()*24ull)/1048576.0f,2u)+" MB; Geraetepuffer je Domaene siehe alloc-Ansage.");
+		if(n2f_nanblocks==(ulong)n2f_liste_c.size()) print_error("N2F-Volumen: ALLE Bloecke fluidleer -- der Blend waere ein vollstaendiger No-Op.");
+		if(band_n>0ull&&band_n==band_nan) print_error("N2F-Volumen: das AUSSENBAND ist komplett fluidleer -- Waechter/Negations-Nachweis/Kipp haetten keine einzige gueltige Zelle.");
+	}
+	else if(n2f_alpha>0.0f) {
 		const uint z_lo = max(1u, env_u("CFD_FERN_BODEN_EQ", 0u)+1u); // boden_eq-Band (z=1..N) unangetastet
 		const bool m_xm = env_u("CFD_N2F_SCHALE_XMINUS", 0u)>0u;
 		const bool m_xp = env_u("CFD_N2F_SCHALE_XPLUS", 1u)>0u;
@@ -2735,6 +2839,11 @@ static void main_setup_fahrzeug_dd() {
 	lbm_f.alloc_coupling_planes(max_cp); // empfaengt dieselben Ebenen
 
 	std::vector<float> face[5];
+	// ★ ZEITINTERP Stufe 1 (Host-Mix): face_alt[p] haelt den Ebenen-Stand des VORIGEN Kopplungs-
+	// fensters (kopiert NACH dem Drive, VOR dem Extract), face_mix ist der Mischpuffer je Substep.
+	// Beide bleiben leer, solange CFD_KOPPLUNG_ZEITINTERP unset/0 ist (bitidentischer Altpfad).
+	std::vector<float> face_alt[5];
+	std::vector<float> face_mix;
 	lbm_c.run(1u); // ein grober Schritt, damit ein Zustand zum Entnehmen existiert
 	// ★ KORREKTUR 2026-08-08 (Pruefer-Befund): hier lief die Schleife ueber ALLE FUENF Ebenen, obwohl
 	// x+ gar nicht getrieben wird (dort steht der Druckauslass). Die grobe x+-Ebene wurde also jeden
@@ -2760,7 +2869,7 @@ static void main_setup_fahrzeug_dd() {
 		// LAGEN=0 unveraendert auf alle Zellen); NEU dahinter: n_gueltig_alle und rms_alle_lat =
 		// dieselbe Metrik ueber ALLE Lagen (Diagnose; Kipp-Kriterium haengt NUR an der Aussenlage).
 		swcsv << "time_s,n_gueltig,rms_lat,max_lat,rms_rel_uinf,n_gueltig_alle,rms_alle_lat\n" << std::flush;
-		print_info("N2F-SCHALE-Waechter aktiv: an der Sample-Kadenz RMS/Max ||u_near-u_far|| ueber die AEUSSERSTE Schalen-Lage (Lage "+to_string(n2f_lage_aussen)+"; Fernfeld-Punktwerte via schale_extract mittel=0) -> "+out_dir+"schale_waechter.csv; CSV-Schema ERWEITERT um n_gueltig_alle,rms_alle_lat (alle Lagen, Diagnose); Kipp-Kriterium (nur Aussenlage): RMS > 0,5*u_inf nach Warmup ODER 10 Samples monoton steigend -> Abbruch.");
+		print_info("N2F-SCHALE-Waechter aktiv: an der Sample-Kadenz RMS/Max ||u_near-u_far|| ueber "+(n2f_volumen>0u?string("das VOLUMEN-AUSSENBAND (aeusserste Gewichtsstufe, lage ")+to_string(n2f_lage_aussen):string("die AEUSSERSTE Schalen-Lage (Lage ")+to_string(n2f_lage_aussen))+"; Fernfeld-Punktwerte via schale_extract mittel=0) -> "+out_dir+"schale_waechter.csv; CSV-Schema ERWEITERT um n_gueltig_alle,rms_alle_lat (alle Lagen, Diagnose); Kipp-Kriterium (nur Aussenlage/-band): RMS > 0,5*u_inf nach Warmup ODER 10 Samples monoton steigend -> Abbruch.");
 	}
 
 	// ---------------------------------------------------------------- Zeitschleife
@@ -2799,6 +2908,23 @@ static void main_setup_fahrzeug_dd() {
 	std::ofstream ipcsv(out_dir+"interface_druck.csv"); ipcsv.precision(8);
 	ipcsv << "time_s,ebene,rho_min,rho_mittel,rho_max,dp_min_pa,dp_mittel_pa,dp_max_pa\n" << std::flush;
 	print_info("INTERFACE-DRUCK-Instrument aktiv: rho-Statistik der 4 getriebenen Kopplungsebenen (x-, y-, y+, z+) an der Sample-Kadenz, Delta-p = (rho-1)*cs2 in Pa -> "+out_dir+"interface_druck.csv (reine Ausgabe aus den vorhandenen Host-Kopplungspuffern).");
+	// ★ SONDE einlass_saeule_nah (Iron Rule 5 -- Echtdaten statt PNG-Analysen fuer die Near-Inlet-
+	// Schlieren): zwei Feingitter-z-Saeulen bei x_f = 2 und x_f = 10 hinter dem Near-x--Rand,
+	// y = fNy/2, ALLE z; ux/uy/uz u_inf-normiert + rho + Solid-Flag. GESCHRIEBEN AM SLICE-HOOK:
+	// dort liegen lbm_f.u und lbm_f.flags fuer render_yslice ohnehin schon auf dem Host -- ein
+	// eigener u-Read je Sample kaeme sonst OBENDRAUF. Der Hook laeuft nur bei CFD_SLICE_DT>0, die
+	// Sonde schreibt damit an der SLICE-Kadenz, nicht an der Sample-Kadenz (dokumentierte
+	// Kopplung an den Hook statt eines eigenen Device-Reads). Einziger Zusatz-Read am Hook: rho
+	// (1/3 der u-Transfergroesse). Immer aktiv (reine Diagnose, kein Schalter); bei CFD_SLICE_DT=0
+	// bleibt nur die Kopfzeile stehen. Welt-x in der Kopfzeile (NEAR_VOR-Fallstrick: die Saeulen
+	// wandern mit dem Einlass-Interface -- A/B ueber Welt-x vergleichen, nicht ueber den Index).
+	const uint sonde_xf[2] = {2u, 10u};
+	std::ofstream sonde_csv(out_dir+"einlass_saeule_nah.csv"); sonde_csv.precision(7);
+	sonde_csv << "# Welt-x der Saeulen (NEAR_VOR-Fallstrick -- ueber Welt-x vergleichen, nicht ueber den Index): x_f=2 -> "
+	          << (near_x0+2.0f*dx_f) << " m, x_f=10 -> " << (near_x0+10.0f*dx_f) << " m; y = fNy/2 = " << fNy/2u
+	          << "; geschrieben an der Slice-Kadenz (CFD_SLICE_DT>0 noetig)\n";
+	sonde_csv << "time_s,x_f,z,ux_rel,uy_rel,uz_rel,rho,solid\n" << std::flush;
+	print_info("SONDE einlass_saeule_nah aktiv (Iron Rule 5): z-Saeulen x_f=2 (Welt-x "+to_string(near_x0+2.0f*dx_f,3u)+" m) und x_f=10 (Welt-x "+to_string(near_x0+10.0f*dx_f,3u)+" m), y = "+to_string(fNy/2u)+", "+to_string(fNz)+" z-Zellen -> "+out_dir+"einlass_saeule_nah.csv; am SLICE-Hook gekoppelt (nur bei CFD_SLICE_DT>0; einziger Zusatz-Read: rho).");
 	// ★ FORK Kraft-Zerlegung nach z-Region (Heiko-Vorgabe): CFD_KRAFT_ZBAND = unterste N Zellen ab z=0
 	// (inkl.) vs Rest. unset/0 = AUS = bitidentisch (null neue Kernelaufrufe/Logzeilen/Dateien).
 	// EINMAL gelesen, nicht je Zelle/Sample (env-Read-Falle).
@@ -2845,6 +2971,21 @@ static void main_setup_fahrzeug_dd() {
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) glatt_ebenen += string(glatt_ebenen.empty()?"":", ")+face_name[p];
 		print_info("KOPPLUNG-GLATT aktiv: "+to_string(glatt_n)+" 1-2-1-Binomialdurchgaenge (a- und b-Richtung, Raender einseitig geklemmt) ueber rho/ux/uy/uz der getriebenen Kopplungsebenen ("+glatt_ebenen+"), im Kopplungsfenster VOR Bodenband und Drive -- Near-Inlet-Schlieren-Filter (Diagnose-Verdikt A).");
 		print_info("KOPPLUNG-GLATT-Hinweis zum Wirksamkeitsnachweis: jede Ebene wird UNABHAENGIG gefiltert; auf den GETEILTEN Kantenspalten (x-Einlasskante der y-/z+-Ebenen) gewinnt der zuletzt getriebene x--Wert. Der Nachweis der y-/z+-Ebenen darf dort deshalb in der 1e-4-GROESSENORDNUNG abweichen (CPU-Abnahme 2026-08-19: max 6,6e-4, ausschliesslich Kantenspalten x=0; x- selbst bleibt bitgenau). Er bricht nicht hart ab -- kein Skip noetig.");
+	}
+	// ★ ZEITINTERP Stufe 1 (Host-Mix, Planungsagenten-Plan) gegen die ratio-EIGENANTWORT der Kopplung:
+	// der Altpfad treibt die TYPE_E-Raender EINMAL je Kopplungsfenster mit dem groben END-Stand und
+	// haelt sie dann ratio feine Schritte fest -- ein Treppenhalteglied, dessen Sprungantwort das
+	// Feingitter mit lambda = ratio Zellen quittiert (Near-Inlet-Schlieren-Verdacht). Mit
+	// CFD_KOPPLUNG_ZEITINTERP=1 laeuft der Drive stattdessen je feinem Substep s = 1..ratio mit dem
+	// Host-Mix w = s/ratio zwischen dem vorigen (face_alt) und dem aktuellen Fenster-Stand (face).
+	// Der LETZTE Substep (w == 1) uebergibt face[p] UNVERMISCHT -- Bit-Anker: der Kopplungs-Verify
+	// vergleicht die Deckungspunkte gegen genau diesen Puffer. Erster Outer = w=1-Fallback
+	// (face_alt noch leer), bitidentisch zum Altpfad. 0/unset = exakt bisheriges Verhalten.
+	// EINMAL gelesen (env-Read-Falle).
+	const uint zinterp = env_u("CFD_KOPPLUNG_ZEITINTERP", 0u);
+	if(zinterp>0u) {
+		face_mix.resize((ulong)max_cp*4ull);
+		print_info("KOPPLUNG-ZEITINTERP aktiv (Stufe 1, Host-Mix): je Kopplungsfenster "+to_string(ratio)+" Substeps, Ebenen-Drive mit w = s/"+to_string(ratio)+" linear zwischen vorigem und aktuellem Fenster-Stand; Substep w = 1 treibt face[] UNVERMISCHT (Bit-Anker fuer den Kopplungs-Verify); erster Outer = w=1-Fallback (bitidentisch zum Altpfad).");
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_info("C7-Notiz: Facetten-Schubspannung = Impulssenke (Gleichgewichtsmodell, kein APG) -- Abloeselage bleibt modellfrei; Cd/Cz-Bewegung dokumentieren, nicht versprechen.");
 	// ★ B2: Wandprofil ueber die Zeit, je Gitter eine Saeule und eine CSV (Begruendung bei
@@ -2935,10 +3076,43 @@ static void main_setup_fahrzeug_dd() {
 				}
 			}
 		}
-		for(uint p=2u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio); // Tiefen-Audit B5: y/z zuerst...
-		if(drive_face[0]) lbm_f.drive_boundary_from_coarse(fp[0], face[0], cp[0].extent_a, cp[0].extent_b, ratio); // ...x- ZULETZT -- sonst ueberschreiben die y-Ebenen die gelifteten Kantenspalten (1-Zellen-Naht) und der Kopplungsnachweis meldet Schein-Abweichungen
+		// ★ ZEITINTERP Stufe 1 (Host-Mix): Altpfad (zinterp=0 ODER erster Outer, face_alt noch leer =
+		// w=1-Fallback, bitidentisch) treibt EINMAL mit dem Fenster-Endstand und laesst ratio Schritte
+		// laufen. Sonst laeuft je Substep s = 1..ratio erst der Drive mit dem Host-Mix w = s/ratio
+		// (face_mix = (1-w)*face_alt + w*face), dann EIN feiner Schritt; der letzte Substep (w == 1)
+		// uebergibt face[p] UNVERMISCHT -- Bit-Anker fuer den Kopplungs-Verify unten. Ebenen-Reihenfolge
+		// je Substep wie im Altpfad {2,3,4,0}: y/z zuerst, x- ZULETZT (Tiefen-Audit B5 -- sonst
+		// ueberschreiben die y-Ebenen die gelifteten Kantenspalten, 1-Zellen-Naht, und der
+		// Kopplungsnachweis meldet Schein-Abweichungen).
+		const bool zi_alt = (zinterp==0u) || face_alt[0].empty();
+		if(zi_alt) {
+			for(uint p=2u; p<5u; p++) if(drive_face[p]) lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio); // Tiefen-Audit B5: y/z zuerst...
+			if(drive_face[0]) lbm_f.drive_boundary_from_coarse(fp[0], face[0], cp[0].extent_a, cp[0].extent_b, ratio); // ...x- ZULETZT -- sonst ueberschreiben die y-Ebenen die gelifteten Kantenspalten (1-Zellen-Naht) und der Kopplungsnachweis meldet Schein-Abweichungen
+		}
 		const auto _t1 = t_now();
-		lbm_f.run((ulong)ratio, n_outer*(ulong)ratio);
+		double zi_drive = 0.0; // Drive-/Mix-Anteil des Substep-Loops -- wird unten ph_kopplung zugebucht (nicht ph_fein)
+		if(zi_alt) {
+			lbm_f.run((ulong)ratio, n_outer*(ulong)ratio);
+		} else {
+			static const uint zi_reihe[4] = {2u, 3u, 4u, 0u}; // wie Altpfad: y/z zuerst, x- zuletzt
+			for(uint s=1u; s<=ratio; s++) {
+				const float w = (float)s/(float)ratio; // s == ratio -> w == 1.0f exakt
+				const auto _tz0 = t_now();
+				for(uint zi_p=0u; zi_p<4u; zi_p++) { // (pi ist ein Makro -- utilities.hpp)
+					const uint p = zi_reihe[zi_p];
+					if(!drive_face[p]) continue;
+					if(w==1.0f) {
+						lbm_f.drive_boundary_from_coarse(fp[p], face[p], cp[p].extent_a, cp[p].extent_b, ratio); // UNVERMISCHT (Bit-Anker)
+					} else {
+						const ulong nn = (ulong)cp[p].extent_a*(ulong)cp[p].extent_b*4ull;
+						for(ulong i=0ull; i<nn; i++) face_mix[i] = (1.0f-w)*face_alt[p][i] + w*face[p][i];
+						lbm_f.drive_boundary_from_coarse(fp[p], face_mix, cp[p].extent_a, cp[p].extent_b, ratio);
+					}
+				}
+				zi_drive += std::chrono::duration<double>(t_now()-_tz0).count();
+				lbm_f.run(1u, n_outer*(ulong)ratio);
+			}
+		}
 		const auto _t2 = t_now();
 
 		// ------------------------------------------------------------ Wirksamkeitsnachweis (einmal)
@@ -2958,6 +3132,12 @@ static void main_setup_fahrzeug_dd() {
 		//      geschrieben. Gemessen am 2026-08-08: geht auf. Das war vorher nur ein Argument.
 		// TYPE_E-Zellen behalten rho/u ueber die Unterschritte unveraendert (stream_collide aktualisiert
 		// die Felder nur fuer Nicht-TYPE_E), die Werte hier sind also genau die geschriebenen.
+		// ★ ZEITINTERP-PRAEZISIERUNG: auch mit CFD_KOPPLUNG_ZEITINTERP=1 gilt (A) BIT-GENAU gegen
+		// face[p] -- der LETZTE Substep des Fensters (w == 1) treibt face[p] UNVERMISCHT (Bit-Anker,
+		// siehe Drive/Run-Block oben), und die TYPE_E-Zellen tragen hier den Stand des letzten Drives.
+		// Bei outer == 0 laeuft ohnehin der w=1-Fallback (face_alt leer, Altpfad). Die Zwischen-Mixe
+		// der Substeps s < ratio sind zum Verify-Zeitpunkt bereits ueberschrieben und tauchen hier
+		// nicht auf -- "identisch" beweist also die Kette, NICHT die Abwesenheit der Zwischen-Drives.
 		// Zweimal geprueft, und das aus einem Grund: beim ERSTEN groben Schritt ist das Fernfeld noch
 		// ueberall Freistrom, dort kann (B) gar nichts anderes zeigen als "gleich u_inf" -- eine
 		// wirkungslose Kopplung waere von einer wirksamen nicht zu unterscheiden. (A) dagegen greift
@@ -3019,6 +3199,11 @@ static void main_setup_fahrzeug_dd() {
 		// (dasselbe Gitter allein gerechnet liefert 1,000). Ein Wettlauf, kein physikalischer Befund --
 		// erkennbar daran, dass das Profil ueber alle z KONSTANT war statt zur Freistroemung anzusteigen.
 		if(outer==0ull) pruefe_wandwirksamkeit(lbm_c, cNx, cNy, cNz, u_lat, "Fernfeld");
+		// ★ ZEITINTERP: getriebener Fenster-Endstand wird zum face_alt des NAECHSTEN Fensters --
+		// zwingend VOR dem Extract (der ueberschreibt face[p] mit dem neuen groben Stand). Kopiert
+		// wird der Stand NACH GLATT-Filter und BODENBAND-Anhebung dieses Fensters: exakt das, was
+		// bei w = 1 getrieben wurde -- der Mix des naechsten Fensters startet also stetig dort.
+		if(zinterp>0u) for(uint p=0u; p<5u; p++) if(drive_face[p]) face_alt[p] = face[p];
 		for(uint p=0u; p<5u; p++) if(drive_face[p]) lbm_c.extract_plane_macros(cp[p], face[p]); // nur die vier getriebenen Flaechen -- x+ ist Druckauslass, siehe oben
 		if(n2f_alpha>0.0f) { // ★ P9c KOPPLUNGSFENSTER (nach lbm_c.finish() + Extracts, VOR dem naechsten run_async): Nahfeld-Blockmittel entnehmen und ins Fernfeld laden -- 1-Outer-Vorlauf wie die Hinkopplung; das Blend des naechsten groben Schritts liest diesen Stand
 			lbm_f.schale_extract_u(n2f_unear, n2f_mittel);
@@ -3026,8 +3211,8 @@ static void main_setup_fahrzeug_dd() {
 		}
 		const auto _t3 = t_now();
 		t_acc += outer_clock.stop(); n_acc++;
-		ph_kopplung += std::chrono::duration<double>(_t1-_t0).count();
-		ph_fein     += std::chrono::duration<double>(_t2-_t1).count();
+		ph_kopplung += std::chrono::duration<double>(_t1-_t0).count() + zi_drive; // ZEITINTERP: Drive-/Mix-Zeit des Substep-Loops gehoert zur Kopplung...
+		ph_fein     += std::chrono::duration<double>(_t2-_t1).count() - zi_drive; // ...und wird dem feinen Fenster wieder abgezogen (zi_drive = 0 im Altpfad)
 		ph_grob     += std::chrono::duration<double>(_t3-_t2).count();
 		ph_n++;
 
@@ -3103,12 +3288,12 @@ static void main_setup_fahrzeug_dd() {
 					// Stroemung noch kaum entwickelt). Zusaetzlich Testzelle 0 als Zahlenpaar.
 					n2f_neg_geprueft = true;
 					const double m_ux = sw_ng? sw_mux/(double)sw_ng : 0.0;
-					const double w_aussen = (n2f_lagen>0u) ? (double)n2f_alpha/(double)n2f_lagen : (double)n2f_alpha; // wirksames a der Aussenlage (XPLUS_SKAL drueckt x+ ggf. darunter -- Schwelle bleibt konservativ)
+					const double w_aussen = (n2f_volumen>0u) ? (double)n2f_alpha*(double)n2f_w_band : ((n2f_lagen>0u) ? (double)n2f_alpha/(double)n2f_lagen : (double)n2f_alpha); // wirksames a der Aussenstufe (VOLUMEN: groesstes Gewicht im Aussenband; Schale: XPLUS_SKAL drueckt x+ ggf. darunter -- Schwelle bleibt konservativ)
 					const double falschziel = w_aussen/(2.0-w_aussen); // Falschziel-FIXPUNKT (Plan-Vorgabe; ersetzt die alte Ein-Schritt-Schaetzung 2a-1)
 					const double schwelle = fmax(0.5, 0.5*(1.0+falschziel)); // Mittelpunkt Falschziel<->Soll(+1); verallgemeinert Pruefagent M1 (alt: fmax(0.5, alpha) = Mittelpunkt von 2a-1 und 1)
 					print_info("N2F-Schale u-NEGATIONS-NACHWEIS (1. Waechter-Sample, Aussenlage "+to_string(n2f_lage_aussen)+", w_aussen = "+to_string((float)w_aussen,3u)+"): mittleres Schalen-u_x im Fernfeld-u-Feld = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf (Soll nahe +1; falsches Vorzeichen truege es Richtung Fixpunkt w/(2-w) = "+to_string((float)falschziel,3u)+" u_inf; Schwelle "+to_string((float)schwelle,3u)+"); Testzelle 0: u_far = ("+to_string(n2f_ufar[0],6u)+","+to_string(n2f_ufar[1],6u)+","+to_string(n2f_ufar[2],6u)+") vs u_near = ("+to_string(n2f_unear[0],6u)+","+to_string(n2f_unear[1],6u)+","+to_string(n2f_unear[2],6u)+") lat.");
 					if(m_ux<schwelle*(double)u_lat) {
-						swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close();
+						swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close(); if(sonde_csv.is_open()) sonde_csv.close();
 						print_error("u-Negations-Nachweis FEHLGESCHLAGEN: Schalen-u_x = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf < Schwelle "+to_string((float)schwelle,3u)+" -- der Blend arbeitet mit falschem Vorzeichen (XL-B8) oder die Schale ist vergiftet. Abgebrochen.");
 					}
 				}
@@ -3124,7 +3309,7 @@ static void main_setup_fahrzeug_dd() {
 				sw_steigend = (sw_rms_prev>=0.0&&sw_rms>sw_rms_prev&&sw_rms>=0.2*(double)u_lat) ? sw_steigend+1u : 0u; sw_rms_prev = sw_rms;
 				if(kipp==""&&sw_steigend>=10u) kipp = "RMS ueber 10 Samples monoton steigend (im Band >= 0,2*u_inf)";
 				if(kipp!="") {
-					swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close(); // Abbruchpfad symmetrisch (R-N2-Muster)
+					swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close(); if(sonde_csv.is_open()) sonde_csv.close(); // Abbruchpfad symmetrisch (R-N2-Muster)
 					print_error("N2F-Schale GEKIPPT bei t = "+to_string((float)t_si,5u)+" s: "+kipp+" (RMS = "+to_string((float)sw_rms,6u)+" lat = "+to_string((float)(sw_rms/(double)u_lat),3u)+" u_inf). Die CSV bis hierher steht in "+out_dir+"schale_waechter.csv.");
 				}
 			}
@@ -3155,7 +3340,7 @@ static void main_setup_fahrzeug_dd() {
 				else if(n_frozen>=2u) grund = "die Kraft steht seit drei Abtastungen BITGLEICH -- das Feld ist eingefroren (Zahlenformat gesaettigt)";
 				else if(t_si>0.02 && (fabs(Fx_si)>20.0*q_A || fabs(Fz_si)>20.0*q_A)) grund = "die Kraft ist unphysikalisch gross (|Cd| oder |Cz| ueber 20)";
 				if(grund!="") {
-					fcsv << std::flush; fcsv.close(); ipcsv.close(); if(swcsv.is_open()) swcsv.close(); // R-N2: Abbruchpfad symmetrisch (Zeilen sind ohnehin geflusht); P9c: Waechter-CSV mit schliessen
+					fcsv << std::flush; fcsv.close(); ipcsv.close(); if(swcsv.is_open()) swcsv.close(); if(sonde_csv.is_open()) sonde_csv.close(); // R-N2: Abbruchpfad symmetrisch (Zeilen sind ohnehin geflusht); P9c: Waechter-CSV mit schliessen
 					print_error("Lauf gekippt bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
 						+"): "+grund+". Fx = "+to_string((float)Fx_si,3u)+" N, Fz = "+to_string((float)Fz_si,3u)
 						+" N. Abgebrochen. Die CSV bis hierher steht in "+out_dir+"forces.csv -- dort ist zu sehen, wann es kippt.");
@@ -3215,6 +3400,20 @@ static void main_setup_fahrzeug_dd() {
 				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
 				lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
 				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "nah");
+				// ★ SONDE einlass_saeule_nah (Iron Rule 5, Ansage beim CSV-Anlegen oben): u/flags liegen
+				// fuer render_yslice bereits auf dem Host, EINZIGER Zusatz-Read ist rho. Je Sample
+				// geflusht (Abbruch-fest).
+				lbm_f.rho.read_from_device();
+				for(uint ci=0u; ci<2u; ci++) {
+					const uint sx = sonde_xf[ci], sy = fNy/2u;
+					for(uint sz2=0u; sz2<fNz; sz2++) {
+						const ulong n = (ulong)sx+((ulong)sy+(ulong)sz2*(ulong)fNy)*(ulong)fNx;
+						sonde_csv << t_si << "," << sx << "," << sz2 << "," << lbm_f.u.x[n]/u_lat << ","
+						          << lbm_f.u.y[n]/u_lat << "," << lbm_f.u.z[n]/u_lat << "," << lbm_f.rho[n] << ","
+						          << (((lbm_f.flags[n]&TYPE_S)!=0u)?1u:0u) << "\n";
+					}
+				}
+				sonde_csv << std::flush;
 				lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
 				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "fern");
 				print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
@@ -3243,6 +3442,7 @@ static void main_setup_fahrzeug_dd() {
 	// ---------------------------------------------------------------- Auswertung
 	fcsv.close(); // die Zeilen stehen bereits einzeln auf Platte, siehe Schleife
 	ipcsv.close(); print_info("CSV: "+out_dir+"interface_druck.csv (Interface-Druck der 4 getriebenen Ebenen, waehrend des Laufs geschrieben)"); // _exit(0) ruft keine Destruktoren
+	sonde_csv.close(); print_info("CSV: "+out_dir+"einlass_saeule_nah.csv (Einlass-Saeulen-Sonde x_f=2/10, Slice-Kadenz, waehrend des Laufs geschrieben)"); // _exit(0) ruft keine Destruktoren
 	if(n2f_alpha>0.0f) { swcsv.close(); print_info("CSV: "+out_dir+"schale_waechter.csv (N2F-Schalen-Waechter, waehrend des Laufs geschrieben)"); } // P9c; _exit(0) ruft keine Destruktoren
 	if(zb>0u) { zcsv.close(); print_info("CSV: "+out_dir+"kraft_zband.csv (Band/Rest-Zerlegung, waehrend des Laufs geschrieben)"); } // _exit(0) am Fallende ruft keine Destruktoren -- explizit schliessen
 	print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen, waehrend des Laufs geschrieben)");
@@ -3503,7 +3703,7 @@ static void main_setup_fernfeld() {
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
-	if(getenv("CFD_N2F_SCHALE")) print_warning("CFD_N2F_SCHALE wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
+	if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im fernfeld-Fall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) print_warning("CFD_FACETTEN_DIAG wird im fernfeld-Fall NICHT angewandt.");
@@ -3555,7 +3755,7 @@ static void main_setup_fernfeld() {
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f);
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fernfeld"))+"/";
 	create_folder(out_dir);
-	{ const char* bs_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_BODENKLEMME","CFD_KOPPLUNG_BODENBAND"}; for(const char* b : bs_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im fernfeld-Fall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ auch kugel -- XL-3 B8)."); }
+	{ const char* bs_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_BODENKLEMME","CFD_KOPPLUNG_BODENBAND","CFD_KOPPLUNG_ZEITINTERP"}; for(const char* b : bs_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im fernfeld-Fall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ auch kugel -- XL-3 B8)."); }
 	sichere_lauf(out_dir, "fernfeld"); // ★ Heiko 2026-08-09: Sicherung MIT JEDEM Lauf, in allen vier Faellen
 	print_info("Laufzeit "+to_string(t_end,4u)+" s = "+to_string(n_steps)+" Schritte (eine Durchspuelung = "+to_string(t_flush,4u)+" s)");
 
@@ -3642,8 +3842,9 @@ static const FacPaar FAC_TAB[3][2][2] = {
 };
 void main_setup_facetten_test() {
 	if(getenv("CFD_BODEN_EQ")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird in facetten_test NICHT angewandt (XL-R3).");
+	if(getenv("CFD_KOPPLUNG_ZEITINTERP")) print_warning("CFD_KOPPLUNG_ZEITINTERP wird in diesem Fall NICHT angewandt (nur fahrzeug_dd; Pruefagent M3).");
 	if(getenv("CFD_FERN_FACETTEN")) print_warning("CFD_FERN_FACETTEN wird in facetten_test NICHT angewandt (nur fahrzeug_dd; P8-M1).");
-	if(getenv("CFD_N2F_SCHALE")) print_warning("CFD_N2F_SCHALE wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
+	if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
 	print_info("facetten_test: ALLE CFD_FACETTEN*/CFD_FAC_*-Env-Werte werden IGNORIERT (Arme hart verdrahtet); kein sichere_lauf, fester Ordner export/facetten_test (Gross-Audit-Ansage).");
 	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N/CFD_SPARSE_TILES/CFD_WANDFUNKTION sind im facetten_test WIRKUNGSLOS (B10).");
 	print_info("C1b T1: Paartabelle unabhaengig aus FZ_C herleiten und gegen die Kernel-Kopie pruefen.");
