@@ -1136,3 +1136,16 @@ Ansagen ueberall), N1 (sonde_csv-Abbruchpfade) gefixt; N2 (0,1-Stufen-Rundungsko
 dokumentiert. Anker-Hash nach allen Fixes exakt. GPU-Leiter-PRAEZISIERUNG (Heiko): Host-only-
 AEnderungen + Wirkungs-A/Bs laufen auf der FREIEN GPU; CPU-Sprosse = neue Kernel + geraete-
 konsistente Bit-Referenzen (Anker-Hashes sind GERAETESPEZIFISCH).
+
+## HEIKO-VERDIKT Volumen-Blend (f8p_volumen, gestoppt ~17:15): RUECKKOPPLUNG AUF AUS
+
+Heiko-Slice-Sichtung: der Flow UEBER das Auto in der Near-Domain wird durch die Volumen-
+Rueckkopplung UNREALISTISCH (das veraenderte Far-Feld fuettert ueber die Kopplungsebenen ein
+verfaelschtes Near zurueck). ANWEISUNG: die gesamte N2F-Rueckkopplung (Schale UND Volumen)
+bleibt AUS -- sie ist NICHT Teil der Standardkonfiguration (Default 0 war ohnehin aus; jetzt
+auch als Nicht-Standard-Messarm etikettiert). Die Infrastruktur (Gewichtsfeld, FNEQ, Waechter,
+Sonden) bleibt als vollstaendig geprueftes Werkzeug fuer spaetere, vorsichtigere Arme (z.B.
+kleines alpha, nur Wake-Region). STANDARDKONFIGURATION unveraendert: -3-Lage + NEAR_VOR=96 +
+BODEN_EQ=2/DOWN=1 nah+fern + ABSTAND=2 + FERN_EINLASS_EQ=2 + SPONGE (32@32mm/64@16mm) +
+KRAFT_ZBAND=4 + FAC_GPU + KOPPLUNG_GLATT=1 (geerbtes Streifen-Band). export/f8p_volumen =
+ABGEBROCHEN-markiert.
