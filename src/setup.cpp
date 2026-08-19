@@ -1919,16 +1919,28 @@ static void main_setup_fahrzeug_dd() {
 	// verweigert. Mit dem Schnappen ist die Konfiguration AUFLOESUNGSUNABHAENGIG -- Voraussetzung
 	// fuer jede Gitterstudie, und die brauchen wir ohnehin.
 	auto auf_grobe_zelle = [&](const float L) { return dx_c*(float)max(1, (int)floor(L/dx_c + 0.5f)); };
-	const float near_Lx = auf_grobe_zelle(env_f("CFD_NEAR_LX",  6.6560f));
+	// ★ Heiko 2026-08-21: Near-Box-Einlass weiter vor die Nase ("80-100 mm"), damit das x--Interface
+	// den Zulauf VOR dem Staugebiet abgreift. Variante B (Planungsagent): near_off_x um Delta KLEINER,
+	// near_Lx um Delta GROESSER -- nur die Einlass-Ebene wandert, das Heck-Ende bleibt weltfest
+	// (reines Schieben haette den Druckauslass 96 mm an die Rezirkulation gerueckt und den A/B
+	// verquickt). Messarm-Wert 96 = Vielfaches von 16 UND 32 mm (beide Grobgitter). Default 0 = alt.
+	const float near_vor_roh = 0.001f*env_f("CFD_NEAR_VOR_MM", 0.0f);
+	if(!std::isfinite(near_vor_roh)) print_error("CFD_NEAR_VOR_MM ist keine Zahl."); // Pruefagent M2: NaN verpuffte sonst lautlos (NaN-Vergleiche schweigen), Cast waere UB
+	const float near_vor = dx_c*(float)max(0, (int)floor(near_vor_roh/dx_c + 0.5f));
+	if(near_vor_roh<0.0f) print_warning("CFD_NEAR_VOR_MM < 0 wird auf 0 geklemmt (Box-Verkuerzung ist kein Messarm).");
+	else if(fabs(near_vor-near_vor_roh)>1e-6f) print_warning("CFD_NEAR_VOR_MM liegt nicht auf dem "+to_string(dx_c*1000.0f,0u)+"-mm-Raster -- gerundet auf "+to_string(near_vor*1000.0f,0u)+" mm.");
+	const float near_Lx = auf_grobe_zelle(env_f("CFD_NEAR_LX",  6.6560f)) + near_vor;
 	const float near_Ly = auf_grobe_zelle(env_f("CFD_NEAR_LY", 2.4800f));
 	const float near_Lz = auf_grobe_zelle(env_f("CFD_NEAR_LZ", 1.9360f));
 	// Weltkoordinaten nach V1-Konvention: die Fahrzeugnase liegt bei x = 0, der Einlass 0.6 Fahrzeug-
-	// laengen davor. Das ist BEWUSST kurz -- Heiko 2026-08-08: der geringe Einlaufweg wirkt der toten
+	// laengen davor (bei NEAR_VOR=0). Das ist BEWUSST kurz -- Heiko 2026-08-08: der geringe Einlaufweg wirkt der toten
 	// Stroemung in den unteren 5 bis 20 mm und der dadurch stagnierenden Unterbodenstroemung entgegen.
 	// Wer das fuer einen Fehler haelt und "korrigiert", macht den Unterboden wieder falsch.
 	const float far_x0  = env_f("CFD_FAR_X0", -0.6f*si_length);       // -2.66184 m
-	const float near_off_x = auf_grobe_zelle(env_f("CFD_NEAR_OFF_X", 2.4320f)); // ebenfalls auf ganze grobe Zellen
-	const float near_x0 = far_x0 + near_off_x;  // -0.22984 m bei dx_c = 16 mm, V1-Wert
+	const float near_off_x = auf_grobe_zelle(env_f("CFD_NEAR_OFF_X", 2.4320f)) - near_vor; // ebenfalls auf ganze grobe Zellen; near_vor zieht die Einlass-Ebene vor
+	if(near_off_x<dx_c) print_error("near_off_x < eine Grobzelle: die Near-Box ragte vor den Fernfeld-Einlass (CFD_NEAR_VOR_MM zu gross oder CFD_NEAR_OFF_X zu klein).");
+	const float near_x0 = far_x0 + near_off_x;  // -0.22984 m bei NEAR_VOR=0 und dx_c = 16 mm, V1-Wert
+	if(near_vor>0.0f) print_info("NEAR_VOR aktiv: Einlass-Interface "+to_string(near_vor*1000.0f,0u)+" mm weiter vor der Nase (jetzt "+to_string(-near_x0,3u)+" m), Heck-Ende weltfest; +"+to_string((uint)floor(near_vor/dx_f+0.5f))+" feine x-Schichten.");
 	const float veh_x0  = 0.0f;                                      // Nase
 	const float veh_x1  = veh_x0 + si_length;                        // Heck
 	// Das Fahrzeug steht AUF der Fahrbahn (Heiko-Vorgabe). V1 liess es 16 mm schweben.
@@ -1991,6 +2003,7 @@ static void main_setup_fahrzeug_dd() {
 		// gegenueber OpenFOAM, sondern der Grund, warum die Kopplung ueberhaupt gebaut wurde.
 		print_info("Einlauf vor der Nase "+to_string((veh_x0-far_x0)/si_length,2u)+" L (bewusst kurz), Nachlauf hinter dem Heck "
 			+to_string((far_x0+(float)(cNx-1u)*dx_c-veh_x1)/si_length,2u)+" L  (OpenFOAM: 1.08 L / 3.33 L)");
+		print_info("Nahfeld-Einlauf vor der Nase "+to_string((veh_x0-near_x0),3u)+" m, Nahfeld-Nachlauf hinter dem Heck "+to_string(near_x0+(float)(fNx-1u)*dx_f-veh_x1,3u)+" m (selbstdokumentierend, XL-R4/NEAR_VOR).");
 	}
 #ifdef TRT
 	print_info("Kollisionsoperator: TRT (Lambda-Wandlage aktiv).");
@@ -2092,15 +2105,15 @@ static void main_setup_fahrzeug_dd() {
 		LBM_Domain::set_force_bbox(x0, y0, z0, x1-x0+1u, y1-y0+1u, z1-z0+1u);
 	}
 	// ★ Daempfungszone NUR am Fernfeld. Dort ist Platz: Abstand Rand -> naechste Kopplungs-Entnahmeebene
-	// betraegt x- 152, x+ 199, y+- 162, z+ 430 Zellen. N=64 laesst ueberall >= 88 Zellen Luft.
-	// Obergrenze N <= 120 (dann noch 32 Zellen Abstand zur Entnahmeebene x-); N=32/64 sind komfortabel.
+	// betraegt x- NF_OX (152 bei NEAR_VOR=0), x+ 199, y+- 162, z+ 430 Zellen. N=64 laesst ueberall >= 88 Zellen Luft.
+	// Obergrenze N <= NF_OX-32 (32er-Reserve zur Entnahmeebene x-); N=32/64 sind komfortabel.
 	// Bewusst NACH lbm_f gesetzt und ohne Selbstruecksetzung: lbm_f wird ZUERST konstruiert, ein
 	// read-once haette die Zone also genau der falschen Domaene gegeben.
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
-	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 kaeme im Fernfeld der Kopplungs-Entnahmeebene x- (152 Zellen) zu nahe.");
+	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
 	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
 	if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_FERN_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2) -- am Grobgitter wiegt jede Zelle 4x (XL-R3).");
@@ -2435,6 +2448,7 @@ static void main_setup_fahrzeug_dd() {
 	uint wp_fx=0u, wp_fy=0u, wp_cx=0u, wp_cy=0u;
 	const bool wp_f_ok = finde_messsaeule(lbm_f, fNx, fNy, fNz, wp_fx, wp_fy);
 	const bool wp_c_ok = finde_messsaeule(lbm_c, cNx, cNy, cNz, wp_cx, wp_cy);
+	if(wp_f_ok&&near_vor>0.0f) print_info("Messsaeule nah bei Welt-x "+to_string(near_x0+(float)wp_fx*dx_f,3u)+" m (wandert mit fNx -- A/B ueber Welt-x vergleichen, NEAR_VOR-Fallstrick).");
 	std::ofstream wpf(out_dir+"wandprofil_nah.csv"), wpc(out_dir+"wandprofil_fern.csv");
 	wpf.precision(6); wpc.precision(6);
 	wpf << "time_s,z1,z2,z3,z4,z5,z6,z7\n"; wpc << "time_s,z1,z2,z3,z4,z5,z6,z7\n";

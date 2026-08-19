@@ -839,3 +839,21 @@ MORGEN, in dieser Reihenfolge:
    dann Slice-Ebenen-Read; UPDATE_FIELDS-Abloesung und FP16S nur als validierte A/Bs.
 4. Danach offen: YWMIN-0,15-Einzelarm (Dach), P8/P9 (Far-Facetten + couple_n2f-Nudging),
    Unterboden-Abloesung (Arm3+Facetten am Pan, ggf. u_road-Drossel ~0,9).
+
+## 2026-08-21 vormittags: Anker + ABSTAND-A/B (8 mm, -3-Lage) und CFD_NEAR_VOR_MM
+
+f8_anker_m3 (facettenfrei, BODEN_EQ=2/DOWN=1 nah+fern): Cd 1,688 / Cz -0,559 (SEM Cz +-0,011),
+Sonde 0,570, Profil 1,220@Nase / 1,048@Mitte. Referenzlagen-Shift konsistent (0-Lage: 1,93/-0,68).
+f8_abst2 (einzige Variable ABSTAND=2): Cd 1,333 / Cz +0,176, Sonde 0,563, Profil 1,198/1,058.
+BEFUND (Heikos V1-These bestaetigt): Stroemung praktisch identisch, Kraefte um dCd -0,36 /
+dCz +0,74 verschoben -- die reifenadjazente Aufpraegung erzeugte ~-0,7 KUENSTLICHEN Abtrieb.
+ABSTAND=2 ist ab jetzt der sauber gemessene Standard-Kandidat; alle Kraftvergleiche mit
+ABSTAND=0-Laeufen sind kontaminationsbehaftet zu etikettieren. Der echte Cz-Weg laeuft ueber
+Facetten + druckkonsistentes Fernfeld (P8/P9), nicht ueber das Artefakt.
+
+CFD_NEAR_VOR_MM eingebaut (Heiko: Einlass 80-100 mm vor; Variante B: Box nach vorn verlaengert,
+Heck weltfest; 96 mm = 6x16 = 3x32 mm zellausgerichtet). Planungsagent-Plan umgesetzt inkl.
+dynamischem Sponge-Guard (NF_OX-32), Nahfeld-Einlauf-Print, Messsaeulen-Welt-x-Print.
+Pruefagent: kein HOCH; M1 (Sponge-Guard bei N=0/Unterlauf) und M2 (NaN-Input lautlos, UB-Cast)
+plus 4 NIEDRIG direkt gefixt. CPU-Smoke NEAR_VOR=96: Einlauf 0,326 m, Nachlauf 1,990 m
+unveraendert, Kopplungs-Deckung gruen. Bitidentitaet bei NEAR_VOR=0 (+-0.0f) verifiziert.
