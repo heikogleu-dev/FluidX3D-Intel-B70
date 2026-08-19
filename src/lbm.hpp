@@ -92,6 +92,7 @@ private:
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)
 	Kernel kernel_object_center_of_mass; // calculate center of mass of all cells flagged with flag_marker
 	Kernel kernel_object_force; // add up force for all cells flagged with flag_marker
+	Kernel kernel_object_force_zband; // FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): object_force auf das z-Band [z_lo,z_hi)
 	Kernel kernel_object_torque; // add up torque around specified rotation_center for all cells flagged with flag_marker
 	ulong t_last_force_field = max_ulong; // optimization to not call kernel_update_force_field multiple times if F is already up-to-date
 #endif // FORCE_FIELD
@@ -190,8 +191,15 @@ public:
 	Memory<uint>  kf_pcnt;   // 3 uint je Arbeitsgruppe: voll,proj,unklar
 	Kernel kernel_kraft_facetten;
 	ulong kf_N=0ull; uchar kf_marker=0u; bool kf_zper=false, kf_bound=false; // Bindungsschluessel (marker,z_per) + Waechter
-	void bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per); // Liste hochladen, Kernel binden
-	void kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar); // Kernel + double-Endsumme
+	// ★ FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): zweiter Bindungs-Slot fuer die z-Band-Teilliste (z<zband).
+	// Eigener Puffersatz + eigener Kernel -- der Hauptslot bleibt wortgleich unangetastet.
+	Memory<ulong> kfb_liste;  // Band-Teilliste (dieselbe Scan-Reihenfolge, Filter z<zband)
+	Memory<float> kfb_psum;   // 3 float je Arbeitsgruppe
+	Memory<uint>  kfb_pcnt;   // 3 uint je Arbeitsgruppe
+	Kernel kernel_kraft_facetten_band;
+	ulong kfb_N=0ull; uint kfb_zband=0u; uchar kfb_marker=0u; bool kfb_zper=false, kfb_bound=false; // EIGENE Bindungsschluessel (Pruefagent: der Hauptslot aktualisiert kf_marker/kf_zper VOR dem Bandslot-Vergleich -- geteilte Schluessel waeren ein stiller Stolperdraht)
+	void bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per, const bool band_slot=false); // Liste hochladen, Kernel binden; band_slot=true -> kfb_*-Satz
+	void kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar, const bool band_slot=false); // Kernel + double-Endsumme
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
 	static float s_wf_tau;      // 1 = volle WFB, 0 = nur Free-Slip-Tausch (Zwischenarm)
@@ -244,6 +252,7 @@ public:
 	void enqueue_update_force_field(); // calculate forces from fluid on TYPE_S cells
 	void enqueue_object_center_of_mass(const uchar flag_marker=TYPE_S); // calculate center of mass of all cells flagged with flag_marker
 	void enqueue_object_force(const uchar flag_marker=TYPE_S); // add up force for all cells flagged with flag_marker
+	void enqueue_object_force_zband(const uchar flag_marker, const uint z_lo, const uint z_hi); // FORK Kraft-Zerlegung: object_force auf das z-Band [z_lo,z_hi); object_sum WIEDERVERWENDET -- strikt sequenziell zu enqueue_object_force aufrufen
 	void enqueue_object_torque(const float3& rotation_center, const uchar flag_marker=TYPE_S); // add up torque around specified rotation_center for all cells flagged with flag_marker
 #endif // FORCE_FIELD
 #ifdef MOVING_BOUNDARIES
@@ -621,6 +630,7 @@ public:
 	void update_force_field(); // calculate forces from fluid on TYPE_S cells
 	float3 object_center_of_mass(const uchar flag_marker=TYPE_S); // calculate center of mass of all cells flagged with flag_marker
 	float3 object_force(const uchar flag_marker=TYPE_S); // add up force for all cells flagged with flag_marker
+	float3 object_force_zband(const uchar flag_marker, const uint z_lo, const uint z_hi); // FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND); coordinates() ist domaenenlokal -- nur D=1
 	float3 object_torque(const float3& rotation_center, const uchar flag_marker=TYPE_S); // add up torque around specified rotation_center for all cells flagged with flag_marker
 #endif // FORCE_FIELD
 #ifdef MOVING_BOUNDARIES

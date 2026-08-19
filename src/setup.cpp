@@ -548,9 +548,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 // austauschs bleibt an getauschten Links erster Ordnung gueltig), REIBUNG fluid-seitig exakt aus
 // dem komponentenweisen Akkumulator (Fenster-Delta / Schritte). Solidzellen ohne tauschenden
 // Facettennachbarn: voller F (dort gilt reiner BB). fbi-Formel WOERTLICH wie messe_yplus.
-struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; };
+struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; double pbx,pby,pbz; }; // pb* = Band-Druckanteil (z<zband; 0 bei zband==0)
+// ★ FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): zband>0 zerlegt NUR den Druckanteil zusaetzlich in
+// Band (z<zband) und Rest (Rest = Gesamt - Band, double). fac_tau (Reibung) traegt keine z-Position --
+// die Reibungszerlegung ist Folgearbeit (fac_geo[6] als z-Traeger). zband==0 ist ausdrucksgleich alt.
 FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uchar marker,
-                        const ulong fenster, const std::vector<double>& snap, const bool z_per=false, const bool flags_aktuell=false) {
+                        const ulong fenster, const std::vector<double>& snap, const bool z_per=false, const bool flags_aktuell=false, const uint zband=0u) {
 	L.update_force_field();
 	LBM_Domain* D = L.lbm_domain[0];
 	// ★ GPU-Reduktion des Druckanteils (Kernel kraft_facetten_gpu): CFD_FAC_GPU=1 (Default) rechnet
@@ -565,7 +568,8 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 	// Voll-Domaenen-Read je Sample war reine PCIe-Verschwendung (~0,5 GB im dd). Heisse
 	// Schleifen lesen EINMAL nach run(0) und uebergeben flags_aktuell=true.
 	if(host_rechnen&&!flags_aktuell) L.flags.read_from_device();
-	FacKraft K; K.px=K.py=K.pz=K.rx=K.ry=K.rz=0.0; K.n_voll=K.n_proj=K.n_unklar=0ull;
+	FacKraft K; K.px=K.py=K.pz=K.rx=K.ry=K.rz=0.0; K.n_voll=K.n_proj=K.n_unklar=0ull; K.pbx=K.pby=K.pbz=0.0;
+	double hbx=0.0, hby=0.0, hbz=0.0; // Host-Band-Druck (nur zband>0 && host_rechnen befuellt)
 	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
 	const bool fac = D->facetten_on;
 	if(fac) {
@@ -601,12 +605,13 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 			kontaminiert=true;
 			nxm+=(double)D->fac_geo[8ull*fid]; nym+=(double)D->fac_geo[8ull*fid+1ull]; nzm+=(double)D->fac_geo[8ull*fid+2ull];
 		}
-		if(!kontaminiert) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_voll++; continue; }
+		if(!kontaminiert) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_voll++; if(zband>0u&&z<zband) { hbx+=Fx; hby+=Fy; hbz+=Fz; } continue; } // Band-Mitschrift NUR bei zband>0 (Kraft-Zerlegung)
 		const double l = sqrt(nxm*nxm+nym*nym+nzm*nzm);
-		if(l<0.5) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_unklar++; continue; } // Gegennormalen (Spalt): konservativ voll
+		if(l<0.5) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_unklar++; if(zband>0u&&z<zband) { hbx+=Fx; hby+=Fy; hbz+=Fz; } continue; } // Gegennormalen (Spalt): konservativ voll
 		const double nx2=nxm/l, ny2=nym/l, nz2=nzm/l;
 		const double fn = Fx*nx2+Fy*ny2+Fz*nz2;
 		K.px+=fn*nx2; K.py+=fn*ny2; K.pz+=fn*nz2; K.n_proj++;
+		if(zband>0u&&z<zband) { hbx+=fn*nx2; hby+=fn*ny2; hbz+=fn*nz2; } // Band-Mitschrift (Kraft-Zerlegung)
 	}
 	} // host_rechnen
 	if(gpu) {
@@ -635,7 +640,31 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 				+", unklar "+to_string(K.n_unklar)+"/"+to_string(KH.n_unklar)
 				+((K.n_voll!=KH.n_voll||K.n_proj!=KH.n_proj||K.n_unklar!=KH.n_unklar)?" -- ZAEHLER-DIFFERENZ (Achtung: an der l~0,5-Schwelle kann float-GPU vs double-Host ehrlich kippen -- erst Zellen ansehen, dann urteilen; Pruefagent N1)!":" (Zaehler exakt gleich)"));
 		}
+		if(zband>0u) { // ★ FORK Kraft-Zerlegung: Band-Druck (z<zband) auf dem zweiten Bindungs-Slot
+			if(!D->kfb_bound||D->kfb_marker!=marker||D->kfb_zper!=z_per||D->kfb_zband!=zband) { // Erstbindung oder Schluesselwechsel (EIGENE kfb-Schluessel, Pruefagent M)
+				if(!flags_aktuell&&!host_rechnen) L.flags.read_from_device(); // flags-Spiegel sicherstellen (ggf. doppelt mit der Hauptslot-Erstbindung -- einmalig beim Bind, toleriert)
+				std::vector<ulong> liste_b; // dieselbe Dreifachschleifen-Scan-Reihenfolge; z>=zband wird HERAUSgefiltert (behalten wird das Band z<zband)
+				for(uint z=D->fbz0; z<D->fbz0+D->fbnz; z++) for(uint y=D->fby0; y<D->fby0+D->fbny; y++) for(uint x=D->fbx0; x<D->fbx0+D->fbnx; x++) {
+					if(z>=zband) continue;
+					const ulong n = (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+					if(L.flags[n]!=marker) continue;
+					liste_b.push_back(n);
+				}
+				D->bind_kraft_facetten(liste_b, marker, z_per, true);
+				D->kfb_zband = zband;
+			}
+			double bpx=0.0, bpy=0.0, bpz=0.0; ulong bv=0ull, bq=0ull, bu=0ull;
+			D->kraft_facetten_gpu(bpx, bpy, bpz, bv, bq, bu, true);
+			K.pbx=bpx; K.pby=bpy; K.pbz=bpz;
+			if(pruef) {
+				auto relb=[](const double a, const double b){ const double s=fmax(fabs(a),fabs(b)); return s>1e-12?fabs(a-b)/s:0.0; }; // Pruefagent N: symmetrisch + absolute Untergrenze, sonst Dauerfehlalarm 1.0 bei ~0-Komponenten (py im Band)
+				print_info("FAC_GPU-PRUEF Band (z<"+to_string(zband)+"): max. Relativabweichung px/py/pz = "
+					+to_string((float)fmax(relb(K.pbx,hbx), fmax(relb(K.pby,hby), relb(K.pbz,hbz))),9u)
+					+" (pz GPU "+to_string((float)K.pbz,6u)+" / Host "+to_string((float)hbz,6u)+"), Bandzellen GPU "+to_string(bv+bq+bu));
+			}
+		}
 	}
+	if(!gpu&&zband>0u) { K.pbx=hbx; K.pby=hby; K.pbz=hbz; } // reiner Host-Pfad: Band aus der Host-Mitschrift
 	return K;
 }
 
@@ -1402,6 +1431,12 @@ void main_setup_kugel() {
 	// Sample-Kadenz gemittelt statt als End-Momentaufnahme gelesen. CFD_FAC_CD_EVERY duennt aus.
 	double fac_px=0.0, fac_py=0.0, fac_pz=0.0; ulong fac_pn=0ull, fac_cd_i=0ull;
 	std::ofstream fac_csv;
+	// ★ FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND, dasselbe Env wie im dd-Fall): die Kugel schwebt frei,
+	// das Band muss ~0 liefern -- Negativ-Kontrolle. unset/0 = AUS = bitidentisch. EINMAL gelesen.
+	const uint zb = env_u("CFD_KRAFT_ZBAND", 0u);
+	double zb_fx_band=0.0, zb_fz_band=0.0, zb_fx_rest=0.0, zb_fz_rest=0.0, zb_selftest_max=0.0; ulong zb_nn=0ull;
+	if(zb>0u&&zb>=Nz) print_error("CFD_KRAFT_ZBAND ("+to_string(zb)+") >= Nz ("+to_string(Nz)+") -- das Band muss unter der Domaenendecke bleiben.");
+	if(zb>0u) print_info("KRAFT-ZBAND aktiv (Kugel, Negativ-Kontrolle): unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx*1000.0f,2u)+" mm (dx = "+to_string(dx*1000.0f,2u)+" mm). GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar.");
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u&&env_u("CFD_FACETTEN", 0u)==0u) { // ★ Audit 3/3 M2: der Schalter war im Kugelfall stummer No-Op (DIAG=2 lief als Vollsimulation weiter)
@@ -1438,6 +1473,14 @@ void main_setup_kugel() {
 		// (Das explizite update_force_field() hier war redundant: enqueue_object_force ruft
 		// enqueue_update_force_field intern, mit t_last_force_field-Guard.)
 		const float3 F_lat = lbm.object_force(TYPE_S|TYPE_X);
+		if(zb>0u) { // ★ KRAFT-ZBAND (Negativ-Kontrolle): sequenziell nach object_force (object_sum wiederverwendet)
+			const float3 Fb = lbm.object_force_zband((uchar)(TYPE_S|TYPE_X), 0u, zb);
+			const float3 Fr = lbm.object_force_zband((uchar)(TYPE_S|TYPE_X), zb, Nz);
+			const double skala = fmax(fmax(fabs((double)F_lat.x), fabs((double)F_lat.z)), 1e-30); // Fz-Nulldurchgang: absolute Toleranz gegen max(|Fx|,|Fz|)
+			zb_selftest_max = fmax(zb_selftest_max, fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F_lat.x), fabs(((double)Fb.z+(double)Fr.z)-(double)F_lat.z))/skala);
+			zb_fx_band+=(double)units.si_F(Fb.x); zb_fz_band+=(double)units.si_F(Fb.z);
+			zb_fx_rest+=(double)units.si_F(Fr.x); zb_fz_rest+=(double)units.si_F(Fr.z); zb_nn++;
+		}
 		ts.push_back((double)((float)(step+chunk)*dt));
 		{	// ★ Gross-Audit M: Waechter wie im dd-Fall (NaN / 3x bitgleich / Explosion)
 			static float Fxp=1e30f, Fzp=1e30f; static uint nfroz=0u;
@@ -1530,6 +1573,13 @@ void main_setup_kugel() {
 	}
 	print_info("  Populations-Sigma des Momentansignals: +- "+to_string((float)sd,5u)+"  -- KEIN Fehlerbalken, nur zum Vergleich");
 	} // stat_ok
+	if(zb>0u&&zb_nn>0ull) { // ★ KRAFT-ZBAND-Endreport (Kugel schwebt frei -> Band ~0 = Negativ-Kontrolle)
+		print_info("KRAFT-ZBAND Kugel (unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx*1000.0f,2u)+" mm; GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar), "+to_string(zb_nn)+" Samples (ALLE, inkl. Anlauf):");
+		print_info("  Band-Mittel: Fx = "+to_string((float)(zb_fx_band/(double)zb_nn),6u)+" N, Fz = "+to_string((float)(zb_fz_band/(double)zb_nn),6u)+" N (Soll ~0 -- Negativ-Kontrolle)");
+		print_info("  Rest-Mittel: Fx = "+to_string((float)(zb_fx_rest/(double)zb_nn),6u)+" N, Fz = "+to_string((float)(zb_fz_rest/(double)zb_nn),6u)+" N");
+		print_info("  Selbsttest-Maximum |Band+Rest-Gesamt|/max(|Fx|,|Fz|): "+to_string((float)zb_selftest_max,9u)+" (Soll < 5e-5)");
+	if(zb_selftest_max>=5e-5) print_warning("ZBAND-Selbsttest ueber 5e-5 -- Zerlegung nicht belastbar (float-Atomik-Marge ist 3,5x, das hier ist mehr).");
+	}
 	if(env_u("CFD_FACETTEN", 0u)==0u&&env_u("CFD_FAC_K4", 0u)>0u) { // K4: Neutralitaet des neuen Pfads im AUS-Arm
 		const std::vector<double> leer;
 		const FacKraft FK0 = kraft_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), 1ull, leer);
@@ -2481,6 +2531,30 @@ static void main_setup_fahrzeug_dd() {
 	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0, fac_dm0=0.0, fac_rest0=0.0;
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
+	// ★ FORK Kraft-Zerlegung nach z-Region (Heiko-Vorgabe): CFD_KRAFT_ZBAND = unterste N Zellen ab z=0
+	// (inkl.) vs Rest. unset/0 = AUS = bitidentisch (null neue Kernelaufrufe/Logzeilen/Dateien).
+	// EINMAL gelesen, nicht je Zelle/Sample (env-Read-Falle).
+	const uint zb = env_u("CFD_KRAFT_ZBAND", 0u);
+	std::ofstream zcsv;
+	double zb_cd_band=0.0, zb_cz_band=0.0, zb_cd_rest=0.0, zb_cz_rest=0.0, zb_selftest_max=0.0; ulong zb_nn=0ull;
+	std::vector<double> zb_cz_rest_reihe; // fuer Block-SEM 4/8/16
+	if(zb>0u) {
+		if(zb>=fNz) print_error("CFD_KRAFT_ZBAND ("+to_string(zb)+") >= fNz ("+to_string(fNz)+") -- das Band muss unter der Domaenendecke bleiben.");
+		// Einmaliger Band-Census der 0x41-Zellen aus dem Host-flags-Spiegel (Muster Facettenbau-Census):
+		// zeigt zugleich, dass z=0 leer ist (die Kontaktflaechen-Uebergabe hebt Fahrzeugzellen auf z>=1).
+		ulong zc_band=0ull, zc_z0=0ull, zc_ges=0ull;
+		for(ulong n2=0ull; n2<lbm_f.get_N(); n2++) if(lbm_f.flags[n2]==(TYPE_S|TYPE_X)) {
+			zc_ges++; const uint zz=(uint)(n2/((ulong)fNx*(ulong)fNy)); if(zz<zb) zc_band++; if(zz==0u) zc_z0++;
+		}
+		print_info("KRAFT-ZBAND aktiv: unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx_f*1000.0f,2u)+" mm (dx = "+to_string(dx_f*1000.0f,2u)
+			+" mm); Band-Census 0x41: "+to_string(zc_band)+" von "+to_string(zc_ges)+" Zellen, davon z=0: "+to_string(zc_z0)+" (Soll 0).");
+		print_warning("GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar (Bandhoehe skaliert mit dx, nicht mit der Geometrie).");
+		if(zc_band==0ull) print_warning("KRAFT-ZBAND: Band-Census = 0 -- die Zerlegung liefert nur Nullen im Band.");
+		zcsv.open(out_dir+"kraft_zband.csv"); zcsv.precision(8);
+		zcsv << "# zband_zellen=" << zb << " dx_mm=" << dx_f*1000.0f << " band_mm=" << (float)zb*dx_f*1000.0f
+		     << " -- GITTERBAND, zwischen DX-Sprossen nicht direkt vergleichbar\n";
+		zcsv << "time_s,Fx_band_N,Fz_band_N,Fx_rest_N,Fz_rest_N,Cz_band,Cz_rest,selbsttest_rel,cz_druck_band,cz_druck_rest\n" << std::flush;
+	}
 	if(env_u("CFD_KOPPLUNG_BODENBAND", 0u)>0u) print_info("BODENBAND-Messarm aktiv: unterste "+to_string(env_u("CFD_KOPPLUNG_BODENBAND",0u))+" Grobzeilen der x--Einlasskopplung: DEFIZIT-ANHEBUNG fmax(u_far, w*u_inf), Rampe bis 2N (B4-Korrektur: keine Ersetzung) -- OF13-Befund.");
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_info("C7-Notiz: Facetten-Schubspannung = Impulssenke (Gleichgewichtsmodell, kein APG) -- Abloeselage bleibt modellfrei; Cd/Cz-Bewegung dokumentieren, nicht versprechen.");
 	// ★ B2: Wandprofil ueber die Zeit, je Gitter eine Saeule und eine CSV (Begruendung bei
@@ -2644,6 +2718,17 @@ static void main_setup_fahrzeug_dd() {
 			// ruft enqueue_update_force_field intern, mit t_last_force_field-Guard.)
 			const float3 F = lbm_f.object_force(TYPE_S|TYPE_X);
 			const float3 Fc = lbm_c.object_force(TYPE_S|TYPE_X);
+			// ★ KRAFT-ZBAND: Band/Rest SEQUENZIELL nach object_force (object_sum wird wiederverwendet).
+			float3 Fb = float3(0.0f, 0.0f, 0.0f), Fr = float3(0.0f, 0.0f, 0.0f); double zb_rel = 0.0;
+			bool zb_fac_now = false; double zb_czdb = 0.0, zb_czdr = 0.0; // Druck-Zerlegung (nur im Facetten-Arm an der Kadenz befuellt)
+			if(zb>0u) {
+				Fb = lbm_f.object_force_zband((uchar)(TYPE_S|TYPE_X), 0u, zb);
+				Fr = lbm_f.object_force_zband((uchar)(TYPE_S|TYPE_X), zb, fNz);
+				// Selbsttest je Komponente gegen das vorhandene F; Skala = max(|Fx|,|Fz|), damit der
+				// Fz-Nulldurchgang nicht als Scheinfehler explodiert (absolute Toleranz dort).
+				const double skala = fmax(fmax(fabs((double)F.x), fabs((double)F.z)), 1e-30);
+				zb_rel = fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F.x), fabs(((double)Fb.z+(double)Fr.z)-(double)F.z))/skala;
+			}
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
 			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);
 			if(wp_c_ok) schreibe_wandprofil(lbm_c, cNx, cNy, wp_cx, wp_cy, u_lat, t_si, wpc);
@@ -2696,8 +2781,14 @@ static void main_setup_fahrzeug_dd() {
 					for(ulong i=0ull;i<df->fac_N;i++){ fac_snap[3ull*i]=(double)df->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)df->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)df->fac_tau[6ull*i+3ull]; }
 					fac_snap_outer = outer+1ull;
 				} else {
-					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap, false, true);
+					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap, false, true, zb);
 					fac_px += FK.px; fac_pz += FK.pz; fac_pn++;
+					if(zb>0u) { // ★ KRAFT-ZBAND: NUR der Druckanteil ist zerlegt -- fac_tau (Reibung) traegt keine z-Position (Folgearbeit fac_geo[6]); Rest = Gesamt - Band (double)
+						const double qA_zb=(double)q_inf*A_ref;
+						zb_czdb = (double)units_fine.si_F((float)FK.pbz)/qA_zb;
+						zb_czdr = (double)units_fine.si_F((float)(FK.pz-FK.pbz))/qA_zb;
+						zb_fac_now = true;
+					}
 					double dm_b=0.0, rest_b=0.0; // fac_tau frisch durch kraft_facetten (kein Extra-Transfer)
 					for(ulong i=0ull;i<df->fac_N;i++){ dm_b+=(double)df->fac_tau[6ull*i+4ull]; rest_b+=(double)df->fac_tau[6ull*i+5ull]; }
 					fac_dm=dm_b-fac_dm0; fac_rest=rest_b-fac_rest0; // FENSTER-Delta (Audit S5): Warmup-Historie abgezogen
@@ -2706,6 +2797,20 @@ static void main_setup_fahrzeug_dd() {
 					fac_csv << t_si << "," << (double)units_fine.si_F((float)FK.px)/qA << "," << (double)units_fine.si_F((float)FK.pz)/qA << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest << "\n" << std::flush;
 					if(fabs(fac_dm)>1e-4*(double)df->fac_N) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N auf das FENSTER-Delta -- Arm-4-Eichung: Rauschbett ~0,12 kumulativ, Schwelle ~1 vormerken)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
+				}
+			}
+			if(zb>0u) { // ★ KRAFT-ZBAND: CSV-Zeile sofort auf Platte (Muster forces.csv) + Mittel-Akkumulatoren ab Warmlauf
+				const double Fxb=(double)units_fine.si_F(Fb.x), Fzb=(double)units_fine.si_F(Fb.z);
+				const double Fxr=(double)units_fine.si_F(Fr.x), Fzr=(double)units_fine.si_F(Fr.z);
+				const double qA_zb=(double)q_inf*A_ref;
+				zcsv << t_si << "," << Fxb << "," << Fzb << "," << Fxr << "," << Fzr << ","
+				     << Fzb/qA_zb << "," << Fzr/qA_zb << "," << zb_rel;
+				if(zb_fac_now) zcsv << "," << zb_czdb << "," << zb_czdr << "\n" << std::flush;
+				else zcsv << ",,\n" << std::flush; // Druckspalten nur an der Facetten-Kadenz gefuellt
+				if(t_si>=(double)t_warmup) {
+					zb_cd_band+=Fxb/qA_zb; zb_cz_band+=Fzb/qA_zb; zb_cd_rest+=Fxr/qA_zb; zb_cz_rest+=Fzr/qA_zb; zb_nn++;
+					zb_cz_rest_reihe.push_back(Fzr/qA_zb);
+					zb_selftest_max = fmax(zb_selftest_max, zb_rel);
 				}
 			}
 			const auto _t5 = t_now();
@@ -2741,6 +2846,7 @@ static void main_setup_fahrzeug_dd() {
 
 	// ---------------------------------------------------------------- Auswertung
 	fcsv.close(); // die Zeilen stehen bereits einzeln auf Platte, siehe Schleife
+	if(zb>0u) { zcsv.close(); print_info("CSV: "+out_dir+"kraft_zband.csv (Band/Rest-Zerlegung, waehrend des Laufs geschrieben)"); } // _exit(0) am Fallende ruft keine Destruktoren -- explizit schliessen
 	print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen, waehrend des Laufs geschrieben)");
 	std::vector<double> cd, cz;
 	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
@@ -2773,6 +2879,17 @@ static void main_setup_fahrzeug_dd() {
 	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cz,k); if(se>=0.0) print_info("      Block-SEM Cz ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); } // WM-Blick C: Cz lief ohne Fehlerbalken -- ehrlich >=0,03, Delta-Cz-0,1-Aussagen sind 2-sigma
+	if(zb>0u&&zb_nn>0ull) { // ★ KRAFT-ZBAND-Endreport (Zeitmittel ab Warmlauf ueber dieselben Samples)
+		const double mcd_b=zb_cd_band/(double)zb_nn, mcz_b=zb_cz_band/(double)zb_nn;
+		const double mcd_r=zb_cd_rest/(double)zb_nn, mcz_r=zb_cz_rest/(double)zb_nn;
+		print_info("KRAFT-ZBAND (unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx_f*1000.0f,2u)+" mm; GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar), "+to_string(zb_nn)+" Samples:");
+		print_info("  Band: Cd = "+to_string((float)mcd_b,4u)+"   Cz = "+to_string((float)mcz_b,4u));
+		print_info("  Rest: Cd = "+to_string((float)mcd_r,4u)+"   Cz = "+to_string((float)mcz_r,4u));
+		for(uint k : {4u, 8u, 16u}) { const double se=block_sem(zb_cz_rest_reihe,k); if(se>=0.0) print_info("      Block-SEM Cz_rest ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
+		print_info("  Selbsttest-Maximum |Band+Rest-Gesamt|/max(|Fx|,|Fz|): "+to_string((float)zb_selftest_max,9u)+" (Soll < 5e-5)");
+	if(zb_selftest_max>=5e-5) print_warning("ZBAND-Selbsttest ueber 5e-5 -- Zerlegung nicht belastbar (float-Atomik-Marge ist 3,5x, das hier ist mehr).");
+		print_info("  Cz_rest vs OF13 -1,301: "+to_string((float)mcz_r,4u)+" (Abweichung "+to_string((float)(100.0*(mcz_r/-1.301-1.0)),1u)+" %)");
+	}
 	} // stat_ok
 	{	// ★ UNTERBODEN-SONDE (Heiko 2026-08-19: Unterboden in ALLEN s5b-Slices tot, arm-unabhaengig).
 		// Je x-Spalte unter dem Fahrzeug: mittleres u_x/u_inf ueber alle Fluidzellen im Spalt

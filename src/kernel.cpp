@@ -3018,6 +3018,25 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		if(local_sum.z!=0.0f) atomic_add_f(&object_sum[2], local_sum.z);
 	}
 } // object_force()
+)+R(kernel void object_force_zband(const global float* F, const global uchar* flags, const uchar flag_marker, const uint z_lo, const uint z_hi, volatile global float* object_sum) {
+	// FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): woertliche Kopie von object_force mit z-Band-Praedikat
+	// [z_lo,z_hi). coordinates() ist DOMAENENLOKAL -- der LBM-Wrapper erzwingt D=1.
+	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
+	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
+	local float3 cache[cl_workgroup_size];
+	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker&&coordinates(n).z>=z_lo&&coordinates(n).z<z_hi ? load3_F(F, n) : (float3)(0.0f, 0.0f, 0.0f); // FORK: bbox-bewusst
+	barrier(CLK_GLOBAL_MEM_FENCE);
+	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
+		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
+		barrier(CLK_LOCAL_MEM_FENCE);
+	}
+	if(lid==0u) { // global memory reduction with atomic addition of local_sum
+		const float3 local_sum = cache[0];
+		if(local_sum.x!=0.0f) atomic_add_f(&object_sum[0], local_sum.x);
+		if(local_sum.y!=0.0f) atomic_add_f(&object_sum[1], local_sum.y);
+		if(local_sum.z!=0.0f) atomic_add_f(&object_sum[2], local_sum.z);
+	}
+} // object_force_zband()
 )+R(kernel void kraft_facetten_gpu(const global float* F, const global ulong* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
 	// FORK kraft_facetten-GPU: Druckanteil des Facetten-Cd-Pfads ohne Host-F-Transfer. Range =
 	// Markerzellen-Indexliste (der Host baut sie in der Dreifachschleifen-Scan-Reihenfolge der

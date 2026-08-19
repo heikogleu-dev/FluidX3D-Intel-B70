@@ -300,6 +300,7 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_reset_force_field = Kernel(device, N, "reset_force_field", F);
 	kernel_object_center_of_mass = Kernel(device, N, "object_center_of_mass", flags, (uchar)0u, object_sum);
 	kernel_object_force = Kernel(device, N, "object_force", F, flags, (uchar)0u, object_sum);
+	kernel_object_force_zband = Kernel(device, N, "object_force_zband", F, flags, (uchar)0u, 0u, 0u, object_sum); // FORK Kraft-Zerlegung: object_sum wiederverwendet, Aufrufe sequenziell
 	kernel_object_torque = Kernel(device, N, "object_torque", F, flags, (uchar)0u, 0.0f, 0.0f, 0.0f, object_sum);
 #endif // FORCE_FIELD
 
@@ -561,6 +562,15 @@ void LBM_Domain::enqueue_object_force(const uchar flag_marker) { // add up force
 	kernel_object_force.set_parameters(2u, flag_marker).enqueue_run();
 	object_sum.enqueue_read_from_device();
 }
+void LBM_Domain::enqueue_object_force_zband(const uchar flag_marker, const uint z_lo, const uint z_hi) { // FORK Kraft-Zerlegung: object_force auf das z-Band [z_lo,z_hi); object_sum WIEDERVERWENDET -- strikt sequenziell zu enqueue_object_force
+	enqueue_update_force_field(); // update force field if it is not yet up-to-date
+	object_sum.x[0] = 0.0f; // reset object_sum
+	object_sum.y[0] = 0.0f;
+	object_sum.z[0] = 0.0f;
+	object_sum.enqueue_write_to_device();
+	kernel_object_force_zband.set_parameters(2u, flag_marker, z_lo, z_hi).enqueue_run();
+	object_sum.enqueue_read_from_device();
+}
 void LBM_Domain::enqueue_object_torque(const float3& rotation_center, const uchar flag_marker) { // add up torque around specified rotation_center for all cells flagged with flag_marker
 	enqueue_update_force_field(); // update force field if it is not yet up-to-date
 	object_sum.x[0] = 0.0f; // reset object_sum
@@ -573,15 +583,23 @@ void LBM_Domain::enqueue_object_torque(const float3& rotation_center, const ucha
 // ★ kraft_facetten-GPU-Reduktion (Muster init_pressure_outlet/set_pressure_outlet_faces): Liste der
 // Markerzellen hochladen, Gruppenpuffer anlegen, Kernel binden. Der Schluessel (marker,z_per) steht
 // in kf_marker/kf_zper -- der Aufrufer (setup.cpp kraft_facetten) bindet bei Wechsel neu.
-void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per) {
-	kf_N = (ulong)liste.size(); kf_marker = marker; kf_zper = z_per; kf_bound = true;
-	if(kf_N==0ull) return; // leere Liste: kraft_facetten_gpu liefert Nullen ohne Launch
-	kf_liste = Memory<ulong>(device, kf_N); // Ctor-Nullinit + zweiter Voll-Write = ein verschenkter 16-MB-Transfer, EINMALIG beim Bind -- bewusst toleriert (Pruefagent N2)
-	for(ulong i=0ull; i<kf_N; i++) kf_liste[i] = liste[i];
-	kf_liste.write_to_device();
-	const ulong gruppen = (kf_N+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE; // = ceil(kf_N/64.0)
-	kf_psum = Memory<float>(device, 3ull*gruppen);
-	kf_pcnt = Memory<uint>(device, 3ull*gruppen);
+void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per, const bool band_slot) {
+	// ★ FORK Kraft-Zerlegung: band_slot=true waehlt den kfb_*-Membersatz (z-Band-Teilliste), sonst
+	// laeuft alles wortgleich ueber den Hauptslot. kfb_zband setzt der Aufrufer (setup.cpp).
+	Memory<ulong>& liste_m = band_slot ? kfb_liste : kf_liste;
+	Memory<float>& psum_m  = band_slot ? kfb_psum  : kf_psum;
+	Memory<uint>&  pcnt_m  = band_slot ? kfb_pcnt  : kf_pcnt;
+	Kernel& kernel_m = band_slot ? kernel_kraft_facetten_band : kernel_kraft_facetten;
+	const ulong liste_n = (ulong)liste.size();
+	if(band_slot) { kfb_N = liste_n; kfb_marker = marker; kfb_zper = z_per; kfb_bound = true; } // eigene Schluessel (Pruefagent M)
+	else { kf_N = liste_n; kf_marker = marker; kf_zper = z_per; kf_bound = true; }
+	if(liste_n==0ull) return; // leere Liste: kraft_facetten_gpu liefert Nullen ohne Launch
+	liste_m = Memory<ulong>(device, liste_n); // Ctor-Nullinit + zweiter Voll-Write = ein verschenkter 16-MB-Transfer, EINMALIG beim Bind -- bewusst toleriert (Pruefagent N2)
+	for(ulong i=0ull; i<liste_n; i++) liste_m[i] = liste[i];
+	liste_m.write_to_device();
+	const ulong gruppen = (liste_n+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE; // = ceil(liste_n/64.0)
+	psum_m = Memory<float>(device, 3ull*gruppen);
+	pcnt_m = Memory<uint>(device, 3ull*gruppen);
 	// Im AUS-Arm (!facetten_on) existieren fac_idx/fac_tau_n/fac_geo NICHT (allocate bindet sie nur
 	// mit facetten_on, s.o.) -- 1-Element-Dummies anlegen, damit der Kernel gueltige Puffer bekommt.
 	// NUR wenn noch nie alloziert (length()==0): ein Move-Assignment auf einen bereits als Kernel-Arg
@@ -591,25 +609,28 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 		if(fac_tau_n.length()==0ull) { fac_tau_n = Memory<uint>(device, 1ull);  fac_tau_n[0]=0u;        fac_tau_n.write_to_device(); }
 		if(fac_geo.length()==0ull)   { fac_geo   = Memory<float>(device, 8ull); for(ulong q=0ull;q<8ull;q++) fac_geo[q]=0.0f; fac_geo.write_to_device(); }
 	}
-	kernel_kraft_facetten = Kernel(device, kf_N, "kraft_facetten_gpu", F, kf_liste, (uint)kf_N,
-		fac_idx, fac_tau_n, fac_geo, facetten_on?1u:0u, z_per?1u:0u, kf_psum, kf_pcnt);
+	kernel_m = Kernel(device, liste_n, "kraft_facetten_gpu", F, liste_m, (uint)liste_n,
+		fac_idx, fac_tau_n, fac_geo, facetten_on?1u:0u, z_per?1u:0u, psum_m, pcnt_m);
 }
-void LBM_Domain::kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar) {
+void LBM_Domain::kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar, const bool band_slot) {
 	px=py=pz=0.0; n_voll=n_proj=n_unklar=0ull;
-	if(kf_N==0ull) return; // keine Markerzellen: Nullen ohne Launch
+	const ulong liste_n = band_slot ? kfb_N : kf_N; // ★ FORK Kraft-Zerlegung: band_slot -> kfb_*-Satz
+	if(liste_n==0ull) return; // keine Markerzellen: Nullen ohne Launch
 	// ★ run() MIT finish, nicht enqueue_run(): kf_psum/kf_pcnt sind auf CPU/iGPU ZERO-COPY-Puffer
 	// (CL_MEM_USE_HOST_PTR) -- dort erzwingt der "blockierende" read_from_device KEINE Ausfuehrung
 	// der wartenden Kommandos, und der Kernel lief erst mit dem naechsten Queue-Flush. Gemessen als
 	// Ein-Aufruf-Versatz im PRUEF-Doppellauf (GPU-Werte = Host-Werte des VORHERIGEN Aufrufs, erster
 	// Aufruf Nullen). Die in-order-Queue stellt zugleich sicher, dass enqueue_update_force_field
 	// davor abgearbeitet ist.
-	kernel_kraft_facetten.run();
-	kf_psum.read_from_device();
-	kf_pcnt.read_from_device();
-	const ulong gruppen = (kf_N+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE;
+	Memory<float>& psum_m = band_slot ? kfb_psum : kf_psum;
+	Memory<uint>&  pcnt_m = band_slot ? kfb_pcnt : kf_pcnt;
+	(band_slot ? kernel_kraft_facetten_band : kernel_kraft_facetten).run();
+	psum_m.read_from_device();
+	pcnt_m.read_from_device();
+	const ulong gruppen = (liste_n+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE;
 	for(ulong g=0ull; g<gruppen; g++) { // double-Endsumme in FESTER Gruppenreihenfolge (deterministisch)
-		px += (double)kf_psum[3ull*g]; py += (double)kf_psum[3ull*g+1ull]; pz += (double)kf_psum[3ull*g+2ull];
-		n_voll += (ulong)kf_pcnt[3ull*g]; n_proj += (ulong)kf_pcnt[3ull*g+1ull]; n_unklar += (ulong)kf_pcnt[3ull*g+2ull];
+		px += (double)psum_m[3ull*g]; py += (double)psum_m[3ull*g+1ull]; pz += (double)psum_m[3ull*g+2ull];
+		n_voll += (ulong)pcnt_m[3ull*g]; n_proj += (ulong)pcnt_m[3ull*g+1ull]; n_unklar += (ulong)pcnt_m[3ull*g+2ull];
 	}
 }
 #endif // FORCE_FIELD
@@ -1869,6 +1890,14 @@ float3 LBM::object_center_of_mass(const uchar flag_marker) { // calculate center
 }
 float3 LBM::object_force(const uchar flag_marker) { // add up force for all cells flagged with flag_marker
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_object_force(flag_marker);
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
+	float3 object_force = float3(0.0f, 0.0f, 0.0f);
+	for(uint d=0u; d<get_D(); d++) object_force += float3(lbm_domain[d]->object_sum.x[0], lbm_domain[d]->object_sum.y[0], lbm_domain[d]->object_sum.z[0]);
+	return object_force;
+}
+float3 LBM::object_force_zband(const uchar flag_marker, const uint z_lo, const uint z_hi) { // FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): object_force auf das z-Band [z_lo,z_hi)
+	if(get_D()>1u) print_error("object_force_zband: coordinates() ist domaenenlokal -- nur D=1.");
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_object_force_zband(flag_marker, z_lo, z_hi);
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->finish_queue();
 	float3 object_force = float3(0.0f, 0.0f, 0.0f);
 	for(uint d=0u; d<get_D(); d++) object_force += float3(lbm_domain[d]->object_sum.x[0], lbm_domain[d]->object_sum.y[0], lbm_domain[d]->object_sum.z[0]);

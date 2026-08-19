@@ -873,3 +873,21 @@ identisch; K4 rel 3,5e-7 (Soll 1e-5); Kanal-K3 parallel: GPU wie Host exakt 0, A
 (fallseitig, vorbestehend -- kein Diff-Befund; langes Fenster steht als Klaerung aus).
 AUSSTEHEND (GPU-Leiter): iGPU-PRUEF, dann B70-Index-A/B (Heiko: Perf-Optimierungen IMMER mit
 dem Performance-Index vermessen) -- Soll: Kraefte-Phase ~37 % -> ~1 % im Messfenster, Index ~-10 %.
+
+## Kraft-Zerlegung CFD_KRAFT_ZBAND (Heiko 2026-08-21: unterste 4 Zellen ab z0 vs Rest)
+
+Diagnose-Kernel object_force_zband (Anker-Pfad unangetastet, Schalter aus = bitidentisch per
+Konstruktion, Hash-Beleg), kraft_zband.csv mit eingebautem Selbsttest Band+Rest=Gesamt (<5e-5,
+jetzt MIT Waechter-Warnung), Band-Census (z=0 beweisbar leer), Facetten-Druckpfad ueber
+z-gefilterte Zweitliste (Kernel unangetastet, Band+Rest vs Gesamt 1,4e-7), Kugel-Negativkontrolle
+exakt 0 N. Pruefagent: kein HOCH; kfb-Schluessel-Stolperdraht (geteilte marker/z_per-Schluessel)
++ 3 NIEDRIG direkt gefixt. Scope: Druckanteil (fac_tau ohne z -- Folgearbeit fac_geo[6]).
+Einsatz: naechstes Screening beziffert das Radkontakt-Restartefakt unter ABSTAND=2.
+
+## 4-mm-Neubasis, Lauf 1 (f4_anker_neu, facettenfrei, ABSTAND=2, NEAR_VOR=96, -3-Lage):
+
+Cd 0,946 / Cz -0,553 (SEM +-0,011), Sonde 0,608, Profil Mitte 1,047 (OF13-Soll 1,087 -- fast
+Deckung), Wirkpfad 539.300.500/55.773.396. KERNBEFUND: der sauber gemessene Cz ist bei 4 mm
+DEUTLICH NEGATIV (8 mm: +0,18) -- der Unterboden-Sog ist real und brauchte nur Aufloesung; die
+8-mm-Sprosse taugt fuer Cz-ABSOLUTWERTE nicht (Ordnung ja). Gegen OF13 (0,599/-1,301): +58 % Cd,
+43 % Abtrieb, facettenfrei und erstmals artefaktbereinigt.
