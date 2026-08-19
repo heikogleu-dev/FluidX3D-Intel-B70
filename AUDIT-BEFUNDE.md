@@ -1059,3 +1059,16 @@ D>=0,94); 8mm A+=26 nur -12..-17 % nu_t -> A+-Leiter {26,52,104} Pflicht; Kanal-
 braucht N=108 (N=38 ist inert, D>=0,94). VORSTUFE: Dachlinien-Abloesesonde (~80 Z., Muster
 unterboden_sonde, OF13-Soll Abloesung erst x/L 0,82) -- laeuft in jedem Arm mit.
 Baubeginn NACH P9-Abschluss (Heiko-Priorisierung).
+
+## P9c Schalen-Blend (Heiko-Idee) IMPLEMENTIERT, CPU-Abnahme gruen
+
+CFD_N2F_SCHALE=alpha (0=bitidentisch, Anker-Hash exakt): Kasten veh_c+3 Grobzellen, 45.401
+Schalenzellen (x- AUS per Heiko-Default, x+ abschaltbar), Blockmittel-Restriktion, Blend mit
+lokalem rho + XL-B8-Negation (TRAGEND, funktional bewiesen: Schalen-ux 0,9987 u_inf), Slot 22
+fern=45.401/nah=0, Waechter schale_waechter.csv (Plateau 0,06 u_inf, Kipp-Kriterium im Transienten
+geeicht: Streak zaehlt ab 0,2 u_inf), Kopplungs-Verify bitgenau, rho-Metrik: x- saettigt bei
++1,2e-3 (Blockage-Feedback, KEIN Leck -- Saekular-Trend statt Punktdifferenz ist die richtige
+Metrik). WICHTIG/EINGESTANDEN: die P9c-Quelltexte wurden von meinen Doku-Commits 42d86bb/eb7157a
+per git add -A MITGERISSEN (falsche Botschaften) -- Historie bleibt, dieser Eintrag ist die
+Klarstellung. LEHRE: kein add -A waehrend Implementierungsagenten im Baum arbeiten.
+AUSSTEHEND: Pruefagent, GPU-Leiter, 8mm-alpha-A/B gegen f8p_basis.
