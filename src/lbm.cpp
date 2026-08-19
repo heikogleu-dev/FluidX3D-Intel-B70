@@ -244,6 +244,8 @@ uint LBM_Domain::s_boden_eq_down = 0u;
 uint LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu;
 float LBM_Domain::s_boden_eq_u = 0.075f;
 uint LBM_Domain::s_boden_eq_abstand = 0u; // Heiko 2026-08-20: reifennahe Aussparung (Chebyshev-Abstand zu TYPE_S, Boden ausgenommen) // Setup kann eigenes u_lat durchreichen (XL-Audit B6)
+uint LBM_Domain::s_einlass_eq_n = 0u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spaltenzahl x=1..N hinter dem Einlass; 0 = aus
+float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Konvention wie s_boden_eq_u)
 uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
@@ -272,7 +274,7 @@ void LBM_Domain::allocate(Device& device) {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
 	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
-	// 21 Slots (Legende R3 nachgezogen, massgeblich ist lbm.hpp; [20] BODEN_EQ-Wirkpfad t%100): [0,1] RHO_CLAMP, [2] WFB-Wirkpfad
+	// 22 Slots (Legende R3 nachgezogen, massgeblich ist lbm.hpp; [21] EINLASS_EQ-Wirkpfad t%100; [20] BODEN_EQ-Wirkpfad t%100): [0,1] RHO_CLAMP, [2] WFB-Wirkpfad
 	// (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS-Wirkpfad (t%100),
 	// [7] Facetten-Wirkpfad (t%100), [8] Facetten-Klemmen (BEIDE, gegatet t%100 seit R3),
 	// [9] Facetten-Skips (gegatet t%100 seit R3), [10] reserviert, [11] ohne offenes Paar (t%100).
@@ -280,11 +282,13 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 21ull); // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 22ull); // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
 	boden_eq_n = s_boden_eq_n; boden_eq_u = s_boden_eq_u; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; boden_eq_abstand = s_boden_eq_abstand; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
+	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
+	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
 
 #ifdef FORCE_FIELD
 	// FORK -- F-BBox: die Box wurde bereits im Konstruktor aufgeloest (sie muss vor device_defines()
@@ -366,6 +370,7 @@ void LBM_Domain::allocate(Device& device) {
 		kernel_stream_collide.add_parameters(tile_slot);
 		kernel_update_fields.add_parameters(tile_slot);
 		kernel_boden_eq.add_parameters(tile_slot); // XL-Audit B1 (Pruefagent R2: NICHT unter FORCE_FIELD -- TS_P haengt nur an SPARSE_TILES)
+		kernel_einlass_eq.add_parameters(tile_slot); // EINLASS_EQ: dieselbe Lektion (TS_P haengt NUR an SPARSE_TILES)
 #ifdef FORCE_FIELD
 		kernel_update_force_field.add_parameters(tile_slot);
 #endif // FORCE_FIELD
@@ -498,6 +503,7 @@ void LBM_Domain::finalize_sparse_tiles() {
 	kernel_stream_collide.set_parameters(0u, fi);
 	kernel_update_fields.set_parameters(0u, fi);
 	kernel_boden_eq.set_parameters(0u, fi); // XL-Audit B2 (Pruefagent R2: NICHT unter FORCE_FIELD): ohne Rebind hielte boden_eq das cl_mem des FREIGEGEBENEN Platzhalters
+	kernel_einlass_eq.set_parameters(0u, fi); // EINLASS_EQ: dito (Sparse-Rebind AUSSERHALB von FORCE_FIELD)
 #ifdef FORCE_FIELD
 	kernel_update_force_field.set_parameters(0u, fi);
 #endif // FORCE_FIELD
@@ -515,6 +521,10 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;
 	kernel_boden_eq.set_parameters(2u, t, boden_eq_u, boden_eq_n, boden_eq_down, boden_eq_split, boden_eq_abstand).enqueue_run();
+}
+void LBM_Domain::enqueue_einlass_eq() { // ★ V1-Port apply_inlet_velocity: post-stream Einlass-Equilibrium x=1..nx; No-Op bei n==0
+	if(einlass_eq_n==0u) return;
+	kernel_einlass_eq.set_parameters(2u, t, einlass_eq_u, einlass_eq_n).enqueue_run();
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
@@ -1526,6 +1536,7 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_boden_eq(); // V1-Port (No-Op wenn aus)
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_einlass_eq(); // V1-Port apply_inlet_velocity (No-Op wenn aus; Ecken-Ueberlapp mit boden_eq unkritisch, s. Kernel-Kommentar)
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS

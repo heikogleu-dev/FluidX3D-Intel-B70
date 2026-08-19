@@ -2629,6 +2629,37 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	store_f(n, feq, fi, j, t TS_A);
 }
 )
+// ★ EINLASS_EQ (2026-08-21): V1-apply_inlet_velocity-PORT -- Freestream-Clamp der Spalten x=1..nx
+// HINTER dem TYPE_E-Einlass (x=0 bleibt TYPE_E): post-stream Equilibrium-Reset mit LOKALEM rho
+// (druckerhaltend), u=(u_road,0,0). Gegen die Einlass-Staggered-Streifen (einlass_saeule-Sonde).
+// TYPE_MS ist FLUID und wird BEHANDELT (MS-Guard-Lehre 2f705ba -- V1s pauschaler TYPE_BO-Guard
+// war ein Erbfehler). x-Test VOR dem flags-Load (Perf-Lehre boden_eq: sonst streamt jede Enqueue
+// das komplette flags-Feld fuer <1 % der Zellen). UEBERLAPP mit boden_eq in den Ecken (x=1..nx,
+// z=1..nz): beide schreiben dieselbe EQ-Form mit lokalem rho und u=(u_road,0,0) -- der zweite
+// Kernel liest das rho des ersten (EQ-Momente sind rho-erhaltend), Reihenfolge also egal.
+// Signatur in EINEM R()-Block (Klammerfalle, Werkzeugfalle Variante 2).
++R(// XL-B7-Latenz auch hier: coordinates() ist domaenenlokal -- bei D>1 mit x-Split klemmte jede
+// Domaene ihr LOKALES x=1..nx mitten im Feld (x ist die uebliche Split-Achse!); heute D=1 ueberall.
+// Sponge-Ueberlapp (x- gehoert zur Daempfungszone): harmlos -- einlass_eq verwirft post-stream
+// alles ausser rho, die Sponge-Wirkung im Band ist damit wirkungslos (Pruefagent N2).
+kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t, const float u_road, const uint nx, volatile global uint* diag TS_P) {
+	const uxx n = get_global_id(0);
+	if(n>=(uxx)def_N||is_halo(n)) return;
+)+"#ifdef SPARSE_TILES"+R(
+	if(is_dead_tile(n, tile_slot)) return; // XL-Audit B1 (wie boden_eq)
+)+"#endif"+R( // SPARSE_TILES
+	const uint3 xyz = coordinates(n);
+	if(nx==0u||xyz.x<1u||xyz.x>nx) return; // nur die Clamp-Schicht hinter dem Einlass; Test VOR dem flags-Load
+	const uchar bo = flags[n]&TYPE_BO;
+	if(bo==TYPE_S||bo==TYPE_E) return; // TYPE_MS wird BEHANDELT (s. o.)
+	if(t%100ul==0ul) atomic_inc(&diag[21]); // Wirkpfad-Nachweis IM Binary (Iron Rule 3)
+	uxx j[def_velocity_set]; neighbors(n, j);
+	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
+	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz); // LOKALES rho (Druck erhalten); post-stream-load = Paare vertauscht -> u waere NEGIERT (nur rho ist invariant und wird genutzt, XL-B8)
+	float feq[def_velocity_set]; calculate_f_eq(rho_local, u_road, 0.0f, 0.0f, feq);
+	store_f(n, feq, fi, j, t TS_A);
+}
+)
 +R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F // argument order is important

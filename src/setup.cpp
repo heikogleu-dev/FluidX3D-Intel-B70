@@ -731,7 +731,7 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
-	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")) print_warning("Die BODEN_EQ-Familie wird im kanal NICHT angewandt (parallele Waende)."); // B3/R3
+	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
 	  if(fc>0u) print_info(string("Facettenpfad: ")+(fc==1u?"Paartausch voll (Kontrollarm)":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll (Slip-Velocity-BB)":"iMEM NULLZIEL (tau=0)")); }
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
 	create_folder(out_dir);
@@ -1323,8 +1323,8 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_boden_eq_n>0u) print_info("BODEN_EQ Kugel aktiv: z=1.."+to_string(LBM_Domain::s_boden_eq_n)+" (V1-Port; OHNE V1-side_nz -- y/z-Waende unbehandelt, XL-B5-Notiz)."); // B3
 	  LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u);
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&LBM_Domain::s_boden_eq_n>0u) print_warning("CFD_BODEN_EQ_ABSTAND > 3: Scan-Kosten wachsen kubisch (XL-R2).");
-	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
-	  if(getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_FERN_BODEN_EQ")) print_warning("CFD_BODEN_EQ_DOWN/CFD_FERN_BODEN_EQ wirken an der Kugel NICHT (uniformes Band ohne Split; XL-R2).");
+	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_einlass_eq_n = 0u; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
+	  if(getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("CFD_BODEN_EQ_DOWN/CFD_FERN_BODEN_EQ/CFD_FERN_EINLASS_EQ wirken an der Kugel NICHT (uniformes Band ohne Split; XL-R2).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2).");
 	  if(LBM_Domain::s_boden_eq_n>0u&&getenv("CFD_KUGEL_MG")&&env_u("CFD_KUGEL_MG",1u)==0u) print_warning("BODEN_EQ mit CFD_KUGEL_MG=0: statischer Boden + u_road-Aufpraegung widersprechen sich (XL-3 B8).");
 	  if(fc>0u) print_info(string("Facettenpfad Kugel: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Impulsaustausch-Cd an behandelten Links kontaminiert, nur der projizierte Cd-Pfad zaehlt."); }
@@ -1724,9 +1724,9 @@ static void main_setup_fahrzeug() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
-	{ const char* bq_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN"}; for(const char* b : bq_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im Einzelgitter-Fahrzeugfall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ/ABSTAND auch kugel -- XL-R2/R3)."); }
+	{ const char* bq_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_EINLASS_EQ"}; for(const char* b : bq_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im Einzelgitter-Fahrzeugfall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ/ABSTAND auch kugel, CFD_FERN_EINLASS_EQ auch fernfeld -- XL-R2/R3)."); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=================== Fahrzeug MR2, Single-Domain ===================");
@@ -2173,7 +2173,7 @@ static void main_setup_fahrzeug_dd() {
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("dd: YWMIN-Default 0,2 schliesst 15-38 % der GENEIGTEN Flaechen (Scheiben!) still als K4 aus -- Slice-Agent 2026-08-20; CFD_FACETTEN_YWMIN=0.15 ist der deklarierte Messarm (Dachabloesung!).");
 	  if(fc==4u&&LBM_Domain::s_fac_apg!=0.0f) print_warning("Arm 4 (Nullziel) + APG: tw/[0]-Akkumulator und y+-Report tragen APG-Korrektur, Ziel bleibt 0 -- reine Diagnose-Kombination (Gross-Audit N17).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
-	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz 2026-08-20
+	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); LBM_Domain::s_einlass_eq_n = 0u; // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz; einlass_eq EXPLIZIT 0 fuers Feingitter (Pruefagent M1: Statik-Doktrin, nicht nur Initialisierer)
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&(LBM_Domain::s_boden_eq_n>0u||env_u("CFD_FERN_BODEN_EQ",0u)>0u)) print_warning("CFD_BODEN_EQ_ABSTAND > 3: der Scan kostet (2A+1)^2*(A+1) Flag-Reads je Bandzelle je Schritt -- stiller Perf-Fresser (XL-R2).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2) -- Kraefteverfaelschung waechst mit N.");
 	  LBM_Domain::s_boden_eq_down = env_u("CFD_BODEN_EQ_DOWN", 0u); // V1-x_split: ab Nase (Default 0 = unterm Wagen aus)
@@ -2202,7 +2202,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
 	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
@@ -2210,6 +2210,12 @@ static void main_setup_fahrzeug_dd() {
 	if(LBM_Domain::s_boden_eq_n==0u&&LBM_Domain::s_boden_eq_down>0u) print_warning("CFD_FERN_BODEN_EQ_DOWN ohne CFD_FERN_BODEN_EQ ist ein stiller No-Op (Guard haengt an N; XL-R3).");
 	LBM_Domain::s_boden_eq_split = (uint)fmax(0.0f, (veh_x0-far_x0)/dx_c);
 	if(LBM_Domain::s_boden_eq_n>0u) print_info("BODEN_EQ FERNFELD aktiv (V1-Port): z=1.."+to_string(LBM_Domain::s_boden_eq_n)+" post-stream auf u_road-Equilibrium.");
+	// ★ EINLASS_EQ (V1-Port apply_inlet_velocity): NUR FERNFELD -- deshalb hier ZWISCHEN lbm_f- und
+	// lbm_c-Konstruktion gesetzt (read-once: lbm_f fror oben die EXPLIZITE 0 ein, Pruefagent M1). Nah-x- ist
+	// Kopplungsebene und bleibt unberuehrt.
+	LBM_Domain::s_einlass_eq_n = env_u("CFD_FERN_EINLASS_EQ", 0u); LBM_Domain::s_einlass_eq_u = u_lat;
+	if(LBM_Domain::s_einlass_eq_n>3u) print_warning("CFD_FERN_EINLASS_EQ > 3 verletzt die V1-Vorgabe (V1: 3) -- die Clamp-Schicht frisst sich in die Domaene.");
+	if(LBM_Domain::s_einlass_eq_n>0u) print_info("EINLASS_EQ FERNFELD aktiv (V1-Port apply_inlet_velocity): x=1.."+to_string(LBM_Domain::s_einlass_eq_n)+" post-stream auf u_inf-Equilibrium (rho lokal), nur FERNFELD; Nah-x- ist Kopplungsebene und bleibt unberuehrt.");
 	LBM lbm_c(uint3(cNx, cNy, cNz), nu_lat_c, dev_coarse);
 
 	// ---------------------------------------------------------------- Voxelisieren, beide Gitter
@@ -2915,6 +2921,19 @@ static void main_setup_fahrzeug_dd() {
 		if(nx_mit>0ull) print_info("Unterboden-Sonde: u_x/u_inf Mittel "+to_string((float)(su_sum/(double)nx_mit),3u)
 			+", Minimum "+to_string((float)su_min,3u)+" ueber "+to_string(nx_mit)+" x-Spalten (Soll deutlich > 0; CSV: unterboden_sonde.csv)");
 		if(nx_mit>0ull&&su_sum/(double)nx_mit<0.1) print_warning("UNTERBODEN TOT (< 10 % u_inf im Mittel) -- Abtrieb kann so nicht entstehen (Cz-Blocker, arm-unabhaengig pruefen).");
+		{	// ★ Einlass-Saeule (Heiko 2026-08-21, Streifen-Verdacht): 20 cm hinter dem FAR-Einlass,
+			// y-Mitte, ALLE z -- Staggered-Beweis waere eine 2-Zellen-Oszillation in ux(z).
+			lbm_c.u.read_from_device();
+			const uint ex=(uint)(0.2f/dx_c+0.5f), ey=cNy/2u; std::ofstream ep(out_dir+"einlass_saeule.csv"); ep.precision(6);
+			ep << "# x = Einlass+" << 0.2f << " m (Zelle " << ex << ", dx_c " << dx_c*1000.0f << " mm), y-Mitte" << std::endl << "z_m,ux_rel,uy_rel,uz_rel" << std::endl;
+			double flips=0.0, dmax=0.0; float vor=0.0f, letzte_d=0.0f; bool hat_vor=false;
+			for(uint z=0u; z<cNz; z++) { const ulong n=(ulong)ex+((ulong)ey+(ulong)z*(ulong)cNy)*(ulong)cNx;
+				const float ux=lbm_c.u.x[n]/u_lat, uy=lbm_c.u.y[n]/u_lat, uz=lbm_c.u.z[n]/u_lat;
+				ep << (double)z*(double)dx_c << "," << ux << "," << uy << "," << uz << std::endl;
+				if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>1e-3f&&fabs(letzte_d)>1e-3f) flips+=1.0; letzte_d=d; } else letzte_d=0.0f;
+				vor=ux; hat_vor=true; }
+			print_info("Einlass-Saeule (x=+0,2 m, y-Mitte): Nachbar-Vorzeichenwechsel in dux/dz = "+to_string((float)flips,0u)+" von "+to_string(cNz-2u)+" moeglichen, max|dux| = "+to_string((float)dmax,4u)+" u_inf (2-Zellen-Oszillation = Staggered-Beweis). CSV: einlass_saeule.csv");
+		}
 		{	// ★ Boden-Laengsprofil (Heiko 2026-08-19, V1-Instrument): u_x in z=1..5 entlang x ueber den
 			// Mittelstreifen (y_mid +- 25 Zellen), INKLUSIVE Einlaufstrecke -- macht den beobachteten
 			// Einbruch direkt nach dem Einlass quantitativ (Verdacht: Fernfeld-Erbe, Spalt grob <2 Zellen).
@@ -2946,6 +2965,13 @@ static void main_setup_fahrzeug_dd() {
 		print_info("BODEN_EQ-Wirkpfad: Nahfeld "+to_string(bqf)+", Fernfeld "+to_string(bqc)+" Band-Resets (t%100-Stichprobe; ABSTAND-Aussparungen senken den Zaehler ehrlich).");
 		if(env_u("CFD_BODEN_EQ",0u)>0u&&bqf==0ull) print_error("CFD_BODEN_EQ gesetzt, aber Nahfeld-Wirkpfad NULL -- lautloser No-Op.");
 		if(env_u("CFD_FERN_BODEN_EQ",0u)>0u&&bqc==0ull) print_error("CFD_FERN_BODEN_EQ gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op.");
+	}
+	if(env_u("CFD_FERN_EINLASS_EQ",0u)>0u) { // ★ EINLASS_EQ-Wirkpfad-Nachweis (Muster BODEN_EQ, Slot 21)
+		lbm_f.lbm_domain[0]->rho_clamp_hits.read_from_device(); lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		const ulong eqf=(ulong)lbm_f.lbm_domain[0]->rho_clamp_hits[21], eqc=(ulong)lbm_c.lbm_domain[0]->rho_clamp_hits[21];
+		print_info("EINLASS_EQ-Wirkpfad: Fernfeld "+to_string(eqc)+" Spalten-Resets (t%100-Stichprobe), Nahfeld "+to_string(eqf)+" (Soll 0 -- Nah-x- ist Kopplungsebene).");
+		if(eqc==0ull) print_error("CFD_FERN_EINLASS_EQ gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op.");
+		if(eqf!=0ull) print_error("Nahfeld zaehlt EINLASS_EQ-Wirkpfad -- es MUSS unberuehrt bleiben (read-once-Bruch?).");
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];
@@ -3051,7 +3077,7 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) print_warning("CFD_FACETTEN_DIAG wird im fernfeld-Fall NICHT angewandt.");
@@ -3062,6 +3088,11 @@ static void main_setup_fernfeld() {
 	// ★ Nachpruefer-Befund 2026-08-09: die Obergrenze stand hier nur im Kommentar, geprueft wurde sie
 	// nur im dd-Fall. Damit lief CFD_SPONGE_N=400 im Diagnosefall ungeprueft durch.
 	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 ist nicht vorgesehen (im dd-Fall kaeme die Zone der Kopplungs-Entnahmeebene x- bei 152 Zellen zu nahe; der Diagnosefall bleibt vergleichbar).");
+	// ★ EINLASS_EQ (V1-Port apply_inlet_velocity): im Diagnosefall ist dies das EINZIGE Gitter --
+	// der Schalter wirkt hier direkt am TYPE_E-Einlass x- (derselbe Name wie im dd-Fall, dort nur Fernfeld).
+	LBM_Domain::s_einlass_eq_n = env_u("CFD_FERN_EINLASS_EQ", 0u); LBM_Domain::s_einlass_eq_u = u_lat;
+	if(LBM_Domain::s_einlass_eq_n>3u) print_warning("CFD_FERN_EINLASS_EQ > 3 verletzt die V1-Vorgabe (V1: 3) -- die Clamp-Schicht frisst sich in die Domaene.");
+	if(LBM_Domain::s_einlass_eq_n>0u) print_info("EINLASS_EQ aktiv (V1-Port apply_inlet_velocity): x=1.."+to_string(LBM_Domain::s_einlass_eq_n)+" post-stream auf u_inf-Equilibrium (rho lokal); x=0 bleibt TYPE_E.");
 	LBM lbm(uint3(Nx, Ny, Nz), nu_lat);
 	if(mit_fahrzeug) {
 		lbm.voxelize_mesh_on_device(veh, TYPE_S|TYPE_X); lbm.flags.read_from_device();
@@ -3144,7 +3175,25 @@ static void main_setup_fernfeld() {
 		}
 		if(!std::isfinite(sd) || sd>1.0) { print_error("Fernfeld allein ist auseinandergelaufen (Streuung "+to_string((float)sd,4u)+" von u_inf) bei t = "+to_string((float)t_si,4u)+" s."); }
 	}
+	{	// ★ Einlass-Saeule (Heiko 2026-08-21): 20 cm hinter dem Einlass, y-Mitte, alle z (wie dd-Fall)
+		lbm.u.read_from_device();
+		const uint ex=(uint)(0.2f/dx+0.5f), ey=Ny/2u; std::ofstream ep(out_dir+"einlass_saeule.csv"); ep.precision(6);
+		ep << "# x = Einlass+0.2 m (Zelle " << ex << ", dx " << dx*1000.0f << " mm), y-Mitte" << std::endl << "z_m,ux_rel,uy_rel,uz_rel" << std::endl;
+		double flips=0.0, dmax=0.0; float vor=0.0f, letzte_d=0.0f; bool hat_vor=false;
+		for(uint z=0u; z<Nz; z++) { const ulong n=(ulong)ex+((ulong)ey+(ulong)z*(ulong)Ny)*(ulong)Nx;
+			const float ux=lbm.u.x[n]/u_lat, uy=lbm.u.y[n]/u_lat, uz=lbm.u.z[n]/u_lat;
+			ep << (double)z*(double)dx << "," << ux << "," << uy << "," << uz << std::endl;
+			if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>1e-3f&&fabs(letzte_d)>1e-3f) flips+=1.0; letzte_d=d; }
+			vor=ux; hat_vor=true; }
+		print_info("Einlass-Saeule (x=+0,2 m, y-Mitte): Vorzeichenwechsel dux/dz = "+to_string((float)flips,0u)+" von "+to_string(Nz-2u)+", max|dux| = "+to_string((float)dmax,4u)+" u_inf. CSV: einlass_saeule.csv");
+	}
 	// Audit-Nacharbeit 7: auch der fernfeld-Diagnosefall meldet die Dichte-Klemme.
+	if(env_u("CFD_FERN_EINLASS_EQ",0u)>0u) { // ★ EINLASS_EQ-Wirkpfad-Nachweis (Iron Rule 3, Slot 21; Muster BODEN_EQ)
+		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
+		const ulong eq=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[21];
+		print_info("EINLASS_EQ-Wirkpfad: "+to_string(eq)+" Spalten-Resets (t%100-Stichprobe).");
+		if(eq==0ull) print_error("CFD_FERN_EINLASS_EQ gesetzt, aber Wirkpfad NULL -- lautloser No-Op.");
+	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Fernfeld-Diagnose", h); dichteklemme_fazit(h); }
 	print_info("CSV: "+out_dir+"rauschen.csv");
 	_exit(0);
@@ -3166,7 +3215,7 @@ static const FacPaar FAC_TAB[3][2][2] = {
 	{ {{9,16,10,15},{11,18,12,17}}, {{15,10,16,9},{17,12,18,11}} } // achse 2: nz>0 (Boden), nz<0 (Decke)
 };
 void main_setup_facetten_test() {
-	if(getenv("CFD_BODEN_EQ")||getenv("CFD_FERN_BODEN_EQ")) print_warning("Die BODEN_EQ-Familie wird in facetten_test NICHT angewandt (XL-R3).");
+	if(getenv("CFD_BODEN_EQ")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird in facetten_test NICHT angewandt (XL-R3).");
 	print_info("facetten_test: ALLE CFD_FACETTEN*/CFD_FAC_*-Env-Werte werden IGNORIERT (Arme hart verdrahtet); kein sichere_lauf, fester Ordner export/facetten_test (Gross-Audit-Ansage).");
 	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N/CFD_SPARSE_TILES/CFD_WANDFUNKTION sind im facetten_test WIRKUNGSLOS (B10).");
 	print_info("C1b T1: Paartabelle unabhaengig aus FZ_C herleiten und gegen die Kernel-Kopie pruefen.");
@@ -3239,7 +3288,7 @@ void main_setup_facetten_test() {
 	// WEIL die Felder bis dahin identisch waren.
 	std::vector<float> ua_x, ua_y, ua_z, ua1_x; std::vector<Facette> FF;
 	{ // Arm A: AUS
-		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_imem=false; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_apg=0.0f; LBM_Domain::s_boden_eq_n=0u; LBM_Domain::s_boden_eq_down=0u; LBM_Domain::s_boden_eq_split=0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=1.0f;
+		LBM_Domain::s_facetten=false; LBM_Domain::s_fac_imem=false; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_apg=0.0f; LBM_Domain::s_boden_eq_n=0u; LBM_Domain::s_boden_eq_down=0u; LBM_Domain::s_boden_eq_split=0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand=0u; LBM_Domain::s_einlass_eq_n=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=1.0f;
 		LBM a(Nx,Ny,Nz,nu_lat); init(a); a.run(1u,2u); a.u.read_from_device();
 		ua1_x.resize(3ull*a.get_N()); for(ulong n=0ull; n<a.get_N(); n++) { ua1_x[n]=a.u.x[n]; ua1_x[n+a.get_N()]=a.u.y[n]; ua1_x[n+2ull*a.get_N()]=a.u.z[n]; } // Nachpruefer: alle DREI Komponenten
 		a.run(1u,2u); a.u.read_from_device();
@@ -3248,7 +3297,7 @@ void main_setup_facetten_test() {
 	}
 	ulong diff_erlaubt=0ull, diff_verboten=0ull, gleich_erwartet=0ull;
 	{ // Arm B: FACETTEN=2 (reiner Tausch)
-		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=false; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_apg=0.0f; LBM_Domain::s_boden_eq_n=0u; LBM_Domain::s_boden_eq_down=0u; LBM_Domain::s_boden_eq_split=0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=0.0f;
+		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=false; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_apg=0.0f; LBM_Domain::s_boden_eq_n=0u; LBM_Domain::s_boden_eq_down=0u; LBM_Domain::s_boden_eq_split=0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand=0u; LBM_Domain::s_einlass_eq_n=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=0.0f;
 		LBM b(Nx,Ny,Nz,nu_lat); init(b);
 		const string t2_dir = get_exe_path()+"../export/facetten_test/"; create_folder(t2_dir);
 		FF = baue_facetten(b, Nx, Ny, Nz, TYPE_S, t2_dir, "T2-Treppe");
@@ -3363,7 +3412,7 @@ void main_setup_facetten_test() {
 	// volle Ziel -twe modifiziert sofort, und die 1-Schritt-Lokalisierung (Auflage 3) bleibt exakt.
 	{
 		ulong di_erlaubt=0ull, di_verboten=0ull, di_still=0ull;
-		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=true; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_apg=0.0f; LBM_Domain::s_boden_eq_n=0u; LBM_Domain::s_boden_eq_down=0u; LBM_Domain::s_boden_eq_split=0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=1.0f;
+		LBM_Domain::s_facetten=true; LBM_Domain::s_fac_imem=true; LBM_Domain::s_fac_ema=0.0f; LBM_Domain::s_fac_pema=0.0f; LBM_Domain::s_fac_satgate=false; LBM_Domain::s_fac_alpha=0u; LBM_Domain::s_fac_apg=0.0f; LBM_Domain::s_boden_eq_n=0u; LBM_Domain::s_boden_eq_down=0u; LBM_Domain::s_boden_eq_split=0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand=0u; LBM_Domain::s_einlass_eq_n=0u; LBM_Domain::s_fac_diagz=-1l; LBM_Domain::s_fac_tau=1.0f;
 		LBM d(Nx,Ny,Nz,nu_lat); init(d);
 		const string t2i_dir = get_exe_path()+"../export/facetten_test/t2imem/"; create_folder(t2i_dir); // Audit 2/3: nicht den T2-Treppen-Census ueberschreiben
 		std::vector<Facette> FD = baue_facetten(d, Nx, Ny, Nz, TYPE_S, t2i_dir, "T2-iMEM");

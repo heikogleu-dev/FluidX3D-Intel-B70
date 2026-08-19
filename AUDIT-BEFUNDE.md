@@ -891,3 +891,30 @@ Deckung), Wirkpfad 539.300.500/55.773.396. KERNBEFUND: der sauber gemessene Cz i
 DEUTLICH NEGATIV (8 mm: +0,18) -- der Unterboden-Sog ist real und brauchte nur Aufloesung; die
 8-mm-Sprosse taugt fuer Cz-ABSOLUTWERTE nicht (Ordnung ja). Gegen OF13 (0,599/-1,301): +58 % Cd,
 43 % Abtrieb, facettenfrei und erstmals artefaktbereinigt.
+
+## einlass_eq (V1-Port apply_inlet_velocity) + Einlass-Saeule + Index-Vermessung FAC_GPU
+
+Heiko sah Streifen hinter dem Far-Einlass; Untersuchung: lineare Instabilitaet des TYPE_E-EQ-
+Einlasses (lambda 4-6 Zellen, 0,5-1,5 % u_inf, sattigt/friert ein, ERBT bis zur Kopplungsebene) --
+NICHT der Boden-Staggered-Mode, aber dieselbe Therapieklasse. V1-Vorlage exakt gefunden
+(apply_inlet_velocity, x=1..3, EQ mit lokalem rho, war in V1 WIRKSAM). Einbau als einlass_eq:
+x=1..N nur FERNFELD (Nah-x- = Kopplungsebene tabu), Wirkpfad Slot 21 (22er-Puffer) mit Null-
+Fehler + Nahfeld-Negativkontrolle, MS-Guard-Lehre statt V1s TYPE_BO-Erbfehler. Pruefagent: kein
+HOCH, M1/M2 (lbm_f-Statik-Doktrin, FACETTEN.md) + N1/N2 direkt gefixt. Abnahme: Anker-Hash exakt,
+Suite 5/5, fernfeld N=2 Wirkpfad 1.701.700, dd-Sparse-Kombiproof gruen. HEIKO-ANSAGE: ungetestet
+auf Cd/Cz-Wirkung DIREKT in den Standard (N=2); Begleiter SPONGE_N=64 ebenfalls Standard.
+Einlass-Saeule (Heiko-Vorgabe: 20 cm hinter Einlass, y-Mitte, alle z) als Dauersonde in dd+fernfeld.
+INDEX-VERMESSUNG FAC_GPU (Heiko-Pflicht) auf B70: Kraftfenster-Anteil 35,8 % (alt) -> 1,3 % (neu),
+iGPU-PRUEF Zaehler exakt gleich, Abweichung 8,45e-6. Die von Heiko gespuerten Chunk-Pausen im
+f4_neustandard2 waren exakt diese Fenster (34,9 % live gemessen) -- ab jetzt Geschichte.
+
+## 4-mm-Facetten-A/B (f4_neustandard2 vs f4_anker_neu, neue Basis):
+
+Wandmodell: Cd 0,946 -> 0,839 (Druckschaetzer; -0,11), Cz -0,553 -> -0,581 (-0,03, ~2xSEM),
+Sonde 0,618. Diagnostik sauber: Wirkpfad 1.310.231.000 = Soll EXAKT, tau-Klemme 0, Dm -0,069,
+Rueckfallraten im s5-Rahmen (Rang2 24 %, SATGATE 15 %, BB-Rueckfall 2,4 %), y+ Median 39/q25 24,7
+(Viertel im Uebergangsbereich -> YWMIN-Feintuning bleibt offen). Gegen OF13 fehlen Cd 0,24 / Cz 0,72;
+Kandidaten: P8/P9-Fernfeld, Einlass-Fix (ab jetzt drin), Unterboden-Abloesung, y+-Feintuning.
+
+NEUE STANDARDKONFIGURATION (ab s6e): -3-Lage + NEAR_VOR=96 + BODEN_EQ=2/DOWN=1 nah+fern +
+ABSTAND=2 + FERN_EINLASS_EQ=2 + SPONGE_N=64 + KRAFT_ZBAND=4 (Diagnose) + FAC_GPU (Default).

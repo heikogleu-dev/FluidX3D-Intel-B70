@@ -48,6 +48,7 @@ private:
 	Kernel kernel_stream_collide; // main LBM kernel
 	Kernel kernel_update_fields;
 	Kernel kernel_boden_eq; // V1-apply_floor_velocity-Port; schreibt NUR fi -- rho/u der Bandzellen zeigen bis zum naechsten update_fields den VOR-Reset-Stand (Sonden/Slices/Kopplungs-Extraktion lesen pre-Reset; XL-3)
+	Kernel kernel_einlass_eq; // V1-apply_inlet_velocity-Port; wie boden_eq: schreibt NUR fi, Sonden lesen pre-Reset
 	Memory<fpxx> fi; // LBM density distribution functions (DDFs); only exist in device memory
 	ulong t_last_update_fields = max_ulong; // optimization to not call kernel_update_fields multiple times if (rho, u, T) are already up-to-date
 	// FORK -- Block-Tiling (sparse solid): fi nur fuer aktive Tiles allozieren. VRAM-gegen-Tempo-Regler,
@@ -157,7 +158,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 21 Slots ([20] BODEN_EQ-Wirkpfad (t%100); 3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme unten 0 ODER oben 2*tw (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme (t%100), [4] u_t~0-Skips (t%100), [5] Ein-Zellen-Spalt (t%100; alle drei seit Gross-Audit gegen uint-Wickel gegatet), [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
+	Memory<uint> rho_clamp_hits; // 22 Slots ([21] EINLASS_EQ-Wirkpfad (t%100); [20] BODEN_EQ-Wirkpfad (t%100); 3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme unten 0 ODER oben 2*tw (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme (t%100), [4] u_t~0-Skips (t%100), [5] Ein-Zellen-Spalt (t%100; alle drei seit Gross-Audit gegen uint-Wickel gegatet), [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -167,12 +168,14 @@ public:
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
 	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; static float s_boden_eq_u; static uint s_boden_eq_abstand; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
+	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_fac_alpha; // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)
 	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
 	uint boden_eq_n = 0u; float boden_eq_u = 0.0f; uint boden_eq_down = 0u, boden_eq_split = 0xFFFFFFFFu, boden_eq_abstand = 0u; // Konstruktionszeit-Kopien (BODEN_EQ)
+	uint einlass_eq_n = 0u; float einlass_eq_u = 0.0f; // Konstruktionszeit-Kopien (EINLASS_EQ)
 	long fac_diagz_wert = -1l; // Konstruktionszeit-Kopie von s_fac_diagz (Gross-Audit: Spaet-Lese-Pfad geschlossen)
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
@@ -240,6 +243,7 @@ public:
 	void enqueue_stream_collide(); // call kernel_stream_collide to perform one LBM time step
 	void enqueue_update_fields(); // update fields (rho, u, T) manually
 	void enqueue_boden_eq(); // V1-apply_floor_velocity-Port
+	void enqueue_einlass_eq(); // V1-apply_inlet_velocity-Port
 	void enqueue_apply_pressure_outlet(); // FORK: Druck-Auslass, No-op ohne konfigurierte Flaechen
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out); // FORK: TYPE_E-Zellen der Aussenflaechen sammeln und Kernel bauen
 #ifdef SURFACE
