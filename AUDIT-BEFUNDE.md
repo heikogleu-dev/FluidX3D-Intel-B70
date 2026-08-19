@@ -1072,3 +1072,13 @@ Metrik). WICHTIG/EINGESTANDEN: die P9c-Quelltexte wurden von meinen Doku-Commits
 per git add -A MITGERISSEN (falsche Botschaften) -- Historie bleibt, dieser Eintrag ist die
 Klarstellung. LEHRE: kein add -A waehrend Implementierungsagenten im Baum arbeiten.
 AUSSTEHEND: Pruefagent, GPU-Leiter, 8mm-alpha-A/B gegen f8p_basis.
+
+## P9c-A/B (f8p_schale05, alpha=0,5): ERSTER ARM, DER DIE KAROSSERIE BEWEGT
+
+Cz_druck +0,057 -> -0,030 (dCz -0,087); Zerlegung: KAROSSERIE-Rest -0,519 -> -0,610 (dCz_rest
+-0,091!), Kontaktband unveraendert (0,580), Cd unveraendert (1,673), Waechter faellt (0,047),
+Sonde stabil, x--Interface +12 Pa (Blockage-Feedback). Heikos Schalen-Blend wirkt genau am
+Ziel. HEIKO-SLICE-BEFUNDE: (1) uniforme alpha=0,5-Schale zeichnet sichtbares Kopplungsartefakt
+in Far -> Gradient-Variante (innen alpha=1, zum Rand auf 0 geblendet) = Heikos urspruengliche
+Idee, Planungsagent laeuft; (2) NEAR-Inlet weiterhin Schlieren trotz sauberem Far-Inlet ->
+Quellendiagnose laeuft (Hypothesen: Streifen-Nachwachsen bis zur Entnahmeebene / Lift-Artefakt).
