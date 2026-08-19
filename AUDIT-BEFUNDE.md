@@ -980,3 +980,16 @@ Pruefagent: kein HOCH; M1 = die PLAUSIBILITAETS-ANKER des Implementierungsberich
 Protokoll hiermit berichtigt; M2 = z=0-Fahrbahnzeile maskierte rho_min der x-/y-Ebenen (gefixt:
 erste b-Zeile uebersprungen, z+ ausgenommen); N1-Aktennotiz (fmin/fmax maskieren NaN still),
 N2 gefixt (ipcsv im Abbruchpfad). Anker-Hash nach Fixes erneut exakt.
+
+## P8 Far-Facetten (CFD_FERN_FACETTEN=0..4) eingebaut und geprueft
+
+Facettenpfad jetzt auch fuers Fernfeld-Gitter (Statik-Fenster zwischen lbm_f/lbm_c, Muster
+FERN_BODEN_EQ; baue_facetten ist gitterunabhaengig, y_w skaliert mit dx_c; CSVs nach fern/;
+Wirkpfad-Report + invertierte Negativ-Kontrolle; Fx_far-Phantom-Etiketten). CPU-Abnahme:
+Bitidentitaet bei 0 (Anker-Hash exakt), FERN=4-Kurzlauf Wirkpfad 45.066 = Soll exakt, Nahfeld
+beweisbar unbeeinflusst (4.120.669 = Soll). 47 % der Fernfeld-Facetten fallen am 32-mm-
+Treppenkoerper auf BB zurueck (erwartbar grob). Pruefagent: H1 = Soll-Formel uebersah den
+Vorlauf-Schritt des Grobgitters (n_outer+1 Schritte!) -- falscher exit(1) bei rundem n_outer,
+gefixt auf floor(n_outer/100)+1; M1/N1/N2 (Ansagen) gefixt, N3 (Doppel-CSV bei DIAG+P8,
+deterministisch identisch) toleriert-dokumentiert. Statik-Leck-Frage NEGATIV (Z.2210 nullt
+alle 9 vor dem P8-Block). Anker-Hash nach Fixes erneut exakt.
