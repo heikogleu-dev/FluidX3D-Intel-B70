@@ -956,3 +956,14 @@ MATRIX-AUSSAGE: der komplette Produktionspunkt (alle 7 Achsen gleichzeitig) ist 
 NIEDRIG (UNGETESTET-Etikett einlass_eq) gefixt; relb-1e-12-Aktennotiz dokumentiert.
 Severity-Verlauf: R1 kein HOCH (2 MITTEL) -> R2 nur 1 NIEDRIG-Etikett. 4-MM-PRODUKTION
 WARTET AUF HEIKO-GO.
+
+## YWMIN-Einzelarm 8mm (f8v_ywmin15): DURCHGEFALLEN fuer den Standard
+
+YWMIN 0,15 vs 0,2 am vollen Standard: Cd_druck 1,680->1,880 (+0,20, falsche Richtung),
+Cz_druck +0,062->-0,003, aber Zerlegung: Karosserie-Rest nur -0,519->-0,528 (-0,01), der Rest
+des Cz-Gewinns liegt im artefaktlastigen Kontaktband (+0,581->+0,525). y+ q25 bei 8mm ohnehin
+39,8 (>30) -- der Uebergangsbereich (q25 24,7) ist eine 4mm-Eigenschaft, YWMIN final nur dort
+entscheidbar. VERDIKT: nicht in den Standard; zurueckgestellt bis zur naechsten 4mm-Kampagne.
+P8/P9-Plan liegt vor (Planungsagent 21.08.): Instrument -> P8 Far-Facetten -> P9a V1-Port
+(x+-Ebene) -> P9b u-only-Volumen-Nudging; Schritt 0 (Interface-Druck + Verdraengungs-Census)
+in Umsetzung.
