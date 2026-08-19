@@ -630,7 +630,7 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		D->kraft_facetten_gpu(gpx, gpy, gpz, gv, gq, gu);
 		K.px=gpx; K.py=gpy; K.pz=gpz; K.n_voll=gv; K.n_proj=gq; K.n_unklar=gu;
 		if(pruef) {
-			auto rel=[](const double a, const double b){ return b!=0.0?fabs(a/b-1.0):(a!=0.0?1.0:0.0); };
+			auto rel=[](const double a, const double b){ const double s=fmax(fabs(a),fabs(b)); return s>1e-12?fabs(a-b)/s:0.0; }; // R1-N3: symmetrisch wie relb -- sonst Scheinalarm 1,0 bei py~0
 			const double rmax = fmax(rel(K.px,KH.px), fmax(rel(K.py,KH.py), rel(K.pz,KH.pz)));
 			print_info("FAC_GPU-PRUEF: max. Relativabweichung px/py/pz = "+to_string((float)rmax,9u)
 				+" (px GPU "+to_string((float)K.px,6u)+" / Host "+to_string((float)KH.px,6u)
@@ -1477,7 +1477,7 @@ void main_setup_kugel() {
 			const float3 Fb = lbm.object_force_zband((uchar)(TYPE_S|TYPE_X), 0u, zb);
 			const float3 Fr = lbm.object_force_zband((uchar)(TYPE_S|TYPE_X), zb, Nz);
 			const double skala = fmax(fmax(fabs((double)F_lat.x), fabs((double)F_lat.z)), 1e-30); // Fz-Nulldurchgang: absolute Toleranz gegen max(|Fx|,|Fz|)
-			zb_selftest_max = fmax(zb_selftest_max, fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F_lat.x), fabs(((double)Fb.z+(double)Fr.z)-(double)F_lat.z))/skala);
+			zb_selftest_max = fmax(zb_selftest_max, fmax(fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F_lat.x), fabs(((double)Fb.y+(double)Fr.y)-(double)F_lat.y)), fabs(((double)Fb.z+(double)Fr.z)-(double)F_lat.z))/skala); // R1-N2
 			zb_fx_band+=(double)units.si_F(Fb.x); zb_fz_band+=(double)units.si_F(Fb.z);
 			zb_fx_rest+=(double)units.si_F(Fr.x); zb_fz_rest+=(double)units.si_F(Fr.z); zb_nn++;
 		}
@@ -2733,7 +2733,7 @@ static void main_setup_fahrzeug_dd() {
 				// Selbsttest je Komponente gegen das vorhandene F; Skala = max(|Fx|,|Fz|), damit der
 				// Fz-Nulldurchgang nicht als Scheinfehler explodiert (absolute Toleranz dort).
 				const double skala = fmax(fmax(fabs((double)F.x), fabs((double)F.z)), 1e-30);
-				zb_rel = fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F.x), fabs(((double)Fb.z+(double)Fr.z)-(double)F.z))/skala;
+				zb_rel = fmax(fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F.x), fabs(((double)Fb.y+(double)Fr.y)-(double)F.y)), fabs(((double)Fb.z+(double)Fr.z)-(double)F.z))/skala; // R1-N2: Fy mitgeprueft
 			}
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
 			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);

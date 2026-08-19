@@ -888,7 +888,7 @@ Einsatz: naechstes Screening beziffert das Radkontakt-Restartefakt unter ABSTAND
 
 Cd 0,946 / Cz -0,553 (SEM +-0,011), Sonde 0,608, Profil Mitte 1,047 (OF13-Soll 1,087 -- fast
 Deckung), Wirkpfad 539.300.500/55.773.396. KERNBEFUND: der sauber gemessene Cz ist bei 4 mm
-DEUTLICH NEGATIV (8 mm: +0,18) -- der Unterboden-Sog ist real und brauchte nur Aufloesung; die
+DEUTLICH NEGATIV (8 mm konfigurationsgleich f8_nearvor96_abst2: +0,14; R1-N3-Praezisierung) -- der Unterboden-Sog ist real und brauchte nur Aufloesung; die
 8-mm-Sprosse taugt fuer Cz-ABSOLUTWERTE nicht (Ordnung ja). Gegen OF13 (0,599/-1,301): +58 % Cd,
 43 % Abtrieb, facettenfrei und erstmals artefaktbereinigt.
 
@@ -910,7 +910,7 @@ f4_neustandard2 waren exakt diese Fenster (34,9 % live gemessen) -- ab jetzt Ges
 
 ## 4-mm-Facetten-A/B (f4_neustandard2 vs f4_anker_neu, neue Basis):
 
-Wandmodell: Cd 0,946 -> 0,839 (Druckschaetzer; -0,11), Cz -0,553 -> -0,581 (-0,03, ~2xSEM),
+Wandmodell: Cd 0,946 -> 0,839 (-0,11), Cz -0,553 -> -0,581 (-0,03, ~2xSEM) -- BEIDE Vergleiche schaetzerverschieden (Anker object_force vs Facetten-DRUCKschaetzer, R1-N2-Etikett; Armdifferenz ist die belastbare Aussage),
 Sonde 0,618. Diagnostik sauber: Wirkpfad 1.310.231.000 = Soll EXAKT, tau-Klemme 0, Dm -0,069,
 Rueckfallraten im s5-Rahmen (Rang2 24 %, SATGATE 15 %, BB-Rueckfall 2,4 %), y+ Median 39/q25 24,7
 (Viertel im Uebergangsbereich -> YWMIN-Feintuning bleibt offen). Gegen OF13 fehlen Cd 0,24 / Cz 0,72;
@@ -931,3 +931,16 @@ Cz +0,610, Karosserie-Rest Cd 0,522/Cz -0,467 -- das Radkontakt-Band maskiert de
 Abtrieb; Cz_rest = ehrlichere Karosserie-Metrik; 4mm-Vergleich (Band dann 16mm) wird Artefakt
 von Radlast trennen. Einlass-Wirkpfad 8.246.700 Spalten-Resets. PRODUKTION WARTET AUF HEIKO-GO
 nach Abschluss der Audit-Schleife.
+
+## Audit-Schleife R1 (2026-08-21 nachmittags): Code- + Doku-Pruefer, alle Befunde direkt gefixt
+
+Code: KEIN HOCH; M1 = Erst-Kombination Facetten-Arm x voller Standard lief auf keiner Sprosse ->
+geschlossen mit f8v_standard_fac (8mm, s6h). N2 (Fy im ZBAND-Selbsttest), N3 (relb im Haupt-PRUEF),
+N4 (2^32-Listen-Guard) gefixt; N1 (barrier-GLOBAL-Quirk = Upstream-Kopie-Treue) und N5 (FAC_GPU-
+Druckwerte ~1e-5 vs alte Host-Logs; CFD_FAC_GPU=0 fuer exakte Reproduktion) als Aktennotiz.
+Doku: KEIN HOCH; alle Protokollzahlen EXAKT reproduziert (Log+CSV unabhaengig). M1-M4 (ABSTAND-
+Status, Kontaminations-Etiketten, 3 fehlende Tabellenzeilen, Sponge-Skalierung) + N2/N3 gefixt.
+N1: f4_anker_v2/f4_neustandard3 (Serie s6e) wurden 11:04 gestartet und auf Heiko-Anweisung nach
+~3 min GESTOPPT (8mm-Validierung zuerst) -- export/f4_anker_v2 enthaelt nur einen PARTIELLEN
+Abbruch-Export (ABGEBROCHEN-Marker gesetzt), f4_neustandard3 lief nie. N4: Abnahme-Konsolen
+kuenftig nach logs/abnahmen_* sichern (heutige aus dem Scratchpad nachkopiert).

@@ -601,6 +601,7 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 	Memory<uint>&  pcnt_m  = band_slot ? kfb_pcnt  : kf_pcnt;
 	Kernel& kernel_m = band_slot ? kernel_kraft_facetten_band : kernel_kraft_facetten;
 	const ulong liste_n = (ulong)liste.size();
+	if(liste_n>0xFFFFFFFFull) print_error("kraft_facetten-Liste ueberschreitet 2^32 Zellen -- uint-Cast im Kernel-Argument wuerde stumm abschneiden (R1-N4)."); // praktisch unerreichbar, aber billig
 	if(band_slot) { kfb_N = liste_n; kfb_marker = marker; kfb_zper = z_per; kfb_bound = true; } // eigene Schluessel (Pruefagent M)
 	else { kf_N = liste_n; kf_marker = marker; kf_zper = z_per; kf_bound = true; }
 	if(liste_n==0ull) return; // leere Liste: kraft_facetten_gpu liefert Nullen ohne Launch
