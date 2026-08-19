@@ -944,3 +944,15 @@ N1: f4_anker_v2/f4_neustandard3 (Serie s6e) wurden 11:04 gestartet und auf Heiko
 ~3 min GESTOPPT (8mm-Validierung zuerst) -- export/f4_anker_v2 enthaelt nur einen PARTIELLEN
 Abbruch-Export (ABGEBROCHEN-Marker gesetzt), f4_neustandard3 lief nie. N4: Abnahme-Konsolen
 kuenftig nach logs/abnahmen_* sichern (heutige aus dem Scratchpad nachkopiert).
+
+## Audit-Schleife R2: R1-Fixes verifiziert, M1-Schliessung bestaetigt -- SCHLEIFE GESCHLOSSEN
+
+Alle drei Code-Fixes korrekt (Fy-Selbsttest mit bewusst strenger Skala, relb nie schlechter als
+alt, 2^32-Guard vor dem Cast); alle Doku-Fixes zahlenbelegt gegengeprueft. M1-Schliessung
+f8v_standard_fac unabhaengig bestaetigt: Facetten-Wirkpfad 147.166.750 = Soll EXAKT, Slot 21
+Fernfeld 8.246.700/Nahfeld 0, ZBAND-Selbsttest 1,0e-5, Kraefte-Phase 1,1-1,3 % (FAC_GPU).
+MATRIX-AUSSAGE: der komplette Produktionspunkt (alle 7 Achsen gleichzeitig) ist auf der
+8mm-Sprosse gelaufen -- KEINE Pfadkombination laeuft zuerst in Produktion. Verbleibender
+NIEDRIG (UNGETESTET-Etikett einlass_eq) gefixt; relb-1e-12-Aktennotiz dokumentiert.
+Severity-Verlauf: R1 kein HOCH (2 MITTEL) -> R2 nur 1 NIEDRIG-Etikett. 4-MM-PRODUKTION
+WARTET AUF HEIKO-GO.
