@@ -993,3 +993,13 @@ Vorlauf-Schritt des Grobgitters (n_outer+1 Schritte!) -- falscher exit(1) bei ru
 gefixt auf floor(n_outer/100)+1; M1/N1/N2 (Ansagen) gefixt, N3 (Doppel-CSV bei DIAG+P8,
 deterministisch identisch) toleriert-dokumentiert. Statik-Leck-Frage NEGATIV (Z.2210 nullt
 alle 9 vor dem P8-Block). Anker-Hash nach Fixes erneut exakt.
+
+## P8-A/B (f8p_fern4 vs f8p_basis, 8mm): FERN_FACETTEN=4 WIRKUNGSLOS -- ehrlich gemessen
+
+Wirkpfad 1.419.579 = Soll exakt (Mechanik lief), aber: x--Interface-Druck 145,2 vs 145,7 Pa,
+Cd_druck 1,684 vs 1,672, Cz_druck +0,046 vs +0,057, Rest -0,534 vs -0,519 -- alles im Rauschen.
+ERKLAERUNG: ein Wandmodell macht den Treppenkoerper nicht schlanker; die +15,5 % Fehl-Verdraengung
+(und der bewusst kurze Einlauf) dominieren die Aufstauung, nicht BB-vs-iMEM. Dazu 47 % BB-
+Rueckfall am 32-mm-Koerper. VERDIKT: P8 bleibt als gemessen-neutraler Messarm (Default 0);
+der druckkonsistente Hebel ist P9c (Heiko-Schalen-Blend, in Umsetzung: x- default AUS,
+rho-Drift-Metrik in der Abnahme, Masse per lokalem rho konstruktiv erhalten).
