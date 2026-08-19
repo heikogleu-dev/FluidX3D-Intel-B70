@@ -1044,3 +1044,18 @@ Bernoulli-Budget funktionierender Diffusor+Induktion: -0,7..-1,0 Cz = exakt die 
 Messarme dokumentiert+GEPARKT: DOWN-Fenster ab Kick (Diagnose), ABSTAND=3-Bound.
 HEIKO-PRIORISIERUNG 2026-08-21: Grenzschicht-Offensive HINTER P9 angestellt; van-Driest-
 Tiefenrecherche (laeuft) wird dokumentiert und wartet.
+
+## van-Driest-Tiefenrecherche (Heiko-Auftrag) ABGESCHLOSSEN -- baufertig GEPARKT hinter P9
+
+Einbau chirurgisch: smag_cc (kernel.cpp:2294, 0.76421222 = 18*sqrt(2)*(C*Delta)^2) multiplikativ
+mit D=(1-exp(-y+/A+))^2; y+ = Y/up faellt im iMEM-Pfad als EINE Division ab (utau existiert dort,
+Z.1782). Schalter CFD_SGS_VANDRIEST=A+ (0=bitidentisch, nichts emittiert), CFD_SGS_VD_MIN als
+D-Floor (Abwaertsspiralen-Sicherung; stetig+selbstlimitierend = strukturell anders als der
+SGS_WANDFREI-Stufenkollaps), optional CFD_SGS_WANDDAEMPF fuer Facetten-LOECHER (YWMIN-Streifen).
+Slot 23 (Puffer 24), Emissions-Gating, 6 Setzstellen. WALE geparkt (braucht Rotationsanteil =
+Nachbar-FD-Schreibwettlauf unter UPDATE_FIELDS). Literatur: ProLB-Klasse faehrt exakt diese
+Kombination (Musker/WF + van-Driest-Smagorinsky). EHRLICHE PROGNOSE: Lage-1-Effekt (Lage 2 y+~100,
+D>=0,94); 8mm A+=26 nur -12..-17 % nu_t -> A+-Leiter {26,52,104} Pflicht; Kanal-Diskriminator
+braucht N=108 (N=38 ist inert, D>=0,94). VORSTUFE: Dachlinien-Abloesesonde (~80 Z., Muster
+unterboden_sonde, OF13-Soll Abloesung erst x/L 0,82) -- laeuft in jedem Arm mit.
+Baubeginn NACH P9-Abschluss (Heiko-Priorisierung).

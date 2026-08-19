@@ -2983,8 +2983,15 @@ static void main_setup_fahrzeug_dd() {
 				}
 				string kipp = "";
 				if(t_si>=(double)t_warmup&&sw_rms>0.5*(double)u_lat) kipp = "RMS > 0,5*u_inf nach Warmup";
-				sw_steigend = (sw_rms_prev>=0.0&&sw_rms>sw_rms_prev) ? sw_steigend+1u : 0u; sw_rms_prev = sw_rms;
-				if(kipp==""&&sw_steigend>=10u) kipp = "RMS ueber 10 Samples monoton steigend";
+				// ★ Monotonie-Klausel GEEICHT am ersten Abnahmelauf (2026-08-19): ungefloort kippte sie
+				// bei RMS = 0,063 u_inf (t = 0,00496 s) -- das war der normale ANFAHRTRANSIENT (die
+				// Near-Far-Diskrepanz waechst, solange sich die Umstroemung des Treppenkoerpers aufbaut;
+				// Zuwachs 1-3 % je Sample, kein exponentielles Wachstum), keine Divergenz. Die Klausel
+				// ist der FRUEHWARN-Detektor der Rueckkopplungsschleife und zaehlt deshalb erst im
+				// Eskalationsband RMS >= 0,2*u_inf (unterhalb: Streak-Reset); die harte 0,5-Schwelle
+				// oben bleibt unveraendert.
+				sw_steigend = (sw_rms_prev>=0.0&&sw_rms>sw_rms_prev&&sw_rms>=0.2*(double)u_lat) ? sw_steigend+1u : 0u; sw_rms_prev = sw_rms;
+				if(kipp==""&&sw_steigend>=10u) kipp = "RMS ueber 10 Samples monoton steigend (im Band >= 0,2*u_inf)";
 				if(kipp!="") {
 					swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close(); // Abbruchpfad symmetrisch (R-N2-Muster)
 					print_error("N2F-Schale GEKIPPT bei t = "+to_string((float)t_si,5u)+" s: "+kipp+" (RMS = "+to_string((float)sw_rms,6u)+" lat = "+to_string((float)(sw_rms/(double)u_lat),3u)+" u_inf). Die CSV bis hierher steht in "+out_dir+"schale_waechter.csv.");
