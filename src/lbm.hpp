@@ -144,6 +144,21 @@ public:
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
 	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny); // C1b: Puffer bauen + binden
 
+	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Nur belegt, wenn alloc_schale()
+	// gerufen wurde (CFD_N2F_SCHALE>0) -- sonst bleibt alles unangetastet (Default bitidentisch).
+	// Die Liste traegt DIREKT Zellindizes (fein: Deckungspunkte, grob: Schalenzellen); schale_unear
+	// ist der Blend-EINGANG (Host-Upload vom Nahfeld-Blockmittel), schale_uout der Extract-AUSGANG
+	// (Nahfeld: Blockmittel; Fernfeld: Waechter-Punktwerte). Getrennte Puffer, damit der Waechter-
+	// Extract auf dem Fernfeld das hochgeladene unear nicht ueberschreibt.
+	Memory<ulong> schale_liste;
+	Memory<float> schale_unear, schale_uout; // je 3 float pro Schalenzelle (ux,uy,uz)
+	Kernel kernel_schale_extract, kernel_schale_blend;
+	uint schale_n = 0u;          // 0 = nicht alloziert = alle Schale-Aufrufe No-Op
+	float schale_alpha = 0.0f;   // Konstruktionszeit-Kopie von s_schale_alpha (read-once wie EINLASS_EQ)
+	static float s_schale_alpha; // CFD_N2F_SCHALE: Blendfaktor u_neu=(1-a)*u_far+a*u_near; 0 = aus. Setup setzt lbm_f EXPLIZIT 0 (Blend laeuft NUR im Fernfeld).
+	void alloc_schale(const std::vector<ulong>& liste, const uint ratio); // Muster alloc_coupling_planes: echte Puffer, Kernel mit echten Puffern; NACH finalize_sparse_tiles rufen (fi-Bindung!)
+	void enqueue_schale_blend(); // post-stream Blend; No-Op bei schale_n==0 ODER schale_alpha==0
+
 	// ★★ Daempfungszone -- PRO DOMAENE, und das ist keine Kosmetik. Vorpruefung 2026-08-09:
 	// die Zone wurde aus device_defines() direkt per getenv gelesen und traf damit JEDE LBM-Instanz.
 	// Im Doppel-Domaenen-Fall waere sie im NAHFELD gelandet, wo zwischen Einlassflaeche und
@@ -158,7 +173,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 22 Slots ([21] EINLASS_EQ-Wirkpfad (t%100); [20] BODEN_EQ-Wirkpfad (t%100); 3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme unten 0 ODER oben 2*tw (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme (t%100), [4] u_t~0-Skips (t%100), [5] Ein-Zellen-Spalt (t%100; alle drei seit Gross-Audit gegen uint-Wickel gegatet), [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
+	Memory<uint> rho_clamp_hits; // 23 Slots ([22] N2F-SCHALE-Blend-Wirkpfad (t%100, P9c); [21] EINLASS_EQ-Wirkpfad (t%100); [20] BODEN_EQ-Wirkpfad (t%100); 3x3-Iteration: [14] gekoppelter Rang-2, [15] gekoppelt Rang 0 -> BB, [16] s_n-Klemme/Gate-Rueckfall (t%100), [17] PEMA-utb-Fallback (t%100), [18] alpha>u_t (nur ALPHA-Arm, t%100), [19] APG-Klemme unten 0 ODER oben 2*tw (nur APG-Arm, t%100)): [0/1] RHO_CLAMP unten/oben, [2] WFB-Wirkpfad (t%100), [3] tau-Klemme (t%100), [4] u_t~0-Skips (t%100), [5] Ein-Zellen-Spalt (t%100; alle drei seit Gross-Audit gegen uint-Wickel gegatet), [6] SGS_WANDFREI-Wirkpfad (t%100), [7] Facetten-Wirkpfad (t%100), [8] Facetten-tau-Klemme (t%100, beide Klemmen), [9] Facetten-u_t~0-Skip (t%100), [10] u_s-Klemme (iMEM, t%100; die alte Achskonflikt-Reservierung entfiel -- Stufe 4 ist unter iMEM obsolet), [11] ohne offenes Paar (nur Paararm, t%100), [12] iMEM-Skalar-Fallback (t%100), [13] iMEM ohne tangential wirksamen Link (t%100)
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -629,6 +644,14 @@ public:
 	void alloc_coupling_planes(const ulong max_plane_cells);
 	void extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf); // liest (rho,u) einer Ebene in host_buf (4 floats/Zelle)
 	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
+	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Reihenfolge: alloc_schale() auf
+	// BEIDEN Instanzen (fein: Deckungspunkt-Indizes + ratio; grob: Schalen-Indizes, ratio=1), danach
+	// je Kopplungsfenster schale_extract_u() auf der feinen (mittel=1: Blockmittel) und
+	// schale_upload_unear() auf der groben Instanz. Der Blend selbst laeuft in do_time_step
+	// (enqueue_schale_blend, nach einlass_eq) und ist ueber s_schale_alpha nur im Fernfeld scharf.
+	void alloc_schale(const std::vector<ulong>& liste, const uint ratio);
+	void schale_extract_u(std::vector<float>& out, const uint mittel); // Kernel-Run + Read des out-Puffers (blockierend)
+	void schale_upload_unear(const std::vector<float>& unear); // Host -> schale_unear (Blend-Eingang)
 	void reset(); // reset simulation (takes effect in following run() call)
 #ifdef FORCE_FIELD
 	void update_force_field(); // calculate forces from fluid on TYPE_S cells

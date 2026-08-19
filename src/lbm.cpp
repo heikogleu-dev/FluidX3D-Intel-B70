@@ -246,6 +246,7 @@ float LBM_Domain::s_boden_eq_u = 0.075f;
 uint LBM_Domain::s_boden_eq_abstand = 0u; // Heiko 2026-08-20: reifennahe Aussparung (Chebyshev-Abstand zu TYPE_S, Boden ausgenommen) // Setup kann eigenes u_lat durchreichen (XL-Audit B6)
 uint LBM_Domain::s_einlass_eq_n = 0u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spaltenzahl x=1..N hinter dem Einlass; 0 = aus
 float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Konvention wie s_boden_eq_u)
+float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
@@ -274,7 +275,7 @@ void LBM_Domain::allocate(Device& device) {
 		tile_slot = Memory<uint>(device, 1ull); // Platzhalter, wird nie gelesen (TS_A ist leer)
 	}
 	kernel_initialize = Kernel(device, N, "initialize", fi, rho, u, flags);
-	// 22 Slots (Legende R3 nachgezogen, massgeblich ist lbm.hpp; [21] EINLASS_EQ-Wirkpfad t%100; [20] BODEN_EQ-Wirkpfad t%100): [0,1] RHO_CLAMP, [2] WFB-Wirkpfad
+	// 23 Slots (Legende R3 nachgezogen, massgeblich ist lbm.hpp; [22] N2F-SCHALE-Blend-Wirkpfad t%100 (P9c); [21] EINLASS_EQ-Wirkpfad t%100; [20] BODEN_EQ-Wirkpfad t%100): [0,1] RHO_CLAMP, [2] WFB-Wirkpfad
 	// (t%100), [3] tau-Klemme, [4] u_t~0-Skips, [5] Ein-Zellen-Spalt, [6] SGS-Wirkpfad (t%100),
 	// [7] Facetten-Wirkpfad (t%100), [8] Facetten-Klemmen (BEIDE, gegatet t%100 seit R3),
 	// [9] Facetten-Skips (gegatet t%100 seit R3), [10] reserviert, [11] ohne offenes Paar (t%100).
@@ -282,13 +283,14 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 22ull); // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 23ull); // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
 	boden_eq_n = s_boden_eq_n; boden_eq_u = s_boden_eq_u; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; boden_eq_abstand = s_boden_eq_abstand; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
 	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
 	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
+	schale_alpha = s_schale_alpha; // ★ P9c N2F-SCHALE: Konstruktionszeit-Kopie (read-once-Doktrin); die Kernel entstehen erst in alloc_schale (Indexlisten-Groesse steht erst nach dem Listenbau fest)
 
 #ifdef FORCE_FIELD
 	// FORK -- F-BBox: die Box wurde bereits im Konstruktor aufgeloest (sie muss vor device_defines()
@@ -401,6 +403,35 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 		rho, u, flags, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 4u);
 	print_info("Kopplungspuffer: "+to_string(max_plane_cells)+" Zellen a 4 floats = "
 		+to_string((float)(max_plane_cells*16ull)/1048576.0f,2u)+" MB auf "+device.info.name+".");
+}
+
+// ★ P9c N2F-SCHALE (Muster alloc_coupling_planes): Puffer anlegen und die Kernel MIT ECHTEN
+// Puffern erzeugen -- kein Platzhalter-Bind-später (die DIAGZ-Use-after-free-Klasse). MUSS nach
+// finalize_sparse_tiles laufen (fi ist dann final gebunden; im dd-Fall hat das Grobgitter ohnehin
+// kein Tiling, und das Setup ruft alloc erst nach run(0)).
+void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const uint ratio) {
+	const ulong n = (ulong)liste.size();
+	if(n==0ull) { print_error("alloc_schale mit leerer Liste."); return; }
+	if(n>0xFFFFFFFFull) { print_error("alloc_schale: Liste ueberschreitet 2^32 Zellen -- uint-Kernel-Argument wuerde stumm abschneiden."); return; }
+	if(ratio==0u) { print_error("alloc_schale: ratio=0 (Blockmittel-Fenster waere leer)."); return; }
+	schale_n = (uint)n;
+	schale_liste = Memory<ulong>(device, n);
+	for(ulong i=0ull; i<n; i++) schale_liste[i] = liste[i];
+	schale_liste.write_to_device();
+	schale_unear = Memory<float>(device, 3ull*n); // Blend-Eingang (Host-Upload); Ctor-Nullinit -> vor dem ersten Upload waere unear 0, deshalb macht das Setup einen 1-Outer-Vorlauf wie bei der Hinkopplung
+	schale_uout  = Memory<float>(device, 3ull*n); // Extract-Ausgang (getrennt, damit der Waechter-Extract unear nicht ueberschreibt)
+	kernel_schale_extract = Kernel(device, n, "schale_extract", u, flags, schale_liste, (uint)n, ratio, 1u, schale_uout); // mittel (Pos. 5) je Enqueue
+	kernel_schale_blend   = Kernel(device, n, "schale_blend", fi, flags, t, 0.0f, schale_liste, (uint)n, schale_unear, rho_clamp_hits); // t/alpha (Pos. 2/3) je Enqueue
+	if(sparse_on) kernel_schale_blend.add_parameters(tile_slot); // TS_P haengt NUR an SPARSE_TILES (XL-Audit-B1-Lektion); der Blend laeuft zwar nur im Fernfeld (ohne Tiling), aber die Signatur muss zur Emission der Domaene passen
+	print_info("N2F-Schale: "+to_string(n)+" Zellen a 2x3 floats + Indexliste = "
+		+to_string((float)(n*32ull)/1048576.0f,2u)+" MB auf "+device.info.name+" (alpha dieser Domaene: "+to_string(schale_alpha,3u)+").");
+}
+
+void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend (nach einlass_eq)
+	// No-Op-Doppelgate: schale_n==0 = nie alloziert; schale_alpha==0 = alloziert, aber nur als
+	// Extract-Seite (lbm_f traegt eine Deckungspunkt-Liste, darf aber NIE blenden -- Slot-22-Soll nah==0).
+	if(schale_n==0u||schale_alpha==0.0f) return;
+	kernel_schale_blend.set_parameters(2u, t, schale_alpha).enqueue_run();
 }
 
 // ★ C1b Stufe 2: Facettendaten der Domaene bauen, hochladen, Kernel neu binden (FACETTEN-STUFE2.md F1/F2).
@@ -1538,6 +1569,7 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_boden_eq(); // V1-Port (No-Op wenn aus)
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_einlass_eq(); // V1-Port apply_inlet_velocity (No-Op wenn aus; Ecken-Ueberlapp mit boden_eq unkritisch, s. Kernel-Kommentar)
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_schale_blend(); // ★ P9c N2F-SCHALE (No-Op wenn aus ODER alpha==0; Ueberlapp mit boden_eq/einlass_eq durch die Setup-Checks ausgeschlossen: z >= BODEN_EQ+1, Schale liegt im Nahfeld-Fussabdruck fern der Einlass-Spalten)
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS
@@ -1878,6 +1910,35 @@ void LBM::drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vec
 		coarse_a, coarse_b, ratio);
 	dom->kernel_drive_boundary_cubic_lift.enqueue_run();
 	dom->finish_queue();
+}
+
+// ★ P9c N2F-SCHALE: LBM-Ebenen-Wrapper (Muster alloc_coupling_planes/extract_plane_macros).
+void LBM::alloc_schale(const std::vector<ulong>& liste, const uint ratio) {
+	if(get_D()!=1u) { print_error("N2F-Schale: nur fuer je eine Domaene je LBM-Instanz gebaut."); return; }
+	if(!initialized) { print_error("alloc_schale vor der Initialisierung. Erst run(0) rufen."); return; }
+	lbm_domain[0]->alloc_schale(liste, ratio);
+}
+
+void LBM::schale_extract_u(std::vector<float>& out, const uint mittel) {
+	LBM_Domain* dom = lbm_domain[0];
+	if(dom->schale_n==0u) { print_error("schale_extract_u ohne alloc_schale."); return; }
+	// Blockierend (Muster extract_plane_macros): der Aufrufer steht im Kopplungsfenster, die
+	// Warteschlange dieser Instanz ist dort ohnehin leer (lbm_f nach run(ratio), lbm_c nach finish()).
+	dom->kernel_schale_extract.set_parameters(5u, mittel).enqueue_run();
+	dom->finish_queue();
+	dom->schale_uout.read_from_device();
+	const ulong m = 3ull*(ulong)dom->schale_n;
+	out.resize(m);
+	for(ulong i=0ull; i<m; i++) out[i] = dom->schale_uout[i];
+}
+
+void LBM::schale_upload_unear(const std::vector<float>& unear) {
+	LBM_Domain* dom = lbm_domain[0];
+	if(dom->schale_n==0u) { print_error("schale_upload_unear ohne alloc_schale."); return; }
+	const ulong m = 3ull*(ulong)dom->schale_n;
+	if((ulong)unear.size()<m) { print_error("schale_upload_unear: Puffer zu klein ("+to_string((ulong)unear.size())+" < "+to_string(m)+")."); return; }
+	for(ulong i=0ull; i<m; i++) dom->schale_unear[i] = unear[i];
+	dom->schale_unear.write_to_device();
 }
 
 void LBM::reset() { // reset simulation (takes effect in following run() call)

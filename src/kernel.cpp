@@ -2974,6 +2974,92 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	u[2ul*def_N+(ulong)n] = v[3];
 } // drive_boundary_cubic_lift()
 
+// ★ P9c N2F-SCHALE (Heiko-Idee): near -> far Schalen-RUECKKOPPLUNG. Die Hinkopplung oben ist
+// EINWEG (Fernfeld diktiert dem Nahfeld die Raender); das Fernfeld rechnet das Fahrzeug aber nur
+// als 32-mm-Treppenkoerper (+15,5 % Verdraengung, Census fc0efced/fc0edcf) und praegt dem Nahfeld
+// damit ein zu grobes Druckfeld auf. P9c: auf einer SCHALE um die Fahrzeug-BBox des GROBGITTERS
+// (5 Flaechen, z- entfaellt; Flaechen-Maske im Setup) wird das grobe Feld post-stream mit dem
+// BLOCKGEMITTELTEN Nahfeld-u relaxiert: u_neu = (1-alpha)*u_far + alpha*u_near, f = f_eq(rho_lokal,
+// u_neu) -- druckerhaltend (rho bleibt das LOKALE, Muster boden_eq/einlass_eq). KEIN voller
+// Feedback-Overlap (2026-06-14-Lehre: dezimierte Nachlaufdaten wirkten als Barriere) -- die Schale
+// liegt bewusst NAH am Koerper, wo das Nahfeld die bessere Verdraengung kennt, nicht im Nachlauf-
+// scherfeld der Kopplungsebenen.
+//
+// schale_extract: laeuft auf BEIDEN Gittern. mittel=1 (Nahfeld): Blockmittel ueber ratio^3
+// Feinzellen um den Deckungspunkt, NUR Fluid (TYPE_S/E uebersprungen, TYPE_MS zaehlt als Fluid --
+// MS-Guard-Lehre 2f705ba); 0 Fluidzellen -> NaN-Marker (Host-Census beim Listenbau sagt an, wie
+// viele Zellen das trifft; der Blend ueberspringt sie per Bit-Test). mittel=0 (Fernfeld/Waechter):
+// Punktwert des u-FELDS der Schalenzelle. Die Liste enthaelt DIREKT die Zellindizes (fein:
+// Deckungspunkte, grob: Schalenzellen) -- keine Offset-Rechnerei im Kernel.
+// ★ Signatur-Abweichung vom Plan: flags ZUSAETZLICH gebunden -- ohne flags ist "NUR ueber Fluid"
+// nicht entscheidbar (der Plan verlangt beides, das Fluid-Kriterium gewinnt).
+// Fenster-Konvention: Offsets -ratio/2 .. ratio-ratio/2-1 je Achse (bei ratio=4: -2..+1) -- das
+// Blockzentrum liegt eine HALBE Feinzelle unter dem Deckungspunkt (2 mm bei dx_f=4mm); fuer eine
+// Relaxationsquelle unerheblich, aber deklariert.
+)+R(kernel void schale_extract(const global float* u, const global uchar* flags, const global ulong* liste, const uint n, const uint ratio, const uint mittel, global float* out) {
+	const uint gid = get_global_id(0);
+	if(gid>=n) return;
+	const uxx c = (uxx)liste[gid];
+	if(mittel==0u) { // Punktwert (Waechter auf dem Grobgitter): u-FELD-Wert der Schalenzelle
+		out[3u*gid   ] = u[            (ulong)c];
+		out[3u*gid+1u] = u[    def_N+(ulong)c];
+		out[3u*gid+2u] = u[2ul*def_N+(ulong)c];
+		return;
+	}
+	const uint x = (uint)(c%(uxx)def_Nx), y = (uint)((c/(uxx)def_Nx)%(uxx)def_Ny), z = (uint)(c/((uxx)def_Nx*(uxx)def_Ny));
+	float sx=0.0f, sy=0.0f, sz=0.0f; uint cnt=0u;
+	const int r = (int)ratio, o0 = -(r/2); // Fenster [-r/2, r-r/2), s. Kopfkommentar
+	for(int dz=o0; dz<o0+r; dz++) for(int dy=o0; dy<o0+r; dy++) for(int dx=o0; dx<o0+r; dx++) {
+		const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
+		if(xx<0||yy<0||zz<0||xx>=(int)def_Nx||yy>=(int)def_Ny||zz>=(int)def_Nz) continue; // defensiv -- der Setup-Check haelt die Schale >=2 Grobzellen von den Entnahmeebenen fern
+		const uxx nn = (uxx)xx+((uxx)yy+(uxx)zz*(uxx)def_Ny)*(uxx)def_Nx;
+		const uchar bo = flags[nn]&TYPE_BO;
+		if(bo==TYPE_S||bo==TYPE_E) continue; // nur Fluid; TYPE_MS wird MITGEZAEHLT (MS-Guard-Lehre)
+		sx += u[            (ulong)nn];
+		sy += u[    def_N+(ulong)nn];
+		sz += u[2ul*def_N+(ulong)nn];
+		cnt++;
+	}
+	if(cnt==0u) { // kein Fluid im Block -> NaN-Marker, der Blend ueberspringt die Zelle (Bit-Test)
+		const float nanm = as_float(0x7FC00000u);
+		out[3u*gid]=nanm; out[3u*gid+1u]=nanm; out[3u*gid+2u]=nanm; return;
+	}
+	const float inv = 1.0f/(float)cnt;
+	out[3u*gid]=sx*inv; out[3u*gid+1u]=sy*inv; out[3u*gid+2u]=sz*inv;
+} // schale_extract()
+
+// schale_blend: laeuft NUR auf dem Fernfeld (das Setup haelt s_schale_alpha des Nahfelds explizit
+// auf 0; Wirkpfad-Endnachweis Slot 22 fern>0/nah==0). Range = n (INDEXLISTE, nicht def_N).
+// Guards: TYPE_S/E return, TYPE_MS wird BEHANDELT (MS-Guard-Lehre 2f705ba); NaN-Bit-Test auf
+// unear (Zelle ohne gueltiges Nah-Mittel bleibt unangetastet -- Census dazu macht der Host beim
+// Listenbau, KEIN eigener Diag-Slot).
+)+R(kernel void schale_blend(global fpxx* fi, const global uchar* flags, const ulong t, const float alpha, const global ulong* liste, const uint n, const global float* unear, volatile global uint* diag TS_P) {
+	const uint gid = get_global_id(0);
+	if(gid>=n) return;
+	const uxx nn = (uxx)liste[gid];
+)+"#ifdef SPARSE_TILES"+R(
+	if(is_dead_tile(nn, tile_slot)) return; // XL-Audit B1; das Fernfeld faehrt im dd-Fall ohne Tiling, der Guard kostet dort nichts
+)+"#endif"+R( // SPARSE_TILES
+	const uchar bo = flags[nn]&TYPE_BO;
+	if(bo==TYPE_S||bo==TYPE_E) return; // TYPE_MS ist FLUID und wird BEHANDELT (MS-Guard-Lehre 2f705ba)
+	const float unx=unear[3u*gid], uny=unear[3u*gid+1u], unz=unear[3u*gid+2u];
+	if((as_uint(unx)&0x7F800000u)==0x7F800000u||(as_uint(uny)&0x7F800000u)==0x7F800000u||(as_uint(unz)&0x7F800000u)==0x7F800000u) return; // NaN/Inf-Bit-Test (isfinite ist unter -cl-finite-math-only toter Code, Gross-Audit M)
+	if(t%100ul==0ul) atomic_inc(&diag[22]); // Wirkpfad-Nachweis IM Binary (Iron Rule 3), Slot 22
+	uxx j[def_velocity_set]; neighbors(nn, j);
+	float fhn[def_velocity_set]; load_f(nn, fhn, fi, j, t TS_A);
+	float rho_l, uxm, uym, uzm; calculate_rho_u(fhn, &rho_l, &uxm, &uym, &uzm);
+	// ★★ XL-B8, hier TRAGEND (anders als in boden_eq/einlass_eq, die u verwerfen durften):
+	// post-stream-load liest die Esoteric-Pull-Paare VERTAUSCHT -- calculate_rho_u liefert damit
+	// u EXAKT NEGIERT (rho ist invariant). Das lokale u ist also u_lokal = -(uxm,uym,uzm).
+	// Wer die drei Minuszeichen entfernt, blendet gegen -u_far und kippt die Schale in eine
+	// Gegenstrom-Quelle -- der u-Negations-Nachweis im Setup (mittleres Schalen-u_x gegen u_inf)
+	// und der Waechter schlagen dann beide an.
+	const float ulx=-uxm, uly=-uym, ulz=-uzm;
+	const float ux2=(1.0f-alpha)*ulx+alpha*unx, uy2=(1.0f-alpha)*uly+alpha*uny, uz2=(1.0f-alpha)*ulz+alpha*unz;
+	float feq[def_velocity_set]; calculate_f_eq(rho_l, ux2, uy2, uz2, feq);
+	store_f(nn, feq, fi, j, t TS_A);
+} // schale_blend()
+
 )+"#ifdef FORCE_FIELD"+R(
 )+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx

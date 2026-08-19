@@ -1003,3 +1003,21 @@ ERKLAERUNG: ein Wandmodell macht den Treppenkoerper nicht schlanker; die +15,5 %
 Rueckfall am 32-mm-Koerper. VERDIKT: P8 bleibt als gemessen-neutraler Messarm (Default 0);
 der druckkonsistente Hebel ist P9c (Heiko-Schalen-Blend, in Umsetzung: x- default AUS,
 rho-Drift-Metrik in der Abnahme, Masse per lokalem rho konstruktiv erhalten).
+
+## Abloese-Offensive 2026-08-21 nachmittags (Heiko: Wandmodellfrage GESCHLOSSEN)
+
+Agent 1 (Ist-Vermessung): Dach-Abloesung 8mm x/L 0,50 (eingefroren) vs 4mm x/L 0,65 (flatternd,
+sigma 0,22 m) -- Aufloesungstrend +0,46 m, Konfigurationstrend NULL (Facetten verschieben 16 mm).
+Diffusor: Kick x=3,59 (x/L 0,81, ~9 Grad); davor loest NICHTS ab; am Kick kollabiert die Rampen-GS
+in allen Laeufen (8mm Vollstall, 4mm Blase mit Wiederanlegen ab x=3,95); Spaltmittel stroemt vorwaerts.
+Agent 3 (Physik-Ranking): 1. van Driest/SGS (nu_t/nu ~290 laminarisiert wandnah; Zhou&Bae:
+Abloeseblase 0..0,35L je SGS-Modell; alte Widerlegung galt y+=137, nicht 30) -- HEIKO:
+TIEFENRECHERCHE BIS CODE-EBENE BEAUFTRAGT. 2. Dachband-Abdeckungsloecher (YWMIN-Treppenstreifen
+= BB-Rauwand am Dach; Facetten-Physikkorrektur ist Heikos Idee und im iMEM implementiert --
+die Loecher sind der Rest; richtungsselektiver YWMIN-Arm dokumentiert und GEPARKT).
+3. Aufloesung = Rahmen (Instrument: Dachlinien-Abloesesonde + Dachsaeule mit Reynoldsstress,
+OF13-Soll anliegend bis Nase+3,64 m). 4. FP32-A/B GEPARKT (Prior niedrig, billig). 5. Anstroem-
+turbulenz ZURUECKGESTUFT (OF13 ist RANS -- GS per Closure turbulent; eigene Streaks waren
+kraftneutraler unfreiwilliger A/B; Injektion ins tau~0,5-Fernfeld zerfaellt in Akustik).
+6. Operatortausch GEPARKT (doppelt gemessen schlechter; tau+ ohne Parameterpunkt).
+P8-Verdikt bestaetigt das Muster: Druckphysik-Beeinflussung am Grobkoerper drehte nichts am Cz.
