@@ -1107,3 +1107,13 @@ Artefakt alpha=0,5: Gradienten-Kollaps Faktor 6 (feq vernichtet Scherspannung), 
 Schlieren: Far-Streifen wachsen in den letzten ~8 Sponge-Zellen nach, Faktor 24 an der
 Entnahmeebene, Vererbung r=0,82, Feingitter verstaerkt auf lambda=ratio; Fix = Ebenen-Filter
 (zweites einlass_eq-Band und Sponge-Verlaengerung begruendet verworfen).
+
+## IRON RULE 5 (Heiko, 2026-08-21): NIEMALS an Bildern messen -- immer an Echtdaten
+
+Slices sind quantisiert/geklemmt/y-einschichtig und dienen NUR dem Sichten. Jede quantitative
+Aussage kommt aus Feld-Echtdaten (Sonden/CSVs); fehlt das Instrument, wird es ZUERST gebaut
+(Iron Rule 3). Rueckwirkend betroffen: die PNG-basierten Zahlen der Abloese-/Artefakt-/
+Schlieren-Analysen von heute nachmittag gelten als HYPOTHESEN-Generatoren, nicht als Messwerte
+-- Nachmessung an Echtdaten noetig, wo Entscheidungen daran haengen. FEHLENDE INSTRUMENTE
+(Bauliste): Nah-x--Saeule (x=2/10 Feinzellen, wie einlass_saeule), Dachlinien-Abloesesonde,
+Artefakt-Metriken M1-M6 als Feldsonden (z+-Linien-Profil ueber dem Kasten, Fernwake-Sonde).
