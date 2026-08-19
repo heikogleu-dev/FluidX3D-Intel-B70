@@ -2235,6 +2235,41 @@ static void main_setup_fahrzeug_dd() {
 	lbm_c.voxelize_mesh_on_device(veh_c, TYPE_S|TYPE_X); lbm_c.flags.read_from_device();
 	sat_shell_and_void_fill(lbm_c, veh_c, cNx, cNy, cNz);
 
+	// ★ P8/P9 Schritt 0: VERDRAENGUNGS-CENSUS (reine AUSGABE, keine Physik). Beide Gitter tragen
+	// dasselbe Fahrzeug, aber als unterschiedlich grobe Treppenkoerper -- WIE unterschiedlich, war
+	// bisher nirgends beziffert. Hier direkt nach der Voxelisierung (flags liegen durch
+	// read_from_device + sat_shell_and_void_fill ohnehin im Host-Spiegel, kein zusaetzlicher
+	// GPU-Read): je Gitter das 0x41-Zellvolumen und die yz-projizierte Stirnflaeche (Anzahl
+	// (y,z)-Saeulen mit mindestens einer 0x41-Zelle). Bewusst VOR der Kontaktflaechen-Uebergabe,
+	// damit beide Gitter mit identischer Zellmenge verglichen werden (z=0-Zellen noch enthalten).
+	{
+		auto verdraengung = [](LBM& L, const uint Nx, const uint Ny, const uint Nz, ulong& n_cells, ulong& n_cols) {
+			n_cells=0ull; n_cols=0ull;
+			for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) {
+				bool hit=false;
+				for(uint x=0u; x<Nx; x++) {
+					if((L.flags[(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx]&(TYPE_S|TYPE_X))==(TYPE_S|TYPE_X)) { n_cells++; hit=true; }
+				}
+				if(hit) n_cols++;
+			}
+		};
+		ulong nf=0ull, cf=0ull, nc=0ull, cc=0ull;
+		verdraengung(lbm_f, fNx, fNy, fNz, nf, cf);
+		verdraengung(lbm_c, cNx, cNy, cNz, nc, cc);
+		const double vol_f = (double)nf*(double)dx_f*(double)dx_f*(double)dx_f, vol_c = (double)nc*(double)dx_c*(double)dx_c*(double)dx_c;
+		const double a_f = (double)cf*(double)dx_f*(double)dx_f, a_c = (double)cc*(double)dx_c*(double)dx_c;
+		print_info("VERDRAENGUNGS-CENSUS fein ("+to_string(dx_f*1000.0f,0u)+" mm): "+to_string(nf)+" 0x41-Zellen = "+to_string((float)vol_f,4u)
+			+" m3, Stirnflaeche (yz-Projektion) "+to_string(cf)+" Saeulen = "+to_string((float)a_f,4u)+" m2");
+		print_info("VERDRAENGUNGS-CENSUS fern ("+to_string(dx_c*1000.0f,0u)+" mm): "+to_string(nc)+" 0x41-Zellen = "+to_string((float)vol_c,4u)
+			+" m3, Stirnflaeche (yz-Projektion) "+to_string(cc)+" Saeulen = "+to_string((float)a_c,4u)+" m2");
+		if(vol_f>0.0 && a_f>0.0) {
+			const double dvol = 100.0*(vol_c/vol_f-1.0), da = 100.0*(a_c/a_f-1.0);
+			print_info("VERDRAENGUNGS-CENSUS: der "+to_string(dx_c*1000.0f,0u)+"-mm-Treppenkoerper verdraengt "+to_string((float)fabs(dvol),2u)
+				+" % "+(dvol>=0.0?"MEHR":"WENIGER")+" Volumen als der "+to_string(dx_f*1000.0f,0u)+"-mm-Treppenkoerper; Stirnflaeche "
+				+to_string((float)fabs(da),2u)+" % "+(da>=0.0?"groesser":"kleiner")+".");
+		}
+	}
+
 	// ---------------------------------------------------------------- Kontaktflaeche, beide Gitter
 	// Fahrzeugzellen auf z=0 werden Teil der Fahrbahn (TYPE_X weg, u = u_road). Begruendung ausfuehrlich
 	// im Einzelgitter-Fall weiter oben; sie gilt hier unveraendert und fuer beide Aufloesungen.
@@ -2537,6 +2572,14 @@ static void main_setup_fahrzeug_dd() {
 	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0, fac_dm0=0.0, fac_rest0=0.0;
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
+	// ★ P8/P9 Schritt 0: INTERFACE-DRUCK-INSTRUMENT (reine AUSGABE, keine Physik, kein Schalter --
+	// Muster unterboden_sonde). Die face[p]-Puffer der 4 getriebenen Ebenen liegen nach
+	// extract_plane_macros jeden Outer ohnehin auf dem Host (rho an Index 4*i+0); an der
+	// Sample-Kadenz wird daraus je Ebene rho_min/mittel/max gezogen und als Delta-p = (rho-1)*cs2
+	// (cs2 = 1/3 lattice) via units_coarse.si_p in Pa ausgewiesen. KEIN zusaetzlicher GPU-Read.
+	std::ofstream ipcsv(out_dir+"interface_druck.csv"); ipcsv.precision(8);
+	ipcsv << "time_s,ebene,rho_min,rho_mittel,rho_max,dp_min_pa,dp_mittel_pa,dp_max_pa\n" << std::flush;
+	print_info("INTERFACE-DRUCK-Instrument aktiv: rho-Statistik der 4 getriebenen Kopplungsebenen (x-, y-, y+, z+) an der Sample-Kadenz, Delta-p = (rho-1)*cs2 in Pa -> "+out_dir+"interface_druck.csv (reine Ausgabe aus den vorhandenen Host-Kopplungspuffern).");
 	// ★ FORK Kraft-Zerlegung nach z-Region (Heiko-Vorgabe): CFD_KRAFT_ZBAND = unterste N Zellen ab z=0
 	// (inkl.) vs Rest. unset/0 = AUS = bitidentisch (null neue Kernelaufrufe/Logzeilen/Dateien).
 	// EINMAL gelesen, nicht je Zelle/Sample (env-Read-Falle).
@@ -2738,6 +2781,23 @@ static void main_setup_fahrzeug_dd() {
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
 			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);
 			if(wp_c_ok) schreibe_wandprofil(lbm_c, cNx, cNy, wp_cx, wp_cy, u_lat, t_si, wpc);
+			// ★ P8/P9 Schritt 0: Interface-Druck aus den face[p]-Puffern. Die stehen hier FRISCH: die
+			// Extract-Schleife lief in DIESEM Outer vor dem Sample-Block, und die BODENBAND-Anhebung
+			// (naechster Outer) fasst nur Index 4*i+1 (ux) an -- rho (4*i+0) ist der unveraenderte
+			// Fernfeld-Wert. Nur Lesen, keine Physik.
+			for(uint p=0u; p<5u; p++) {
+				if(!drive_face[p]) continue;
+				const ulong n_pl = (ulong)cp[p].extent_a*(ulong)cp[p].extent_b;
+				const ulong i0 = (p==4u) ? 0ull : (ulong)cp[p].extent_a; // Pruefagent M2: erste b-Zeile (z=0, Fahrbahn-Solid mit eingefrorenem rho=1) maskiert sonst rho_min der Ebenen x-/y-/y+; z+ hat keine Fahrbahn. Mit CFD_FERN_BODENKLEMME>1 blieben weitere eingefrorene TYPE_E-Zeilen enthalten (Diagnose-Arm, bewusst toleriert).
+				double s = 0.0; float rmin = face[p][4ull*i0], rmax = rmin;
+				for(ulong i=i0; i<n_pl; i++) { const float r = face[p][4ull*i]; s += (double)r; rmin = fmin(rmin, r); rmax = fmax(rmax, r); }
+				const double rmean = s/(double)(n_pl-i0);
+				const double dpmin  = (double)units_coarse.si_p((rmin-1.0f)/3.0f);
+				const double dpmean = (double)units_coarse.si_p((float)(rmean-1.0)/3.0f);
+				const double dpmax  = (double)units_coarse.si_p((rmax-1.0f)/3.0f);
+				ipcsv << t_si << "," << face_name[p] << "," << rmin << "," << rmean << "," << rmax << ","
+				      << dpmin << "," << dpmean << "," << dpmax << "\n" << std::flush;
+			}
 			const double Fx_si = (double)units_fine.si_F(F.x), Fz_si = (double)units_fine.si_F(F.z);
 			// ★ NaN-WAECHTER (Pruefer-Befund 2026-08-08). Ohne ihn kostet eine Divergenz den ganzen Lauf:
 			// die CSV liefe 2,5 Stunden mit nan voll, Mittelwert und Block-SEM lieferten nan, und gewarnt
@@ -2765,7 +2825,7 @@ static void main_setup_fahrzeug_dd() {
 				else if(n_frozen>=2u) grund = "die Kraft steht seit drei Abtastungen BITGLEICH -- das Feld ist eingefroren (Zahlenformat gesaettigt)";
 				else if(t_si>0.02 && (fabs(Fx_si)>20.0*q_A || fabs(Fz_si)>20.0*q_A)) grund = "die Kraft ist unphysikalisch gross (|Cd| oder |Cz| ueber 20)";
 				if(grund!="") {
-					fcsv << std::flush; fcsv.close();
+					fcsv << std::flush; fcsv.close(); ipcsv.close(); // R-N2: Abbruchpfad symmetrisch (Zeilen sind ohnehin geflusht)
 					print_error("Lauf gekippt bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
 						+"): "+grund+". Fx = "+to_string((float)Fx_si,3u)+" N, Fz = "+to_string((float)Fz_si,3u)
 						+" N. Abgebrochen. Die CSV bis hierher steht in "+out_dir+"forces.csv -- dort ist zu sehen, wann es kippt.");
@@ -2852,6 +2912,7 @@ static void main_setup_fahrzeug_dd() {
 
 	// ---------------------------------------------------------------- Auswertung
 	fcsv.close(); // die Zeilen stehen bereits einzeln auf Platte, siehe Schleife
+	ipcsv.close(); print_info("CSV: "+out_dir+"interface_druck.csv (Interface-Druck der 4 getriebenen Ebenen, waehrend des Laufs geschrieben)"); // _exit(0) ruft keine Destruktoren
 	if(zb>0u) { zcsv.close(); print_info("CSV: "+out_dir+"kraft_zband.csv (Band/Rest-Zerlegung, waehrend des Laufs geschrieben)"); } // _exit(0) am Fallende ruft keine Destruktoren -- explizit schliessen
 	print_info("CSV: "+out_dir+"forces.csv ("+to_string((uint)ts.size())+" Zeilen, waehrend des Laufs geschrieben)");
 	std::vector<double> cd, cz;

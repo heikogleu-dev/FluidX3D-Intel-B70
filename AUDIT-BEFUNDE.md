@@ -967,3 +967,16 @@ entscheidbar. VERDIKT: nicht in den Standard; zurueckgestellt bis zur naechsten 
 P8/P9-Plan liegt vor (Planungsagent 21.08.): Instrument -> P8 Far-Facetten -> P9a V1-Port
 (x+-Ebene) -> P9b u-only-Volumen-Nudging; Schritt 0 (Interface-Druck + Verdraengungs-Census)
 in Umsetzung.
+
+## P8/P9 Schritt 0: Interface-Druck-Instrument + Verdraengungs-Census (bitidentisch, immer an)
+
+interface_druck.csv (rho/dp min/mittel/max je getriebener Ebene an der Sample-Kadenz, aus den
+ohnehin vorhandenen face[]-Host-Puffern) + Verdraengungs-Census nach Voxelisierung. KERNZAHL
+(8mm-Sprosse): der 32-mm-Treppenkoerper im Fernfeld verdraengt 15,51 % MEHR Volumen (4,79 vs
+4,15 m3) und hat 5,48 % mehr Stirnflaeche als das feine Fahrzeug -- Offen-Punkt 8 erstmals
+quantifiziert (bei Produktions-DX=4/fern 16 mm neu zu erheben, skaliert nicht linear).
+Pruefagent: kein HOCH; M1 = die PLAUSIBILITAETS-ANKER des Implementierungsberichts waren falsch
+(q_inf = 551,25 Pa bei 30 m/s/1,225 -- nicht 911; rho 1,00048 = +31,4 Pa) -- Code korrekt,
+Protokoll hiermit berichtigt; M2 = z=0-Fahrbahnzeile maskierte rho_min der x-/y-Ebenen (gefixt:
+erste b-Zeile uebersprungen, z+ ausgenommen); N1-Aktennotiz (fmin/fmax maskieren NaN still),
+N2 gefixt (ipcsv im Abbruchpfad). Anker-Hash nach Fixes erneut exakt.
