@@ -1,21 +1,69 @@
-# Projektdoku (Fork) — Leseeinstieg
+# FluidX3D-v2 — Fahrzeug-Aerodynamik-Fork (LBM-WMLES gegen OpenFOAM-Referenz)
 
-Dieser Fork misst ein Fahrzeug gegen die OpenFOAM-13-Referenz (Cd 0,599 / Cz −1,301) und baut
-dafür ein Wandmodell (WFB + zellbasierte Facetten). Wer einsteigt, liest in dieser Reihenfolge:
+Dieser Fork von [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) rechnet die Umströmung
+eines realen Fahrzeugs (GPU-LBM, D3Q19, Wandmodell-LES) gegen eine OpenFOAM-13-Referenz
+(kOmegaSST-RANS, 34 M Zellen: **Cd 0,599 / Cz −1,301**) — auf einer Workstation mit
+Intel Arc Pro B70 (Nahfeld, 4 mm, ~500 M Zellen) + Intel iGPU (Fernfeld, 16 mm).
+
+## Warum V2 statt des alten Forks?
+
+Der erste Fork (V1) war über Monate explorativ gewachsen: Mechanismen ohne Wirkungsnachweis
+(der zentrale Moving-Floor-Fix stellte sich nachträglich als **jahrelanger stiller No-Op**
+heraus), vermischte Messarme, keine reproduzierbare Beweiskette. V2 ist der disziplinierte
+Neuaufbau derselben Aufgabe mit harten Arbeitsregeln ("Iron Rules"):
+
+1. **Jeder Mechanismus beweist seine Wirkung im Binary** (Wirkpfad-Zähler, Ist=Soll-Abnahmen,
+   Selbsttests — ein Schalter ohne feuernden Zähler ist ein harter Fehler).
+2. **Agenten-Pipeline**: Planungs-Review vor, adversariales Prüf-Review nach jeder
+   Implementierung; Audit-Korrektur-Schleifen bis "keine Befunde".
+3. **Arm-Disziplin**: eine Variable je Lauf, Screening auf der schnellen 8-mm-Sprosse
+   (~10 min/Lauf), Produktion (4 mm) nur für validierte Gewinner.
+4. **Ein Läufer, eine Kette**: GPU-Serien nur über eine gelockte Queue mit Statusdatei.
+5. **Echtdaten-Doktrin**: gemessen wird an Feld-CSVs/Sonden, nie an gerenderten Bildern.
+
+## Was umgesetzt ist (Stand 2026-08-21)
+
+- **Doppel-Domänen-Kopplung** fein↔grob (B70+iGPU, echtes Parallel-Scheduling, Kopplungsanteil
+  ~1 %), kubischer Rand-Lift, Deckungspunkt-bitgenaue Verify-Kette, Interface-Instrumente.
+- **Zellbasiertes Facetten-Wandmodell (iMEM)**: TLS-Flächenfit über die Voxel-Treppen,
+  Spalding-Ziel, 3×3-Impulskopplung, Sättigungs-Gate, Massenkorrektur — vollständig
+  wirkpfad-bewiesen (1,3 Mrd Ereignisse Ist=Soll exakt, Δm im Band).
+- **Boden-/Einlass-Physik**: Moving-Floor-Equilibrium-Reset (kuriert den vermessenen
+  Staggered-Mode des Fernfeld-Bodens), Einlass-Reset + Dämpfungszone (Freistrom-Streifen
+  −99 %), Reifenschutz-Kraftmaß (die Bodenaufprägung erzeugte ~−0,7 **künstlichen** Abtrieb —
+  quantifiziert und eliminiert).
+- **Messinstrumente im Code**: Kraft-Zerlegung Radkontakt/Karosserie, Unterboden-/Boden-/
+  Einlass-Säulensonden, Interface-Druck, Verdrängungs-Census, Block-SEM-Statistik.
+- **Performance**: GPU-Kraftreduktion statt 2,5-GB-PCIe-Transfers (Kraftfenster 36 %→1,3 %),
+  ~24 % schneller als V1 bei deutlich mehr Physik; vermessene Phasenprofile je Lauf.
+
+## Wo wir stehen
+
+Auf der ehrlichen (artefaktbereinigten) 4-mm-Basis: **Cd 0,84 / Cz −0,58** gegen OF13
+0,599/−1,301 — das Wandmodell liefert −0,11 Cd, der Boden-Fix hat den Unterboden von "tot"
+auf das OF13-Geschwindigkeitsprofil gebracht. Die verbleibende Cz-Lücke ist lokalisiert:
+zu frühe Grenzschichtablösung an Dach und Diffusor-Kick (auflösungs-/SGS-dominiert; die
+OF13-Referenz löst dort praktisch nicht ab und bezieht ⅔ ihres Abtriebs aus dem Unterboden,
+⅓ aus dem Heckflügel — der bei uns im Ablöse-Totwasser steht). Die nächsten Hebel sind
+geplant und baufertig dokumentiert: van-Driest-SGS-Wanddämpfung (ν_t/ν≈290 laminarisiert
+wandnah), Dachlinien-Ablösesonde, Schließung der Facetten-Abdeckungslücken; dazu offen:
+Rest-Streifen am Nahfeld-Einlass (Eigenantwort des Kopplungsrandes) und die richtige Form
+einer near→far-Rückkopplung (erste Volumen-/Schalen-Varianten gebaut, aber als
+Near-verfälschend zurückgestellt).
+
+Die komplette Beweis- und Befundkette liegt in den Projekt-Markdowns:
 
 | Datei | Zweck |
 |---|---|
-| **ARBEITSLISTE.md** | Priorisierte Arbeitsliste + Tagesstand — **führend für „was ist offen"** |
-| **AUDIT-BEFUNDE.md** | Komplett-Audits R1–R3 (2026-08-15) mit allen Nacharbeits-Nachweisen |
+| **AUDIT-BEFUNDE.md** | Chronologisches Befund-/Abnahmeprotokoll aller Audits und Läufe — **führend** |
+| **FACETTEN.md** | Einstieg Facetten-Wandmodell: Architektur, komplette Schalter-Referenz, Abnahmen |
 | **WANDMODELL.md** | Wissensstand Wandmodell/Kanal: Rauwand-Befundkette, WFB-Ergebnis |
-| **FACETTEN.md** | **Einstieg C1b-Facetten-Wandmodell**: geltende Architektur, Schalter-Referenz, Abnahmen, offene Punkte |
-| FACETTEN-ARCHIV.md + FACETTEN-*.md | Archivfamilie (8 Altdateien: PLAN/STUFE2/STUFE3/CD-PFAD/LITERATUR/IMEM/IMEM-3X3/IMEM-ANALYSE) — Belegkette; Verzeichnis mit Überholt-Vermerken in FACETTEN-ARCHIV.md |
-| **OFFENE-PUNKTE.md** | Iron Rules + Übergabeprotokoll 2026-08-08/09 (historisch, mit Korrektur-Vermerken) |
-| **HYGIENE-BEFUNDE.md** | Codehygiene-Prüferberichte (2026-08-09, weitgehend abgearbeitet) |
-| **EINLASS-AUSLASS.md** | Randbedingungs-Analyse: Klingeln, Dämpfungszone, SRT/TRT-Entscheidung |
 | **DOPPEL-DOMAENE.md** | Zwei-Domänen-Fall: Geometrie, Kopplung, bewusste Grenzen |
+| **EINLASS-AUSLASS.md** | Randbedingungs-Analyse: Klingeln, Dämpfungszone, SRT/TRT-Entscheidung |
 | **LEISTUNG.md** | Leistungsindex, Phasenprofil, Hardware-Bezugswerte (B70 + iGPU) |
-| **V1-GEGEN-V2.md** | Prüfbericht 2026-08-08: was der V1-Fork wirklich konnte |
+| **OFFENE-PUNKTE.md** | Iron Rules + Übergabeprotokolle (historisch, mit Korrektur-Vermerken) |
+| **V1-GEGEN-V2.md** | Prüfbericht: was der V1-Fork wirklich konnte — die Begründung für V2 |
+| ARBEITSLISTE.md, HYGIENE-BEFUNDE.md, FACETTEN-ARCHIV.md + FACETTEN-*.md | Arbeitslisten und Archiv-Belegkette |
 
 Der Rest dieser README ist die unveränderte Upstream-Dokumentation von FluidX3D.
 

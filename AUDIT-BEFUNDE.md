@@ -1149,3 +1149,26 @@ kleines alpha, nur Wake-Region). STANDARDKONFIGURATION unveraendert: -3-Lage + N
 BODEN_EQ=2/DOWN=1 nah+fern + ABSTAND=2 + FERN_EINLASS_EQ=2 + SPONGE (32@32mm/64@16mm) +
 KRAFT_ZBAND=4 + FAC_GPU + KOPPLUNG_GLATT=1 (geerbtes Streifen-Band). export/f8p_volumen =
 ABGEBROCHEN-markiert.
+
+## TAGESABSCHLUSS 2026-08-21 abends: finale 8mm-Referenz f8_standard_final GRUEN
+
+Finale Standardkonfiguration (OHNE N2F, MIT GLATT): Cd_druck 1,672 / Cz_druck +0,054 = exakt
+Basis-Niveau (Filter kraftneutral BEWIESEN), Band +0,584/Rest -0,530, x- 145,7 Pa, Fern-Einlass-
+Saeule RMS 0,00015 (sauber), Facetten-Wirkpfad 147.166.750 = Soll exakt, Sonde 0,588.
+EHRLICHER REST: Nah-Saeule x_f=2 dux-RMS 0,0121 (t>0,4s) -- die NEAR-INLET-STREIFEN SIND NICHT
+GELOEST (GLATT trifft nur das geerbte Band; die ratio-Eigenantwort des Kopplungsrandes bleibt;
+Zeitinterpolation als Ursache widerlegt).
+
+## TODO NAECHSTE SESSION (Heiko-Auftrag):
+1. NEAR-INLET-STREIFEN LOESEN (Echtdaten-Referenz: Nah-Saeule RMS 0,0121; Kandidaten offen --
+   Ursache der ratio-Eigenantwort am TYPE_E-Rand tiefer analysieren, ggf. Rand-Regularisierung/
+   feq-Behandlung der Kopplungszellen; Zeit-Halteglied und raeumlicher Filter sind abgehakt).
+2. RECHERCHE RICHTIGE RUECKKOPPLUNGSART near->far (Volumen-Blend verfaelschte den Near-Flow
+   uebers Auto -- Literatur/Alternativen: schwaechere alpha, nur-Wake-Region, Kraft- statt
+   EQ-Kopplung, Konsistenz mit der grob->fein-Kette; Infrastruktur ist komplett und geprueft).
+3. FNEQ-Laufzeit-Paritaetsbeweis (a=0-Test, Pruefagent-M2 offen).
+4. Grenzschicht-Kampagne (GEPARKT hinter 1+2): Dachlinien-Abloesesonde -> van-Driest-Leiter
+   {26,52,104} -> richtungsselektives YWMIN; OF13-Ziele: Dach angelegt bis x=3,585, Diffusor
+   angelegt, Cz-Budget Boden -1,35/Fluegel -0,47/Dach +0,57.
+5. Klein: po_mean-deterministische Reduktion, Reibungs-z-Zerlegung (fac_geo[6]), Perf-Runde-2-
+   Rest (Slice-Read, UPDATE_FIELDS-A/B, FP16S).
