@@ -918,3 +918,16 @@ Kandidaten: P8/P9-Fernfeld, Einlass-Fix (ab jetzt drin), Unterboden-Abloesung, y
 
 NEUE STANDARDKONFIGURATION (ab s6e): -3-Lage + NEAR_VOR=96 + BODEN_EQ=2/DOWN=1 nah+fern +
 ABSTAND=2 + FERN_EINLASS_EQ=2 + SPONGE_N=64 + KRAFT_ZBAND=4 (Diagnose) + FAC_GPU (Default).
+
+## 8-mm-VALIDIERUNG des neuen Standards KOMPLETT (Heiko-Regel: erst 8mm, dann fragen)
+
+Leiter (je 0,5 s, ZBAND=4, Saeule aktiv): Basis RMS 0,00966/maxdux 0,051, +einlass_eq=2 RMS
+0,00861 (-11 %), +Sponge32 RMS 0,00016 (-98 %), +beide RMS 0,00014 (-99 %)/maxdux 0,0018.
+BEIDE Fixes kraftneutral (Cd 1,355-1,359, Cz +0,128..+0,143, Band/Rest stabil) = reine
+Sauberkeits-Fixes, belegt. SPONGE-SKALIERUNGSLEHRE: N ist Zellenzahl -- 64@16mm entspricht
+32@32mm; der dynamische NF_OX-Guard fing die Fehlkonfiguration korrekt (2 Arme rc=1, neu
+gefahren). ZBAND-KERNBEFUND an der 8mm-Sprosse: Kontaktband (4 Zellen=32mm) traegt Cd 0,833/
+Cz +0,610, Karosserie-Rest Cd 0,522/Cz -0,467 -- das Radkontakt-Band maskiert den echten
+Abtrieb; Cz_rest = ehrlichere Karosserie-Metrik; 4mm-Vergleich (Band dann 16mm) wird Artefakt
+von Radlast trennen. Einlass-Wirkpfad 8.246.700 Spalten-Resets. PRODUKTION WARTET AUF HEIKO-GO
+nach Abschluss der Audit-Schleife.
