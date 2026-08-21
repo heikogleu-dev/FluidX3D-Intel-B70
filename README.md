@@ -1,4 +1,4 @@
-# FluidX3D-v2 — Vehicle Aerodynamics on Intel Arc Pro B70 (LBM-WMLES vs. OpenFOAM)
+# FluidX3D — Intel Arc Pro B70: Vehicle Aerodynamics (LBM-WMLES vs. OpenFOAM)
 
 A fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D) tuned for **vehicle
 aerodynamics on a single Intel Arc Pro B70 (Battlemage) + Arrow-Lake iGPU**. The base solver runs
@@ -6,10 +6,11 @@ at **96–100 % of peak memory bandwidth (≈ 5 464 MLUPS)** on the B70 via Open
 fork adds a force-resolving, multi-resolution dual-GPU stack for a Toyota MR2 race car, validated
 against an OpenFOAM 13 k-ω-SST reference (34 M cells: **Cd 0.599 / Cz −1.301**) on the **same STL**.
 
-**This repository supersedes [FluidX3D-Intel-B70](https://github.com/heikogleu-dev/FluidX3D-Intel-B70)**
-(archived 2026-08-15). V2 is a disciplined rebuild of the same task; the older repository remains
-readable as the B70-Pioneer record. Everything below the *V2* sections is carried over from it
-unchanged — those findings are still valid and still the ground the current work stands on.
+This is the **second generation (V2)** of the fork. The first generation — the B70-Pioneer work
+from May to August 2026 — was retired on 2026-08-15 and rebuilt from scratch under hard working
+rules; the reasons are in *Why V2 instead of the old fork* below. Everything under
+*Carried over from V1* is taken from that first generation **unchanged**: those findings are still
+valid and still the ground the current work stands on.
 
 - Upstream docs: [README_UPSTREAM.md](README_UPSTREAM.md) · license **unchanged** (non-commercial /
   non-military): [LICENSE.md](LICENSE.md)
@@ -90,8 +91,7 @@ sound.
 
 # Carried over from V1 — still valid
 
-*The sections below are taken over unchanged from the archived
-[FluidX3D-Intel-B70](https://github.com/heikogleu-dev/FluidX3D-Intel-B70) repository. The figures,
+*The sections below are taken over unchanged from the first generation of this fork. The figures,
 measurements and verdicts are V1's; they are reproduced here because they remain the established
 ground — geometry fidelity, the driver hazard, the VRAM work, the hardware baseline and the solver
 landscape did not change with the rebuild. Where V2 has since revised a conclusion, the V2 sections
@@ -150,8 +150,7 @@ until the system OOMs. **The B70 (`xe` driver) is NOT affected.** Detection:
 
 First publicly documented end-to-end CFD evaluation on Intel Arc Pro B70 (BMG-G31, Xe2):
 
-1. **This repo — FluidX3D-v2** — LBM via OpenCL (production aero stack);
-   predecessor [FluidX3D-Intel-B70](https://github.com/heikogleu-dev/FluidX3D-Intel-B70) (archived).
+1. **This repo** — LBM via OpenCL (production aero stack).
 2. **[Openfoam13-GPU-Offloading-Intel-B70-Pro](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)** — FVM pressure solver via Ginkgo SYCL (hardware ready, stack maturing).
 3. **[Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)** — PETSc-Kokkos-SYCL attempt, abandoned at the GAMG path (documents what does not work yet).
 
@@ -202,8 +201,8 @@ filled/large vehicle models drop a far larger tile fraction and do even better.
 ## Build
 
 ```bash
-git clone https://github.com/heikogleu-dev/FluidX3D-v2.git
-cd FluidX3D-v2
+git clone https://github.com/heikogleu-dev/FluidX3D-Intel-B70.git
+cd FluidX3D-Intel-B70
 mkdir -p export bin                    # run-time outputs
 make Linux-X11 -j$(nproc)              # build only
 ./make.sh                              # builds AND runs
@@ -260,7 +259,6 @@ pieces — AMR, a built-in wall model, a specular symmetry plane — are exactly
 - ParaView / OSPRay / B70 ray-tracing — [Paraview-Intel-B70-Pro-OSPRAY-Raytracing](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing)
 - OpenFOAM v2512 + PETSc-Kokkos-SYCL — [Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)
 - OpenFOAM 13 GPU offloading (Ginkgo SYCL) — [Openfoam13-GPU-Offloading-Intel-B70-Pro](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)
-- Predecessor, archived — [FluidX3D-Intel-B70](https://github.com/heikogleu-dev/FluidX3D-Intel-B70)
 
 ## License & attribution
 
