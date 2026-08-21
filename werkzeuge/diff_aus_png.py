@@ -16,11 +16,21 @@
 import sys, math
 from PIL import Image
 
+if len(sys.argv)<11:
+    sys.exit("Aufruf: diff_aus_png.py <nah.png> <fern.png> <out.png> <out.csv> <u_ref> <span> "
+             "<near_x0> <dx_f> <far_x0> <dx_c>\n"
+             "  near_x0/far_x0 = Ursprung in m, dx = Schrittweite in m (aus dem Lauf-Log).\n"
+             "  Beispiel 8 mm, NEAR_VOR=96: ... 30 15 -0.326 0.008 -2.662 0.032")
+NEAR_X0, DX_F = float(sys.argv[7]), float(sys.argv[8])
+FAR_X0,  DX_C = float(sys.argv[9]), float(sys.argv[10])
 nah_png, fern_png, out_png, out_csv = sys.argv[1:5]
-U_REF   = float(sys.argv[5]) if len(sys.argv)>5 else 30.0   # Anstroemung [m/s], = Skalenmitte
-SPAN    = float(sys.argv[6]) if len(sys.argv)>6 else 15.0   # Diff-Skala: -SPAN blau, 0 weiss, +SPAN rot
-NEAR_X0, DX_F = -0.326, 0.008                                # Nahfeld-Ursprung/Schrittweite [m]
-FAR_X0,  DX_C = -2.662, 0.032                                # Fernfeld-Ursprung/Schrittweite [m]
+U_REF   = float(sys.argv[5])   # Anstroemung [m/s], = Skalenmitte
+SPAN    = float(sys.argv[6])   # Diff-Skala: -SPAN blau, 0 weiss, +SPAN rot
+# ★ 2026-08-21: diese vier Werte waren HARTKODIERT auf den 8-mm-Lauf mit CFD_NEAR_VOR_MM=96.
+# Aendert sich die Nahfeld-Box (andere NEAR_VOR/NEAR_LY/NEAR_LZ), rechnet das Werkzeug jede
+# Weltkoordinate still falsch -- ohne Fehlermeldung. Jetzt Pflichtangabe aus dem Lauf-Log
+# ("Nahfeld x[...]" / "Fernfeld x[...]") bzw. der jeweiligen LAUF.txt.
+
 
 def entfaerben(p):
     """PNG-Pixel -> (|u| in m/s, status). status: 'ok' | 'solid' | 'klemm'"""

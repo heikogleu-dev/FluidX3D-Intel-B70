@@ -2985,6 +2985,18 @@ static void main_setup_fahrzeug_dd() {
 	if(slice_dt>0.0f&&diff_an) print_info("DIFF-SCHNITT aktiv: je Schnitt zusaetzlich |u_nah|-|u_fern| an derselben Weltposition (Fernfeld trilinear auf den Feinzellmittelpunkt), Skala +-"
 		+to_string(diff_span,1u)+" m/s (blau/weiss/rot), Solid schwarz -> schnitt_diff_<ms>ms.png + schnitt_diff_letzter.csv (Echtdaten, Iron Rule 5). Laeuft auf der CPU aus dem Hostspeicher, KEIN zusaetzlicher Device-Read.");
 	else if(slice_dt>0.0f) print_info("DIFF-SCHNITT AUS (CFD_DIFF_SCHNITT=0).");
+	// ★ SAUBERER STOPP (Heiko 2026-08-21). V1 hatte das (/tmp/cfd_stop), V2 nicht -- beim Neuaufbau
+	// nicht mitportiert. Ohne den Mechanismus ist ein laufender Lauf nur per kill zu beenden, und
+	// dabei geht ALLES verloren, was hinter der Zeitschleife steht: der VTK-Dump am Laufende, die
+	// Endauswertung, die Mittelwerte. Die CSVs ueberleben (sie werden je Sample geflusht) -- das Feld
+	// nicht. Die Datei anlegen -> naechste Sample-Kadenz verlaesst die Schleife regulaer, danach
+	// laeuft der komplette Abschlusspfad. Stale-Datei-Falle (V1-Lehre): beim Start wird eine
+	// liegengebliebene Datei entfernt, sonst stoppt der naechste Lauf sofort nach dem ersten Sample.
+	const string stop_datei = getenv("CFD_STOP_DATEI") ? string(getenv("CFD_STOP_DATEI")) : string("/tmp/cfd_stop");
+	std::remove(stop_datei.c_str());
+	print_info("SAUBERER STOPP: \"touch "+stop_datei+"\" verlaesst die Zeitschleife an der naechsten Sample-Kadenz (alle "
+		+to_string(sample_every)+" grobe Schritte) und laeuft den vollstaendigen Abschlusspfad -- Endauswertung, CSV-Schluss"
+		+(env_u("CFD_VTK_ENDE",0u)>0u?string(" UND VTK-Feld-Dump"):string(" (VTK nur mit CFD_VTK_ENDE=1)"))+". Pfad ueber CFD_STOP_DATEI aenderbar.");
 	const float vtk_dt     = env_f("CFD_VTK_DT", 0.0f);
 	const bool  vtk_ende   = env_u("CFD_VTK_ENDE", 0u)>0u;
 	const uint  vtk_stride = max(1u, env_u("CFD_VTK_STRIDE", 1u));
@@ -3074,6 +3086,7 @@ static void main_setup_fahrzeug_dd() {
 	// Als Praediktor-Halteschema ist ein Vorlauf gegenueber einem Nachlauf eher guenstiger.
 	std::vector<double> ts, fx, fz, fx_c; // fx_c war write-only (Hygiene E6b) -- wird jetzt unten ausgewiesen
 	float slice_next = 0.0f, vtk_next = 0.0f;
+	double t_si_letzt = 0.0; bool stop_angefordert = false; // gesetzt je Aussenschritt bzw. beim sauberen Stopp
 	if(vtk_dt>0.0f||vtk_ende) { // Kosten VOR dem ersten Zeitschritt ansagen, nicht erst beim Schreiben
 		auto mb = [&](const uint Nx, const uint Ny, const uint Nz) {
 			const ulong np=(ulong)((Nx+vtk_stride-1u)/vtk_stride)*(ulong)((Ny+vtk_stride-1u)/vtk_stride)*(ulong)((Nz+vtk_stride-1u)/vtk_stride);
@@ -3435,6 +3448,7 @@ static void main_setup_fahrzeug_dd() {
 				zb_rel = fmax(fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F.x), fabs(((double)Fb.y+(double)Fr.y)-(double)F.y)), fabs(((double)Fb.z+(double)Fr.z)-(double)F.z))/skala; // R1-N2: Fy mitgeprueft
 			}
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
+			t_si_letzt = t_si;
 			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);
 			if(wp_c_ok) schreibe_wandprofil(lbm_c, cNx, cNy, wp_cx, wp_cy, u_lat, t_si, wpc);
 			// ★ P8/P9 Schritt 0: Interface-Druck aus den face[p]-Puffern. Die stehen hier FRISCH: die
@@ -3640,6 +3654,16 @@ static void main_setup_fahrzeug_dd() {
 			ph_kraft += std::chrono::duration<double>(_t5-_t4).count();
 			ph_schnitt += std::chrono::duration<double>(t_now()-_t5).count();
 
+			// ★ SAUBERER STOPP: erst HIER, nach Kraeften, Sonden, Schnitt und VTK-Kadenz -- der
+			// angebrochene Aussenschritt ist damit vollstaendig ausgewertet, bevor die Schleife
+			// endet. Die Datei wird beim Erkennen entfernt (der Abschlusspfad laeuft trotzdem).
+			if(access(stop_datei.c_str(), F_OK)==0) {
+				std::remove(stop_datei.c_str());
+				stop_angefordert = true;
+				print_info("[STOPP] "+stop_datei+" erkannt bei t = "+to_string((float)t_si,4u)+" s (grober Schritt "
+					+to_string((ulong)(outer+1ull))+" von "+to_string(n_outer)+"). Zeitschleife wird regulaer verlassen, Abschlusspfad laeuft.");
+			}
+
 			// ---------------------------------------------------- Leistungsbericht
 			{
 				const double wall = std::chrono::duration<double>(t_now()-wall_begin).count();
@@ -3655,12 +3679,13 @@ static void main_setup_fahrzeug_dd() {
 				wall_begin = t_now(); t_phys_begin = t_si; // naechstes Fenster
 			}
 		}
+		if(stop_angefordert) break;
 	}
 	// ★ VTK am LAUFENDE: der Fall, fuer den dieser Export gebaut wurde -- das Feld des LETZTEN
 	// gerechneten Zeitschritts, aus dem sich jede Ebene, jede Komponente und jede Differenz
 	// nah gegen fern spaeter offline ziehen laesst, ohne den Lauf zu wiederholen.
 	if(vtk_ende) {
-		const int t_ms = (int)((float)n_outer*dt_c*1000.0f+0.5f); // Schleifenende: t_si ist schleifenlokal, n_outer*dt_c ist derselbe Wert
+		const int t_ms = (int)((float)t_si_letzt*1000.0f+0.5f); // WIRKLICH erreichte Zeit -- bei sauberem Stopp ist das NICHT n_outer*dt_c
 		string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
 		lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
 		schreibe_vtk_feld(lbm_f, fNx, fNy, fNz, near_x0, near_y0, near_z0, dx_f, si_u/u_lat, vtk_stride, out_dir+"feld_nah_"+ms+"ms.vtk");
@@ -3672,6 +3697,8 @@ static void main_setup_fahrzeug_dd() {
 		if(g_vtk_dateien==0ull) print_error("CFD_VTK_ENDE/CFD_VTK_DT war gesetzt, es wurde aber KEINE einzige VTK-Datei geschrieben -- stiller No-Op.");
 		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben.");
 	}
+	if(stop_angefordert) print_info("[STOPP] Lauf regulaer beendet bei t = "+to_string((float)t_si_letzt,4u)+" s statt der geplanten "
+		+to_string((float)n_outer*dt_c,4u)+" s. Alle Ausgaben sind vollstaendig; die Mittelwerte unten beziehen sich auf das VERKUERZTE Fenster.");
 	if(n_acc>0ull) print_info("Mittlere Zeit je grobem Schritt: "+to_string((float)(t_acc/(double)n_acc),4u)+" s ("+to_string(ratio)+" feine Schritte inklusive)");
 
 	// ---------------------------------------------------------------- Auswertung

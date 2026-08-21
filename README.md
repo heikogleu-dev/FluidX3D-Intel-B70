@@ -70,8 +70,14 @@ Next levers, planned and documented ready-to-build: van-Driest SGS wall damping 
 laminarises the near-wall region), a roof-line separation probe, closing the facet coverage gaps.
 Still open: residual streaks at the near-field inlet (an eigen-response of the coupling boundary)
 and the right form of a **near→far feedback** — first volume and shell variants were built and
-proven correct, but rejected on physics: they distorted the near flow. Forward coupling alone is
-sound.
+proven correct, but rejected on physics: they distorted the near flow.
+
+Measured 2026-08-21 on the 4 mm production run, from the near-vs-far difference field
+(`schnitt_diff_letzter.csv`, 661,281 evaluable cells at t = 495 ms): the **forward coupling is
+sound** — RMS |Δu| is 0.36–0.95 m/s in the inlet band ahead of the nose, 1–3 % of the freestream.
+The deviation is generated **at the body** (the boundary-layer rim the 16 mm far field cannot
+resolve) and grows monotonically downstream to RMS 8.56 m/s behind the tail. The next build step
+is planned in `BAUPLAN-KOPPLUNG.md`.
 
 ## The evidence chain
 

@@ -1172,3 +1172,116 @@ Zeitinterpolation als Ursache widerlegt).
    angelegt, Cz-Budget Boden -1,35/Fluegel -0,47/Dach +0,57.
 5. Klein: po_mean-deterministische Reduktion, Reibungs-z-Zerlegung (fac_geo[6]), Perf-Runde-2-
    Rest (Slice-Read, UPDATE_FIELDS-A/B, FP16S).
+
+---
+
+## TAGESABSCHLUSS 2026-08-21 spaet: 4-mm-Produktion mit Diff-Instrument + Kopplungs-Bauplan
+
+**4-mm-PRODUKTION `f4_std_diff2` GRUEN** (Standardkonfiguration, rc=0, 1 h 32 min):
+cd_druck **0,8428** / cz_druck **-0,5795** (Band +0,2461 / Rest **-0,8255**) = reproduziert die
+dokumentierte 4-mm-Basis. VTK beider Domaenen weltpositioniert geschrieben (11,28 GB, Wirkpfad
+2 Dateien). Leistungsindex Median **10.609** s_wall/s_phys.
+
+**NEUE INSTRUMENTE (Host-seitig, keine Kernel-Aenderung):**
+- `render_yslice_diff` (CFD_DIFF_SCHNITT, Default an): je Schnitt |u_nah|-|u_fern| an derselben
+  Weltposition, Fernfeld TRILINEAR auf den Feinzellmittelpunkt. Noetig, weil die Feinmittelebene
+  bei geradem cey GENAU ZWISCHEN zwei Grobzellen faellt (bestaetigt: cNy=240, Fern-Schnitt auf
+  Index 120 = Welt-y +16 mm, Nah-Mittelebene y=0). Laeuft auf der CPU aus dem Hostspeicher, KEIN
+  zusaetzlicher Device-Read; gemessener Phasenanteil "Schnitte 0,0 %". Dazu
+  `schnitt_diff_letzter.csv` mit BEIDEN u-Vektoren zellweise.
+- VTK-Feldexport (CFD_VTK_ENDE / _DT / _STRIDE): eigener Writer statt
+  Memory_Container::write_vtk -- der rechnet mit dem GLOBALEN `units` (der dd-Fall fuehrt zwei)
+  und setzt ORIGIN auf die Boxmitte; Nah und Fern laegen NICHT uebereinander. Abnahme am
+  Rauchtest: 0 Restbytes, Weltausdehnungen = Startansagen, |u| 28,2/30,1 m/s bei u_inf 30.
+- SAUBERER STOPP (CFD_STOP_DATEI, Default /tmp/cfd_stop): V1 hatte das, V2 nicht -- beim
+  Neuaufbau nicht mitportiert. Ohne den Mechanismus ging bei jedem kill ALLES verloren, was
+  hinter der Zeitschleife steht (VTK, Endauswertung). Stale-Datei-Falle mit portiert.
+
+**KIPP-WAECHTER WAR AUF DER 8-mm-SPROSSE GEEICHT** (CFD_KIPP_AB, Default 0,05 s): stand fest auf
+t > 0,02 s. `f4_std_diff` riss dort mit |Cd| 20,06; `f4_neustandard2` ueberlebte dieselbe Stelle
+mit 18,62 -- 7 % Rest, also Glueck, keine Auslegung. Bei t = 21 ms ist die Stroemung 0,63 m weit
+gelaufen, das Fahrzeug ist 4,4 m lang. Grundlage des neuen Werts: im Fenster 0,05..0,2 s liegt
+max|Cd| bei 13,82 (8 mm) bzw. 14,53 (4 mm) = 27 % Luft zur Schwelle 20.
+
+**DIFF-SCHNITT, ECHTDATEN 4 mm bei t = 495 ms** (661.281 auswertbare Zellen):
+RMS **6,07 m/s**, Mittel **+0,90**, Median -0,58, p95 +14,8. x-Baender: Einlaufband vor der Nase
+**0,36-0,95** (= 1-3 % von u_inf, die VORWAERTSKOPPLUNG SITZT), ab der Nase 2,3 steigend bis
+**8,56 bei x=+4,1 m** (Heckabriss/nahes Totwasser). Der Fehler entsteht AM KOERPER (Grenzschicht-
+saum, den das Fernfeld nicht auflaesen kann) und waechst monoton in den Nachlauf.
+KORREKTUR EINER FRUEHEREN AUSSAGE: die PNG-Schaetzung derselben Groesse (8 mm) gab Mittel -0,72
+und "75 % der Zellen langsamer". Beides ist ein Klemm-Artefakt -- 27,8 % der Nah-Ebene standen im
+PNG an der unteren Farbklemme (u <= 15 m/s), genau das Totwasser fehlte. Iron Rule 5 bestaetigt.
+
+**LEISTUNGSPROFIL 4 mm, 384 Berichte -- V1s Aussage gilt in V2 NICHT MEHR:**
+Nahfeld (B70, 4 feine Schritte) **97,7 %** | Kraefte 1,1 % | Kopplung grob->fein 0,9 % |
+**Fernfeld warten+entnehmen 0,3 %** (~1,3 ms von 424 ms) | Schnitte 0,0 %.
+Der grobe Schritt verschwindet vollstaendig hinter dem feinen: **die B70 ist der Flaschenhals,
+nicht die iGPU**. V1s README-Satz "iGPU coarse step ~720 ms is the saturated bottleneck" ist fuer
+V2 falsch und im oeffentlichen README berichtigt. Ursache der Umkehr NICHT gemessen (beide
+Generationen rechnen ~203 M Fernzellen; in V2 ist das Fernfeld bewusst reines Bounce-Back).
+Nebenbei quantifiziert: der Schnitt-Hook transferiert bei 4 mm **11,3 GB je Schnitt**; in den
+38 von 384 Fenstern mit Schnitt steigt der Aussenschritt 422,6 -> 474,4 ms (+12 %), ueber den
+ganzen Lauf ~1 %.
+
+**BAUPLAN KOPPLUNGS-UMBAU -> `BAUPLAN-KOPPLUNG.md`** (vier Planungs- und drei Pruefagenten).
+Die drei Befunde, die dort alles andere binden:
+1. **Teil A (Box) und Teil C1 (Rueckwaertsband linear) brauchen NULL Codezeilen** -- A sind drei
+   Env-Schalter, C1 ist `CFD_N2F_SCHALE=0.5 CFD_N2F_SCHALE_LAGEN=8`. Der ganze C-Zweig ist ein
+   Kill/Keep-Entscheid fuer 24 Minuten Rechenzeit, BEVOR irgendetwas gebaut wird.
+2. **Der Fruehindikator war der falsche.** Fenstermittel [0,02;0,10 s]: der verworfene
+   Volumen-Blend hatte Cd **12,03** gegen Basis 12,16 -- er war im frueher Cd BESSER als die
+   Basis. `Fx_far_N` trennt um Faktor 12 (44.553 N gegen 3.760 N), im ersten Sample bei t=2 ms
+   bereits 83.837 N gegen -19.924 N. **Ab jetzt ist Fx_far das Abbruchkriterium, nicht Cd.**
+3. **Die Fahrbahn-Falle im Band-Listenbauer:** Saatmenge muss `(TYPE_S|TYPE_X)` sein, nicht
+   `TYPE_S`. Die Fahrbahn ist bei z=0 flaechendeckend TYPE_S -- mit ihr als Saat waere das
+   "Band ums Fahrzeug" ein 8 Zellen dicker Teppich ueber 2,95 Mio Zellen, still.
+
+**y+ GEMESSEN, beide Sprossen** (Facetten-Akkumulator, y_w je Facette):
+4 mm q25 24,8 / **Median 39,4** / q75 64,6 -- 8 mm q25 45,3 / **Median 72,2** / q75 120,8.
+Faktor 1,83, y+ skaliert sauber mit dx. Median 39 heisst: erste Zelle oben im Buffer-Layer, die
+Grenzschicht wird von im Wesentlichen EINER Zelle getragen. Smagorinskys lokales nu_t ~ D^2|S|
+dissipiert, es transportiert nicht -- die auflaesungsabhaengige Abloesung ist die Vorhersage
+dieses Modells (Modeled-Stress-Depletion), kein Defekt.
+
+## TODO NAECHSTE SESSION (Heiko, Stand 2026-08-21 abends)
+1. **Kopplungs-Umbau nach `BAUPLAN-KOPPLUNG.md`**, Phasen 0-2 zuerst (kein Code, 1 h 20).
+2. **Kollisionsmodell HRR/RR** (NACH der Kopplung). Astoul et al. 2020 (JCP 418:109645): die
+   Erzeugung falscher Wellen am Aufloesungssprung ist INTRINSISCH (Aliasing), unabhaengig vom
+   Kopplungsalgorithmus -- der benannte Hebel ist die Kollision, nicht das Interface.
+3. **van-Driest-Wanddaempfung** (NACH der Kopplung, baufertig dokumentiert). Adressiert die
+   MSD-Ursache statt des Symptoms.
+4. **2x B70, Nahfeld-Halbierung mit Halo** (Hardware in Arbeit) -- Vorpruefung siehe unten.
+5. Rest unveraendert: FNEQ-Paritaetsbeweis (M2), Near-Inlet-Streifen, po_mean-Determinismus.
+
+## VORPRUEFUNG 2x B70 (Heiko-Plan 2026-08-21 abends)
+Plan: zweite B70 auf neuem Mainboard, beide fuer das NAHFELD (linke/rechte Haelfte, per Halo
+verbunden), Nahfeld auf 3,5 mm, Fernfeld bleibt auf der iGPU, Blockage unveraendert (Fern-x+
+entsprechend einkuerzen).
+
+**KLEMME: 3,5 mm bricht das 4:1.** 16/3,5 ist keine ganze Zahl -- ratio 4 zwingt das Fernfeld auf
+**14 mm** = +49 % Fernzellen (203,5 -> 303,8 M), iGPU-Grobschritt 343 -> **511 ms** gegen ein
+Nahfenster von ~507 ms (2 Karten, 15 % Halo-Aufschlag) = **101 %**. Die iGPU wird vom versteckten
+Partner zum Flaschenhals. Rechnung auf den Ankern dieser Maschine (B70 4648 MLUPs, iGPU 594
+MLUPs, 55 B/Zelle, groesste je beobachtete Belegung 29.274 MB).
+
+**Zwei Auswege, beide gerechnet:**
+- **Fern-Nachlauf um 2,5 m einkuerzen** (Heikos eigener Vorschlag): 407 ms = 80 %, exakt wie
+  heute. Rest 1,0 m Fernfeld hinter dem Nahfeld-Auslass statt 3,5 m. Der Nahfeld-Auslass ist ein
+  Zou-He-Druckrand, sein Gegendruck kommt aus genau diesem Stueck -- eng, aber ueber
+  `interface_druck.csv` messbar.
+- **3,2 mm mit ratio 5**: Fernfeld bleibt unangetastet bei 16 mm, iGPU bei **56 %**, und 3,2 mm
+  ist FEINER als die gewuenschten 3,5 (mehr Voxeldetail = das eigentliche Ziel). Preis: ratio 5
+  statt 4 (Spektralsprung [pi/5,pi] statt [pi/4,pi]), Box waechst nicht (32,5 statt 32,0 m3).
+
+**Die zweite Karte bezahlt in beiden Faellen die Aufloesung, nicht die Box:** 3,5 mm -> +37 %
+Volumen (43,9 m3), 3,2 mm -> +2 % (32,5 m3). Nahzellen 1024 M bzw. 991 M.
+
+**Der y-Split ist die aufwendigste Schnittebene.** Lastbalance perfekt (symmetrisch), aber der
+Halo laege genau in der Fahrzeug-Mittelebene -- Dachfirst, Unterbodenmitte, Diffusormitte -- und
+das ist die Ebene, in der ALLE Diagnosen messen (Diff-Schnitt, Slices, Sonden). Der Upstream-Halo
+traegt fi/rho/u/flags sauber (`communicate_fi`, `kernel_transfer`, `get_D()` sind im Kern
+vorhanden; beide Domaenen werden heute mit dem Einzelgeraet-Konstruktor gebaut). NICHT abgedeckt
+sind die eigenen Kernel des Forks: `apply_facette` liest ein 3x3-Fenster und 18 Nachbarn,
+`baue_facetten` ein 5^3-Fenster, die Kraftreduktionen summieren pro Domaene, `schale_extract`
+mittelt ueber ratio^3, der Sparse-Tiles-Pfad haelt eigene Slot-Tabellen.
+**Jeder davon braucht ein Halo-Audit -- das ist die Arbeit, nicht der LBM-Kern.**
