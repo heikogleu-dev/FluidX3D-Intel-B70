@@ -242,9 +242,20 @@ it out and watch `journalctl -k --since "1 min ago" | grep xe`.
 
 - **Single-domain B70:** ≈ 5 464 MLUPS at 96–100 % of peak bandwidth (FluidX3D's class-leading
   efficiency; ~4× an RTX 3060 Ti).
-- **Dual-domain:** iGPU-bound — the far coarse step on the Xe-LPG iGPU gates throughput; the B70
-  fine step overlaps beneath it. iGPU effective bandwidth ~40–50 GB/s on system RAM.
-  Measured index and phase profile per run: [LEISTUNG.md](LEISTUNG.md).
+- **Dual-domain (V2, measured 2026-08-21 over 384 phase reports of a 4 mm production run):**
+  **B70-bound.** The coarse far step runs asynchronously on the iGPU and hides completely beneath
+  the fine step — waiting for it plus extracting the coupling planes costs **0.3 %** of the outer
+  step (~1.3 ms of 424 ms). The split is fine step **97.7 %**, forces 1.1 %, coarse→fine coupling
+  0.9 %, far wait+extract 0.3 %, slices 0.0 %. Performance index 10 609 s_wall/s_phys (median).
+  *This reverses V1's profile, where the iGPU coarse step was the saturated bottleneck at
+  ~720 ms/outer. Both generations run the same far grid size (~203 M cells at 16 mm), so the change
+  is in what the far domain computes, not how much — in V2 it is deliberately plain bounce-back
+  while the facet wall model runs only in the near field. The share of that difference has not been
+  measured; only the resulting profile above has.* Measured index and phase profile per run: [LEISTUNG.md](LEISTUNG.md).
+- **Slice cost at 4 mm:** each slice hook transfers ~11.3 GB over PCIe (u + rho + flags of the fine
+  domain, u + flags of the coarse one). In the 38 of 384 report windows that contain a slice the
+  outer step rises from 422.6 to 474.4 ms (+12 %); across the whole run that is ~1 %. Worth knowing
+  before tightening `CFD_SLICE_DT`.
 
 ## LBM solver landscape — why FluidX3D on the B70
 
