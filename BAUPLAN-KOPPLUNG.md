@@ -296,6 +296,32 @@ cz_druck_rest wird kleiner.
 
 ---
 
+## 7b. Fernfeld: cNx MUSS durch 64 teilbar sein (gemessen, V1 2026-06-15)
+
+Aus `FluidX3D/knowledge/hardware.md:417` -- ein A/B mit einer Variablen in derselben Sitzung:
+`Nx 937` = 3,79 ns/Zelle gegen `Nx 1024` = **3,20 ns/Zelle**. **1024 ist 8 % schneller, obwohl es
+9 % MEHR Zellen sind.** `937` (prim) erzeugt Partition-Camping auf den System-RAM-Kanaelen der
+Xe-iGPU. **Regel: Coarse-Nx immer power-of-2-freundlich (÷64), nie prim oder ungerade.**
+
+Heute erfuellt: V2s Fernfeld hat `cNx = 768 = 12 × 64`. **Die Regel stand bisher NUR in V1** --
+beim Neuaufbau nicht mitgekommen, hiermit nachgetragen. Sie bindet jede kuenftige Fernfeld-Box.
+
+Fuer den 2x-B70-Plan mit 3,5 mm (Fernfeld 14 mm) heisst das:
+
+| cNx | ×64 | Laenge | Zellen | Grobschritt | Kuerzung ggue. heute |
+|---:|---:|---:|---:|---:|---:|
+| 896 | 14 | 12,544 m | 309,3 M | 521 ms | −0,256 m |
+| 832 | 13 | 11,648 m | 287,2 M | 484 ms | 0,640 m |
+| 768 | 12 | 10,752 m | 265,1 M | 446 ms | 1,536 m |
+| **704** | **11** | **9,856 m** | **243,0 M** | **409 ms** | **2,432 m** |
+| 640 | 10 | 8,960 m | 221,0 M | 372 ms | 3,328 m |
+
+Nahfenster (2 Karten, 3,5 mm, 15 % Halo-Aufschlag): ~507 ms. **`cNx = 704` ist die Antwort** --
+409 ms = 81 % Auslastung, exakt wie heute (343/430 = 80 %). Es bleiben ~1,07 m Fernfeld hinter dem
+Nahfeld-Auslass statt 3,50 m. `640` waere zu knapp (0,17 m Rest), `768` zu langsam.
+
+---
+
 ## 8. Offene Entscheidungen
 
 1. **„8 Fernzellen" = Grobzellen der jeweiligen Sprosse oder feste 128 mm?** Auf 8 mm ist eine
