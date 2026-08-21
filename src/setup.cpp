@@ -114,6 +114,169 @@ static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 	write_png(dir+"schnitt_"+tag+"_"+ms+"ms.png", &img);
 }
 
+// --------------------------------------------------------------------------------------------
+// DIFF-SCHNITT nah GEGEN fern (Heiko-Auftrag 2026-08-21, Diagnose der Kopplungsrichtung).
+// ANSICHT EXAKT WIE "schnitt_nah": y-Mittelebene des FEINgitters ueber die volle Nahfeld-
+// Ausdehnung, gleiche Bildgroesse, gleiche Orientierung. Gezeigt wird an derselben WELTposition
+//   d = |u_nah| - |u_fern|   in m/s,   blau = -15, weiss = 0, rot = +15.
+// Das Fernfeld wird dazu TRILINEAR auf den Feinzellmittelpunkt interpoliert, in der Deckungs-
+// punkt-Konvention der Kopplung (fein f  <->  grob NF_O + f/ratio, siehe Listenbau der Schale).
+// Das ist hier keine Kosmetik: bei geradem cey faellt die Feinmittelebene fNy/2 GENAU ZWISCHEN
+// zwei Grobzellen (fNy/2=158, ratio=4 -> yc = NF_OY+39,5), eine Nachbarzelle waere um eine halbe
+// Grobzelle = 16 mm querversetzt und wuerde eine Scheindifferenz malen.
+// Ecken, die im Fernfeld Solid sind (Treppenkoerper/Fahrbahn), fallen aus der Summe; die
+// verbleibenden Gewichte werden renormiert. Ist KEINE Ecke gueltig, wird die Zelle grau gemalt
+// und in der CSV als fern_ungueltig=1 gefuehrt -- ein grauer Fleck ist damit "kein Fernwert",
+// nicht "Differenz null".
+// IRON RULE 5: das PNG ist nur die Sichtung. GEMESSEN wird an schnitt_diff_letzter.csv -- dieselbe
+// Ebene zellweise mit BEIDEN Geschwindigkeitsvektoren. Sie wird bei jedem Schnitt neu geschrieben
+// und haelt damit immer den zuletzt gerechneten Zeitschritt (abbruchfest, und jede andere
+// Faerbung/Metrik ist daraus ohne neuen Lauf ableitbar).
+static void render_yslice_diff(LBM& F, LBM& C,
+                               const uint fNx, const uint fNy, const uint fNz,
+                               const uint cNx, const uint cNy, const uint cNz,
+                               const uint NF_OX, const uint NF_OY, const uint NF_OZ, const uint ratio,
+                               const float u2si, const float d_span,
+                               const float near_x0, const float near_z0, const float dx_f,
+                               const int t_ms, const string& dir) {
+	const uint y_f = fNy/2u;
+	const float yc  = (float)NF_OY + (float)y_f/(float)ratio;
+	Image img(fNx, fNz);
+	string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
+	std::ofstream csv(dir+"schnitt_diff_letzter.csv"); csv.precision(6);
+	csv << "t_ms,x_idx,z_idx,x_m,z_m,unah_x,unah_y,unah_z,ufern_x,ufern_y,ufern_z,d_betrag_ms,nah_solid,fern_ungueltig\n";
+	ulong n_fluid=0ull, n_nsolid=0ull, n_ungueltig=0ull; double sum2=0.0, dmax=0.0;
+	for(uint z=0u; z<fNz; z++) for(uint x=0u; x<fNx; x++) {
+		const ulong n = (ulong)x + (ulong)fNx*((ulong)y_f + (ulong)fNy*(ulong)z);
+		// Solid-Maske exakt wie render_yslice: NUR 0x01 allein ist Solid, TYPE_MS (0x03) ist Fluid.
+		const bool nah_solid = (F.flags[n]&(TYPE_S|TYPE_E))==TYPE_S;
+		const float nx_=u2si*F.u.x[n], ny_=u2si*F.u.y[n], nz_=u2si*F.u.z[n];
+		// ---- Fernfeld trilinear am selben Weltpunkt
+		const float xc = (float)NF_OX + (float)x/(float)ratio;
+		const float zc = (float)NF_OZ + (float)z/(float)ratio;
+		const int i0 = (int)fmin(fmax(floor(xc), 0.0f), (float)cNx-2.0f);
+		const int j0 = (int)fmin(fmax(floor(yc), 0.0f), (float)cNy-2.0f);
+		const int k0 = (int)fmin(fmax(floor(zc), 0.0f), (float)cNz-2.0f);
+		const float tx=xc-(float)i0, ty=yc-(float)j0, tz=zc-(float)k0;
+		float wsum=0.0f, fx_=0.0f, fy_=0.0f, fz_=0.0f;
+		for(int dk=0; dk<2; dk++) for(int dj=0; dj<2; dj++) for(int di=0; di<2; di++) {
+			const float w = (di?tx:1.0f-tx)*(dj?ty:1.0f-ty)*(dk?tz:1.0f-tz);
+			if(w<=0.0f) continue;
+			const ulong m = (ulong)(i0+di) + (ulong)cNx*((ulong)(j0+dj) + (ulong)cNy*(ulong)(k0+dk));
+			if((C.flags[m]&(TYPE_S|TYPE_E))==TYPE_S) continue; // Solid faellt aus der Summe
+			wsum += w; fx_ += w*C.u.x[m]; fy_ += w*C.u.y[m]; fz_ += w*C.u.z[m];
+		}
+		const bool fern_ungueltig = !(wsum>0.0f);
+		if(!fern_ungueltig) { fx_=u2si*fx_/wsum; fy_=u2si*fy_/wsum; fz_=u2si*fz_/wsum; }
+		else { fx_=0.0f; fy_=0.0f; fz_=0.0f; }
+		const float bn = sqrt(nx_*nx_+ny_*ny_+nz_*nz_), bf = sqrt(fx_*fx_+fy_*fy_+fz_*fz_);
+		const float d = bn-bf;
+		// ---- Faerbung
+		int col;
+		if(nah_solid)            { col = 0x000000; n_nsolid++; }      // Nahfeld-Solid: schwarz wie im nah-Schnitt
+		else if(fern_ungueltig)  { col = 0x808080; n_ungueltig++; }   // kein gueltiger Fernwert: grau
+		else {
+			n_fluid++; sum2 += (double)d*(double)d; dmax = fmax(dmax, (double)fabs(d));
+			const float dc = fmin(d_span, fmax(-d_span, d));
+			int r,g,b;
+			if(dc<0.0f) { const float t=1.0f+dc/d_span; r=(int)(255.0f*t+0.5f); g=r; b=255; } // -span blau -> 0 weiss
+			else        { const float t=1.0f-dc/d_span; r=255; g=(int)(255.0f*t+0.5f); b=g; } // 0 weiss -> +span rot
+			col = (r<<16)|(g<<8)|b;
+		}
+		img.set_color(x, fNz-1u-z, col); // Bildzeile 0 ist oben, z waechst nach oben -- wie render_yslice
+		csv << t_ms << "," << x << "," << z << "," << (near_x0+(float)x*dx_f) << "," << (near_z0+(float)z*dx_f) << ","
+		    << nx_ << "," << ny_ << "," << nz_ << "," << fx_ << "," << fy_ << "," << fz_ << "," << d << ","
+		    << (nah_solid?1u:0u) << "," << (fern_ungueltig?1u:0u) << "\n";
+	}
+	csv << std::flush;
+	write_png(dir+"schnitt_diff_"+ms+"ms.png", &img);
+	print_info("[DIFF-SCHNITT] t = "+to_string(t_ms)+" ms: "+to_string(n_fluid)+" auswertbare Zellen, RMS |d| = "
+		+to_string((float)(n_fluid>0ull?sqrt(sum2/(double)n_fluid):0.0),4u)+" m/s, max |d| = "+to_string((float)dmax,3u)
+		+" m/s (Skala +-"+to_string(d_span,1u)+"); Nahfeld-Solid "+to_string(n_nsolid)+", ohne gueltigen Fernwert "
+		+to_string(n_ungueltig)+" (grau). Echtdaten: "+dir+"schnitt_diff_letzter.csv");
+}
+
+
+// --------------------------------------------------------------------------------------------
+// VTK-FELDEXPORT fuer den Doppel-Domaenen-Fall (Heiko-Auftrag 2026-08-21).
+// ANLASS: fuer f8_standard_final gab es KEINEN Feld-Dump -- der Vergleich nah gegen fern liess
+// sich nur aus den Schnitt-PNGs rekonstruieren, und dort sind 27,8 % der Nahfeld-Ebene an der
+// unteren Farbklemme (0,5*u_ref) = praktisch das ganze Totwasser. Genau die Region, um die es
+// bei der Rueckkopplung geht, war damit nicht auswertbar.
+//
+// WARUM NICHT Memory_Container::write_vtk (lbm.hpp) -- zwei stille Fehler in diesem Fall:
+//  1. Es rechnet mit dem GLOBALEN `units` (lbm.cpp Zeile 6). Der dd-Fall fuehrt aber ZWEI
+//     Einheitensysteme (units_fine/units_coarse, setup.cpp), die sich in dx und dt um ratio
+//     unterscheiden. Mindestens eine der beiden Domaenen bekaeme lautlos die falsche
+//     Ortsschrittweite und den falschen SI-Faktor.
+//  2. ORIGIN ist fest auf die MITTE der jeweiligen Box gesetzt (0,5-0,5*N). Nah- und Fernfeld
+//     haben verschiedene Groessen und verschiedene Weltlagen; die beiden Dateien laegen im
+//     Betrachter also NICHT uebereinander -- und ohne Deckung ist ein Differenzvergleich
+//     wertlos. Hier wird die ECHTE Weltlage geschrieben (x0/y0/z0 der jeweiligen Domaene).
+//
+// Format: VTK legacy, BINARY, STRUCTURED_POINTS, Big-Endian (Formatvorgabe, daher
+// reverse_bytes). Je Datei drei Felder unter einem POINT_DATA-Block:
+//   VECTORS u float          Geschwindigkeit in m/s (SI, bereits umgerechnet)
+//   SCALARS rho float        Dichte (Gitter-Einheiten, wie im Loeser)
+//   SCALARS flags unsigned_char  Zelltypen -- 0x01 Solid, 0x02 Equilibrium/Kopplung, 0x03 MS ...
+// stride>1 tastet jede stride-te Zelle ab (SPACING waechst entsprechend mit); die Weltlage des
+// ersten Punktes bleibt exakt, damit auch abgetastete Dateien noch deckungsgleich liegen.
+//
+// Der Aufrufer muss u, rho und flags VORHER vom Geraet gelesen haben.
+static ulong g_vtk_dateien = 0ull, g_vtk_bytes = 0ull; // Wirkpfad-Zaehler (Iron Rule: Nachweis im Binary)
+static void schreibe_vtk_feld(LBM& L, const uint Nx, const uint Ny, const uint Nz,
+                              const float x0, const float y0, const float z0, const float dx,
+                              const float u2si, const uint stride, const string& datei) {
+	const uint Sx=(Nx+stride-1u)/stride, Sy=(Ny+stride-1u)/stride, Sz=(Nz+stride-1u)/stride;
+	const ulong np = (ulong)Sx*(ulong)Sy*(ulong)Sz;
+	std::ofstream f(datei, std::ios::out|std::ios::binary);
+	if(!f) { print_warning("VTK: "+datei+" konnte nicht geoeffnet werden -- Dump uebersprungen."); return; }
+	const float sp = dx*(float)stride;
+	f << "# vtk DataFile Version 3.0\nFluidX3D-v2 dd-Feld " << datei.substr(datei.rfind('/')+1) << "\nBINARY\nDATASET STRUCTURED_POINTS\n"
+	  << "DIMENSIONS " << Sx << " " << Sy << " " << Sz << "\n"
+	  << "ORIGIN "  << to_string(x0,6u) << " " << to_string(y0,6u) << " " << to_string(z0,6u) << "\n"
+	  << "SPACING " << to_string(sp,6u) << " " << to_string(sp,6u) << " " << to_string(sp,6u) << "\n"
+	  << "POINT_DATA " << np << "\n";
+	// ---- u als Vektorfeld in m/s
+	f << "VECTORS u float\n";
+	{
+		std::vector<float> buf((size_t)Sx*3u);
+		for(uint z=0u; z<Sz; z++) for(uint y=0u; y<Sy; y++) {
+			for(uint x=0u; x<Sx; x++) {
+				const ulong n = (ulong)(x*stride) + (ulong)Nx*((ulong)(y*stride) + (ulong)Ny*(ulong)(z*stride));
+				buf[3u*x   ] = reverse_bytes(u2si*L.u.x[n]);
+				buf[3u*x+1u] = reverse_bytes(u2si*L.u.y[n]);
+				buf[3u*x+2u] = reverse_bytes(u2si*L.u.z[n]);
+			}
+			f.write((char*)buf.data(), (std::streamsize)(buf.size()*sizeof(float)));
+		}
+	}
+	// ---- rho in Gitter-Einheiten (Druck folgt daraus ueber (rho-1)*cs2 und den SI-Druckfaktor)
+	f << "\nSCALARS rho float 1\nLOOKUP_TABLE default\n";
+	{
+		std::vector<float> buf(Sx);
+		for(uint z=0u; z<Sz; z++) for(uint y=0u; y<Sy; y++) {
+			for(uint x=0u; x<Sx; x++) buf[x] = reverse_bytes(L.rho[(ulong)(x*stride) + (ulong)Nx*((ulong)(y*stride) + (ulong)Ny*(ulong)(z*stride))]);
+			f.write((char*)buf.data(), (std::streamsize)(buf.size()*sizeof(float)));
+		}
+	}
+	// ---- flags (uchar, kein Byte-Tausch noetig)
+	f << "\nSCALARS flags unsigned_char 1\nLOOKUP_TABLE default\n";
+	{
+		std::vector<uchar> buf(Sx);
+		for(uint z=0u; z<Sz; z++) for(uint y=0u; y<Sy; y++) {
+			for(uint x=0u; x<Sx; x++) buf[x] = L.flags[(ulong)(x*stride) + (ulong)Nx*((ulong)(y*stride) + (ulong)Ny*(ulong)(z*stride))];
+			f.write((char*)buf.data(), (std::streamsize)buf.size());
+		}
+	}
+	f.close();
+	const ulong bytes = np*(3ull*4ull+4ull+1ull);
+	g_vtk_dateien++; g_vtk_bytes += bytes;
+	print_info("[VTK] "+datei+": "+to_string(Sx)+"x"+to_string(Sy)+"x"+to_string(Sz)+" = "+to_string(np)+" Punkte, "
+		+to_string((float)bytes/1048576.0f,1u)+" MB, Ursprung ("+to_string(x0,3u)+", "+to_string(y0,3u)+", "+to_string(z0,3u)
+		+") m, Schrittweite "+to_string(sp*1000.0f,1u)+" mm"+(stride>1u?" (Abtastung 1:"+to_string(stride)+")":""));
+}
+
 // SAT-Schale plus Void-Fill. Upstreams Ray-Paritaets-Voxelizer laesst achsparallele Ebenen loechrig
 // (an der Kugel: 72 statt ~1064 Solidzellen in der Symmetrieebene), und die SAT-Schale allein ergaebe
 // einen HOHLKOERPER mit durchstroemtem Inneren -- gemessen 224 statt ~1100 Zellen im Mittelschnitt.
@@ -2797,6 +2960,34 @@ static void main_setup_fahrzeug_dd() {
 	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f); // alle 10 ms (Heiko); 0 = aus
+	// ★ KIPP-WAECHTER-SCHARFSCHALTUNG (Heiko 2026-08-21, Befund aus f4_std_diff): der Waechter stand
+	// fest auf t > 0,02 s. Diese Zahl ist auf der 8-mm-Sprosse geeicht. Der Impulsstart-Transient
+	// erreicht auf BEIDEN Sprossen ein Vielfaches der Schwelle (8 mm: |Cd| 41,25 / 4 mm: 49,24, je bei
+	// t ~ 1-2 ms) -- bis 20 ms ist er auf 8 mm auf 14,4 abgeklungen, auf 4 mm steht er noch bei 17-20.
+	// f4_std_diff riss dort mit 20,06; f4_neustandard2 ueberlebte dieselbe Stelle mit 18,62, also mit
+	// 7 % Rest. Das war Glueck, keine Auslegung. Bei t = 21 ms ist die Stroemung 0,63 m weit gelaufen,
+	// das Fahrzeug ist 4,4 m lang -- ein Cd existiert dort noch gar nicht.
+	// GEMESSENE Grundlage des neuen Werts: im Fenster 0,05..0,2 s liegt max|Cd| bei 13,82 (8 mm,
+	// f8_standard_final) bzw. 14,53 (4 mm, f4_neustandard2) -- 27 % Luft zur Schwelle 20.
+	const float kipp_ab = env_f("CFD_KIPP_AB", 0.05f);
+	if(!(kipp_ab>=0.0f)) print_error("CFD_KIPP_AB darf nicht negativ sein (Scharfschaltzeit des Kipp-Waechters in Sekunden; NaN faengt dieser Test mit).");
+	if(kipp_ab>=t_end) print_warning("CFD_KIPP_AB ("+to_string(kipp_ab,3u)+" s) liegt bei oder hinter CFD_T_END -- der Kipp-Waechter wird in diesem Lauf NIE scharf.");
+	print_info("KIPP-WAECHTER: scharf ab t > "+to_string(kipp_ab,3u)+" s (CFD_KIPP_AB), Schwelle |Cd| bzw. |Cz| > 20. Davor wirken nur die NaN-/Nichtendlich-Zweige. Der Impulsstart-Transient liegt bei t ~ 1-2 ms bei |Cd| ~ 41 (8 mm) bis 49 (4 mm) und ist keine Explosion.");
+	// ★ VTK-FELDEXPORT (Heiko 2026-08-21): Default AUS -- ein Dump kostet Sekunden und ueber ein
+	// Gigabyte, das gehoert nicht in jeden Screening-Lauf. CFD_VTK_ENDE=1 schreibt EINEN Dump beider
+	// Domaenen am Laufende (der Fall, um den es ging: das Feld des LETZTEN Zeitschritts), CFD_VTK_DT>0
+	// zusaetzlich an einer eigenen Kadenz. CFD_VTK_STRIDE tastet ab (2 -> 1/8 der Punkte).
+	// ★ DIFF-SCHNITT: EINMAL gelesen (env-Read-Falle -- die Konstanten tragen bis in die Zeitschleife,
+	// wie bei CFD_N2F_SCHALE/CFD_FERN_EINLASS_EQ). Vorher standen beide env-Aufrufe IM Schleifenkoerper.
+	const bool  diff_an   = env_u("CFD_DIFF_SCHNITT", 1u)>0u;
+	const float diff_span = env_f("CFD_DIFF_SPAN", 15.0f);
+	if(!(diff_span>0.0f)) print_error("CFD_DIFF_SPAN muss groesser als 0 sein (Halbbreite der Diff-Farbskala in m/s; NaN faengt dieser Test mit)."); // Negativform, faengt NaN
+	if(slice_dt>0.0f&&diff_an) print_info("DIFF-SCHNITT aktiv: je Schnitt zusaetzlich |u_nah|-|u_fern| an derselben Weltposition (Fernfeld trilinear auf den Feinzellmittelpunkt), Skala +-"
+		+to_string(diff_span,1u)+" m/s (blau/weiss/rot), Solid schwarz -> schnitt_diff_<ms>ms.png + schnitt_diff_letzter.csv (Echtdaten, Iron Rule 5). Laeuft auf der CPU aus dem Hostspeicher, KEIN zusaetzlicher Device-Read.");
+	else if(slice_dt>0.0f) print_info("DIFF-SCHNITT AUS (CFD_DIFF_SCHNITT=0).");
+	const float vtk_dt     = env_f("CFD_VTK_DT", 0.0f);
+	const bool  vtk_ende   = env_u("CFD_VTK_ENDE", 0u)>0u;
+	const uint  vtk_stride = max(1u, env_u("CFD_VTK_STRIDE", 1u));
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 	create_folder(out_dir);
 	sichere_lauf(out_dir, "fahrzeug_dd");
@@ -2882,7 +3073,17 @@ static void main_setup_fahrzeug_dd() {
 	// die Stroemung 1,2 mm, weniger als eine feine Zelle --, aber die Richtung war falsch beschrieben.
 	// Als Praediktor-Halteschema ist ein Vorlauf gegenueber einem Nachlauf eher guenstiger.
 	std::vector<double> ts, fx, fz, fx_c; // fx_c war write-only (Hygiene E6b) -- wird jetzt unten ausgewiesen
-	float slice_next = 0.0f;
+	float slice_next = 0.0f, vtk_next = 0.0f;
+	if(vtk_dt>0.0f||vtk_ende) { // Kosten VOR dem ersten Zeitschritt ansagen, nicht erst beim Schreiben
+		auto mb = [&](const uint Nx, const uint Ny, const uint Nz) {
+			const ulong np=(ulong)((Nx+vtk_stride-1u)/vtk_stride)*(ulong)((Ny+vtk_stride-1u)/vtk_stride)*(ulong)((Nz+vtk_stride-1u)/vtk_stride);
+			return (float)(np*17ull)/1048576.0f; };
+		print_info("VTK-FELDEXPORT aktiv (Abtastung 1:"+to_string(vtk_stride)+"): je Dump nah "+to_string(mb(fNx,fNy,fNz),0u)
+			+" MB + fern "+to_string(mb(cNx,cNy,cNz),0u)+" MB = "+to_string(mb(fNx,fNy,fNz)+mb(cNx,cNy,cNz),0u)+" MB; "
+			+(vtk_ende?string("EIN Dump am Laufende"):string("kein Dump am Laufende"))
+			+(vtk_dt>0.0f?", zusaetzlich alle "+to_string(vtk_dt*1000.0f,0u)+" ms":"")
+			+". ORIGIN/SPACING sind die ECHTE Weltlage beider Gitter -- die Dateien liegen im Betrachter deckungsgleich uebereinander.");
+	}
 	Clock outer_clock; double t_acc = 0.0; ulong n_acc = 0ull;
 	double Fx_prev = 1e300, Fz_prev = 1e300; uint n_frozen = 0u; // fuer den Einfrier-Test, siehe Zeitschleife
 	// ★ Pruefer-Befund 2026-08-08: die CSV entstand bisher ERST NACH der Schleife. Bei 2,5 Stunden
@@ -3338,7 +3539,7 @@ static void main_setup_fahrzeug_dd() {
 				string grund = "";
 				if(!std::isfinite(Fx_si) || !std::isfinite(Fz_si) || !std::isfinite(Fxf)) grund = "die Kraft ist keine Zahl mehr";
 				else if(n_frozen>=2u) grund = "die Kraft steht seit drei Abtastungen BITGLEICH -- das Feld ist eingefroren (Zahlenformat gesaettigt)";
-				else if(t_si>0.02 && (fabs(Fx_si)>20.0*q_A || fabs(Fz_si)>20.0*q_A)) grund = "die Kraft ist unphysikalisch gross (|Cd| oder |Cz| ueber 20)";
+				else if(t_si>(double)kipp_ab && (fabs(Fx_si)>20.0*q_A || fabs(Fz_si)>20.0*q_A)) grund = "die Kraft ist unphysikalisch gross (|Cd| oder |Cz| ueber 20, gemessen ab CFD_KIPP_AB = "+to_string(kipp_ab,3u)+" s)";
 				if(grund!="") {
 					fcsv << std::flush; fcsv.close(); ipcsv.close(); if(swcsv.is_open()) swcsv.close(); if(sonde_csv.is_open()) sonde_csv.close(); // R-N2: Abbruchpfad symmetrisch (Zeilen sind ohnehin geflusht); P9c: Waechter-CSV mit schliessen
 					print_error("Lauf gekippt bei t = "+to_string((float)t_si,5u)+" s (grober Schritt "+to_string((ulong)(outer+1ull))
@@ -3416,7 +3617,25 @@ static void main_setup_fahrzeug_dd() {
 				sonde_csv << std::flush;
 				lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
 				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "fern");
+				// ★ DIFF-SCHNITT nah-fern (Heiko 2026-08-21): KEIN zusaetzlicher Device-Read -- lbm_f.u/flags
+				// und lbm_c.u/flags liegen fuer die beiden Schnitte oben ohnehin schon auf dem Host. Skala
+				// ueber CFD_DIFF_SPAN (Default 15 m/s = Heiko-Vorgabe blau -15 / weiss 0 / rot +15).
+				if(diff_an)
+					render_yslice_diff(lbm_f, lbm_c, fNx, fNy, fNz, cNx, cNy, cNz, NF_OX, NF_OY, NF_OZ, ratio,
+					                   si_u/u_lat, diff_span, near_x0, near_z0, dx_f, t_ms, out_dir);
 				print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
+			}
+			// ★ VTK-Kadenz: EIGENE Uhr, unabhaengig von CFD_SLICE_DT. Die Lesevorgaenge stehen hier
+			// bewusst noch einmal -- der Slice-Block laeuft an einer anderen Kadenz und kann in diesem
+			// Fenster ausgefallen sein; ein Dump aus halb altem Hostspeicher waere ein stiller Fehler.
+			if(vtk_dt>0.0f && (float)t_si>=vtk_next) {
+				vtk_next = (float)t_si + vtk_dt;
+				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
+				string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
+				lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
+				schreibe_vtk_feld(lbm_f, fNx, fNy, fNz, near_x0, near_y0, near_z0, dx_f, si_u/u_lat, vtk_stride, out_dir+"feld_nah_"+ms+"ms.vtk");
+				lbm_c.u.read_from_device(); lbm_c.rho.read_from_device(); lbm_c.flags.read_from_device();
+				schreibe_vtk_feld(lbm_c, cNx, cNy, cNz, far_x0, far_y0, 0.0f, dx_c, si_u/u_lat, vtk_stride, out_dir+"feld_fern_"+ms+"ms.vtk");
 			}
 			ph_kraft += std::chrono::duration<double>(_t5-_t4).count();
 			ph_schnitt += std::chrono::duration<double>(t_now()-_t5).count();
@@ -3436,6 +3655,22 @@ static void main_setup_fahrzeug_dd() {
 				wall_begin = t_now(); t_phys_begin = t_si; // naechstes Fenster
 			}
 		}
+	}
+	// ★ VTK am LAUFENDE: der Fall, fuer den dieser Export gebaut wurde -- das Feld des LETZTEN
+	// gerechneten Zeitschritts, aus dem sich jede Ebene, jede Komponente und jede Differenz
+	// nah gegen fern spaeter offline ziehen laesst, ohne den Lauf zu wiederholen.
+	if(vtk_ende) {
+		const int t_ms = (int)((float)n_outer*dt_c*1000.0f+0.5f); // Schleifenende: t_si ist schleifenlokal, n_outer*dt_c ist derselbe Wert
+		string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
+		lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
+		schreibe_vtk_feld(lbm_f, fNx, fNy, fNz, near_x0, near_y0, near_z0, dx_f, si_u/u_lat, vtk_stride, out_dir+"feld_nah_"+ms+"ms.vtk");
+		lbm_c.u.read_from_device(); lbm_c.rho.read_from_device(); lbm_c.flags.read_from_device();
+		schreibe_vtk_feld(lbm_c, cNx, cNy, cNz, far_x0, far_y0, 0.0f, dx_c, si_u/u_lat, vtk_stride, out_dir+"feld_fern_"+ms+"ms.vtk");
+	}
+	// Wirkpfad-Nachweis: ein Schalter ohne feuernden Zaehler ist ein harter Fehler (Iron Rule).
+	if(vtk_dt>0.0f||vtk_ende) {
+		if(g_vtk_dateien==0ull) print_error("CFD_VTK_ENDE/CFD_VTK_DT war gesetzt, es wurde aber KEINE einzige VTK-Datei geschrieben -- stiller No-Op.");
+		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben.");
 	}
 	if(n_acc>0ull) print_info("Mittlere Zeit je grobem Schritt: "+to_string((float)(t_acc/(double)n_acc),4u)+" s ("+to_string(ratio)+" feine Schritte inklusive)");
 
