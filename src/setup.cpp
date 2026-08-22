@@ -3087,6 +3087,11 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<double> ts, fx, fz, fx_c; // fx_c war write-only (Hygiene E6b) -- wird jetzt unten ausgewiesen
 	float slice_next = 0.0f, vtk_next = 0.0f;
 	double t_si_letzt = 0.0; bool stop_angefordert = false; // gesetzt je Aussenschritt bzw. beim sauberen Stopp
+	// ★ 2026-08-22, Befund aus dem Stopp-Rauchtest: die Wirkpfad-Sollwerte unten rechneten mit
+	// n_outer, also der GEPLANTEN Schrittzahl. Nach einem sauberen Stopp ist die tatsaechliche
+	// kleiner -- ein voellig korrekter Lauf meldete sich als "Ist != Soll, Bindung defekt" und
+	// endete mit rc=1. Wer den Lauf gerettet hat, haette ihn danach fuer ungueltig gehalten.
+	ulong n_outer_ist = 0ull; // Aussenschritte, die WIRKLICH gelaufen sind (== n_outer ohne Stopp)
 	if(vtk_dt>0.0f||vtk_ende) { // Kosten VOR dem ersten Zeitschritt ansagen, nicht erst beim Schreiben
 		auto mb = [&](const uint Nx, const uint Ny, const uint Nz) {
 			const ulong np=(ulong)((Nx+vtk_stride-1u)/vtk_stride)*(ulong)((Ny+vtk_stride-1u)/vtk_stride)*(ulong)((Nz+vtk_stride-1u)/vtk_stride);
@@ -3448,7 +3453,7 @@ static void main_setup_fahrzeug_dd() {
 				zb_rel = fmax(fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F.x), fabs(((double)Fb.y+(double)Fr.y)-(double)F.y)), fabs(((double)Fb.z+(double)Fr.z)-(double)F.z))/skala; // R1-N2: Fy mitgeprueft
 			}
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
-			t_si_letzt = t_si;
+			t_si_letzt = t_si; n_outer_ist = outer+1ull;
 			if(wp_f_ok) schreibe_wandprofil(lbm_f, fNx, fNy, wp_fx, wp_fy, u_lat, t_si, wpf);
 			if(wp_c_ok) schreibe_wandprofil(lbm_c, cNx, cNy, wp_cx, wp_cy, u_lat, t_si, wpc);
 			// ★ P8/P9 Schritt 0: Interface-Druck aus den face[p]-Puffern. Die stehen hier FRISCH: die
@@ -3834,13 +3839,13 @@ static void main_setup_fahrzeug_dd() {
 		print_info("N2F-SCHALE-Wirkpfad: Fernfeld "+to_string(swc)+" Blend-Zellen (t%100-Stichprobe; Solid-/NaN-Skips senken den Zaehler ehrlich), Nahfeld "+to_string(swf)+" (Soll 0 -- der Blend laeuft NUR im Fernfeld).");
 		// t laeuft im Blend 1..n_outer (Vorlauf-run(1) hatte t=0 VOR alloc_schale) -- t%100 feuert
 		// floor(n_outer/100) mal; bei Laeufen unter 100 groben Schritten ist 0 also KEIN Befund.
-		if(swc==0ull) { if(n_outer<100ull) print_warning("N2F-SCHALE-Wirkpfad 0, aber der Lauf hat unter 100 grobe Schritte -- die t%100-Stichprobe hat nie gefeuert (kein Befund; laenger laufen fuer den Nachweis)."); else print_error("CFD_N2F_SCHALE gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op (Iron Rule 3)."); }
+		if(swc==0ull) { if(n_outer_ist<100ull) print_warning("N2F-SCHALE-Wirkpfad 0, aber der Lauf hat unter 100 grobe Schritte -- die t%100-Stichprobe hat nie gefeuert (kein Befund; laenger laufen fuer den Nachweis)."); else print_error("CFD_N2F_SCHALE gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op (Iron Rule 3)."); }
 		if(swf!=0ull) print_error("Nahfeld zaehlt Schalen-Blend-Wirkpfad -- es MUSS unberuehrt bleiben (alpha-Statik-Bruch: s_schale_alpha muss fuer lbm_f EXPLIZIT 0 sein).");
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];
 		df->rho_clamp_hits.read_from_device();
-		const ulong wz=(ulong)df->rho_clamp_hits[7], soll=df->fac_N*(ulong)((n_outer*(ulong)ratio+99ull)/100ull);
+		const ulong wz=(ulong)df->rho_clamp_hits[7], soll=df->fac_N*(ulong)((n_outer_ist*(ulong)ratio+99ull)/100ull); // n_outer_IST: nach sauberem Stopp ist die geplante Zahl falsch
 		print_info("Facetten-Wirkpfad Nahfeld: "+to_string(wz)+" (Soll "+to_string(soll)+" mod 2^32), tau-Klemme "+to_string((ulong)df->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
@@ -3880,7 +3885,7 @@ static void main_setup_fahrzeug_dd() {
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) { // ★ P8: Wirkpfad-Nachweis FERNFELD (Muster Nahfeld; das Grobgitter laeuft n_outer Schritte, Ereignis-Slots t%100-gesampelt)
 		LBM_Domain* dc = lbm_c.lbm_domain[0];
 		dc->rho_clamp_hits.read_from_device();
-		const ulong wzc=(ulong)dc->rho_clamp_hits[7], sollc=dc->fac_N*(ulong)(n_outer/100ull + 1ull); // Pruefagent H1: das Grobgitter macht n_outer+1 Schritte (Vorlauf-run(1) vor der Schleife!) -- t%100 feuert bei t=0,100,..,<=n_outer = floor(n_outer/100)+1 mal; die ceil-Formel haette bei rundem n_outer falsch hart abgebrochen
+		const ulong wzc=(ulong)dc->rho_clamp_hits[7], sollc=dc->fac_N*(ulong)(n_outer_ist/100ull + 1ull); // n_outer_IST (s. o.) // Pruefagent H1: das Grobgitter macht n_outer+1 Schritte (Vorlauf-run(1) vor der Schleife!) -- t%100 feuert bei t=0,100,..,<=n_outer = floor(n_outer/100)+1 mal; die ceil-Formel haette bei rundem n_outer falsch hart abgebrochen
 		print_info("Facetten-Wirkpfad Fernfeld (P8): "+to_string(wzc)+" (Soll "+to_string(sollc)+" mod 2^32), tau-Klemme "+to_string((ulong)dc->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)dc->rho_clamp_hits[9])
 			+(env_u("CFD_FERN_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[10])+", Skalar "+to_string((ulong)dc->rho_clamp_hits[12])
