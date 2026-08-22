@@ -3849,13 +3849,14 @@ static void main_setup_fahrzeug_dd() {
 				                          mk(bil_x0,bil_y0,bil_z0, bx,bz, 1u), mk(bil_x0,bil_y1,bil_z0, bx,bz, 1u),
 				                          mk(bil_x0,bil_y0,bil_z0, bx,by, 2u), mk(bil_x0,bil_y0,bil_z1, bx,by, 2u) };
 				const float nrm[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
-				double md[6]={0,0,0,0,0,0}, fimp=0.0, fdru=0.0, rmn=1e30, rmx=-1e30, mein=0.0, fimp_xp=0.0, fdru_xp=0.0; ulong nverw=0ull;
+				double md[6]={0,0,0,0,0,0}, fimp=0.0, fdru=0.0, rmn=1e30, rmx=-1e30, mein=0.0, fimp_xp=0.0, fdru_xp=0.0; ulong nverw=0ull; uint rmn_f=0u, rmx_f=0u;
+				const char* fname[6] = {"x-","x+","y-","y+","z-","z+"};
 				for(uint f=0u; f<6u; f++) {
 					lbm_c.extract_plane_macros(bp[f], bf);
 					const ulong np=(ulong)bp[f].extent_a*(ulong)bp[f].extent_b;
 					for(ulong i=0ull; i<np; i++) {
 						const double r=(double)bf[4ull*i], ux=(double)bf[4ull*i+1ull], uy=(double)bf[4ull*i+2ull], uz=(double)bf[4ull*i+3ull];
-						rmn=fmin(rmn,r); rmx=fmax(rmx,r);                   // ★ VOR dem Filter (Pruefagent): stand er dahinter, konnten rho_min/rho_max konstruktiv nie ausserhalb [0,5;2,0] melden -- das Instrument war gegen genau die Entgleisung blind, die es fangen soll
+						if(r<rmn) { rmn=r; rmn_f=f; } if(r>rmx) { rmx=r; rmx_f=f; } // Flaeche mitfuehren: ein Ausschlag auf der x--Ebene (durch das Fahrzeug) ist etwas anderes als einer im freien Nachlauf // ★ VOR dem Filter (Pruefagent): stand er dahinter, konnten rho_min/rho_max konstruktiv nie ausserhalb [0,5;2,0] melden -- das Instrument war gegen genau die Entgleisung blind, die es fangen soll
 						if(!(r>0.5&&r<2.0)) { nverw++; continue; }           // Solid/ungueltig ueberspringen, aber gezaehlt
 						const double un = ux*(double)nrm[f][0] + uy*(double)nrm[f][1] + uz*(double)nrm[f][2];
 						md[f] += r*un;                                      // Gittereinheiten, dA = 1 Zelle
@@ -3868,7 +3869,7 @@ static void main_setup_fahrzeug_dd() {
 				// ★ BAUPLAN Paragraf 2, zweite Haelfte des Wake-Kippkriteriums (|rho-1| > 0,1). Sie fehlte
 				// bisher ersatzlos -- aus der geforderten Konjunktion war ein Einzelkriterium geworden.
 				// Hier ist der richtige Ort: der Waechter am Bandrand hat kein rho, die Bilanz schon.
-				if(t_si>=(double)t_warmup&&(rmx-1.0>0.1||1.0-rmn>0.1)) print_error("N2F-BAND WAKE-KIPP (Dichte): im Wake-Kasten liegt rho ausserhalb 1 +- 0,1 (min "+to_string((float)rmn,4u)+", max "+to_string((float)rmx,4u)+"). Die u-Aufpraegung bei festgehaltenem rho hat den Kasten aus dem inkompressiblen Bereich getrieben. Abgebrochen (Bauplan Paragraf 2, zweite Haelfte des Kippkriteriums).");
+				if(t_si>=(double)t_warmup&&(rmx-1.0>0.1||1.0-rmn>0.1)) print_error("N2F-BAND WAKE-KIPP (Dichte): im Wake-Kasten liegt rho ausserhalb 1 +- 0,1 (min "+to_string((float)rmn,4u)+" auf Flaeche "+string(fname[rmn_f])+", max "+to_string((float)rmx,4u)+" auf Flaeche "+string(fname[rmx_f])+"). Die u-Aufpraegung bei festgehaltenem rho hat den Kasten aus dem inkompressiblen Bereich getrieben. Abgebrochen (Bauplan Paragraf 2, zweite Haelfte des Kippkriteriums).");
 				const double mnet = md[0]+md[1]+md[2]+md[3]+md[4]+md[5];
 				// Gitter -> SI: rho_lat*u_lat^2 wird zu rho_si*u_si^2, dazu die Zellflaeche.
 				const double A1  = (double)dx_c*(double)dx_c;                                  // Zellflaeche [m2]
