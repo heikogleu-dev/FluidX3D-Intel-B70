@@ -144,6 +144,7 @@ static void render_yslice_diff(LBM& F, LBM& C,
 	Image img(fNx, fNz);
 	string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
 	std::ofstream csv(dir+"schnitt_diff_letzter.csv"); csv.precision(6);
+	csv << "# d_betrag_ms ist SIGNIERT: |u_nah| - |u_fern| (nicht ||u_nah-u_fern||); Solid-Zeilen tragen Init-u (Instrumenten-Audit 2026-08-22)\n";
 	csv << "t_ms,x_idx,z_idx,x_m,z_m,unah_x,unah_y,unah_z,ufern_x,ufern_y,ufern_z,d_betrag_ms,nah_solid,fern_ungueltig\n";
 	ulong n_fluid=0ull, n_nsolid=0ull, n_ungueltig=0ull; double sum2=0.0, dmax=0.0;
 	for(uint z=0u; z<fNz; z++) for(uint x=0u; x<fNx; x++) {
@@ -2389,7 +2390,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u;
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
 	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
@@ -2543,11 +2544,11 @@ static void main_setup_fahrzeug_dd() {
 			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im BAND-Modus werden sie NICHT angewandt (Ansage-Doktrin).");
 		}
 		else if(n2f_volumen>0u) {
-			print_info("N2F-VOLUMEN aktiv (CFD_N2F_VOLUMEN=1, Heiko-Bild): VOLUMEN-Blend ersetzt den Schalen-Listenbauer -- Rot-Kern = Fahrzeug-BBox+100mm (Gewichtsfeld 1,0, wirksam alpha), lineare Rampe (Chebyshev-artig je Achse) auf 0,0 an der Gruen-Box = Nahfeld-Fussabdruck-100mm; Schutzzone Gruen->Fussabdruck zellfrei; z- offen (Volumen endet unten am boden_eq-Band); Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten)":" (EQ)")+".");
+			print_info("N2F-VOLUMEN aktiv (CFD_N2F_VOLUMEN=1, Heiko-Bild): VOLUMEN-Blend ersetzt den Schalen-Listenbauer -- Rot-Kern = Fahrzeug-BBox+100mm (Gewichtsfeld 1,0, wirksam alpha), lineare Rampe (Chebyshev-artig je Achse) auf 0,0 an der Gruen-Box = Nahfeld-Fussabdruck-100mm; Schutzzone Gruen->Fussabdruck zellfrei; z- offen (Volumen endet unten am boden_eq-Band); Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten, seit 2026-08-22 Default)":" (EQ -- seit 2026-08-22 NICHT mehr Standard)")+".");
 			if(n2f_modus==0u) print_info("N2F-VOLUMEN EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 setzen -- der Volumen-Blend greift bis in den Rot-Kern nahe der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (EQ-Arm wuerde sie je Blend verwerfen).");
 			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im VOLUMEN-Modus (CFD_N2F_VOLUMEN=1) werden sie NICHT angewandt (Ansage-Doktrin).");
 		}
-		else if(n2f_lagen>0u) print_info("N2F-SCHALE GRADIENT: "+to_string(n2f_lagen)+" Lagen, Gewichte w_k = (N-k)/N linear (innen 1,000 -> aussen "+to_string(1.0f/(float)n2f_lagen,3u)+"); x+-Skalierung "+to_string(n2f_xskal,3u)+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten)":" (EQ)")+".");
+		else if(n2f_lagen>0u) print_info("N2F-SCHALE GRADIENT: "+to_string(n2f_lagen)+" Lagen, Gewichte w_k = (N-k)/N linear (innen 1,000 -> aussen "+to_string(1.0f/(float)n2f_lagen,3u)+"); x+-Skalierung "+to_string(n2f_xskal,3u)+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten, seit 2026-08-22 Default)":" (EQ -- seit 2026-08-22 NICHT mehr Standard)")+".");
 		else print_info("N2F-SCHALE KONTROLLARM (CFD_N2F_SCHALE_LAGEN=0): Altverhalten -- uniforme Doppellage bei rand~100mm, Gewicht 1,0; Modus "+to_string(n2f_modus)+".");
 		if(n2f_ident>0u) print_warning("CFD_N2F_SCHALE_IDENT=1: Blend ist ein EXAKTES No-Op (Debug-Paritaetsbeweis) -- dieser Lauf traegt KEINE Schalen-Physik.");
 		if(n2f_ident>0u&&n2f_fneq>0u) print_warning("CFD_N2F_SCHALE_FNEQ wird von CFD_N2F_SCHALE_IDENT=1 ueberstimmt (Debug-Arm).");
@@ -3105,7 +3106,7 @@ static void main_setup_fahrzeug_dd() {
 			}
 			{ const float w_ = wake_kern ? 1.0f : band_w(d); if(w_<=0.0f) { ausgelassen_w0++; continue; } } // Profil-2-Nulllage (B-P2/B2)
 			const uchar bo=lbm_c.flags[nn]&(TYPE_S|TYPE_E);
-			if(bo==TYPE_E) lage_te[lage]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier gezaehlt
+			if(bo==TYPE_E) lage_te[lage]++;                     // z. B. FERN_BODENKLEMME; seit c1a6843 zaehlt lage_te nur noch GELISTETE Zellen (WANDFREI/w0-gefilterte nicht mehr) -- Bedeutungswandel dokumentiert
 			const bool zone_wake = n2f_wake>0u && (wake_kern || x>=wx0); // Obermenge, s. Kommentar oben
 			n2f_marke.push_back((uchar)(zone_wake?1u:0u));
 			n2f_liste_c.push_back(nn);
@@ -3625,6 +3626,7 @@ static void main_setup_fahrzeug_dd() {
 	double fac_px=0.0, fac_pz=0.0, fac_dm=0.0, fac_rest=0.0, fac_dm0=0.0, fac_rest0=0.0;
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
+	const bool fac_an_zs = env_u("CFD_FACETTEN", 0u)>0u; // env-Read VOR der Zeitschleife (Doktrin; stand im Sample-Block)
 	// ★ P8/P9 Schritt 0: INTERFACE-DRUCK-INSTRUMENT (reine AUSGABE, keine Physik, kein Schalter --
 	// Muster unterboden_sonde). Die face[p]-Puffer der 4 getriebenen Ebenen liegen nach
 	// extract_plane_macros jeden Outer ohnehin auf dem Host (rho an Index 4*i+0); an der
@@ -4204,7 +4206,7 @@ static void main_setup_fahrzeug_dd() {
 			ts.push_back(t_si); fx.push_back(Fx_si); fz.push_back(Fz_si); fx_c.push_back(Fx_far);
 			fcsv << t_si << "," << Fx_si << "," << Fz_si << "," << Fx_si/((double)q_inf*A_ref) << ","
 			     << Fz_si/((double)q_inf*A_ref) << "," << Fx_far << "\n" << std::flush; // sofort auf Platte, siehe oben
-			if(env_u("CFD_FACETTEN", 0u)>0u && t_si>=(double)t_warmup && (++fac_smp)%fac_cd_every==0ull) { // ★ Stufe 5 (PCIe ~2,5 GB je Aufruf -- Kadenz!)
+			if(fac_an_zs && t_si>=(double)t_warmup && (++fac_smp)%fac_cd_every==0ull) { // ★ Stufe 5 (PCIe ~2,5 GB je Aufruf -- Kadenz!)
 				LBM_Domain* df = lbm_f.lbm_domain[0];
 				if(fac_snap.empty()) { // Reibungs-Snapshot am Fensteranfang (erst ab Warmup)
 					df->fac_tau.read_from_device();
@@ -4225,7 +4227,8 @@ static void main_setup_fahrzeug_dd() {
 					double dm_b=0.0, rest_b=0.0; // fac_tau frisch durch kraft_facetten (kein Extra-Transfer)
 					for(ulong i=0ull;i<df->fac_N;i++){ dm_b+=(double)df->fac_tau[6ull*i+4ull]; rest_b+=(double)df->fac_tau[6ull*i+5ull]; }
 					fac_dm=dm_b-fac_dm0; fac_rest=rest_b-fac_rest0; // FENSTER-Delta (Audit S5): Warmup-Historie abgezogen
-					if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv.precision(8); fac_csv << "time_s,cd_druck,cz_druck,cd_reib,cz_reib,dm,rest\n"; }
+					if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv.precision(8); fac_csv << "# DREI ZEITBASEN (Instrumenten-Audit 2026-08-22): cd/cz_druck = MOMENTAN am Sample; cd/cz_reib = FENSTER-MITTEL seit Warmup; dm/rest = KUMULATIV seit Warmup (wachsend). Kadenz = Sample x CFD_FAC_CD_EVERY.\n";
+		fac_csv << "time_s,cd_druck,cz_druck,cd_reib,cz_reib,dm,rest\n"; }
 					const double qA=(double)q_inf*A_ref;
 					fac_csv << t_si << "," << (double)units_fine.si_F((float)FK.px)/qA << "," << (double)units_fine.si_F((float)FK.pz)/qA << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest << "\n" << std::flush;
@@ -4660,7 +4663,7 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");

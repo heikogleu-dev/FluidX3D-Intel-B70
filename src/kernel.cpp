@@ -2924,6 +2924,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b) {
 	// Liest (rho, u_x, u_y, u_z) auf einer achsen-normalen Ebene in einen dichten Puffer.
+	// HINWEIS (Kernel-Audit 2026-08-22, NIEDRIG): der N2F-Waechter-Extract liest das u-FELD,
+	// das stream_collide VOR dem Blend desselben Schritts schrieb -- die Waechterzahlen sind
+	// der PRAE-Blend-Stand und hinken fi um einen Blend nach. Reine Diagnose, kein Wirkpfad.
 	// Liest die Makro-Felder DIREKT statt sie aus den DDFs zu rekonstruieren -- das setzt UPDATE_FIELDS
 	// voraus, weil rho/u sonst auf dem Stand der letzten update_fields()-Anforderung stehen.
 	// Der Aufrufer prueft das; hier waere die Pruefung nicht ausdrueckbar.
