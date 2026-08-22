@@ -289,3 +289,14 @@ Reihenfolge = Abarbeitung. Jeder Punkt eine Variable, jeder mit Wirknachweis im 
    aber NICHT im laufenden Binary). PRÜFUNG an Felddaten nach Laufende: liegt die Abdruckkante
    exakt auf der Bandgrenze, und skaliert die Abdruckstärke mit a oder ist sie binär?
    Wenn binär -> Fix ist FNEQ=1 (Punkt 5 rückt vor) bzw. a==0/klein-Skip im EQ-Arm.
+
+9. **Facetten-Neubau-Idee (Heiko 2026-08-22 abends), Unterbau fuer Punkt 1c:** Facetten direkt
+   an der Solidaussenwand bilden (globale Menge, host-seitig nach dem Voxelieren -- Bau ist
+   heute schon host-seitig, aber je Zelle als TLS-Fit der Linkmittelpunkte); jede wandnahe
+   Zelle sucht sich die 3-4 naechsten Facetten fuer ihre Richtung. Loest die STATISCHEN
+   Fit-Degenerationen (21,9 % markierte Zellen: K1/K2/K4/Orientierung), NICHT die
+   Laufzeit-Gates (u_s-Klemme, tangential-lose Links -- Topologie). ACHTUNG y_w-Semantik:
+   3-Fenster ist auf die EFFEKTIVE Wand geeicht (y_w-Median 0,500); STL-Facetten messen zur
+   wahren Wand -- fuers Wandmodell A/B-pflichtig, fuer ELIBB (q je Link) genau richtig.
+10. **Band-Skalierungsregel (Heiko):** Default-N aus dx ableiten -- konstante physikalische
+    Bandtiefe, N halbiert bei doppeltem dx. Ueberschreibbar, Ansage im Log.
