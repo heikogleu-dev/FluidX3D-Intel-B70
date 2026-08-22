@@ -1698,3 +1698,95 @@ bestaetigter Befund, bevor er durch ist -- seine Befunde vor P2 einarbeiten.
 (3) Void-Fill-A/B mit KONN=18 (Arbeitsliste 12) NACH P2;
 (4) Produktions-Wiederholung f4_wandfrei_prod und Kadenz-1-Bezug -- beides nur nach
     Heiko-Go, und waehrend des Laufs keine GPU-Werkzeuge am Desktop.
+
+## 2026-08-22, NACHTRAG — Pruefagent auf f84f6b3: mehrere meiner Aussagen tragen nicht
+
+Der Pruefer lief beim Sitzungsende noch und kam nach dem Abschlussbericht zurueck.
+Iron Rule 2 greift: die folgenden Aussagen von mir sind hiermit ZURUECKGENOMMEN oder
+eingeschraenkt. Wer hier weiterarbeitet, liest diesen Abschnitt VOR den beiden davor.
+
+### FAELLT: "ABNAHME DURCHSCHUSS bestanden = es wird nichts verschlossen"
+Der Test ist **strukturell blind fuer genau den Fall, fuer den ich ihn gebaut habe.**
+In einem 1-Zellen-Spalt liegen beide Waende symmetrisch +-q um die Zellmitte; der
+Laengslink laeuft ZWISCHEN ihnen hindurch und wird auch bei 87 % Verschluss nie
+geschnitten. Bei vollem Zuschmieren liegt er exakt AUF der Flaeche -> det=0 in ray_tri
+-> kein Treffer. "0 von 3.749.916 gekappt" ist mit einem zugeschmierten Spalt voll
+vereinbar. Der eigene Log belegt es: Engstellen-q_min 0,0647 heisst **Restspalt 0,13
+Zellen** -- und daneben steht "ABNAHME bestanden".
+**Die richtige Kennzahl liegt in den Daten und wird nicht gebildet:
+Restspaltweite = q+ plus q- je Zelle mit freier Weite 1.** Das ist der erste Bau in P1b.
+Dazu: die von mir als "nachrichtlich" abgetane Diagonalzahl ist der EINZIGE reagierende
+Indikator und waechst monoton 1152 -> 1240 -> 1380 (ITER 3/8/15). Fuer GEGLAETTET sind
+das echte Schnitte, nicht der Streiffall (der erklaert nur die 316.860 bei TREPPE).
+
+### FAELLT: "ABNAHME PARITY bestanden"
+Die Zusammenfassung gleicher t (noetig wegen der Quad-Diagonale) fasst auch den
+Zielfehlerfall zusammen: zwei Waende eines Spalts, die beide an der +-0,5-Klemme
+liegen, sind KOPLANAR und liefern exakt gleiches t -> zusammengefasst -> Parity
+ungerade -> "bestanden". Zusaetzlich ist die Flaeche gar nicht geschlossen
+(464 Kanten mit Inzidenz 1, Randflaechen am Domaenenrand entstehen bewusst nicht),
+die Parity-Praemisse gilt am Latsch also nicht.
+
+### FAELLT: "Der Bauplan schliesst die STL zu Recht aus" (die MESSUNG deckt das nicht)
+`if(best>1.0+1e-6) return false;` kann "keine STL da" und "die Voxelwand steht VOR der
+STL" nicht unterscheiden. Die 59,5 % sind damit eine Messung der SAT-Schalen-Aufdickung,
+kein Urteil ueber die STL. Die faire Pruefung kostet nichts (Fenster t<=3, oder
+schlicht: lagen ueberhaupt Dreiecke in den Bins). Was bleibt: Voxelkoerper und STL
+weichen um rund 0,77 Zellen voneinander ab -- STL-q gegen Voxel-flags waere INKONSISTENT,
+weil der LBM an der Voxelwand abprallt. Das ist ein anderer und schwaecherer Grund als
+der, den ich in den Commit geschrieben habe.
+
+### EINGESCHRAENKT: die Kugel-Grundwahrheit
+R_vol=19,522 ist an den Pruefling angepasst. Der Koerper IST um 0,77 Zellen aufgedickt
+(SAT-Schale +4596, Void-Fill +1051; R_eff Symmetrieebene 19,49). Damit ist der GROESSTE
+Geometriefehler per Konstruktion unsichtbar: die Glaettung poliert 0,11 RMS, waehrend
+0,77 Zellen Versatz unbeanstandet stehen. Der RELATIVE Vergleich Treppe gegen Geglaettet
+bleibt gueltig (gleiche Referenz); jede ABSOLUTE Genauigkeitsaussage nicht.
+Der Bias (-0,033) ist ausserdem ein Zensurartefakt: `ok=(tq>0 && tq<=1)` wirft die
+Links mit t<=0 einseitig weg (2248 = 8,2 %). Zum Vorzeichen: Schrumpfung eines konvexen
+Koerpers ergaebe POSITIVEN Bias; beobachtet ist er monoton negativ, und Achs- gegen
+Diagonal-q fallen im Verhaeltnis 0,73 (rund 1/Wurzel2) -- das ist ein gleichfoermiger
+Normalversatz NACH AUSSEN. Die Glaettung dickt den Koerper zusaetzlich auf.
+
+### FALSCHE ZAHL IM COMMIT: -41 % gehoert zu ITER=15, ausgeliefert wird 8
+Bei Default 8 sind es RMS 0,17883 = **-32,3 %**. Ebenso: "Engstellen 0,4683 / min 0,0647
+/ offen 0,5005" ist p1_fz15; bei Default 8 gilt **0,4774 / 0,1685 / 0,5004**.
+Zwei Kopfzahlen beschreiben eine Einstellung, die derselbe Commit abschafft.
+
+### NICHT VALIDIERT: der Quetschkanten-Fix
+A/B bei ITER=15 ohne gegen mit Fix: Engstellen-q 0,4688 -> 0,4683 (schlechter),
+q_min unveraendert 0,0647, Diagonalschnitte 1236 -> 1380 (+11,7 %). Beide gerichteten
+Indikatoren zeigen in die falsche Richtung. Festhalten von 680 Vertices reicht nicht,
+weil die NACHBARN ungeklemmt weiterwandern. Der Schluessel selbst ist kollisionsfrei.
+
+### PRAEZISIERT: der Bin-Fix war nicht "latent"
+Er kollidierte tatsaechlich (yy+1 bis 228 gegen Nz+2=141 bei der Kugel, 318 gegen 243
+beim Fahrzeug) -- folgenlos nur, weil die aliasierten Dreiecke 141 bzw. 243 Zellen
+entfernt liegen und von ray_tri verworfen werden. Ausserdem ist aus den Logs NICHT
+feststellbar, ob der p1_stl_ab-Build den Fix schon enthielt: das Bitgleichheits-A/B
+ist damit nicht zuordenbar und muss wiederholt werden.
+
+### WAS TRAEGT
+- Rohe Voxelflaeche liefert q EXAKT 0,5000 -- alle neun Punkte der Iterationskurve
+  exakt bestaetigt. Die Kernaussage von P1 steht.
+- `CFD_FACETTEN_REMESH=0` ist bitidentisch: geprueft und bestaetigt (liest flags an
+  sechs Stellen, schreibt an keiner; beide Aufrufstellen gegatet).
+- Default 8 bleibt richtig -- aber die Begruendung aendert sich. Es gibt KEINEN Knick:
+  RMS minus RMS_unendlich zerfaellt sauber exponentiell (tau rund 6,5). Das belastbare
+  Kriterium ist das a2-Budget an der FAHRZEUG-Engstelle: a2 = 4,9 bei ITER 8 gegen
+  14,5 bei ITER 15. Danach ist 8 vertretbar und 15 nicht.
+- Bin-Schluessel-Kollision: real und behoben.
+
+### UNGEPRUEFT
+Der Void-Fill-Befund (116.651 Zellen, Konnektivitaet 6 gegen 18) stammt aus demselben
+Sitzungscode und wurde von diesem Pruefer NICHT betrachtet. Er gilt nach Iron Rule 2
+als unbestaetigt, bis ein Pruefer ueber 02b20e6 gelaufen ist.
+
+### REIHENFOLGE, KORRIGIERT
+(1) Restspaltweite q+ plus q- fuer Zellen mit freier Weite 1 bauen -- das ist die
+    Abnahme, die der Durchschusstest haette sein sollen; (2) Diagonalschnitte vom
+    Nachrichtlichen zur Abnahme hochstufen; (3) Zensur im Kugelvergleich beheben und
+    die Aufdickung als eigene Groesse ausweisen; (4) Quetschkanten-Fix entweder
+    reparieren (Nachbarn mitklemmen) oder zuruecknehmen; (5) STL-Frage fair messen
+    (Fenster t<=3); (6) Bitgleichheits-A/B des Bin-Fix wiederholen; (7) Pruefer ueber
+    den Void-Fill-Befund; DANN P2.
