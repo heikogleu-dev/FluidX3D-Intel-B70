@@ -3081,29 +3081,15 @@ static void main_setup_fahrzeug_dd() {
 			if(unterboden&&n2f_band_ub==0u) { ausgelassen_ub++; continue; }
 			// Deckungspunkt muss im Nahfeld-Fussabdruck liegen, sonst gibt es keine feine Quelle.
 			if(x<NF_OX||x>=NF_OX+cex||y<NF_OY||y>=NF_OY+cey||z>=NF_OZ+cez) { ausserhalb++; continue; }
-			const uchar bo=lbm_c.flags[nn]&(TYPE_S|TYPE_E);
-			if(bo==TYPE_E) lage_te[wake_kern?0u:(uint)d-1u]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier wird sie GEZAEHLT
 			const uint lage = wake_kern ? 0u : (uint)d-1u;
-			// Zone: Kernzelle des Kastens ODER Auslaufzelle, deren naechste Quelle der Kasten war.
-			// Letzteres ist ohne zweite Distanztransformation nicht exakt zu trennen; als sichere
-			// Obermenge gilt "liegt stromab des Kastenstarts", denn dort ist der Kasten die naehere
-			// Quelle. Vor dem Kastenstart ist es in jedem Fall Koerperband.
-			const bool zone_wake = n2f_wake>0u && (wake_kern || x>=wx0);
-			n2f_marke.push_back((uchar)(zone_wake?1u:0u)); // Bit 1 ("stromauf der Nase") ENTFERNT 2026-08-22: es wurde geschrieben und nirgends gelesen -- die Einschraenkung, fuer die es gedacht war, wurde als Ueberkorrektur verworfen (write-only-Zustand, Pruefagent-Befund)
-			n2f_liste_c.push_back(nn);
-			// ★ Pruefrunde 2026-08-22 abends (zwei unabhaengige Pruefer, B-P2/B2): Zellen mit
-			// Gewicht EXAKT 0 (Profil 2, aeusserste Lage) wurden gelistet und transferiert -- und
-			// im EQ-Arm ist a=0 KEIN No-Op, sondern eine Equilibrium-Projektion: die Nulllage war
-			// eine unangesagte fneq-Loeschschale (5,1 % der Bandzellen des Plateau-Laufs). Der
-			// VOLUMEN-Bauer filtert w<=0 seit jeher; der Band-Bauer zieht nach. Kostet nebenbei
-			// 4-6 % Transfer. NICHT bitidentisch zum Plateau-Lauf f4_kopplung_plateau -- gewollt.
-			if(!wake_kern&&(uint)d<=n2f_wandfrei) { ausgelassen_wf++; continue; }   // ★ 1b WANDFREI: Koerperband-Lagen 1..k nicht listen (dt bleibt gelabelt -- Beweise unberuehrt)
-			// ★ 1b, KONSEQUENZ: auch KASTENKERN-Zellen im Wandabstand <= k fallen unter WANDFREI --
-			// der Kasten ueberlappt das Fahrzeug (Start am Dach), seine wandnahen Zellen wuerden
-			// die FERN_FACETTEN-Schicht am Heck genauso ueberschreiben wie das Koerperband. Der
-			// Chebyshev-Abstand der Kernzellen ist nicht mehr in dt (254 hat ihn ueberschrieben) --
-			// direkter (2k+1)^3-Scan auf ist_fzg, einmalig im Listenbau, ~Sekunden.
-			if(wake_kern&&n2f_wandfrei>0u) {
+			// ★★ ORDNUNGS-FIX 2026-08-22 abends (die WAKE-ABNAHME hat ihn gefangen, b8_1b_w3 rc=1):
+			// die drei Auslass-Filter (WANDFREI Koerperband, WANDFREI Kastenkern, w<=0) standen NACH
+			// n2f_marke/n2f_liste_c.push_back -- jede uebersprungene Zelle desynchronisierte die
+			// Listen (liste_c laenger als gewicht/lage/liste_f). Kein abgeschlossener Lauf betroffen
+			// (alle bisherigen Arme linear N=16 ohne w<=0, WANDFREI erst heute). Jetzt: ALLE Filter
+			// zuerst, ALLE Pushes danach, als geschlossener Block.
+			if(!wake_kern&&(uint)d<=n2f_wandfrei) { ausgelassen_wf++; continue; }   // 1b WANDFREI: Koerperband-Lagen 1..k
+			if(wake_kern&&n2f_wandfrei>0u) {                                        // 1b: wandnahe Kastenkern-Zellen (Scan, s. Kommentar am Schalter)
 				bool wandnah=false; const int k=(int)n2f_wandfrei;
 				for(int dz=-k; dz<=k&&!wandnah; dz++) for(int dy=-k; dy<=k&&!wandnah; dy++) for(int dx2=-k; dx2<=k&&!wandnah; dx2++) {
 					const int xx=(int)x+dx2, yy=(int)y+dy, zz=(int)z+dz;
@@ -3112,7 +3098,12 @@ static void main_setup_fahrzeug_dd() {
 				}
 				if(wandnah) { ausgelassen_wf_kern++; continue; }
 			}
-			{ const float w_ = wake_kern ? 1.0f : band_w(d); if(w_<=0.0f) { ausgelassen_w0++; continue; } }
+			{ const float w_ = wake_kern ? 1.0f : band_w(d); if(w_<=0.0f) { ausgelassen_w0++; continue; } } // Profil-2-Nulllage (B-P2/B2)
+			const uchar bo=lbm_c.flags[nn]&(TYPE_S|TYPE_E);
+			if(bo==TYPE_E) lage_te[lage]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier gezaehlt
+			const bool zone_wake = n2f_wake>0u && (wake_kern || x>=wx0); // Obermenge, s. Kommentar oben
+			n2f_marke.push_back((uchar)(zone_wake?1u:0u));
+			n2f_liste_c.push_back(nn);
 			n2f_gewicht.push_back(wake_kern ? 1.0f : band_w(d));
 			n2f_lage.push_back(lage);
 			lage_n[lage]++; if(unterboden) lage_ub[lage]++;
