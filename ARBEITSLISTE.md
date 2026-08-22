@@ -278,3 +278,14 @@ Reihenfolge = Abarbeitung. Jeder Punkt eine Variable, jeder mit Wirknachweis im 
    Heckflügel (1/3 des OF13-Abtriebs) sitzt im Totwasser.
 7. **Async-Überlappung N2F-Rückweg** (bis 3,6 % Wanduhr bei 4 mm; Netto-Kopplungskosten heute
    +0,3-0,7 %). Nice-to-have, kein Blocker.
+
+8. **★ PRÜFEN/FIXEN (Heiko-Befund am Far-Slice, 2026-08-22 abends): sichtbarer Abdruck der
+   Rückkopplung im Fernfeld TROTZ Plateau-Profil mit Halbierung.** Bei so schnellem Gewichts-
+   abfall dürfte die Bandgrenze nicht sichtbar sein. Verdächtiger Mechanismus (Numerik-Prüfer,
+   passt exakt): im EQ-Arm ist die fneq-Löschung a-UNABHÄNGIG — auch eine Lage mit a=0,016
+   wird voll äquilibriert. Der Abdruck wäre dann nicht das Gewichtsprofil, sondern die BINÄRE
+   Kante "fneq gelöscht / nicht gelöscht" am Bandrand (~75x Smagorinsky-Dissipation im Band).
+   Dazu trägt der laufende Arm 2 noch die Nulllage als Löschschale (Fix 9f11ec5 ist committet,
+   aber NICHT im laufenden Binary). PRÜFUNG an Felddaten nach Laufende: liegt die Abdruckkante
+   exakt auf der Bandgrenze, und skaliert die Abdruckstärke mit a oder ist sie binär?
+   Wenn binär -> Fix ist FNEQ=1 (Punkt 5 rückt vor) bzw. a==0/klein-Skip im EQ-Arm.
