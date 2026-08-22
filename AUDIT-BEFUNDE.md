@@ -1580,3 +1580,13 @@ Preis: cd_druck +0,16 (5,7 sigma), RMS-Diff 3,4 -> 5,7, Fernfeld loest wieder se
 (49,5 %); FERN_FACETTEN druecken das auf 44,1 % -- richtige Richtung, schwach bei 32-mm-
 Treppe, echter Test auf 4 mm. Cz-Signifikanz erst 1,8 sigma -> Schaerfungslauf b8_1b_w3_k1
 (Kadenz 1) laeuft.
+
+## 2026-08-22 spaet — Plateau-hinter-Wandrueckzug-Kette (Heiko-Synthese, 3 Arme, Kadenz 1)
+
+Alle drei Arme statistisch ununterscheidbar vom Bezug (cz_rest 0,1-0,7 sigma): der Cz-Gewinn
+haengt ALLEIN am Wandrueckzug, nicht an Profilform oder Bandbreite. Heikos Zielkonfiguration
+(N=8, WANDFREI=2, Plateau 2 ab Lage 3, Halbierung, Lage 8 = 0) liefert gleiche Kraefte bei
+BESTER Feldkonsistenz der vier (RMS 5,21 gegen 5,61-5,92) und kleinstem Band (~1/3 der
+N16-Zellen). => Rationaler 4-mm-Produktionskandidat: b8_sp_c-Konfiguration + WANDFREI.
+Produktionsfreigabe liegt bei Heiko. Code der Verschiebung pruefagenten-bestaetigt
+(0e01748 sauber; Nacharbeiten 9069bc8: Randfall-Guard wf+plateau>=N-1, Census-Ansage).
