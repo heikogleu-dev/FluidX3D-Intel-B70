@@ -1532,3 +1532,19 @@ NEAR_VOR_MM=96 als Nasenabstand; real 326 mm = 20 Grobzellen, Lauf meldet selbst
    konstruktiv; q je Link speicherfrei aus y_w/|c*n| ableitbar; ABER es braucht ein
    q-ABHÄNGIGES Schema (Marson Eq. 25/26-Klasse, nicht das q-invariante ELIBB-U, an dem V1
    scheiterte), kombiniert mit dem iMEM-u_s als Slip-Ziel.
+
+## 2026-08-22 abends — Punkt 8 gemessen: der Far-Abdruck hat zwei Gesichter (Heiko-Befund verifiziert)
+
+Beide 4-mm-Arme bei t=335 ms, Karosseriezone, je Grobzellen-Lage vom Fahrzeug:
+- **Arm 1 (linear N=16 a=0,25): BINAERER Abdruck bestaetigt.** ||u_nah-u_fern|| in Lagen 12-16
+  auf ~0,5 m/s festgenagelt, +52 % Sprung ueber die Bandgrenze; Fernfeld-Textur im Band 0,10
+  gegen 0,39 ungekoppelt (4x glatter), +150 % Textursprung an der Kante. Das ist die
+  a-UNABHAENGIGE fneq-Loeschung des EQ-Arms, nicht das Gewichtsprofil.
+- **Arm 2 (Plateau N=8 a=0,5): KEINE Kante** (+7 % Delta-u, +14 % Textur an der Grenze). Der
+  sichtbare Abdruck ist ein TEXTUR-KONTRAST: Lage 1-2 rauer als ungekoppelt (3,1-3,5 gegen
+  2,7-3,8 gemischt -- die 4x4x4-Blockmittel-Flecken werden mit a=0,5 voll eingepraegt),
+  Lage 3-8 halb so rau wie die Umgebung (fneq-Loeschung glaettet). Ein Hof, keine Kante.
+
+FOLGE (Heiko-Regel "wenn binaer -> FNEQ rueckt vor"): FNEQ=1-A/B auf 8 mm gestartet
+(eine Variable gegen b8_breit_n16). Der Blockflecken-Anteil bleibt davon unberuehrt ->
+CFD_N2F_ZEITMITTEL (Arbeitsliste Punkt 4) und langfristig weichere Raumrestriktion.
