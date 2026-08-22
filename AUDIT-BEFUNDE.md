@@ -1568,3 +1568,15 @@ Budgets bleiben 1,0. KERNZAHL: 22,9 von 23,6 Mio ohneTang-Ereignissen am Fahrzeu
 Einzellink-diagonal (97 %; Kugel 94 %) -- die Klasse ist so gross wie die u_s-Klemme und
 NUR per ELIBB (1c) erreichbar. 1a schliesst damit: weiter mit 1b (FERN_FACETTEN +
 Band-Wandrueckzug) und 1c (Plan: FACETTEN-ELIBB-PLAN.md).
+
+## 2026-08-22 spaet — 1b-Screening: Wandrueckzug ist der Cz-Fund des Tages
+
+Code vorab per Pruefagent bestaetigt (e6a2c96; NURWAKE-Freigabeschiene dabei als unsicher
+erkannt und gesperrt -- nur wandfrei>0 ohne NURWAKE ist EsoPull-bewiesen). Ergebnis:
+cz_druck_rest -0,5107 -> **-0,7707** (w3) / -0,7721 (w3ff) -- bester Wert der Kampagne,
+besser als die ungekoppelte Kontrolle (-0,652), Richtung OF13 (-1,301). Die Wand-Schreibung
+des Bandes hatte den Abtrieb unterdrueckt (Mechanik vom Abloesungs-Pruefer vorhergesagt).
+Preis: cd_druck +0,16 (5,7 sigma), RMS-Diff 3,4 -> 5,7, Fernfeld loest wieder selbst ab
+(49,5 %); FERN_FACETTEN druecken das auf 44,1 % -- richtige Richtung, schwach bei 32-mm-
+Treppe, echter Test auf 4 mm. Cz-Signifikanz erst 1,8 sigma -> Schaerfungslauf b8_1b_w3_k1
+(Kadenz 1) laeuft.
