@@ -536,7 +536,8 @@ static bool ray_tri(const double ox,const double oy,const double oz, const doubl
 	*t_out=t; return true;
 }
 static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uint Nz,
-                                 const uchar wand_flag, const string& out_dir) {
+                                 const uchar wand_flag, const string& out_dir, const double* kugel_ref=nullptr,
+                                 const Mesh* stl=nullptr) {
 	const auto idx=[&](const uint x,const uint y,const uint z){ return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
 	const auto solid=[&](const int x,const int y,const int z){
 		if(x<0||y<0||z<0||x>=(int)Nx||y>=(int)Ny||z>=(int)Nz) return false;
@@ -574,6 +575,41 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 	}
 	M.quads=(ulong)quads.size();
 	if(M.quads==0ull) { print_warning("REMESH: keine Grenzflaechen gefunden (wand_flag pruefen)."); return; }
+	// ---- 1b) ABNAHME TOPOLOGIE: Kantenzensus + Euler-Charakteristik. Eine geschlossene,
+	// mannigfaltige Flaeche hat jede Kante genau zweimal und chi = V-E+F = 2-2g. Inzidenz 1
+	// = offener Rand (am Latsch gewollt), >=3 = nicht mannigfaltig (Quetschkante an diagonal
+	// beruehrenden Voxeln -- dort mittelt die Glaettung UEBER den Spalt hinweg, und keine
+	// Klemme bremst das). Kostet ein paar Zeilen und faellt vor jedem Raycast auf.
+	std::vector<uchar> v_fest; // Vertices an Quetschkanten -- werden nicht geglaettet
+	{
+		std::unordered_map<ulong,uint> kanten;
+		for(const auto& qd : quads) for(uint e=0u; e<4u; e++) {
+			const uint a=qd[e], b=qd[(e+1u)&3u];
+			const ulong k=(ulong)min(a,b)*4294967296ull+(ulong)max(a,b);
+			kanten[k]++;
+		}
+		ulong e1=0ull, e2=0ull, e3=0ull;
+		v_fest.assign(M.vx.size(), (uchar)0u);
+		for(const auto& kv : kanten) {
+			if(kv.second==1u) e1++; else if(kv.second==2u) e2++; else {
+				e3++;
+				/* An einer Kante mit Inzidenz >=3 sind zwei Waende zu EINEM Vertex verschweisst
+				   (vmap schluesselt nur auf die Gitterecke). Die Glaettung mittelt dort UEBER
+				   den Spalt hinweg und zieht ihn aktiv zu -- das begrenzt keine Klemme, weil
+				   der Vertex sich von seinem Original gar nicht wegbewegen muss. Solche
+				   Vertices bleiben stehen. Sauberer waere Vertex-Splitting (Schaefer/Ju/Warren,
+				   Manifold Dual Contouring, TVCG 2007); bei 560 von 1,56 Mio Kanten ist
+				   Festhalten die verhaeltnismaessige Antwort. */
+				v_fest[(uint)(kv.first>>32)]=(uchar)1u; v_fest[(uint)(kv.first&4294967295ull)]=(uchar)1u;
+			}
+		}
+		ulong nfest=0ull; for(const uchar f : v_fest) if(f) nfest++;
+		if(nfest>0ull) print_info("REMESH TOPOLOGIE: "+to_string(nfest)+" Vertices an Quetschkanten festgehalten (nicht geglaettet).");
+		const long long chi=(long long)M.vx.size()-(long long)kanten.size()+(long long)M.quads;
+		print_info("REMESH TOPOLOGIE: V="+to_string((ulong)M.vx.size())+", E="+to_string((ulong)kanten.size())+", F="+to_string(M.quads)+" -> chi="+to_string((long)chi)+" (geschlossen+mannigfaltig: 2-2g).");
+		if(e1>0ull||e3>0ull) print_warning("REMESH TOPOLOGIE: "+to_string(e1)+" Kanten mit Inzidenz 1 (offener Rand), "+to_string(e3)+" mit Inzidenz >=3 (NICHT mannigfaltig, Quetschkante). Inzidenz 2: "+to_string(e2)+".");
+		else print_info("REMESH TOPOLOGIE: alle "+to_string(e2)+" Kanten mit Inzidenz 2 -- geschlossen und mannigfaltig.");
+	}
 	// ---- 2) Taubin-Glaettung auf den Vertices (Nachbarn = Quad-Kanten), Klemme +-0,5 Zelle
 	const uint nv=(uint)M.vx.size();
 	std::vector<std::vector<uint>> adj(nv);
@@ -584,10 +620,14 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 	std::vector<float> ox=M.vx, oy=M.vy, oz=M.vz;                       // Originale fuer die Klemme
 	std::vector<float> tx(nv), ty(nv), tz(nv);
 	const float lam=0.5f, mu=-0.53f;
-	for(uint it=0u; it<15u; it++) for(uint pass=0u; pass<2u; pass++) {
+	// Taubin daempft bei lam/mu jedes Merkmal unter rund 11 Zellen Periode und loescht alles
+	// unter rund 6 aus. Wie viel Glaettung optimal ist, entscheidet die Kugel gegen die
+	// analytische Loesung -- deshalb die Iterationszahl als Schalter statt als 15.
+	const uint n_it=env_u("CFD_FACETTEN_REMESH_ITER", 8u);
+	for(uint it=0u; it<n_it; it++) for(uint pass=0u; pass<2u; pass++) {
 		const float f=(pass==0u)?lam:mu;
 		for(uint v=0u; v<nv; v++) {
-			if(adj[v].empty()) { tx[v]=M.vx[v]; ty[v]=M.vy[v]; tz[v]=M.vz[v]; continue; }
+			if(adj[v].empty()||v_fest[v]) { tx[v]=M.vx[v]; ty[v]=M.vy[v]; tz[v]=M.vz[v]; continue; }
 			double sx=0.0, sy=0.0, sz=0.0;
 			for(const uint n : adj[v]) { sx+=M.vx[n]; sy+=M.vy[n]; sz+=M.vz[n]; }
 			const double k=1.0/(double)adj[v].size();
@@ -599,62 +639,233 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 			M.vz[v]=fmin(oz[v]+0.5f, fmax(oz[v]-0.5f, tz[v]));
 		}
 	}
-	// ---- 3) Triangulieren + Binning (uniformes Gitter, Zellweite 1)
-	for(const auto& q : quads) { M.tri.insert(M.tri.end(),{q[0],q[1],q[2]}); M.tri.insert(M.tri.end(),{q[0],q[2],q[3]}); }
+	// ---- 3) Triangulieren. Die Bins entstehen je Abtastung neu (die Dreiecke liegen je
+	// nach Vertex-Satz woanders), siehe q_scan.
+	for(const auto& qd : quads) { M.tri.insert(M.tri.end(),{qd[0],qd[1],qd[2]}); M.tri.insert(M.tri.end(),{qd[0],qd[2],qd[3]}); }
 	const ulong ntri=(ulong)M.tri.size()/3ull;
-	std::unordered_map<ulong,std::vector<uint>> bins;
-	for(ulong t=0ull; t<ntri; t++) {
-		const uint a=M.tri[3ull*t], b=M.tri[3ull*t+1ull], c2=M.tri[3ull*t+2ull];
-		const int x0=(int)floor(fmin(M.vx[a],fmin(M.vx[b],M.vx[c2]))), x1=(int)floor(fmax(M.vx[a],fmax(M.vx[b],M.vx[c2])));
-		const int y0=(int)floor(fmin(M.vy[a],fmin(M.vy[b],M.vy[c2]))), y1=(int)floor(fmax(M.vy[a],fmax(M.vy[b],M.vy[c2])));
-		const int z0=(int)floor(fmin(M.vz[a],fmin(M.vz[b],M.vz[c2]))), z1=(int)floor(fmax(M.vz[a],fmax(M.vz[b],M.vz[c2])));
-		for(int zz=z0; zz<=z1; zz++) for(int yy=y0; yy<=y1; yy++) for(int xx=x0; xx<=x1; xx++)
-			bins[(ulong)(xx+1)+((ulong)(yy+1)+(ulong)(zz+1)*(ulong)(Nz+2u))*(ulong)(Nx+2u)].push_back((uint)t);
-	}
-	// ---- 4) q je Link fuer alle wandnahen Fluidzellen; DIAGNOSE (P1: nur Histogramm/Abdeckung)
-	// D3Q19-Richtungen 1..18 (Host-Tabelle; P2-AUFLAGE: gegen die Kernel-c()-Tabelle verifizieren!)
+	// D3Q19-Richtungen 1..18. Reihenfolge gegen die Kernel-Tabelle c() (kernel.cpp:940-942)
+	// spaltenweise verifiziert (Pruefagent 2026-08-22) -- P2 darf sich darauf stuetzen.
 	const int cd[18][3]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
 	                     {1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},
 	                     {1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
-	ulong links_solid=0ull, links_getroffen=0ull, links_fallback=0ull, zellen=0ull;
-	ulong qh[10]={0,0,0,0,0,0,0,0,0,0}; double qsum=0.0;
-	for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
-		const ulong n=idx(x,y,z);
-		if((L.flags[n]&(TYPE_S|TYPE_E))!=0u) continue;
-		bool wandnah=false;
-		for(uint i=0u; i<18u&&!wandnah; i++) if(solid((int)x+cd[i][0],(int)y+cd[i][1],(int)z+cd[i][2])) wandnah=true;
-		if(!wandnah) continue;
-		zellen++;
-		const double cx0=(double)x+0.5, cy0=(double)y+0.5, cz0=(double)z+0.5; // Zellmitte im Eckgitter
-		for(uint i=0u; i<18u; i++) {
-			if(!solid((int)x+cd[i][0],(int)y+cd[i][1],(int)z+cd[i][2])) continue;
-			links_solid++;
-			const double dxl=(double)cd[i][0], dyl=(double)cd[i][1], dzl=(double)cd[i][2];
-			const double len=sqrt(dxl*dxl+dyl*dyl+dzl*dzl);
-			double best=1e30;
-			// Kandidaten aus den Bins entlang des Links (Start- und Zielzelle reichen bei |c|<=sqrt2)
-			for(uint kk=0u; kk<2u; kk++) {
-				const int bx=(int)x+(int)kk*cd[i][0], by=(int)y+(int)kk*cd[i][1], bz=(int)z+(int)kk*cd[i][2];
-				auto itb=bins.find((ulong)(bx+1)+((ulong)(by+1)+(ulong)(bz+1)*(ulong)(Nz+2u))*(ulong)(Nx+2u));
-				if(itb==bins.end()) continue;
-				for(const uint t : itb->second) {
+	// ---- 3b) ENGSTELLENMASS je Fluidzelle: freie Weite in Zellen, Minimum ueber die drei
+	// Achsen (Deckel 9 = offen). freie_weite==1 heisst 1-Zellen-Spalt -- Kuehlerlamelle,
+	// Radhausruecken. Genau dort hat Heiko am 2026-08-22 das Zuschmieren gesehen; ohne
+	// diese Zahl bliebe der Befund ein Bildbefund (Iron Rule 3).
+	const auto freie_weite=[&](const uint x,const uint y,const uint z)->uint {
+		uint w=9u;
+		for(uint a=0u; a<3u; a++) {
+			int d0[3]={0,0,0}; d0[a]=1;
+			uint run=1u;
+			for(int s=-1; s<=1; s+=2) for(uint k=1u; k<9u; k++) {
+				const int xx=(int)x+s*(int)k*d0[0], yy=(int)y+s*(int)k*d0[1], zz=(int)z+s*(int)k*d0[2];
+				if(xx<0||yy<0||zz<0||xx>=(int)Nx||yy>=(int)Ny||zz>=(int)Nz) break;
+				if((L.flags[idx((uint)xx,(uint)yy,(uint)zz)]&(TYPE_S|TYPE_E))!=0u) break;
+				run++;
+			}
+			if(run<w) w=run;
+		}
+		return w;
+	};
+	// ---- 4) q-Abtastung. Laeuft ZWEIMAL -- rohe Voxeltreppe gegen geglaettete Flaeche.
+	// Erst der Vergleich beantwortet, ob das Remesh ueberhaupt etwas bringt; eine einzelne
+	// q-Verteilung um 0,5 beweist gar nichts (Pruefbefund HOCH, 2026-08-22).
+	struct QStat {
+		ulong zellen=0ull, links=0ull, getroffen=0ull, fallback=0ull, parity_bad=0ull, kein_schnitt=0ull;
+		ulong qh[10]={0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull};
+		double qsum=0.0, qmin=1e30;
+		ulong n_ax=0ull, n_di=0ull; double s_ax=0.0, s_di=0.0;
+		ulong n_eng=0ull, n_off=0ull; double s_eng=0.0, s_off=0.0, qmin_eng=1e30;
+		ulong n_ref=0ull, n_ref_aus=0ull; double e_sum=0.0, e2_sum=0.0, e_max=0.0;
+		ulong ff_ax=0ull, ff_ax_kap=0ull, ff_di=0ull, ff_di_kap=0ull;
+		ulong fwh[10]={0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull};
+	};
+	const auto q_scan=[&](const std::vector<float>& VX,const std::vector<float>& VY,const std::vector<float>& VZ)->QStat {
+		QStat S;
+		std::unordered_map<ulong,std::vector<uint>> bins;
+		for(ulong t=0ull; t<ntri; t++) {
+			const uint a=M.tri[3ull*t], b=M.tri[3ull*t+1ull], c2=M.tri[3ull*t+2ull];
+			const int x0=(int)floor(fmin(VX[a],fmin(VX[b],VX[c2]))), x1=(int)floor(fmax(VX[a],fmax(VX[b],VX[c2])));
+			const int y0=(int)floor(fmin(VY[a],fmin(VY[b],VY[c2]))), y1=(int)floor(fmax(VY[a],fmax(VY[b],VY[c2])));
+			const int z0=(int)floor(fmin(VZ[a],fmin(VZ[b],VZ[c2]))), z1=(int)floor(fmax(VZ[a],fmax(VZ[b],VZ[c2])));
+			for(int zz=z0; zz<=z1; zz++) for(int yy=y0; yy<=y1; yy++) for(int xx=x0; xx<=x1; xx++)
+				bins[(ulong)(xx+1)+((ulong)(yy+1)+(ulong)(zz+1)*(ulong)(Ny+2u))*(ulong)(Nx+2u)].push_back((uint)t);
+		}
+		std::vector<uint> kand; std::vector<double> tref;
+		for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+			const ulong n=idx(x,y,z);
+			if((L.flags[n]&(TYPE_S|TYPE_E))!=0u) continue;
+			bool wandnah=false;
+			for(uint i=0u; i<18u&&!wandnah; i++) if(solid((int)x+cd[i][0],(int)y+cd[i][1],(int)z+cd[i][2])) wandnah=true;
+			if(!wandnah) continue;
+			S.zellen++;
+			const uint fw=freie_weite(x,y,z);
+			const double cx0=(double)x+0.5, cy0=(double)y+0.5, cz0=(double)z+0.5; // Zellmitte im Eckgitter
+			S.fwh[fw>9u?9u:fw]++;
+			for(uint i=0u; i<18u; i++) {
+				const int nx2=(int)x+cd[i][0], ny2=(int)y+cd[i][1], nz2=(int)z+cd[i][2];
+				const bool ziel_solid=solid(nx2,ny2,nz2);
+				/* ABNAHME DURCHSCHUSS: eine Verbindung zwischen ZWEI Fluidzellen darf die
+				   Flaeche nie schneiden -- beide Enden liegen auf der Fluidseite. Schneidet sie
+				   doch, hat sich die Flaeche in den Fluidraum gewoelbt und macht einen Weg zu,
+				   den das Voxelgitter offen hat. Das ist Heikos "zugeschmiert" als Zahl
+				   (Iron Rule 3). Nur Achslinks sind eindeutig; Diagonallinks streifen an
+				   Solid-Ecken bauartbedingt und werden getrennt und nur nachrichtlich gezaehlt. */
+				if(!ziel_solid) {
+					if(nx2<0||ny2<0||nz2<0||nx2>=(int)Nx||ny2>=(int)Ny||nz2>=(int)Nz) continue;
+					if((L.flags[idx((uint)nx2,(uint)ny2,(uint)nz2)]&(TYPE_S|TYPE_E))!=0u) continue;
+					if(i<6u) S.ff_ax++; else S.ff_di++;
+					const double fx0=(double)cd[i][0], fy0=(double)cd[i][1], fz0=(double)cd[i][2];
+					kand.clear();
+					for(uint kk=0u; kk<2u; kk++) {
+						const int bx=(int)x+(int)kk*cd[i][0], by=(int)y+(int)kk*cd[i][1], bz=(int)z+(int)kk*cd[i][2];
+						auto itb=bins.find((ulong)(bx+1)+((ulong)(by+1)+(ulong)(bz+1)*(ulong)(Ny+2u))*(ulong)(Nx+2u));
+						if(itb!=bins.end()) kand.insert(kand.end(), itb->second.begin(), itb->second.end());
+					}
+					std::sort(kand.begin(), kand.end()); kand.erase(std::unique(kand.begin(),kand.end()), kand.end());
+					bool kaputt=false;
+					for(const uint t : kand) {
+						const uint a=M.tri[3u*t], b=M.tri[3u*t+1u], c2=M.tri[3u*t+2u];
+						double tt;
+						if(ray_tri(cx0,cy0,cz0, fx0,fy0,fz0, VX[a],VY[a],VZ[a], VX[b],VY[b],VZ[b], VX[c2],VY[c2],VZ[c2], &tt))
+							if(tt>1e-6&&tt<1.0-1e-6) { kaputt=true; break; }
+					}
+					if(kaputt) { if(i<6u) S.ff_ax_kap++; else S.ff_di_kap++; }
+					continue;
+				}
+				S.links++;
+				const double dxl=(double)cd[i][0], dyl=(double)cd[i][1], dzl=(double)cd[i][2];
+				kand.clear();
+				for(uint kk=0u; kk<2u; kk++) { // Start- und Zielzelle reichen bei |c|<=sqrt2
+					const int bx=(int)x+(int)kk*cd[i][0], by=(int)y+(int)kk*cd[i][1], bz=(int)z+(int)kk*cd[i][2];
+					auto itb=bins.find((ulong)(bx+1)+((ulong)(by+1)+(ulong)(bz+1)*(ulong)(Ny+2u))*(ulong)(Nx+2u));
+					if(itb!=bins.end()) kand.insert(kand.end(), itb->second.begin(), itb->second.end());
+				}
+				std::sort(kand.begin(), kand.end()); kand.erase(std::unique(kand.begin(),kand.end()), kand.end());
+				tref.clear();
+				for(const uint t : kand) {
 					const uint a=M.tri[3u*t], b=M.tri[3u*t+1u], c2=M.tri[3u*t+2u];
 					double tt;
-					if(ray_tri(cx0,cy0,cz0, dxl,dyl,dzl, M.vx[a],M.vy[a],M.vz[a], M.vx[b],M.vy[b],M.vz[b], M.vx[c2],M.vy[c2],M.vz[c2], &tt))
-						if(tt<best) best=tt;
+					if(ray_tri(cx0,cy0,cz0, dxl,dyl,dzl, VX[a],VY[a],VZ[a], VX[b],VY[b],VZ[b], VX[c2],VY[c2],VZ[c2], &tt))
+						if(tt<=1.0+1e-6) tref.push_back(tt);
+				}
+				std::sort(tref.begin(), tref.end());
+				/* ABNAHME PARITY: die Verbindung startet im Fluid und endet im Solid, muss die
+				   geschlossene Flaeche also UNGERADE oft schneiden. Gerade = Treffer auf einer
+				   Gegenflaeche oder gefaltete Flaeche. Achtung: die Quad-Diagonale gehoert zu
+				   ZWEI Dreiecken, und Achslinks treffen genau darauf -- gleiche t zusammenfassen,
+				   sonst ist jede Parity trivial gerade. */
+				ulong nkr=0ull; double vor=-1.0;
+				for(const double tv : tref) { if(vor<0.0||tv-vor>1e-7) nkr++; vor=tv; }
+				if(nkr==0ull) { S.kein_schnitt++; S.fallback++; continue; } // Kernel faellt auf HWBB
+				if((nkr&1ull)==0ull) S.parity_bad++;
+				const double q=fmin(1.0, tref[0]); // erster Schnitt = die gesuchte Wand
+				S.getroffen++; S.qsum+=q; if(q<S.qmin) S.qmin=q;
+				{ int hb=(int)(q*10.0); if(hb>9) hb=9; if(hb<0) hb=0; S.qh[hb]++; }
+				if(i<6u) { S.n_ax++; S.s_ax+=q; } else { S.n_di++; S.s_di+=q; }
+				if(fw<=2u) { S.n_eng++; S.s_eng+=q; if(q<S.qmin_eng) S.qmin_eng=q; } else { S.n_off++; S.s_off+=q; }
+				if(kugel_ref!=nullptr) { // analytischer Eintrittspunkt in die Kugel
+					const double ex=cx0-kugel_ref[0], ey=cy0-kugel_ref[1], ez=cz0-kugel_ref[2], R=kugel_ref[3];
+					const double aa=dxl*dxl+dyl*dyl+dzl*dzl, bb=2.0*(ex*dxl+ey*dyl+ez*dzl), cc2=ex*ex+ey*ey+ez*ez-R*R;
+					const double disc=bb*bb-4.0*aa*cc2;
+					bool ok=false; double tq=0.0;
+					if(disc>=0.0) { tq=(-bb-sqrt(disc))/(2.0*aa); ok=(tq>0.0&&tq<=1.0); }
+					if(ok) { const double e=q-tq; S.n_ref++; S.e_sum+=e; S.e2_sum+=e*e; if(fabs(e)>S.e_max) S.e_max=fabs(e); }
+					else S.n_ref_aus++;
 				}
 			}
-			if(best<=1.0+1e-6) {                                            // q = Schnittabstand / Linklaenge, in (0,1]
-				links_getroffen++;
-				const double q=fmin(1.0, best); qsum+=q;
-				{ int hb=(int)(q*10.0); if(hb>9) hb=9; qh[hb]++; }
-			} else links_fallback++;                                        // kein Schnitt im Link -> Kernel wird HWBB fallen
+		}
+		return S;
+	};
+	const auto bericht=[&](const string& na, const QStat& S) {
+		print_info("REMESH ["+na+"] "+to_string(S.zellen)+" wandnahe Zellen, "+to_string(S.links)+" Solid-Links; getroffen "+to_string(S.getroffen)+" ("+to_string((float)(100.0*(double)S.getroffen/(double)max(1ull,S.links)),1u)+" %), FALLBACK->HWBB "+to_string(S.fallback)+".");
+		print_info("REMESH ["+na+"] q: Mittel "+to_string((float)(S.qsum/(double)max(1ull,S.getroffen)),4u)+", min "+to_string((float)S.qmin,4u)+" | Achs "+to_string((float)(S.s_ax/(double)max(1ull,S.n_ax)),4u)+" ("+to_string(S.n_ax)+"), Diag "+to_string((float)(S.s_di/(double)max(1ull,S.n_di)),4u)+" ("+to_string(S.n_di)+").");
+		print_info("REMESH ["+na+"] ENGSTELLEN (freie Weite <=2 Zellen): "+to_string(S.n_eng)+" Links, q-Mittel "+to_string((float)(S.s_eng/(double)max(1ull,S.n_eng)),4u)+", min "+to_string((float)S.qmin_eng,4u)+" || offen: "+to_string(S.n_off)+" Links, q-Mittel "+to_string((float)(S.s_off/(double)max(1ull,S.n_off)),4u)+".");
+		if(S.parity_bad>0ull||S.kein_schnitt>0ull) print_warning("REMESH ["+na+"] ABNAHME PARITY VERFEHLT: "+to_string(S.parity_bad)+" Links mit GERADER Schnittzahl, "+to_string(S.kein_schnitt)+" ohne Schnitt. Soll 0/0.");
+		else print_info("REMESH ["+na+"] ABNAHME PARITY bestanden (jede Verbindung schneidet die Flaeche ungerade oft).");
+		if(S.n_ref>0ull) print_info("REMESH ["+na+"] KUGEL-REFERENZ: "+to_string(S.n_ref)+" Links, Bias "+to_string((float)(S.e_sum/(double)S.n_ref),5u)+", RMS "+to_string((float)sqrt(S.e2_sum/(double)S.n_ref),5u)+", max "+to_string((float)S.e_max,4u)+" ("+to_string(S.n_ref_aus)+" ohne analytischen Schnitt).");
+		if(S.ff_ax_kap>0ull) print_warning("REMESH ["+na+"] ABNAHME DURCHSCHUSS VERFEHLT: "+to_string(S.ff_ax_kap)+" von "+to_string(S.ff_ax)+" Achs-Fluidverbindungen werden von der Flaeche gekappt (Soll 0). Diagonal nachrichtlich: "+to_string(S.ff_di_kap)+"/"+to_string(S.ff_di)+".");
+		else print_info("REMESH ["+na+"] ABNAHME DURCHSCHUSS bestanden: keine der "+to_string(S.ff_ax)+" Achs-Fluidverbindungen gekappt (diagonal nachrichtlich "+to_string(S.ff_di_kap)+"/"+to_string(S.ff_di)+").");
+		{ string w="REMESH ["+na+"] FREIE WEITE der wandnahen Zellen (1..>=9 Zellen): "; for(int k2=1;k2<10;k2++) w+=to_string(S.fwh[k2])+(k2<9?" ":""); print_info(w); }
+		string h="REMESH ["+na+"] q-HISTOGRAMM (Dezile 0,0-1,0): "; for(int k2=0;k2<10;k2++) h+=to_string(S.qh[k2])+(k2<9?" ":""); print_info(h);
+	};
+	print_info("REMESH (ELIBB P1): "+to_string(M.quads)+" Grenzquads, "+to_string((ulong)M.vx.size())+" Vertices, "+to_string(ntri)+" Dreiecke (Surface Nets + Taubin "+to_string(n_it)+"x, Klemme +-0,5 Zelle).");
+	// ---- 4b) STL-DURCHGANG: q direkt gegen die Original-Dreiecke. Das ist die Grundwahrheit,
+	// gegen die sich Treppe UND Remesh messen lassen -- und zugleich der Test, ob der Bauplan
+	// zu Recht auf die STL verzichtet (Planungsagent 2026-08-22). Koordinaten: sat_shell setzt
+	// die Zellmitte auf (x,y,z) (setup.cpp:299), der Remesh auf (x+0,5,...) -- die STL liegt
+	// also um eine halbe Zelle versetzt, Ursprung des Strahls ist hier (x,y,z).
+	if(stl!=nullptr) {
+		std::unordered_map<ulong,std::vector<uint>> sbins;
+		for(uint t=0u; t<stl->triangle_number; t++) {
+			const float3 &A=stl->p0[t], &B=stl->p1[t], &C=stl->p2[t];
+			const int x0=(int)floor(fmin(A.x,fmin(B.x,C.x))), x1=(int)floor(fmax(A.x,fmax(B.x,C.x)));
+			const int y0=(int)floor(fmin(A.y,fmin(B.y,C.y))), y1=(int)floor(fmax(A.y,fmax(B.y,C.y)));
+			const int z0=(int)floor(fmin(A.z,fmin(B.z,C.z))), z1=(int)floor(fmax(A.z,fmax(B.z,C.z)));
+			if(x1<-1||y1<-1||z1<-1||x0>(int)Nx||y0>(int)Ny||z0>(int)Nz) continue;
+			for(int zz=max(-1,z0); zz<=min((int)Nz,z1); zz++) for(int yy=max(-1,y0); yy<=min((int)Ny,y1); yy++) for(int xx=max(-1,x0); xx<=min((int)Nx,x1); xx++)
+				sbins[(ulong)(xx+1)+((ulong)(yy+1)+(ulong)(zz+1)*(ulong)(Ny+2u))*(ulong)(Nx+2u)].push_back(t);
+		}
+		/* Die STL-Koordinaten kommen aus place() (Zellen ab Domaenenursprung), die SAT-Schale
+		   setzt die Zellmitte auf (x,y,z), der FluidX3D-Voxelierer dagegen auf die zentrierte
+		   position()-Konvention. Zwei Systeme -- also nicht lesen, sondern MESSEN: beide
+		   Ursprungsannahmen laufen mit, die mit der hoeheren Trefferquote ist die richtige. */
+		ulong nl=0ull, n_eng=0ull;
+		ulong ntr[2]={0ull,0ull}, nleer[2]={0ull,0ull}, neng_tr[2]={0ull,0ull};
+		double sq[2]={0.0,0.0}, sq_eng[2]={0.0,0.0}, qmin[2]={1e30,1e30};
+		ulong qh2[2][10]={{0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull},{0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull}};
+		std::vector<uint> kand;
+		const auto schuss=[&](const double ox_,const double oy_,const double oz_,const uint i,double* qout)->bool {
+			kand.clear();
+			for(uint kk=0u; kk<2u; kk++) {
+				const int bx=(int)floor(ox_)+(int)kk*cd[i][0], by=(int)floor(oy_)+(int)kk*cd[i][1], bz=(int)floor(oz_)+(int)kk*cd[i][2];
+				auto itb=sbins.find((ulong)(bx+1)+((ulong)(by+1)+(ulong)(bz+1)*(ulong)(Ny+2u))*(ulong)(Nx+2u));
+				if(itb!=sbins.end()) kand.insert(kand.end(), itb->second.begin(), itb->second.end());
+			}
+			std::sort(kand.begin(), kand.end()); kand.erase(std::unique(kand.begin(),kand.end()), kand.end());
+			double best=1e30;
+			for(const uint t : kand) {
+				const float3 &A=stl->p0[t], &B=stl->p1[t], &C=stl->p2[t];
+				double tt;
+				if(ray_tri(ox_,oy_,oz_, (double)cd[i][0],(double)cd[i][1],(double)cd[i][2],
+				           (double)A.x,(double)A.y,(double)A.z, (double)B.x,(double)B.y,(double)B.z, (double)C.x,(double)C.y,(double)C.z, &tt))
+					if(tt<best) best=tt;
+			}
+			if(best>1.0+1e-6) return false;
+			*qout=fmin(1.0,best); return true;
+		};
+		for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+			const ulong n=idx(x,y,z);
+			if((L.flags[n]&(TYPE_S|TYPE_E))!=0u) continue;
+			bool wandnah=false;
+			for(uint i=0u; i<18u&&!wandnah; i++) if(solid((int)x+cd[i][0],(int)y+cd[i][1],(int)z+cd[i][2])) wandnah=true;
+			if(!wandnah) continue;
+			const uint fw=freie_weite(x,y,z);
+			const double sx0=(double)x, sy0=(double)y, sz0=(double)z; // STL-Konvention: Zellmitte = (x,y,z)
+			for(uint i=0u; i<18u; i++) {
+				const int nx2=(int)x+cd[i][0], ny2=(int)y+cd[i][1], nz2=(int)z+cd[i][2];
+				if(!solid(nx2,ny2,nz2)) continue;
+				nl++; if(fw<=2u) n_eng++;
+				for(uint v=0u; v<2u; v++) {
+					const double off=(v==0u)?0.0:0.5;
+					double qs;
+					if(!schuss(sx0+off,sy0+off,sz0+off,i,&qs)) { nleer[v]++; continue; } // flags sagt solid, STL findet nichts
+					ntr[v]++; sq[v]+=qs; if(qs<qmin[v]) qmin[v]=qs;
+					{ int hb=(int)(qs*10.0); if(hb>9) hb=9; if(hb<0) hb=0; qh2[v][hb]++; }
+					if(fw<=2u) { neng_tr[v]++; sq_eng[v]+=qs; }
+				}
+			}
+		}
+		for(uint v=0u; v<2u; v++) {
+			const string na=(v==0u)?"STL Ursprung (x,y,z)":"STL Ursprung (x+0,5)";
+			print_info("REMESH ["+na+"]: "+to_string(nl)+" Solid-Links, davon "+to_string(ntr[v])+" mit STL-Schnitt ("+to_string((float)(100.0*(double)ntr[v]/(double)max(1ull,nl)),2u)+" %), "+to_string(nleer[v])+" OHNE (flags sagt solid, STL leer).");
+			print_info("REMESH ["+na+"] q: Mittel "+to_string((float)(sq[v]/(double)max(1ull,ntr[v])),4u)+", min "+to_string((float)qmin[v],4u)+" | Engstellen (Weite<=2): "+to_string(neng_tr[v])+" von "+to_string(n_eng)+" getroffen, q-Mittel "+to_string((float)(sq_eng[v]/(double)max(1ull,neng_tr[v])),4u)+".");
+			string h="REMESH ["+na+"] q-HISTOGRAMM (Dezile 0,0-1,0): "; for(int k2=0;k2<10;k2++) h+=to_string(qh2[v][k2])+(k2<9?" ":""); print_info(h);
 		}
 	}
-	print_info("REMESH (ELIBB P1): "+to_string(M.quads)+" Grenzquads, "+to_string((ulong)M.vx.size())+" Vertices, "+to_string(ntri)+" Dreiecke (Surface Nets + Taubin 15x, Klemme +-0,5 Zelle).");
-	print_info("REMESH q-ABDECKUNG: "+to_string(zellen)+" wandnahe Zellen, "+to_string(links_solid)+" Solid-Links; getroffen "+to_string(links_getroffen)+" ("+to_string((float)(100.0*(double)links_getroffen/(double)max(1ull,links_solid)),1u)+" %), FALLBACK->HWBB "+to_string(links_fallback)+". Mittleres q = "+to_string((float)(qsum/(double)max(1ull,links_getroffen)),3u)+" (Halfway-Referenz 0,5).");
-	{ string h="REMESH q-HISTOGRAMM (Dezile 0,0-1,0): "; for(int k2=0;k2<10;k2++) h+=to_string(qh[k2])+(k2<9?" ":""); print_info(h); }
-	// VTK der Flaeche fuer die Sichtpruefung (Iron Rule 5 gilt fuers MESSEN; sichten ist erlaubt)
+	bericht("TREPPE", q_scan(ox,oy,oz));       // rohe Voxelflaeche = Bezug
+	bericht("GEGLAETTET", q_scan(M.vx,M.vy,M.vz));
+	// VTK der Flaeche fuer die Sichtpruefung (Iron Rule 3 gilt fuers MESSEN; sichten ist erlaubt)
 	std::ofstream vtk(out_dir+"remesh_flaeche.vtk");
 	vtk << "# vtk DataFile Version 3.0\nRemesh ELIBB P1\nASCII\nDATASET POLYDATA\nPOINTS " << M.vx.size() << " float\n";
 	for(uint v=0u; v<nv; v++) vtk << M.vx[v] << " " << M.vy[v] << " " << M.vz[v] << "\n";
@@ -1779,6 +1990,23 @@ void main_setup_kugel() {
 	if(zb>0u) print_info("KRAFT-ZBAND aktiv (Kugel, Negativ-Kontrolle): unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx*1000.0f,2u)+" mm (dx = "+to_string(dx*1000.0f,2u)+" mm). GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar.");
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
+	if(env_u("CFD_FACETTEN_REMESH", 0u)>0u) { // ★ ELIBB P1: die Kugel ist der einzige Fall mit ANALYTISCHEM q
+		// Mitte und Radius kommen aus dem Voxelfeld selbst -- Schwerpunkt der Solidzellen und
+		// volumenaequivalenter Radius. Die position()-Konvention (Zellindex gegen zentrierten
+		// Positionsraum) ist hier uneindeutig; ein 0,5-Zellen-Irrtum wuerde einen Bias
+		// vortaeuschen, den es nicht gibt. Beide Durchgaenge nutzen DIESELBE Referenz, der
+		// Vergleich Treppe gegen Geglaettet bleibt also auch bei kleinem Radiusfehler gueltig.
+		double sx=0.0, sy=0.0, sz=0.0; ulong nv_=0ull;
+		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++)
+			if(lbm.flags[(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx]==(uchar)(TYPE_S|TYPE_X)) {
+				sx+=(double)x+0.5; sy+=(double)y+0.5; sz+=(double)z+0.5; nv_++; }
+		if(nv_>0ull) {
+			const double R_vol=pow(3.0*(double)nv_/(4.0*M_PI), 1.0/3.0);
+			const double kref[4]={sx/(double)nv_, sy/(double)nv_, sz/(double)nv_, R_vol};
+			print_info("ELIBB P1 (Kugel): "+to_string(nv_)+" Solidzellen, Schwerpunkt ("+to_string((float)kref[0],2u)+", "+to_string((float)kref[1],2u)+", "+to_string((float)kref[2],2u)+"), volumenaequivalenter Radius "+to_string((float)R_vol,3u)+" Zellen (nominal "+to_string(0.5f*D/dx,3u)+").");
+			remesh_facetten_diag(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, kref);
+		} else print_warning("ELIBB P1 (Kugel): keine Solidzellen mit TYPE_S|TYPE_X -- Remesh uebersprungen.");
+	}
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u&&env_u("CFD_FACETTEN", 0u)==0u) { // ★ Audit 3/3 M2: der Schalter war im Kugelfall stummer No-Op (DIAG=2 lief als Vollsimulation weiter)
 		baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel-Census");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
@@ -2879,7 +3107,7 @@ static void main_setup_fahrzeug_dd() {
 		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, "dd-Nahfeld");
 		if(env_u("CFD_FACETTEN_REMESH", 0u)>0u) { // ★ ELIBB P1 (Heiko 2026-08-22): Voxel-Remesh-Diagnose, reiner Host-Schritt, Default aus = bitidentisch
 			print_info("ELIBB P1: Remesh der Nahfeld-Voxelaussenwand (Surface Nets + Taubin) ...");
-			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn);
+			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, nullptr, veh_f);
 		}
 		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
