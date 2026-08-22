@@ -1346,3 +1346,44 @@ syntaxgeprueft. Erster Rauchtest: Stopp korrekt (t = 0,056 s statt 0,300, VTK mi
 erreichten Zeit im Namen, Stopp-Datei entfernt) -- aber rc=1, weil drei Wirkpfad-Sollwerte aus
 `n_outer` rechnen, also der GEPLANTEN Schrittzahl. Ein geretteter Lauf meldete sich als defekt.
 `n_outer_ist` behoben; zweiter Rauchtest rc=0, Facetten-Wirkpfad Ist = Soll = 88.300.050 exakt.
+
+## 2026-08-22 mittags — Heiko-Befund am Fernfeld-Slice: Geschwindigkeitsrand an der Fahrzeugnase
+
+**Heikos Beobachtung:** ungewoehnlich hoher Geschwindigkeitsrand an der Vorderseite, dort wo
+die Rampe der Rueckkopplung bei 0 % stehen sollte.
+
+**Erste Klarstellung:** der Lauf `f8_standard_final_diff` hatte **gar keine Rueckkopplung**
+(kein `CFD_N2F_*` im Log, nur die Hinkopplung). Der Rand kann nicht vom Blending stammen.
+
+**Gemessen** an `export/f8_standard_final_diff/schnitt_diff_letzter.csv`, Mittelebene y=0:
+
+| Groesse | Nahfeld (8 mm) | Fernfeld (32 mm) |
+|---|---|---|
+| Spalt Fahrbahn -> Splitter unter der Nase | 80 mm (10 Zellen) | **32 mm (1 Zelle)** |
+| \|u\| dort | ~35 m/s | **112,9 m/s = 3,7 u_inf** (u_z = -112,06) |
+
+Ursache: ein 32-mm-Voxel, das den Splitter irgendwo beruehrt, wird vollstaendig solid. Der grobe
+Wagen zieht seinen Unterboden damit zwei Zellen tiefer als der feine. Derselbe Volumenstrom muss
+durch einen um 60 % engeren Kanal, ueber eine mit 30 m/s bewegte Fahrbahn -- und der Kanal ist
+genau EINE Zelle hoch, also unterhalb jeder Aufloesungsgrenze.
+
+**Kein Renderer-Artefakt.** Die ueber z=1..7 identischen Werte entstehen, weil im 2x2x2-Stencil
+nur eine einzige Zelle kein Solid ist; `render_yslice_diff` verteilt einen echten groben Wert,
+es erfindet keinen. Beleg zusaetzlich: die Aufweitung faellt mit der Sperre zusammen
+(`fern_ungueltig=1` ab z=8, feines Solid erst ab z=10).
+
+**Umfang** (Mittelebene, 163.619 feine Fluidzellen): 892 Zellen = 0,55 % sind im Fernfeld
+zugemauert; 33 Zellen = 0,020 % ueberschreiten 1,5 u_inf.
+
+**Folge fuer den Bauplan -- BISHER NICHT ERFASST:** der Befund stuetzt die Rueckkopplung (es ist
+genau die Voxelisierungsdifferenz, die ihr zugewiesen wurde), zeigt aber eine Grenze:
+**wo das Fernfeld zugemauert ist, gibt es keine Zelle, die das Band korrigieren koennte.**
+Die 112 m/s stehen in der NACHBARzelle, die das Band erreicht -- die wird besser; die Sperre
+selbst bleibt. Der Saat-Test `flags != (TYPE_S|TYPE_X)` erfasst diese Nachbarzellen korrekt.
+Zu pruefen bleibt, ob eine u-Aufpraegung bei konstantem rho in einem geometrisch versperrten
+Ein-Zellen-Kanal ueberhaupt tragen kann, oder ob sie gegen die Geometrie anarbeitet.
+
+**Reihenfolge Moving-Floor (dieselbe Sitzung):** Heikos zweiter Befund -- der Bodenfix muesse
+NACH der Rueckkopplung wieder aufgetragen werden -- ist richtig und seit `919c122` umgesetzt
+(`schale_blend` vor `boden_eq`, lbm.cpp:1590-1592). `f8_standard_final` ist von 2026-08-21 und
+zeigt noch den Altstand, in dem der Blend ueber den Bodenfix gewann.
