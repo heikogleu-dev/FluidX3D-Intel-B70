@@ -115,3 +115,25 @@ Gegen linear N=8 bei alpha 0,5: 50 / 43,8 / 37,5 / 31,2 / 25 / 18,8 / 12,5 / 6,2
    Faktor 2 bis 4. *Falsifiziert unter Faktor 1,5.*
 4. Der Kopplungsfehler im NAHEN Bereich (bis 4 Grobzellen) wird besser als Arm 1, im AEUSSEREN
    (ab Lage 6) schlechter -- das Profil verschiebt Gewicht nach innen.
+
+---
+
+## Dritter 4-mm-Arm: die 1b-Siegerkette (w3ff auf 4 mm)
+
+8-mm-Screening validiert (Kette je eine Variable): FNEQ-Standard -> WANDFREI=3
+(cz_druck_rest -0,51 -> -0,78, reproduziert bei Kadenz 1: -0,7845 +- 0,047, 2,4 sigma)
+-> +FERN_FACETTEN (Fernabloesung 49,5 -> 44,1 %). Uebersetzung auf 4 mm: N=16 linear,
+alpha 0,5, WANDFREI=3, Kasten ab Kabinendach x=311, ABSTAND=32, FERN_FACETTEN=3,
+FAC_CD_EVERY=1.
+
+**Vorhersagen, vor dem Start (Bezug f4_std_diff2: cd_druck 0,8428, cz_druck_rest -0,8255):**
+1. **cz_druck_rest faellt Richtung OF13 (-1,301) um 0,1 bis 0,3** auf -0,93 bis -1,13.
+   Herleitung: der 8-mm-Effekt war -0,27; die 4-mm-Basis liegt schon tiefer, der Hebel
+   (Wand frei + Kopplung im Aussenfeld) ist aufloesungsunabhaengig in der Mechanik.
+   *Falsifiziert, wenn cz_rest ueber -0,88 bleibt.* Damit waere Bauplan-Kriterium 2
+   (<= -0,92) erstmals in Reichweite.
+2. cd_druck steigt gegen die 4-mm-Basis um 0,05 bis 0,15 (der 8-mm-Preis skaliert mit) --
+   bewusst in Kauf genommen, Cz ist das Ziel. *Ueberraschung, wenn er faellt.*
+3. FERN_FACETTEN wirken auf 16-mm-Treppen staerker als auf 32-mm: Fernabloesung wandnah
+   naeher an der Nahfeld-Quote als die 8-mm-Differenz (49,5-27 = 22 Pp).
+4. Fx_far bleibt unbrauchbar (Kastenkern beruehrt weiter Karosseriezellen oberhalb k).
