@@ -1660,3 +1660,41 @@ zugeschmiert.** Deckt sich mit Pruefbefund 3 und ist der erste echte P1-Mangel.
 2. Bin-Schluessel `(Nz+2u)` -> `(Ny+2u)`.
 3. Die drei fehlenden Abnahmezahlen (ungerade Schnittzahl, Kugel-q, Achs/Diagonal).
 4. Erst danach P2 (fac_q + Kernel).
+
+## 2026-08-22 Abschluss II — ELIBB P1 gehaertet, Radhaus-Ursache gefunden
+
+**Ergebnis in einem Satz:** P1 steht und ist messtechnisch abgesichert; die zugeschmierten
+Radhaeuser sind KEIN Flaechenproblem, sondern die 6er-Konnektivitaet des Void-Fill.
+
+**Gebaute Abnahmen (alle mit feuerndem Zaehler, Iron Rule 8):**
+- PARITY -- Schnittzahl je Verbindung muss ungerade sein. Bestanden, beide Faelle.
+  (Loest den HOCH-Befund des Vorpruefers: 100 % Abdeckung belegte die SEITE nicht.)
+- DURCHSCHUSS -- Achs-Fluidverbindungen duerfen nicht gekappt werden. 0 von 3.749.916.
+- TOPOLOGIE -- Kantenzensus + Euler: chi=-144, 560 Quetschkanten, 464 offene Kanten.
+- KUGEL-REFERENZ -- analytisches q, Bias/RMS/max.
+- FREIE WEITE -- Engstellenmass je wandnaher Zelle, q getrennt eng/offen.
+- VOID-FILL-KONNEKTIVITAET -- 6er- gegen 18er-Flutung, Differenz mit Bereichsangabe.
+
+**Behobene Fehler:** Bin-Schluessel Ny/Nz (latent, Histogramm bitgleich = Abnahme);
+680 an Quetschkanten verschweisste Vertices werden festgehalten; unbenutztes `len`.
+
+**Zwei eigene Aussagen zurueckgenommen:**
+1. "Der Spalt ist aerodynamisch dicht" -- der Durchschusstest sagt das Gegenteil.
+   Es ist Einwoelbung (q 0,5000 -> 0,4683 in Engstellen), kein Verschluss.
+2. Die Glaettung sei die Ursache des zugeschmierten Radhauses. Heikos Sichtung
+   (ITER 3/8/15 identisch am Radhaus) hat das widerlegt -- und direkt auf die
+   richtige Stufe gezeigt.
+
+**Ein Agentenvorschlag per Messung verworfen:** q direkt gegen die STL. Nur 40,5 % der
+Solid-Links haben eine STL-Flaeche in Reichweite; 59,5 % sind SAT-Schale und Void-Fill.
+
+**OFFEN, zuerst in der naechsten Sitzung:** der Pruefagent auf dem P1-Haertungs-Diff
+(f84f6b3) lief beim Sitzungsende noch. Nach Iron Rule 2 gilt KEIN P1-Messwert als
+bestaetigter Befund, bevor er durch ist -- seine Befunde vor P2 einarbeiten.
+
+**Reihenfolge fuer die naechste Sitzung:**
+(1) Pruefagenten-Befunde zu f84f6b3 einarbeiten; (2) P2 nach FACETTEN-ELIBB-PLAN.md
+(q-Puffer als uchar, Esoteric-Pull-Konvention klaeren, Kugel-Gate zuerst);
+(3) Void-Fill-A/B mit KONN=18 (Arbeitsliste 12) NACH P2;
+(4) Produktions-Wiederholung f4_wandfrei_prod und Kadenz-1-Bezug -- beides nur nach
+    Heiko-Go, und waehrend des Laufs keine GPU-Werkzeuge am Desktop.
