@@ -2879,7 +2879,7 @@ static void main_setup_fahrzeug_dd() {
 		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, "dd-Nahfeld");
 		if(env_u("CFD_FACETTEN_REMESH", 0u)>0u) { // ★ ELIBB P1 (Heiko 2026-08-22): Voxel-Remesh-Diagnose, reiner Host-Schritt, Default aus = bitidentisch
 			print_info("ELIBB P1: Remesh der Nahfeld-Voxelaussenwand (Surface Nets + Taubin) ...");
-			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), out_dir);
+			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn);
 		}
 		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
