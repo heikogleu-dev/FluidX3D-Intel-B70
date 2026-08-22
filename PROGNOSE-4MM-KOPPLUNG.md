@@ -71,3 +71,20 @@ NICHT ueber cd_druck.
 **Angepasste Vorhersage 1:** cd_druck faellt von 0,8428 um 10 bis 16 Prozent auf
 0,708 bis 0,758 (8-mm-Effekt bei alpha 0,25: -14,8 %). *Falsifiziert ueber 0,80.*
 Vorhersagen 2 bis 5 bleiben unveraendert.
+
+---
+
+## Zweiter 4-mm-Arm (Heiko): N=8 mit alpha 0,50
+
+ZWEI Variablen gegen `f4_kopplung_prod` (N 16->8 UND alpha 0,25->0,50) -- bewusste
+Eckpunktprobe, keine Zerlegung. Sie beantwortet: liefert das halbe Band mit doppeltem alpha
+denselben Cd-Effekt bei halbem Rechenaufwand?
+
+**Vorhersagen, vor dem Start:**
+1. Massenquelle und Fernfeld-Klemmtreffer steigen um etwa Faktor 4 gegen den laufenden Arm.
+   Herleitung: div(u_blend) ~ alpha*grad(w)*Delta_u, |grad w| = 1/(N*dx_c), also ~ alpha/N;
+   0,50/8 = 0,0625 gegen 0,25/16 = 0,0156. *Falsifiziert unter Faktor 2 oder ueber 8.*
+2. Der Kopplungsfehler (RMS Diff Mittelebene) wird SCHLECHTER als im laufenden Arm, weil die
+   8-mm-Leiter zeigte: N=8 schlaegt N=16 in keiner Zone. Groessenordnung +10 bis +20 %.
+3. cd_druck bleibt in derselben Groessenordnung wie im laufenden Arm (+-0,05). Falls nicht,
+   haengt der Cd-Effekt an einem der beiden Knoepfe und die Zerlegung wird noetig.
