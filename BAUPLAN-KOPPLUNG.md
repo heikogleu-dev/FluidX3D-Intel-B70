@@ -350,3 +350,24 @@ Nahfeld-Auslass statt 3,50 m. `640` waere zu knapp (0,17 m Rest), `768` zu langs
 6. **Deterministische `po_mean`-Reduktion** — hebt die halbe Beweisführung von „im Rauschband" auf
    „bitgleich". Bis dahin ist `CFD_PO_HART=1` die Krücke für jeden Bitbeweis.
 7. **Luft-Ansage in Fernzellen** beim Start (heute steht nur der Einlauf in Metern im Log).
+
+---
+
+## 9. Literatur-Einordnung der Rueckkopplung (Recherche 2026-08-22 abends, Quellen im Wissensspeicher)
+
+**Heikos Profil (Plateau + geometrische Halbierung + hartes Null-Ende) = NWP-Standard:**
+Lehmann 1993 (Meteorol. Atmos. Phys. 52, DOI 10.1007/BF01025749) leitet das EXPONENTIELLE
+Profil als reflexionsoptimal fuer Davies-Relaxationsraender her -- die geometrische Halbierung
+ist dessen zellweise Diskretisierung. WRF faehrt strukturell exakt dieses Profil (1 Zelle
+Plateau, Rampe linear/exponentiell auf 0). Nordstroem et al. 1999 (SIAM JSC 20): Plateau +
+hartes Null-Ende in der Fringe-Region publiziert. Begruendung ueberall REFLEXIONSFREIHEIT,
+nie Massenerhaltung.
+
+**Die Rueckkopplung selbst (Volumen-Nudging u, rho lokal) = Meteorologie-Import:**
+Harris & Lin 2013 (MWR 141, GFDL-Nest): Zweiwege-Feedback als blockgemitteltes Volumen-Update,
+woertlich "only the winds and temperature are updated to the coarse grid; the coarse-grid air
+mass field is undisturbed" -- exakt unser Schema, als bewusste Design-Entscheidung. Unsere
+gemessene Massenquelle (1,0-1,7 %) ist dort ein dokumentierter Trade-off. Der Textur-Abdruck
+ist ebenfalls publiziert (Bowden et al. 2012: Grid-Nudging daempft feinskalige Varianz;
+Abhilfe skalenselektiv -- deckt sich mit unserem FNEQ-Befund). In der LBM macht volumetrisches
+Nudging NIEMAND (Lagrava/Astoul: Interface-Restriktion) -- Neuland mit solider Verwandtschaft.
