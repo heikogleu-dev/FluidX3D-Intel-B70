@@ -2153,7 +2153,6 @@ static void main_setup_fahrzeug_dd() {
 	const float dt_c  = (float)ratio*dt_f;
 	const float nu_lat_f = si_nu*dt_f/(dx_f*dx_f);
 	const float nu_lat_c = si_nu*dt_c/(dx_c*dx_c);
-	const float tau_f = 3.0f*nu_lat_f + 0.5f, tau_c = 3.0f*nu_lat_c + 0.5f;
 
 	// ---------------------------------------------------------------- Fernfeld = OpenFOAM-Box
 	// Die Maße stammen aus dem V1-Fahrzeugfall (phase7g), wo sie durchgerechnet waren. Sie stehen hier
@@ -2488,6 +2487,8 @@ static void main_setup_fahrzeug_dd() {
 	// exakte Halbierung, damit das Profil eine geschlossene Form hat.
 	// Vorlaeufer: V1 fuhr 2026-05-16 eine "Plateau-Rampe" nach demselben Gedanken (Phase 6C).
 	const uint n2f_band_plateau = max(1u, min(n2f_band_n>1u?n2f_band_n-1u:1u, env_u("CFD_N2F_BAND_PLATEAU", 2u)));
+	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_band_n<2u) print_error("CFD_N2F_BAND_PROFIL=2 braucht N >= 2: bei N=1 ist die einzige Lage die Nulllage -- das ganze Band waere gewichtslos (B-P3).");
+	if(getenv("CFD_N2F_BAND_PLATEAU")&&n2f_band_prof!=2u) print_warning("CFD_N2F_BAND_PLATEAU ist gesetzt, wirkt aber nur bei CFD_N2F_BAND_PROFIL=2 (B3; Ansage-Doktrin).");
 	auto band_w = [&](const uint d) { // d = 1..N, gibt w in (0,1]; a = alpha*w
 		if(n2f_band_prof==2u) {                                   // Plateau + geometrisch
 			if(d>=n2f_band_n) return 0.0f;                        // aeusserste Lage exakt 0 -- keine Kante
@@ -2501,6 +2502,7 @@ static void main_setup_fahrzeug_dd() {
 	if(n2f_alpha>0.0f) {
 		print_info("N2F-SCHALE aktiv (P9c, Heiko): Fernfeld-Schale um die Fahrzeug-BBox wird post-stream mit dem Nahfeld-Blockmittel relaxiert, alpha = "+to_string(n2f_alpha,3u)+" (u_neu = (1-a)*u_far + a*u_near, rho bleibt lokal; a = alpha*gewicht je Zelle).");
 		if(n2f_band>0u&&n2f_nurwake>0u) print_info("N2F-BAND NUR-WAKE (CFD_N2F_BAND_NURWAKE=1, Heiko 2026-08-22): das KOERPERBAND entfaellt. Das Fahrzeug bleibt Sperre fuer die Distanztransformation (dt = 253), ist aber KEINE Quelle mehr -- die Rueckkopplung geht ausschliesslich vom Wake-Kasten aus, mit derselben Rampe nach aussen. Nebenwirkung, die den Arm interessant macht: die karosserienahe Zellschicht wird nicht mehr ueberschrieben, damit liest update_force_field im Fernfeld wieder echte Rueckprall-Verteilungen und Fx_far ist als Kriterium zurueck (ausser dort, wo der Kasten selbst ans Fahrzeug stoesst).");
+		if(n2f_band>0u&&n2f_nurwake==0u) print_warning("N2F-BAND mit Koerperband: Lage 1 ueberschreibt die karosserienahe Fernfeld-Schicht, aus der update_force_field liest -- Fx_far_N (forces.csv) und Fx_grob_N (band_bilanz.csv) sind in DIESEM Arm KEINE Kraefte, sondern lesen den Blend (Befund 79d6441). Nicht als Kriterium verwenden; sauber sind der Nahfeld-Facettenpfad und die Feld-CSVs.");
 		if(n2f_band>0u) {
 			print_info("N2F-BAND aktiv (CFD_N2F_BAND=1, Heiko 2026-08-22): BAND-Blend ersetzt den Schalen-Listenbauer -- "
 				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
@@ -2522,7 +2524,7 @@ static void main_setup_fahrzeug_dd() {
 		if(n2f_volumen==0u&&n2f_lagen==0u&&getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL wird im Kontrollarm LAGEN=0 NICHT angewandt (uniformes Gewicht 1,0 ist die Definition des Altverhaltens).");
 		if(n2f_volumen==0u&&n2f_xskal==0.0f) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL=0: x+-Zellen bleiben mit Gewicht 0 in der Liste und wuerden auf ihr LOKALES Gleichgewicht projiziert (a=0 ist im EQ-Arm KEIN No-Op; im FNEQ-Arm nahezu, in IDENT exakt ein No-Op) -- zum Abschalten der Flaeche CFD_N2F_SCHALE_XPLUS=0 nutzen.");
 	}
-	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT")||getenv("CFD_N2F_BAND_WAKE")||getenv("CFD_N2F_BAND_NURWAKE")||getenv("CFD_N2F_BAND_WAKE_START")||getenv("CFD_N2F_BAND_WAKE_START_X")||getenv("CFD_N2F_BAND_WAKE_ABSTAND")||getenv("CFD_N2F_PARITAET"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_BAND_WAKE/_START/_START_X/_ABSTAND, CFD_N2F_PARITAET, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c; die WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Liste -- getenv ist Exaktvergleich, Pruefagent-B8).");
+	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT")||getenv("CFD_N2F_BAND_WAKE")||getenv("CFD_N2F_BAND_NURWAKE")||getenv("CFD_N2F_BAND_WAKE_START")||getenv("CFD_N2F_BAND_WAKE_START_X")||getenv("CFD_N2F_BAND_WAKE_ABSTAND")||getenv("CFD_N2F_BAND_PLATEAU")||getenv("CFD_N2F_PARITAET"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_BAND_WAKE/_START/_START_X/_ABSTAND, CFD_N2F_PARITAET, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c; die WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Liste -- getenv ist Exaktvergleich, Pruefagent-B8).");
 	// ★ P8 (Offen-Punkt 8): FACETTEN AUCH IM FERNFELD. Der 32-mm-Treppenkoerper verdraengt +15,5 %
 	// Volumen (Schritt-0-Census fc0edcf) und praegt dem Nahfeld ueber die Kopplungsebenen ein zu
 	// grobes Druckfeld auf -- der Facettenpfad macht die Fernfeld-Wand druckkonsistenter. Schalter
@@ -2868,7 +2870,12 @@ static void main_setup_fahrzeug_dd() {
 	// das Fernfeld-Fahrzeug erzeugt sein eigenes Defizit weiter. Ob daraus eine Doppelzaehlung
 	// wird, entscheidet keine Ueberlegung, sondern die Bilanz ueber die sechs Kastenflaechen.
 	uint bil_x0=0u, bil_x1=0u, bil_y0=0u, bil_y1=0u, bil_z0=0u, bil_z1=0u; bool bil_an=false;
-	const uint n2f_lage_aussen = (n2f_band>0u) ? n2f_band_n-1u : ((n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u)); // BAND: Lage = d-1, aeusserste ist N-1 // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
+	// ★ B-P1/B-P4: bei Profil 2 ist Lage N-1 gewichtslos und wird nicht mehr gelistet -- Waechter,
+	// Negations-Nachweis und Kipp-Metrik laufen auf der aeussersten Lage MIT Gewicht (N-2). Sonst
+	// waeren sie strukturell blind (im FNEQ-Arm speichert a=0 ftrue unabhaengig vom
+	// Negationsvorzeichen -- genau der Fehler, den der Nachweis fangen soll, erreichte die
+	// Messlage nicht mehr).
+	const uint n2f_lage_aussen = (n2f_band>0u) ? (n2f_band_prof==2u&&n2f_band_n>1u ? n2f_band_n-2u : n2f_band_n-1u) : ((n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u)); // BAND: Lage = d-1; Profil 2: N-2 (s.o.) // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
 	float n2f_w_band = 0.0f; // VOLUMEN: groesstes Gewichtsfeld im Aussenband -- traegt in die Negations-Schwelle (w_aussen = alpha*n2f_w_band)
 	ulong n2f_nanblocks = 0ull;
 	const uint n2f_mittel = min(1u, env_u("CFD_N2F_SCHALE_MITTEL", 1u)); // 1 = Blockmittel ueber ratio^3 Feinzellen (Default), 0 = Punktwert am Deckungspunkt
@@ -3030,7 +3037,7 @@ static void main_setup_fahrzeug_dd() {
 		// ---- LISTE. Reihenfolge z,y,x aufsteigend = aufsteigend im linearen Index (deterministisch,
 		// Muster des Volumen-Listenbauers; keine std::map noetig).
 		std::vector<ulong> lage_n(n2f_band_n,0ull), lage_nan(n2f_band_n,0ull), lage_ub(n2f_band_n,0ull), lage_te(n2f_band_n,0ull);
-		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausserhalb=0ull;
+		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausserhalb=0ull, ausgelassen_w0=0ull;
 		const int n2f_r=(int)ratio, n2f_w0=-(n2f_r/2);
 		for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
 			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
@@ -3055,6 +3062,13 @@ static void main_setup_fahrzeug_dd() {
 			const bool zone_wake = n2f_wake>0u && (wake_kern || x>=wx0);
 			n2f_marke.push_back((uchar)(zone_wake?1u:0u)); // Bit 1 ("stromauf der Nase") ENTFERNT 2026-08-22: es wurde geschrieben und nirgends gelesen -- die Einschraenkung, fuer die es gedacht war, wurde als Ueberkorrektur verworfen (write-only-Zustand, Pruefagent-Befund)
 			n2f_liste_c.push_back(nn);
+			// ★ Pruefrunde 2026-08-22 abends (zwei unabhaengige Pruefer, B-P2/B2): Zellen mit
+			// Gewicht EXAKT 0 (Profil 2, aeusserste Lage) wurden gelistet und transferiert -- und
+			// im EQ-Arm ist a=0 KEIN No-Op, sondern eine Equilibrium-Projektion: die Nulllage war
+			// eine unangesagte fneq-Loeschschale (5,1 % der Bandzellen des Plateau-Laufs). Der
+			// VOLUMEN-Bauer filtert w<=0 seit jeher; der Band-Bauer zieht nach. Kostet nebenbei
+			// 4-6 % Transfer. NICHT bitidentisch zum Plateau-Lauf f4_kopplung_plateau -- gewollt.
+			{ const float w_ = wake_kern ? 1.0f : band_w(d); if(w_<=0.0f) { ausgelassen_w0++; continue; } }
 			n2f_gewicht.push_back(wake_kern ? 1.0f : band_w(d));
 			n2f_lage.push_back(lage);
 			lage_n[lage]++; if(unterboden) lage_ub[lage]++;
@@ -3179,14 +3193,14 @@ static void main_setup_fahrzeug_dd() {
 				if(kern_gelistet!=wake_n) print_error("N2F-BAND WAKE ABNAHME GESCHEITERT: Census sagt "+to_string(wake_n)+" Kernzellen an, gelistet sind "+to_string(kern_gelistet)+" ("+to_string((float)(100.0*(double)kern_gelistet/(double)max(1ull,wake_n)),1u)+" %). Die Differenz ist ein LAUTLOSER No-Op -- genau Fehler B1 vom 2026-08-22.");
 				else print_info("N2F-BAND WAKE ABNAHME: "+to_string(kern_gelistet)+" Kernzellen angesagt UND gelistet (Ist == Soll).");
 			}
-			if(verletzt==0ull&&luecke==0ull) print_info("N2F-BAND MAXIMUM-BEWEIS: "+to_string(geprueft)+" Bandzellen geprueft, 0 Verletzungen; VOLLSTAENDIGKEIT: 0 unerreichte Zellen mit zu nahem Nachbarn -- jede Zelle traegt das HOECHSTE Gewicht aus Fahrzeug-Saat und Wake-Kasten (Abstand zur naechsten Saat, band_w faellt monoton).");
+			if(verletzt==0ull&&luecke==0ull) print_info("N2F-BAND MAXIMUM-BEWEIS: "+to_string(geprueft)+" Bandzellen geprueft, 0 Verletzungen; VOLLSTAENDIGKEIT: 0 unerreichte Zellen mit zu nahem Nachbarn -- jede Zelle traegt das HOECHSTE Gewicht aus Fahrzeug-Saat und Wake-Kasten (Abstand zur naechsten Saat, band_w ist monoton nicht-steigend).");
 		}
 		if(n2f_liste_c.empty()) print_error("N2F-BAND: Zellliste leer -- kein Bandkandidat hat Fussabdruck, z_lo und Unterboden-Maske ueberlebt.");
-		n2f_w_band = band_w(n2f_band_n); // Aussenlage traegt in die Negations-Schwelle
+		n2f_w_band = band_w(n2f_lage_aussen+1u); // Gewicht der WAECHTERLAGE (bei Profil 2: N-1. Lage; band_w(N) waere 0 und machte die Schwelle wirkungslos)
 		// ---- CENSUS (Iron Rule: Diagnostik gehoert in den Code)
 		print_info("N2F-BAND SAAT-CENSUS: "+to_string(saat)+" Fahrzeug-Grobzellen (0x41), davon "+to_string(saat_z0)+" auf z=0; Quervergleich: der Verdraengungs-Census oben zaehlt dieselbe Menge VOR dem Entzug von TYPE_X an den Aufstandsflaechen -- die Differenz MUSS die Kontaktflaechen-Zahl sein. BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z["+to_string(sz0)+".."+to_string(sz1)+"]; Arbeitsbox x["+to_string(ax0)+".."+to_string(ax1)+"] y["+to_string(ay0)+".."+to_string(ay1)+"] z["+to_string(az0)+".."+to_string(az1)+"]; Metrik Chebyshev (an Koerperkanten diagonal bis "+to_string((float)n2f_band_n*1.732f,1u)+" Zellen dick -- bekannt, Ersatz waere Chamfer-3-4-5).");
 		ulong ges=0ull; for(uint k=0u; k<n2f_band_n; k++) ges+=lage_n[k];
-		print_info("N2F-BAND ZELL-CENSUS: "+to_string(ges)+" Zellen in "+to_string(n2f_band_n)+" Lagen; ausgelassen: "+to_string(ausgelassen_zlo)+" im boden_eq-Band, "+to_string(ausgelassen_ub)+" Unterboden (Vergleichsarm), "+to_string(ausserhalb)+" ausserhalb des Nahfeld-Fussabdrucks; fluidleere Bloecke (NaN-Skip im Blend): "+to_string(n2f_nanblocks)+".");
+		print_info("N2F-BAND ZELL-CENSUS: "+to_string(ges)+" Zellen in "+to_string(n2f_band_n)+" Lagen; ausgelassen: "+to_string(ausgelassen_zlo)+" im boden_eq-Band, "+to_string(ausgelassen_ub)+" Unterboden (Vergleichsarm), "+to_string(ausserhalb)+" ausserhalb des Nahfeld-Fussabdrucks, "+to_string(ausgelassen_w0)+" mit Gewicht 0 (Profil-2-Nulllage, nicht gelistet -- sonst waere sie im EQ-Arm eine fneq-Loeschschale); fluidleere Bloecke (NaN-Skip im Blend): "+to_string(n2f_nanblocks)+".");
 		for(uint k=0u; k<n2f_band_n; k++) print_info("N2F-BAND LAGEN-CENSUS: Lage "+to_string(k)+" (Abstand "+to_string(k+1u)+", w = "+to_string(band_w(k+1u),3u)+", a = "+to_string(n2f_alpha*band_w(k+1u),3u)+"): "+to_string(lage_n[k])+" Zellen, davon Unterboden "+to_string(lage_ub[k])+", fluidleer "+to_string(lage_nan[k])+", TYPE_E (Blend-Skip) "+to_string(lage_te[k])+(k==n2f_lage_aussen?" [WAECHTER-LAGE]":""));
 		if(lage_n[0]>0ull&&lage_nan[0]*2ull>lage_n[0]) print_warning("N2F-BAND: Lage 0 (staerkstes Gewicht) ist zu ueber 50 % fluidleer -- der Arm wirkt deutlich schwaecher, als sein alpha behauptet. Ursache ist die Voxelisierungs-Differenz fein/grob; im Verdikt mit angeben.");
 		if(lage_n[n2f_lage_aussen]==0ull) print_error("N2F-BAND: die AEUSSERSTE Lage ist leer -- Waechter, Negations-Nachweis und Kipp-Kriterium haetten keine einzige Zelle.");
@@ -3204,7 +3218,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("N2F-BAND TRANSFER: je Kopplungsfenster 2 x 12 Bytes/Zelle = "+to_string((float)((ulong)n2f_liste_c.size()*24ull)/1048576.0f,2u)+" MB; Geraetepuffer je Domaene "+to_string((float)((ulong)n2f_liste_c.size()*36ull)/1048576.0f,2u)+" MB.");
 	}
 	else if(n2f_alpha>0.0f&&n2f_volumen>0u) { // ---------------- VOLUMEN-Listenbauer (Heiko-Bild; ERSETZT den Schalen-Listenbauer)
-		const uint z_lo = max(1u, env_u("CFD_FERN_BODEN_EQ", 0u)+1u); // Ausschluss wie gehabt: das boden_eq-Band (z=1..N) bleibt unangetastet; Fahrbahn z- offen (kein z--Deckel)
+		const uint z_lo = max(1u, max(env_u("CFD_FERN_BODEN_EQ", 0u), env_u("CFD_FERN_BODEN_EQ_DOWN", 0u))+1u); // ★ B1 2026-08-22 abends: _DOWN-Luecke wie im Band-Bauer geschlossen -- boden_eq nutzt nz_eff=(x>=x_split)?nz_down:nz und laeuft NACH dem Blend // Ausschluss wie gehabt: das boden_eq-Band (z=1..N) bleibt unangetastet; Fahrbahn z- offen (kein z--Deckel)
 		if(env_u("CFD_FERN_FACETTEN",0u)>0u) print_error("CFD_N2F_VOLUMEN=1 mit CFD_FERN_FACETTEN>0: der Rot-Kern enthaelt die karosserienahen FERN_FACETTEN-Zellen -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nicht freigegeben.");
 		const uint sz_rand = max(1u, (uint)floor(0.1f/dx_c+0.5f)); // 100 mm auf dx_c gerastert (wie n2f_rand): Rot-Aufweitung UND Schutzzonen-Breite
 		// ROT-Box: Fahrzeug-BBox + sz_rand; innerhalb Gewichtsfeld konstant 1,0 (alpha traegt die Staerke); z- offen bis z_lo
@@ -3293,7 +3307,7 @@ static void main_setup_fahrzeug_dd() {
 		if(band_n>0ull&&band_n==band_nan) print_error("N2F-Volumen: das AUSSENBAND ist komplett fluidleer -- Waechter/Negations-Nachweis/Kipp haetten keine einzige gueltige Zelle.");
 	}
 	else if(n2f_alpha>0.0f) {
-		const uint z_lo = max(1u, env_u("CFD_FERN_BODEN_EQ", 0u)+1u); // boden_eq-Band (z=1..N) unangetastet
+		const uint z_lo = max(1u, max(env_u("CFD_FERN_BODEN_EQ", 0u), env_u("CFD_FERN_BODEN_EQ_DOWN", 0u))+1u); // ★ B1 2026-08-22 abends: _DOWN-Luecke wie im Band-Bauer geschlossen -- boden_eq nutzt nz_eff=(x>=x_split)?nz_down:nz und laeuft NACH dem Blend // boden_eq-Band (z=1..N) unangetastet
 		const bool m_xm = env_u("CFD_N2F_SCHALE_XMINUS", 0u)>0u;
 		const bool m_xp = env_u("CFD_N2F_SCHALE_XPLUS", 1u)>0u;
 		std::map<ulong, std::pair<float,uint>> smap; ulong roh[5] = {0ull,0ull,0ull,0ull,0ull}; // Zelle -> (Gewicht, Lage)
@@ -3521,7 +3535,7 @@ static void main_setup_fahrzeug_dd() {
 		// Trennung) n_gueltig = 21.940; max_bew (danach, gleiche Geometrie) n_gueltig = 10.276 plus
 		// n_wake = 11.664, Summe exakt 21.940. Wer rms_lat oder n_gueltig ueber diese Grenze hinweg
 		// vergleicht, vergleicht verschiedene Grundgesamtheiten.
-		swcsv << "# n_gueltig/rms_lat/max_lat: Aussenlage OHNE Wake-Zone (Bedeutungswechsel 2026-08-22, vorher: ganze Aussenlage). n_wake/rms_wake_lat: Aussenlage IN der Wake-Zone. n_kern/rms_kern_lat/max_kern_lat: Wake-KERN (Lage 0, volles Gewicht) -- bis 2026-08-22 von keiner Metrik erfasst. n_gueltig_alle/rms_alle_lat: alle Bandlagen.\n";
+		swcsv << "# n_gueltig/rms_lat/max_lat: Aussenlage OHNE Wake-Zone (Bedeutungswechsel 2026-08-22, vorher: ganze Aussenlage). n_wake/rms_wake_lat: Aussenlage IN der Wake-Zone. n_kern/rms_kern_lat/max_kern_lat: ALLE Lage-0-Zellen der Wake-Zone (Kastenkern PLUS Koerperband-Lage-0 mit x>=wx0 -- beide volles Gewicht; B-P5) -- bis 2026-08-22 von keiner Metrik erfasst. n_gueltig_alle/rms_alle_lat: alle Bandlagen.\n";
 		swcsv << "time_s,n_gueltig,rms_lat,max_lat,rms_rel_uinf,n_gueltig_alle,rms_alle_lat,n_wake,rms_wake_lat,n_kern,rms_kern_lat,max_kern_lat\n" << std::flush;
 		print_info("N2F-SCHALE-Waechter aktiv: an der Sample-Kadenz RMS/Max ||u_near-u_far|| ueber "+(n2f_volumen>0u?string("das VOLUMEN-AUSSENBAND (aeusserste Gewichtsstufe, lage ")+to_string(n2f_lage_aussen):string("die AEUSSERSTE Schalen-Lage (Lage ")+to_string(n2f_lage_aussen))+"; Fernfeld-Punktwerte via schale_extract mittel=0) -> "+out_dir+"schale_waechter.csv; CSV-Schema ERWEITERT um n_gueltig_alle,rms_alle_lat (alle Lagen, Diagnose); Kipp-Kriterium (nur Aussenlage/-band): RMS > 0,5*u_inf nach Warmup ODER 10 Samples monoton steigend -> Abbruch.");
 	}
@@ -3589,7 +3603,7 @@ static void main_setup_fahrzeug_dd() {
 	std::ofstream bilcsv;
 	if(bil_an) {
 		bilcsv.open(out_dir+"band_bilanz.csv"); bilcsv.precision(8);
-		bilcsv << "# Vorzeichen: Fx_summe ist die LINKE Seite der Impulsbilanz und traegt damit das umgekehrte Vorzeichen von Fx_fein/Fx_grob -- -Fx_summe gegen die Fahrzeugkraft stellen. Es fehlen bewusst der instationaere Term d/dt Int(rho*u_x)dV (erst nach t_warmup lesen) und der Reibanteil. rho_min/rho_max werden VOR dem Gueltigkeitsfilter gebildet, n_verworfen zaehlt die uebersprungenen Zellen. Fx_xp_N ist der Fluss durch die stromabwaertige Ebene ALLEIN (Bauplan-Abnahmekriterium).\n";
+		bilcsv << "# Vorzeichen: Fx_summe ist die LINKE Seite der Impulsbilanz und traegt damit das umgekehrte Vorzeichen von Fx_fein/Fx_grob -- -Fx_summe gegen die Fahrzeugkraft stellen. Es fehlen bewusst der instationaere Term d/dt Int(rho*u_x)dV (erst nach t_warmup lesen) und der Reibanteil. rho_min/rho_max werden NACH dem Flag-Filter nur ueber FLUID gebildet (Solid-Test ueber flags seit 1f851ea); n_verworfen zaehlt die uebersprungenen Nicht-Fluid-Zellen. mdot_*-Spalten sind GITTEREINHEITEN (rho_lat*u_lat je Zellflaeche); nur die *_N-Spalten sind SI-Newton. Fx_xp_N ist der Fluss durch die stromabwaertige Ebene ALLEIN (Bauplan-Abnahmekriterium).\n";
 		bilcsv << "time_s,mdot_xm,mdot_xp,mdot_ym,mdot_yp,mdot_zm,mdot_zp,mdot_netto,mdot_netto_rel,Fx_impuls_N,Fx_druck_N,Fx_summe_N,Fx_fein_N,Fx_grob_N,rho_min,rho_max,Fx_xp_N,n_verworfen,n_fluid,n_an_klemme\n" << std::flush;
 		print_info("N2F-BAND BILANZ aktiv: Massen- und x-Impulsbilanz ueber die sechs Begrenzungsflaechen des Wake-Kastens (grob x["+to_string(bil_x0)+".."+to_string(bil_x1)+"] y["+to_string(bil_y0)+".."+to_string(bil_y1)+"] z["+to_string(bil_z0)+".."+to_string(bil_z1)+"]) an der Sample-Kadenz -> "+out_dir+"band_bilanz.csv. mdot_netto SOLL ~ 0; die Abweichung ist die kuenstliche Massenquelle des Blends. VORZEICHEN: Fx_summe ist die linke Seite der Impulsbilanz und traegt damit das UMGEKEHRTE Vorzeichen von Fx_fein/Fx_grob -- also -Fx_summe gegen die Fahrzeugkraft lesen; schiesst er darueber, zaehlen Fernfeld-Koerper und Blend doppelt. Der instationaere Term d/dt Integral(rho*u_x)dV fehlt bewusst, erst nach t_warmup lesen.");
 	}
@@ -3999,7 +4013,7 @@ static void main_setup_fahrzeug_dd() {
 				// Aussagekraeftig ist nicht das Extremum ueber ~27.000 Flaechenzellen (ein einziger
 				// Ausreisser genuegt), sondern der ANTEIL an der Klemme.
 				const double anteil = nfl>0ull ? (double)n_ausser/(double)nfl : 0.0;
-				if(t_si>=(double)t_warmup&&anteil>0.02) print_error("N2F-BAND WAKE-KIPP (Dichte): "+to_string((float)(100.0*anteil),2u)+" % der Fluidzellen auf den Kastenflaechen ("+to_string(n_ausser)+" von "+to_string(nfl)+") stehen an der Solver-Dichteklemme. Ueber 2 Prozent rechnet das Fernfeld dort nichts Physikalisches mehr. Abgebrochen.");
+				if(t_si>=(double)t_warmup&&anteil>0.02) { if(bilcsv.is_open()) bilcsv.close(); if(swcsv.is_open()) swcsv.close(); print_error("N2F-BAND WAKE-KIPP (Dichte): "+to_string((float)(100.0*anteil),2u)+" % der Fluidzellen auf den Kastenflaechen ("+to_string(n_ausser)+" von "+to_string(nfl)+") stehen an der Solver-Dichteklemme. Ueber 2 Prozent rechnet das Fernfeld dort nichts Physikalisches mehr. Abgebrochen."); }
 				else if(t_si>=(double)t_warmup&&(rmx-1.0>0.1||1.0-rmn>0.1)) print_warning("N2F-BAND Dichte im Wake-Kasten: min "+to_string((float)rmn,4u)+" auf Flaeche "+string(fname[rmn_f])+", max "+to_string((float)rmx,4u)+" auf Flaeche "+string(fname[rmx_f])+" -- ausserhalb 1 +- 0,1 (Bauplan Paragraf 2). An der Klemme stehen "+to_string((float)(100.0*anteil),2u)+" %. EINORDNUNG: der Kontrolllauf OHNE Kopplung meldet dieselbe Klemme 5,5 Mio mal -- die Schwelle 0,1 ist auf diesen Fall nicht geeicht, deshalb Warnung statt Abbruch. Verlauf in band_bilanz.csv (n_fluid, n_an_klemme).");
 				const double mnet = md[0]+md[1]+md[2]+md[3]+md[4]+md[5];
 				// Gitter -> SI: rho_lat*u_lat^2 wird zu rho_si*u_si^2, dazu die Zellflaeche.
@@ -4022,7 +4036,7 @@ static void main_setup_fahrzeug_dd() {
 			}
 			if(n2f_alpha>0.0f) { // ★ P9c WAECHTER an der Sample-Kadenz: schale_extract(mittel=0) auf lbm_c liest das
 				// grobe u-FELD der Schalenzellen; verglichen wird gegen das in DIESEM Outer hochgeladene
-				// Nahfeld-Blockmittel (beide am selben physikalischen Zeitpunkt). NaN-Eintraege (fluidleere
+				// Nahfeld-Blockmittel (fein@(k+1)*dt_c gegen grob@(k+2)*dt_c -- 1 Grobschritt Versatz (4e-5 s), messtechnisch irrelevant, aber so ist es ehrlich). NaN-Eintraege (fluidleere
 				// Bloecke, Census beim Listenbau) werden uebersprungen.
 				lbm_c.schale_extract_u(n2f_ufar, 0u);
 				// ★ GRADIENT: Waechter/Negations-Nachweis/Kipp NUR auf der AEUSSERSTEN Lage (n2f_lage ==
@@ -4067,8 +4081,8 @@ static void main_setup_fahrzeug_dd() {
 				// gross (gemessen 4 mm: Diff-RMS bis 8,56 m/s = 0,29 u_inf im Totwasser) -- die
 				// 0,5-u_inf-Kippschwelle des Koerperbands waere dort blind, eine strengere ein
 				// Fehlalarm. Verdachtsschwelle: mehr als die Anstroemung selbst kann kein Nachlauf.
-				if(sw_ng_kern>0ull&&t_si>=(double)t_warmup&&sw_rms_kern>1.5*(double)u_lat) print_error("N2F-BAND WAKE-KERN-KIPP: RMS ||u_near-u_far|| im Wake-KERN (Lage 0, volles Gewicht) = "+to_string((float)(sw_rms_kern/(double)u_lat),3u)+" u_inf > 1,5 ueber "+to_string(sw_ng_kern)+" Zellen. Dort wird mit a = alpha aufgepraegt; eine Abweichung dieser Groesse heisst, die Aufpraegung traegt nicht. Abgebrochen.");
-				if(sw_ng_wake>0ull&&t_si>=(double)t_warmup&&sw_rms_wake>1.0*(double)u_lat) print_error("N2F-BAND WAKE-KIPP: RMS ||u_near-u_far|| in der Wake-Zone = "+to_string((float)(sw_rms_wake/(double)u_lat),3u)+" u_inf > 1,0 -- das Fernfeld weicht dort um mehr als die Anstroemung ab, das kann kein Nachlauf mehr sein. Abgebrochen.");
+				if(sw_ng_kern>0ull&&t_si>=(double)t_warmup&&sw_rms_kern>1.5*(double)u_lat) { if(bilcsv.is_open()) bilcsv.close(); if(swcsv.is_open()) swcsv.close(); print_error("N2F-BAND WAKE-KERN-KIPP: RMS ||u_near-u_far|| im Wake-KERN (Lage 0, volles Gewicht) = "+to_string((float)(sw_rms_kern/(double)u_lat),3u)+" u_inf > 1,5 ueber "+to_string(sw_ng_kern)+" Zellen. Dort wird mit a = alpha aufgepraegt; eine Abweichung dieser Groesse heisst, die Aufpraegung traegt nicht. Abgebrochen."); }
+				if(sw_ng_wake>0ull&&t_si>=(double)t_warmup&&sw_rms_wake>1.0*(double)u_lat) { if(bilcsv.is_open()) bilcsv.close(); if(swcsv.is_open()) swcsv.close(); print_error("N2F-BAND WAKE-KIPP: RMS ||u_near-u_far|| in der Wake-Zone = "+to_string((float)(sw_rms_wake/(double)u_lat),3u)+" u_inf > 1,0 -- das Fernfeld weicht dort um mehr als die Anstroemung ab, das kann kein Nachlauf mehr sein. Abgebrochen."); }
 				if(!n2f_neg_geprueft) { // ★ u-NEGATIONS-NACHWEIS (XL-B8, im Blend TRAGEND): funktionaler Beweis am
 					// laufenden Binary. Der Blend liest post-stream u EXAKT NEGIERT und muss es zurueckdrehen;
 					// waere das Vorzeichen falsch, stuende u_neu = (1-a)*(-u)+a*u_near, und der FIXPUNKT
@@ -4517,7 +4531,7 @@ static void main_setup_fahrzeug_dd() {
 			print_info("Cd-Pfad Nahfeld: Cd_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_px/(double)fac_pn))/qA),4u)
 				+" (Zeitmittel, "+to_string(fac_pn)+" Samples), Cz_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_pz/(double)fac_pn))/qA),4u)
 				+" -- Reibung: letzte Zeile cd_facetten.csv. ACHTUNG Audit S5: cd_reib ist residuendominiert (88 % zielUNabhaengige Querresiduen der Rang-2-Pfade) -- ehrlicher Zielanteil = ARM-DIFFERENZ, nicht der Absolutwert."); }
-		print_info("ACHTUNG: forces.csv/Cd oben enthaelt an behandelten Links PHANTOM-Reibung (object_force) -- fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
+		print_info("ACHTUNG: forces.csv/Cd oben enthaelt an behandelten Links PHANTOM-Reibung (object_force; gilt ebenso fuer kraft_zband.csv Fx/Fz_band/rest -- dieselbe Zerlegung) -- fuer A/B nur die VERSCHIEBUNG zwischen den Armen werten.");
 	}
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) { // ★ P8: Wirkpfad-Nachweis FERNFELD (Muster Nahfeld; das Grobgitter laeuft n_outer Schritte, Ereignis-Slots t%100-gesampelt)
 		LBM_Domain* dc = lbm_c.lbm_domain[0];

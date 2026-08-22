@@ -414,7 +414,7 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus) {
 	const ulong n = (ulong)liste.size();
 	if(n==0ull) { print_error("alloc_schale mit leerer Liste."); return; }
-	if(n>0xFFFFFFFFull) { print_error("alloc_schale: Liste ueberschreitet 2^32 Zellen -- uint-Kernel-Argument wuerde stumm abschneiden."); return; }
+	if(n>0x55555555ull) { print_error("alloc_schale: Liste ueberschreitet 2^32/3 Zellen -- die 3u*gid-Indexprodukte in schale_extract/schale_blend (kernel.cpp) wickeln in 32 Bit VOR der 2^32-Grenze (Kernel-Pruefer 2026-08-22 abends). Praktisch unerreichbar, aber der Guard deckt jetzt seine eigene Arithmetik."); return; }
 	if(ratio==0u) { print_error("alloc_schale: ratio=0 (Blockmittel-Fenster waere leer)."); return; }
 	if((ulong)gewichte.size()!=n) { print_error("alloc_schale: gewichte ("+to_string((ulong)gewichte.size())+") passt nicht zur Liste ("+to_string(n)+") -- der Kernel laese daneben."); return; }
 	for(ulong i=0ull; i<n; i++) if(!(gewichte[i]>=0.0f&&gewichte[i]<=1.0f)) { print_error("alloc_schale: gewicht["+to_string(i)+"] = "+to_string(gewichte[i],6u)+" liegt nicht in [0;1] (NaN faengt die Negativform mit)."); return; }

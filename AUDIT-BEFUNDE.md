@@ -1488,3 +1488,47 @@ FluidX3D/findings/2026-06-23_resolution-dependence_sgs-grid-dependence.md
 **Lehre fuer mich:** vor jedem Vergleich zweier Laeufe den ZEITSTEMPEL des Schnitts und das
 Ende der forces.csv pruefen. Ein Diff-Slice traegt seine Zeit in der ersten Spalte; ich habe
 sie nicht gelesen.
+
+## 2026-08-22 abends — Acht-Prüfer-Audit-Loop (Heiko-Auftrag: Kopplung komplett, Performance, Ablösung, Facetten)
+
+Acht unabhängige Prüfer (Diff/Profil-2, Performance, Ablösung, Facetten/ELIBB, Kernel-OpenCL,
+Host-Pipeline/toter-Code, Numerik/Physik, Instrumente/Wächter). Behoben in dieser Runde:
+
+- **B-P2/B2 (2 Prüfer unabhängig):** w=0-Zellen (Profil-2-Nulllage) wurden gelistet + transferiert;
+  im EQ-Arm ist a=0 eine fneq-Löschschale. Band-Bauer filtert jetzt w<=0 (wie der Volumen-Bauer),
+  Census sagt die Zahl an. NICHT bitidentisch zu f4_kopplung_plateau — gewollt.
+- **B-P1/B-P4:** Wächterlage bei Profil 2 auf N-2 (äußerste Lage MIT Gewicht); Negations-Schwelle
+  nutzt band_w(Wächterlage) statt band_w(N)=0.
+- **B-P3:** Profil 2 mit N=1 → harter Fehler; PLATEAU bei PROFIL!=2 → Warnung; PLATEAU in No-Op-Liste.
+- **B1:** z_lo-_DOWN-Lücke auch in Volumen- und Schale-Bauer geschlossen (war nur im Band-Arm).
+- **Instrumente-2:** Fx_far/Fx_grob-Kontaminationswarnung jetzt auch im normalen Band-Arm (war nur
+  NURWAKE); kraft_zband in die Phantom-Warnung aufgenommen.
+- **Instrumente-4:** band_bilanz-Kopf berichtigt (NACH dem Flag-Filter; mdot = Gittereinheiten).
+- **B4:** bilcsv/swcsv-Schluss vor den drei neuen Abbruchpfaden (Symmetrie-Doktrin).
+- **B-P5:** n_kern-Etikett ehrlich (Kastenkern PLUS Körperband-Lage-0 x>=wx0).
+- **Kernel-1:** alloc_schale-Guard von 2^32 auf 2^32/3 (3u*gid-Produkt).
+- **B6:** tau_f/tau_c (write-only) entfernt; B7/I7: Gleichzeitigkeits-Kommentare berichtigt
+  (1 Grobschritt Versatz, 4e-5 s).
+
+**Widerlegt:** Instrumente-Befund 1 ("Band berührt Kopplungsebenen bei 4 mm") — der Prüfer las
+NEAR_VOR_MM=96 als Nasenabstand; real 326 mm = 20 Grobzellen, Lauf meldet selbst x- 4. Kernel-3
+(PARITAET-No-Op) war bereits abgedeckt (Zeile 2525).
+
+**Nicht behoben, als Entscheidung notiert:**
+1. **FNEQ=1 als Produktionsstandard** (Numerik-Prüfer: EQ-Arm = a-unabhängige Äquilibrierung,
+   effektiv ~75x Smagorinsky-Dissipation im Band; ABER: diese Dissipation dämpft derzeit die
+   Rückkopplungsschleife — Umstellung nur mit Fx_far-Gate).
+2. **Wand-Rückzug des Bandes** (Ablösungs-Prüfer: die Wand-Schreibung verschlechtert die
+   Fernfeld-Ablösung aktiv, 11,2 % gegen 43,7 % ungekoppelt gegen 35,6 % nah — das 4x4x4-
+   Blockmittel kann Ablöseschichten mit Median 32 mm nicht transportieren; Hebel: Lage 1-3
+   Gewicht 0 bzw. NURWAKE-A/B, plus CFD_FERN_FACETTEN — Kombination derzeit gesperrt).
+3. **Async-Überlappung des N2F-Rückwegs** (Perf: bis 3,6 % bei 4 mm; Netto-Kopplungskosten
+   heute nur +0,3-0,7 %).
+4. **Massenquelle:** S ~ alpha * Integral(Lage-0-Fläche) * Delta_u — N-unabhängig (erklärt beide
+   Messungen); Profil 2 senkt sie NICHT (Plateau lässt den dominanten Innensprung identisch).
+5. **Facetten/ELIBB:** Wirkpfad Ist=Soll exakt (877.854.770 = 2.620.462 x 335); ~35 % der
+   Ereignisse fallen auf BB zurück (SATGATE-Semantik), y+ Median 42. ELIBB-Verdikt: GEHT —
+   der V2-Einhängepunkt (registerlokal in stream_collide) umgeht die V1-EP-Pull-Falle
+   konstruktiv; q je Link speicherfrei aus y_w/|c*n| ableitbar; ABER es braucht ein
+   q-ABHÄNGIGES Schema (Marson Eq. 25/26-Klasse, nicht das q-invariante ELIBB-U, an dem V1
+   scheiterte), kombiniert mit dem iMEM-u_s als Slip-Ziel.
