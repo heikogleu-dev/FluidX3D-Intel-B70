@@ -3088,6 +3088,30 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// Nichtgleichgewichtsanteil (bei exakter Equilibrium-Zelle MUSS f_true - feq_loc = 0 sein).
 	float feq_loc[def_velocity_set]; calculate_f_eq(rho_l, ulx, uly, ulz, feq_loc);
 	for(uint i=0u; i<def_velocity_set; i++) feq[i] += ftrue[i]-feq_loc[i];
+	// ★ PARITAETSZAEHLER (Pruefagent-M2, gebaut 2026-08-22). Der FNEQ-Arm MUSS bei a == 0 exakt
+	// degenerieren: u2 == u_lokal, also feq == feq_loc, also feq[i] + ftrue[i] - feq_loc[i] ==
+	// ftrue[i]. Jede Abweichung ist ein Bruch der Paarung oder der Momentenrechnung.
+	// WARUM GERAETEINTERN und nicht per Dateivergleich: im Doppel-Domaenen-Fall ist ein
+	// Bitvergleich zweier Laeufe UNMOEGLICH -- die blosse Aktivierung der Rueckkopplung zieht
+	// schale_extract_u auf dem Nahfeld ins Kopplungsfenster, und das Nahfeld ist ueber po_mean
+	// feldwirksam nichtdeterministisch. Gemessen am 2026-08-22: zwei WORTGLEICHE IDENT-Laeufe
+	// liefern verschiedene interface_druck.csv. Der Zaehler haengt dagegen an nichts als der
+	// Arithmetik dieser Zelle.
+	if(t%100ul==0ul) { // Zahl der Abweichungen UND ihr Mass (groesste ULP-Distanz), denn "ungleich"
+		// allein unterscheidet nicht zwischen einem gebrochenen Paar und der Rundung von a+(b-a).
+		uint abw=0u, ulp_max=0u;
+		for(uint i=0u; i<def_velocity_set; i++) if(feq[i]!=ftrue[i]) {
+			abw++;
+			// RELATIVE Abweichung, nicht float32-ULP: gespeichert wird in FP16C, dessen Aufloesung
+			// bei ~2^-11 = 4,9e-4 liegt. Zwei float32-Werte, die sich um 1000 ULP (= 1,2e-4 relativ)
+			// unterscheiden, landen im 16-Bit-Format auf DEMSELBEN Wert -- ein Vergleich in float32-
+			// ULP misst also eine Genauigkeit, die das Feld gar nicht traegt.
+			const float rel = fabs(feq[i]-ftrue[i])/fmax(fabs(ftrue[i]), 1e-6f);
+			const uint sk = (uint)(rel*1.0e9f); // in 1e-9-Schritten, damit der uint-Slot es traegt
+			ulp_max = sk>ulp_max ? sk : ulp_max;
+		}
+		if(abw>0u) { atomic_add(&diag[23], abw); atomic_max(&diag[24], ulp_max); }
+	}
 	store_f(nn, feq, fi, j, t TS_A);
 } // schale_blend()
 

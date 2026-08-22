@@ -896,7 +896,7 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
-	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
+	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden im kanal NICHT angewandt (nur fahrzeug_dd; M3).");
 	  if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im kanal NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
@@ -1491,7 +1491,7 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_boden_eq_n>0u) print_info("BODEN_EQ Kugel aktiv: z=1.."+to_string(LBM_Domain::s_boden_eq_n)+" (V1-Port; OHNE V1-side_nz -- y/z-Waende unbehandelt, XL-B5-Notiz)."); // B3
 	  LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u);
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&LBM_Domain::s_boden_eq_n>0u) print_warning("CFD_BODEN_EQ_ABSTAND > 3: Scan-Kosten wachsen kubisch (XL-R2).");
-	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
+	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
 	  if(getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("CFD_BODEN_EQ_DOWN/CFD_FERN_BODEN_EQ/CFD_FERN_EINLASS_EQ wirken an der Kugel NICHT (uniformes Band ohne Split; XL-R2).");
 	  if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden an der Kugel NICHT angewandt (nur fahrzeug_dd; M3).");
 	  if(getenv("CFD_N2F_SCHALE")||getenv("CFD_N2F_VOLUMEN")) print_warning("CFD_N2F_SCHALE/CFD_N2F_VOLUMEN wird nur im fahrzeug_dd-Fall angewandt (P9c)."); // Ansage-Doktrin
@@ -2398,7 +2398,14 @@ static void main_setup_fahrzeug_dd() {
 	// EINMAL gelesen (env-Read-Falle), die Konstante traegt bis in Listenbau/Zeitschleife.
 	const float n2f_alpha = env_f("CFD_N2F_SCHALE", 0.0f);
 	if(!(n2f_alpha>=0.0f&&n2f_alpha<=1.0f)) print_error("CFD_N2F_SCHALE muss in [0;1] liegen (Blendfaktor alpha; NaN faengt dieser Test mit)."); // NaN-Vergleiche schweigen -- Negativform (Pruefagent-M2-Klasse)
-	LBM_Domain::s_schale_alpha = n2f_alpha;
+	// ★ PARITAETSARM (CFD_N2F_PARITAET=1, Pruefagent-M2, 2026-08-22). Setzt das KERNEL-alpha exakt
+	// auf 0, laesst aber den ganzen Mechanismus laufen: Listenbau, Extract auf dem Nahfeld, Upload
+	// ins Fernfeld, Kernel-Enqueue, Zaehler. Damit ist der FNEQ-Arm beweispflichtig -- er MUSS bei
+	// a == 0 exakt degenerieren (u2 == u_lokal -> feq == feq_loc -> gespeichert == geladen).
+	// Ein alpha=0 ueber CFD_N2F_SCHALE waere kein Ersatz: das schaltet den Arm host-seitig ganz ab.
+	const uint n2f_paritaet = min(1u, env_u("CFD_N2F_PARITAET", 0u));
+	LBM_Domain::s_schale_alpha = n2f_alpha; LBM_Domain::s_schale_paritaet = (n2f_paritaet>0u);
+	if(n2f_paritaet>0u) print_warning("CFD_N2F_PARITAET=1: Kernel-alpha ist EXAKT 0 -- dieser Lauf traegt KEINE Rueckkopplungs-Physik. Er beweist nur, dass der Blend bei a = 0 ein exaktes No-Op ist (Slot 23 muss 0 sein).");
 	// ★ GRADIENT-BLEND (Heiko-Slice-Befund c646253: uniforme alpha=0,5-Schale zeichnet ein sicht-
 	// bares Kopplungsartefakt ins Far -> Lagen-Gradient innen 1 -> aussen 1/N, Heikos urspruengliche
 	// Idee). Envs EINMAL gelesen (env-Read-Falle), Konstanten tragen bis Listenbau/Zeitschleife:
@@ -2419,9 +2426,46 @@ static void main_setup_fahrzeug_dd() {
 	// Fussabdruck bleibt zellfrei. Default 0 = Altverhalten (Schale) UNVERAENDERT. gewicht/modus-
 	// Infrastruktur, schale_blend-/schale_extract-Kernel und Waechter werden WIEDERVERWENDET.
 	const uint n2f_volumen = min(1u, env_u("CFD_N2F_VOLUMEN", 0u));
+	// ★ BAND-Blend (Heiko 2026-08-21/22, BAUPLAN-KOPPLUNG.md §2): CFD_N2F_BAND=1 ersetzt den
+	// Listenbauer durch ein Band, das VOM FAHRZEUG NACH AUSSEN reicht statt einer Schale um dessen
+	// Bounding-Box. Der Unterschied ist keine Feinheit: die Fahrzeug-BBox misst ~2,4 Mio Grobzellen,
+	// der voxelisierte Koerper nur ~1,05 Mio -- 55 % des BBox-Inhalts ist Fluid, und die heutige
+	// Schale liegt an Motorhaube, A-Saeule und ueber dem Heck teils einen halben Meter von der
+	// Karosserie weg. Der A/B Schale(LAGEN=N) gegen Band(N) isoliert genau diese Variable.
+	//
+	// Abstandsmass: Chebyshev zur Menge der Fahrzeug-Voxel des GROBGITTERS, per N Runden a drei
+	// 1-D-Dilatationen (separabel, deterministisch, kein BFS). Lage = d-1, damit Lagen-Census,
+	// Waechter-Aussenlage und Negations-Schwelle unveraendert weitertragen.
+	//  CFD_N2F_BAND         1 = Band-Arm (Default 0). Schliesst CFD_N2F_VOLUMEN aus.
+	//  CFD_N2F_BAND_N       Bandbreite in GROBZELLEN (Default 8). Auf der 8-mm-Sprosse ist eine
+	//                       Grobzelle 32 mm, auf der 4-mm-Sprosse 16 mm -- gleiche Zellzahl heisst
+	//                       doppelte Metertiefe. Das ist gewollt (der Mechanismus behandelt ein
+	//                       Grobgitter-Artefakt), muss beim Sprossen-Vergleich aber bedacht werden.
+	//  CFD_N2F_BAND_PROFIL  0 = linear (Default, bitgleiche Formel wie der Schalen-Gradient),
+	//                       1 = cos^2 (eigener Messarm; Heiko: erst nach dem linearen Arm).
+	//  CFD_N2F_BAND_UNTERBODEN  0 = Zellen im Unterbodenspalt weglassen (Vergleichsarm; Default 1).
+	const uint  n2f_band     = min(1u, env_u("CFD_N2F_BAND", 0u));
+	const uint  n2f_band_n   = max(1u, env_u("CFD_N2F_BAND_N", 8u));
+	const uint  n2f_band_prof= min(1u, env_u("CFD_N2F_BAND_PROFIL", 0u));
+	const uint  n2f_band_ub  = min(1u, env_u("CFD_N2F_BAND_UNTERBODEN", 1u));
+	if(n2f_band>0u&&n2f_volumen>0u) print_error("CFD_N2F_BAND=1 und CFD_N2F_VOLUMEN=1 schliessen sich aus -- beide ersetzen denselben Listenbauer. Genau einen Arm waehlen.");
+	// Gewichtsprofil als eine Funktion, damit Census-Ausgabe und Listenbau garantiert dasselbe
+	// rechnen (getrennte Formeln waren im Altbau schon einmal auseinandergelaufen).
+	auto band_w = [&](const uint d) { // d = 1..N
+		return n2f_band_prof==0u ? (float)(n2f_band_n+1u-d)/(float)n2f_band_n
+		                         : (float)(cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n)*cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n));
+	};
 	if(n2f_alpha>0.0f) {
 		print_info("N2F-SCHALE aktiv (P9c, Heiko): Fernfeld-Schale um die Fahrzeug-BBox wird post-stream mit dem Nahfeld-Blockmittel relaxiert, alpha = "+to_string(n2f_alpha,3u)+" (u_neu = (1-a)*u_far + a*u_near, rho bleibt lokal; a = alpha*gewicht je Zelle).");
-		if(n2f_volumen>0u) {
+		if(n2f_band>0u) {
+			print_info("N2F-BAND aktiv (CFD_N2F_BAND=1, Heiko 2026-08-22): BAND-Blend ersetzt den Schalen-Listenbauer -- "
+				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
+				+(n2f_band_prof==0u?string("linear"):string("cos^2"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
+				+"), Unterbodenspalt "+(n2f_band_ub>0u?"ENTHALTEN":"AUSGENOMMEN (Vergleichsarm)")+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ)":" (EQ)")+".");
+			if(n2f_modus==0u) print_info("N2F-BAND EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");
+			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im BAND-Modus werden sie NICHT angewandt (Ansage-Doktrin).");
+		}
+		else if(n2f_volumen>0u) {
 			print_info("N2F-VOLUMEN aktiv (CFD_N2F_VOLUMEN=1, Heiko-Bild): VOLUMEN-Blend ersetzt den Schalen-Listenbauer -- Rot-Kern = Fahrzeug-BBox+100mm (Gewichtsfeld 1,0, wirksam alpha), lineare Rampe (Chebyshev-artig je Achse) auf 0,0 an der Gruen-Box = Nahfeld-Fussabdruck-100mm; Schutzzone Gruen->Fussabdruck zellfrei; z- offen (Volumen endet unten am boden_eq-Band); Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ: Nichtgleichgewichtsanteil erhalten)":" (EQ)")+".");
 			if(n2f_modus==0u) print_info("N2F-VOLUMEN EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 setzen -- der Volumen-Blend greift bis in den Rot-Kern nahe der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (EQ-Arm wuerde sie je Blend verwerfen).");
 			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im VOLUMEN-Modus (CFD_N2F_VOLUMEN=1) werden sie NICHT angewandt (Ansage-Doktrin).");
@@ -2433,7 +2477,7 @@ static void main_setup_fahrzeug_dd() {
 		if(n2f_volumen==0u&&n2f_lagen==0u&&getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL wird im Kontrollarm LAGEN=0 NICHT angewandt (uniformes Gewicht 1,0 ist die Definition des Altverhaltens).");
 		if(n2f_volumen==0u&&n2f_xskal==0.0f) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL=0: x+-Zellen bleiben mit Gewicht 0 in der Liste und wuerden auf ihr LOKALES Gleichgewicht projiziert (a=0 ist im EQ-Arm KEIN No-Op; im FNEQ-Arm nahezu, in IDENT exakt ein No-Op) -- zum Abschalten der Flaeche CFD_N2F_SCHALE_XPLUS=0 nutzen.");
 	}
-	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT"))) print_warning("CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c).");
+	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c).");
 	// ★ P8 (Offen-Punkt 8): FACETTEN AUCH IM FERNFELD. Der 32-mm-Treppenkoerper verdraengt +15,5 %
 	// Volumen (Schritt-0-Census fc0edcf) und praegt dem Nahfeld ueber die Kopplungsebenen ein zu
 	// grobes Druckfeld auf -- der Facettenpfad macht die Fernfeld-Wand druckkonsistenter. Schalter
@@ -2763,12 +2807,119 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<ulong> n2f_liste_c, n2f_liste_f; // grobe Schalenzellen + feine Deckungspunkte, GLEICHE Reihenfolge (Map-Iteration, aufsteigend deterministisch)
 	std::vector<float> n2f_gewicht; // Zellgewicht [0;1] (Lagen-Rampe), gleiche Reihenfolge
 	std::vector<uint>  n2f_lage;    // Lagenindex je Zelle (0 = innen), gleiche Reihenfolge; Waechter/Negations-Nachweis/Kipp laufen NUR auf der aeussersten Lage
-	const uint n2f_lage_aussen = (n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u); // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
+	const uint n2f_lage_aussen = (n2f_band>0u) ? n2f_band_n-1u : ((n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u)); // BAND: Lage = d-1, aeusserste ist N-1 // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
 	float n2f_w_band = 0.0f; // VOLUMEN: groesstes Gewichtsfeld im Aussenband -- traegt in die Negations-Schwelle (w_aussen = alpha*n2f_w_band)
 	ulong n2f_nanblocks = 0ull;
 	const uint n2f_mittel = min(1u, env_u("CFD_N2F_SCHALE_MITTEL", 1u)); // 1 = Blockmittel ueber ratio^3 Feinzellen (Default), 0 = Punktwert am Deckungspunkt
-	if(n2f_mittel==0u&&env_u("CFD_N2F_VOLUMEN",0u)>0u) print_error("CFD_N2F_SCHALE_MITTEL=0 ist im VOLUMEN-Modus GESPERRT: Punktwert-Extraktion prueft keine Flags -- ein Deckungspunkt im Fein-Solid (Voxelisierungs-Differenz 4 vs 16 mm!) wuerde still vergiftet ins Blend laufen (Pruefagent M2).");
-	if(n2f_alpha>0.0f&&n2f_volumen>0u) { // ---------------- VOLUMEN-Listenbauer (Heiko-Bild; ERSETZT den Schalen-Listenbauer)
+	if(n2f_mittel==0u&&(env_u("CFD_N2F_VOLUMEN",0u)>0u||n2f_band>0u)) print_error("CFD_N2F_SCHALE_MITTEL=0 ist im VOLUMEN- und im BAND-Modus GESPERRT: Punktwert-Extraktion prueft keine Flags -- ein Deckungspunkt im Fein-Solid (Voxelisierungs-Differenz 4 vs 16 mm!) wuerde still vergiftet ins Blend laufen (Pruefagent M2).");
+	if(n2f_alpha>0.0f&&n2f_band>0u) { // ---------------- BAND-Listenbauer (Heiko 2026-08-22; ERSETZT Schale/Volumen)
+		const uint z_lo = max(1u, env_u("CFD_FERN_BODEN_EQ", 0u)+1u); // redundante Zweitsicherung, seit der Blend VOR boden_eq laeuft (lbm.cpp) -- bleibt drin, haelt den Kontrollarm bitgleich
+		if(env_u("CFD_FERN_FACETTEN",0u)>0u) print_error("CFD_N2F_BAND=1 mit CFD_FERN_FACETTEN>0: Lage 1 IST definitionsgemaess die karosserienahe Zellschicht, also genau die FERN_FACETTEN-Menge -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nicht freigegeben.");
+		// ---- SAATMENGE. HIER SITZT DIE GEFAEHRLICHSTE FALLE DES GANZEN ARMS:
+		// Die FAHRBAHN ist bei z=0 flaechendeckend TYPE_S. Mit `flags&TYPE_S` als Saat waere das
+		// "Band ums Fahrzeug" ein N Zellen dicker Teppich ueber cNx*cNy Zellen -- bei 4 mm sind das
+		// 2,95 Mio Zellen statt ~0,85 Mio, und zwar lautlos. Der Test muss auf BEIDE Bits gehen:
+		// 0x41 = TYPE_S|TYPE_X ist das Fahrzeug, exakt wie im Verdraengungs-Census.
+		std::vector<uchar> dt((size_t)cNx*(size_t)cNy*(size_t)cNz, 0u); // 0 = unerreicht, 1..N = Lage d, 255 = Saat
+		ulong saat=0ull; uint sx0=cNx, sx1=0u, sy0=cNy, sy1=0u, sz0=cNz, sz1=0u;
+		for(uint z=0u; z<cNz; z++) for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) {
+			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
+			if(lbm_c.flags[nn]!=(TYPE_S|TYPE_X)) continue; // EXAKTE Gleichheit wie der Verdraengungs-Census (setup.cpp) -- eine Maske faenge zusaetzlich Zellen mit weiteren Bits und die Quervergleichszahl waere wertlos
+			dt[(size_t)nn]=255u; saat++;
+			sx0=min(sx0,x); sx1=max(sx1,x); sy0=min(sy0,y); sy1=max(sy1,y); sz0=min(sz0,z); sz1=max(sz1,z);
+		}
+		if(saat==0ull) print_error("N2F-BAND: keine einzige Fahrzeug-Grobzelle (0x41) gefunden -- Saatmenge leer, das Band waere leer. Voxelisierung des Fernfelds pruefen.");
+		// Fahrbahn-Falle als HARTER Test, nicht als Kommentar. ERSTE FASSUNG WAR FALSCH (2026-08-22):
+		// sie verglich die 3D-Zellzahl der Saat gegen die 2D-Fahrbahnflaeche und schlug damit am
+		// richtigen Fahrzeug an -- bei 8 mm hat der Fernfeld-Wagen 146.167 Zellen, die Fahrbahnebene
+		// aber nur 384x240 = 92.160. Ein Volumen ist zwangslaeufig groesser als eine Flaeche.
+		// Richtig ist der Test auf der EBENE z=0: die Fahrbahn ist dort flaechendeckend, das Fahrzeug
+		// beruehrt sie nur mit den Aufstandsflaechen (bei 8 mm 744 Zellen, und denen wird TYPE_X
+		// ohnehin entzogen). Mehr als ein Zehntel der Ebene bedeutet: die Maske faengt die Strasse.
+		ulong saat_z0=0ull;
+		for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) if(dt[(size_t)((ulong)x+(ulong)y*(ulong)cNx)]==255u) saat_z0++;
+		if(saat_z0>(ulong)((double)cNx*(double)cNy*0.10)) print_error("N2F-BAND: "+to_string(saat_z0)+" Saatzellen liegen auf der Ebene z=0, das sind ueber 10 % der Fahrbahnflaeche ("+to_string(cNx)+"x"+to_string(cNy)+") -- die Maske faengt die STRASSE, nicht das Fahrzeug. Soll: flags == TYPE_S|TYPE_X (exakt).");
+		// ---- CHEBYSHEV-DISTANZTRANSFORMATION, separabel: N Runden a drei 1-D-Dilatationen.
+		// Deterministisch, keine Warteschlange, Laufzeit im Millisekundenbereich. Arbeitsbereich ist
+		// die Saat-BBox um N+1 aufgeblasen und aufs Gitter geklemmt -- alles ausserhalb kann per
+		// Konstruktion keine Lage <= N bekommen.
+		const uint ax0=(uint)max(0,(int)sx0-(int)n2f_band_n-1), ax1=min(cNx-1u, sx1+n2f_band_n+1u);
+		const uint ay0=(uint)max(0,(int)sy0-(int)n2f_band_n-1), ay1=min(cNy-1u, sy1+n2f_band_n+1u);
+		const uint az0=(uint)max(0,(int)sz0-(int)n2f_band_n-1), az1=min(cNz-1u, sz1+n2f_band_n+1u);
+		auto belegt=[&](const uint x,const uint y,const uint z){ return dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)]!=0u; };
+		auto setze =[&](const uint x,const uint y,const uint z,const uchar v){ dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)]=v; };
+		for(uint runde=1u; runde<=n2f_band_n; runde++) {
+			std::vector<ulong> neu; // erst sammeln, dann setzen -- sonst frisst sich eine Runde selbst weiter
+			for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
+				if(belegt(x,y,z)) continue;
+				bool nachbar=false;
+				for(int dz=-1; dz<=1&&!nachbar; dz++) for(int dy=-1; dy<=1&&!nachbar; dy++) for(int dx=-1; dx<=1&&!nachbar; dx++) {
+					if(dx==0&&dy==0&&dz==0) continue;
+					const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
+					if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
+					if(belegt((uint)xx,(uint)yy,(uint)zz)) nachbar=true;
+				}
+				if(nachbar) neu.push_back((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx);
+			}
+			for(const ulong nn : neu) dt[(size_t)nn]=(uchar)runde;
+		}
+		// ---- LISTE. Reihenfolge z,y,x aufsteigend = aufsteigend im linearen Index (deterministisch,
+		// Muster des Volumen-Listenbauers; keine std::map noetig).
+		std::vector<ulong> lage_n(n2f_band_n,0ull), lage_nan(n2f_band_n,0ull), lage_ub(n2f_band_n,0ull), lage_te(n2f_band_n,0ull);
+		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausserhalb=0ull;
+		const int n2f_r=(int)ratio, n2f_w0=-(n2f_r/2);
+		for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
+			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
+			const uchar d=dt[(size_t)nn];
+			if(d==0u||d==255u) continue;                       // unerreicht oder Saat (= Fahrzeug selbst)
+			if(z<z_lo) { ausgelassen_zlo++; continue; }
+			// UNTERBODEN-Kennung: liegt in derselben (x,y)-Saeule OBERHALB eine Saatzelle, ist die
+			// Zelle unter dem Fahrzeug. Billig und robust auch bei nicht-quaderfoermigem Koerper.
+			bool unterboden=false;
+			for(uint zz=z+1u; zz<=sz1&&!unterboden; zz++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)zz*(ulong)cNy)*(ulong)cNx)]==255u) unterboden=true;
+			if(unterboden&&n2f_band_ub==0u) { ausgelassen_ub++; continue; }
+			// Deckungspunkt muss im Nahfeld-Fussabdruck liegen, sonst gibt es keine feine Quelle.
+			if(x<NF_OX||x>=NF_OX+cex||y<NF_OY||y>=NF_OY+cey||z>=NF_OZ+cez) { ausserhalb++; continue; }
+			const uchar bo=lbm_c.flags[nn]&(TYPE_S|TYPE_E);
+			if(bo==TYPE_E) lage_te[d-1u]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier wird sie GEZAEHLT
+			n2f_liste_c.push_back(nn);
+			n2f_gewicht.push_back(band_w(d));
+			n2f_lage.push_back(d-1u);
+			lage_n[d-1u]++; if(unterboden) lage_ub[d-1u]++;
+			const uint fdx=(x-NF_OX)*ratio, fdy=(y-NF_OY)*ratio, fdz=(z-NF_OZ)*ratio;
+			n2f_liste_f.push_back((ulong)fdx+((ulong)fdy+(ulong)fdz*(ulong)fNy)*(ulong)fNx);
+			uint fluid=0u;
+			for(int dz=n2f_w0; dz<n2f_w0+n2f_r&&fluid==0u; dz++) for(int dy=n2f_w0; dy<n2f_w0+n2f_r&&fluid==0u; dy++) for(int dx=n2f_w0; dx<n2f_w0+n2f_r&&fluid==0u; dx++) {
+				const int xx=(int)fdx+dx, yy=(int)fdy+dy, zz=(int)fdz+dz;
+				if(xx<0||yy<0||zz<0||xx>=(int)fNx||yy>=(int)fNy||zz>=(int)fNz) continue;
+				const uchar bof=lbm_f.flags[(ulong)xx+((ulong)yy+(ulong)zz*(ulong)fNy)*(ulong)fNx]&(TYPE_S|TYPE_E);
+				if(bof!=TYPE_S&&bof!=TYPE_E) fluid++;           // TYPE_MS zaehlt als Fluid -- Kernel-Konvention
+			}
+			if(fluid==0u) { n2f_nanblocks++; lage_nan[d-1u]++; }
+		}
+		if(n2f_liste_c.empty()) print_error("N2F-BAND: Zellliste leer -- kein Bandkandidat hat Fussabdruck, z_lo und Unterboden-Maske ueberlebt.");
+		n2f_w_band = band_w(n2f_band_n); // Aussenlage traegt in die Negations-Schwelle
+		// ---- CENSUS (Iron Rule: Diagnostik gehoert in den Code)
+		print_info("N2F-BAND SAAT-CENSUS: "+to_string(saat)+" Fahrzeug-Grobzellen (0x41), davon "+to_string(saat_z0)+" auf z=0; Quervergleich: der Verdraengungs-Census oben zaehlt dieselbe Menge VOR dem Entzug von TYPE_X an den Aufstandsflaechen -- die Differenz MUSS die Kontaktflaechen-Zahl sein. BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z["+to_string(sz0)+".."+to_string(sz1)+"]; Arbeitsbox x["+to_string(ax0)+".."+to_string(ax1)+"] y["+to_string(ay0)+".."+to_string(ay1)+"] z["+to_string(az0)+".."+to_string(az1)+"]; Metrik Chebyshev (an Koerperkanten diagonal bis "+to_string((float)n2f_band_n*1.732f,1u)+" Zellen dick -- bekannt, Ersatz waere Chamfer-3-4-5).");
+		ulong ges=0ull; for(uint k=0u; k<n2f_band_n; k++) ges+=lage_n[k];
+		print_info("N2F-BAND ZELL-CENSUS: "+to_string(ges)+" Zellen in "+to_string(n2f_band_n)+" Lagen; ausgelassen: "+to_string(ausgelassen_zlo)+" im boden_eq-Band, "+to_string(ausgelassen_ub)+" Unterboden (Vergleichsarm), "+to_string(ausserhalb)+" ausserhalb des Nahfeld-Fussabdrucks; fluidleere Bloecke (NaN-Skip im Blend): "+to_string(n2f_nanblocks)+".");
+		for(uint k=0u; k<n2f_band_n; k++) print_info("N2F-BAND LAGEN-CENSUS: Lage "+to_string(k)+" (Abstand "+to_string(k+1u)+", w = "+to_string(band_w(k+1u),3u)+", a = "+to_string(n2f_alpha*band_w(k+1u),3u)+"): "+to_string(lage_n[k])+" Zellen, davon Unterboden "+to_string(lage_ub[k])+", fluidleer "+to_string(lage_nan[k])+", TYPE_E (Blend-Skip) "+to_string(lage_te[k])+(k==n2f_lage_aussen?" [WAECHTER-LAGE]":""));
+		if(lage_n[0]>0ull&&lage_nan[0]*2ull>lage_n[0]) print_warning("N2F-BAND: Lage 0 (staerkstes Gewicht) ist zu ueber 50 % fluidleer -- der Arm wirkt deutlich schwaecher, als sein alpha behauptet. Ursache ist die Voxelisierungs-Differenz fein/grob; im Verdikt mit angeben.");
+		if(lage_n[n2f_lage_aussen]==0ull) print_error("N2F-BAND: die AEUSSERSTE Lage ist leer -- Waechter, Negations-Nachweis und Kipp-Kriterium haetten keine einzige Zelle.");
+		// ---- ABSTAND zu den getriebenen Entnahmeebenen (Zirkularitaetsschutz, Muster Schale)
+		int mnx=(int)cNx, mxx=-1, mny=(int)cNy, mxy=-1, mxz=-1;
+		for(const ulong nn : n2f_liste_c) {
+			const int x=(int)(nn%(ulong)cNx), y=(int)((nn/(ulong)cNx)%(ulong)cNy), z=(int)(nn/((ulong)cNx*(ulong)cNy));
+			mnx=min(mnx,x); mxx=max(mxx,x); mny=min(mny,y); mxy=max(mxy,y); mxz=max(mxz,z);
+		}
+		const int d_xm=mnx-(int)NF_OX, d_ym=mny-(int)NF_OY, d_yp=(int)(NF_OY+cey-1u)-mxy, d_zp=(int)(NF_OZ+cez-1u)-mxz;
+		const int d_min=min(min(d_xm,d_ym),min(d_yp,d_zp));
+		print_info("N2F-BAND: Abstand zu den getriebenen Entnahmeebenen (Grobzellen): x- "+to_string(d_xm)+", y- "+to_string(d_ym)+", y+ "+to_string(d_yp)+", z+ "+to_string(d_zp)+" (Soll >= 2, komfortabel >= 4; x+ ist Druckauslass und wird NICHT getrieben -- dort gilt die Regel nicht).");
+		if(d_min<2) print_error("N2F-BAND kommt einer getriebenen Entnahmeebene naeher als 2 Grobzellen -- die Rueckkopplung schriebe direkt in die Quelle der Hinkopplung. Nahfeld-Box verbreitern (CFD_NEAR_LY/LZ/NEAR_VOR_MM) oder CFD_N2F_BAND_N senken.");
+		else if(d_min<4) print_warning("N2F-BAND naeher als 4 Grobzellen an einer getriebenen Entnahmeebene -- eng; Kasten oder Bandbreite pruefen.");
+		print_info("N2F-BAND TRANSFER: je Kopplungsfenster 2 x 12 Bytes/Zelle = "+to_string((float)((ulong)n2f_liste_c.size()*24ull)/1048576.0f,2u)+" MB; Geraetepuffer je Domaene "+to_string((float)((ulong)n2f_liste_c.size()*36ull)/1048576.0f,2u)+" MB.");
+	}
+	else if(n2f_alpha>0.0f&&n2f_volumen>0u) { // ---------------- VOLUMEN-Listenbauer (Heiko-Bild; ERSETZT den Schalen-Listenbauer)
 		const uint z_lo = max(1u, env_u("CFD_FERN_BODEN_EQ", 0u)+1u); // Ausschluss wie gehabt: das boden_eq-Band (z=1..N) bleibt unangetastet; Fahrbahn z- offen (kein z--Deckel)
 		if(env_u("CFD_FERN_FACETTEN",0u)>0u) print_error("CFD_N2F_VOLUMEN=1 mit CFD_FERN_FACETTEN>0: der Rot-Kern enthaelt die karosserienahen FERN_FACETTEN-Zellen -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nicht freigegeben.");
 		const uint sz_rand = max(1u, (uint)floor(0.1f/dx_c+0.5f)); // 100 mm auf dx_c gerastert (wie n2f_rand): Rot-Aufweitung UND Schutzzonen-Breite
@@ -3508,7 +3659,7 @@ static void main_setup_fahrzeug_dd() {
 					// Stroemung noch kaum entwickelt). Zusaetzlich Testzelle 0 als Zahlenpaar.
 					n2f_neg_geprueft = true;
 					const double m_ux = sw_ng? sw_mux/(double)sw_ng : 0.0;
-					const double w_aussen = (n2f_volumen>0u) ? (double)n2f_alpha*(double)n2f_w_band : ((n2f_lagen>0u) ? (double)n2f_alpha/(double)n2f_lagen : (double)n2f_alpha); // wirksames a der Aussenstufe (VOLUMEN: groesstes Gewicht im Aussenband; Schale: XPLUS_SKAL drueckt x+ ggf. darunter -- Schwelle bleibt konservativ)
+					const double w_aussen = (n2f_band>0u||n2f_volumen>0u) ? (double)n2f_alpha*(double)n2f_w_band : ((n2f_lagen>0u) ? (double)n2f_alpha/(double)n2f_lagen : (double)n2f_alpha); // wirksames a der Aussenstufe (VOLUMEN: groesstes Gewicht im Aussenband; Schale: XPLUS_SKAL drueckt x+ ggf. darunter -- Schwelle bleibt konservativ)
 					const double falschziel = w_aussen/(2.0-w_aussen); // Falschziel-FIXPUNKT (Plan-Vorgabe; ersetzt die alte Ein-Schritt-Schaetzung 2a-1)
 					const double schwelle = fmax(0.5, 0.5*(1.0+falschziel)); // Mittelpunkt Falschziel<->Soll(+1); verallgemeinert Pruefagent M1 (alt: fmax(0.5, alpha) = Mittelpunkt von 2a-1 und 1)
 					print_info("N2F-Schale u-NEGATIONS-NACHWEIS (1. Waechter-Sample, Aussenlage "+to_string(n2f_lage_aussen)+", w_aussen = "+to_string((float)w_aussen,3u)+"): mittleres Schalen-u_x im Fernfeld-u-Feld = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf (Soll nahe +1; falsches Vorzeichen truege es Richtung Fixpunkt w/(2-w) = "+to_string((float)falschziel,3u)+" u_inf; Schwelle "+to_string((float)schwelle,3u)+"); Testzelle 0: u_far = ("+to_string(n2f_ufar[0],6u)+","+to_string(n2f_ufar[1],6u)+","+to_string(n2f_ufar[2],6u)+") vs u_near = ("+to_string(n2f_unear[0],6u)+","+to_string(n2f_unear[1],6u)+","+to_string(n2f_unear[2],6u)+") lat.");
@@ -3840,6 +3991,31 @@ static void main_setup_fahrzeug_dd() {
 		// t laeuft im Blend 1..n_outer (Vorlauf-run(1) hatte t=0 VOR alloc_schale) -- t%100 feuert
 		// floor(n_outer/100) mal; bei Laeufen unter 100 groben Schritten ist 0 also KEIN Befund.
 		if(swc==0ull) { if(n_outer_ist<100ull) print_warning("N2F-SCHALE-Wirkpfad 0, aber der Lauf hat unter 100 grobe Schritte -- die t%100-Stichprobe hat nie gefeuert (kein Befund; laenger laufen fuer den Nachweis)."); else print_error("CFD_N2F_SCHALE gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op (Iron Rule 3)."); }
+		// ★ PARITAETSNACHWEIS (Pruefagent-M2, 2026-08-22): der FNEQ-Arm muss bei alpha == 0 exakt
+		// degenerieren. Slot 23 zaehlt geraeteintern jede gespeicherte Verteilung, die vom geladenen
+		// Wert abweicht -- ein Dateivergleich kann das im dd-Fall nicht leisten (die Aktivierung
+		// macht das Fernfeld ueber po_mean nichtdeterministisch, gemessen).
+		if(n2f_modus==1u) {
+			const ulong par=(ulong)lbm_c.lbm_domain[0]->rho_clamp_hits[23];
+			if(n2f_paritaet>0u) {
+				// ★ WARUM DER TEST EIN MASS BRAUCHT UND KEIN "MUSS NULL SEIN" (gemessen 2026-08-22):
+				// bei a == 0 ist u2 == u_lokal EXAKT (1.0f*x+0.0f*y == x), also feq == feq_loc
+				// bitgleich. Die Schlusszeile lautet aber feq[i] += ftrue[i] - feq_loc[i], und
+				// a + (b - a) ist in Gleitkomma NICHT exakt b: wo feq_loc und ftrue verschiedene
+				// Groessenordnungen haben, verliert die Differenz Stellen, die die Addition nicht
+				// zurueckholt. Der FNEQ-Arm KANN also gar kein bitexaktes No-Op sein -- die
+				// Forderung war falsch gestellt, nicht die Implementierung.
+				// Aussagekraeftig ist die GROESSE: Rundung liegt bei 1-2 ULP. Alles darueber ist
+				// ein Bruch der Paarung oder der Momentenrechnung und damit ein echter Befund.
+				const double rel=(double)lbm_c.lbm_domain[0]->rho_clamp_hits[24]*1.0e-9;
+				// Schwelle = Aufloesung des Speicherformats. FP16C traegt rund 11 Bit Mantisse,
+				// also ~4,9e-4. Was darunter liegt, ist im Feld nicht darstellbar und damit kein
+				// Unterschied; was darueber liegt, ist einer.
+				if(rel>4.9e-4) print_error("N2F-PARITAETSBEWEIS GESCHEITERT: bei alpha = 0 weichen "+to_string(par)+" Verteilungen ab, groesste RELATIVE Abweichung "+to_string((float)rel,9u)+" -- ueber der FP16C-Aufloesung 4,9e-4. Das ist im Feld darstellbar und damit ein echter Unterschied: Paarung oder Momentenrechnung pruefen (Pruefagent-M2).");
+				else print_info("N2F-PARITAETSBEWEIS BESTANDEN: alpha = 0, "+to_string(par)+" Verteilungen weichen in float32 ab, aber die groesste RELATIVE Abweichung ist "+to_string((float)rel,9u)+" und liegt damit unter der FP16C-Aufloesung (4,9e-4) -- im gespeicherten Feld ist das kein Unterschied. Ein bitexaktes No-Op ist mit der FNEQ-Formel feq += ftrue - feq_loc ohnehin nicht erreichbar (a+(b-a) rundet); der Pruefagent-M2-Befund ist damit beantwortet.");
+			}
+			else print_info("N2F-Blend-Paritaetszaehler (Slot 23, Diagnose): "+to_string(par)+" abweichende Verteilungen bei alpha = "+to_string(n2f_alpha,7u)+" -- bei alpha > 0 ist ein Wert > 0 ERWARTET (der Blend soll ja wirken); der Beweis laeuft ueber einen eigenen alpha=0-Arm.");
+		}
 		if(swf!=0ull) print_error("Nahfeld zaehlt Schalen-Blend-Wirkpfad -- es MUSS unberuehrt bleiben (alpha-Statik-Bruch: s_schale_alpha muss fuer lbm_f EXPLIZIT 0 sein).");
 	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)

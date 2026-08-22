@@ -246,6 +246,7 @@ float LBM_Domain::s_boden_eq_u = 0.075f;
 uint LBM_Domain::s_boden_eq_abstand = 0u; // Heiko 2026-08-20: reifennahe Aussparung (Chebyshev-Abstand zu TYPE_S, Boden ausgenommen) // Setup kann eigenes u_lat durchreichen (XL-Audit B6)
 uint LBM_Domain::s_einlass_eq_n = 0u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spaltenzahl x=1..N hinter dem Einlass; 0 = aus
 float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Konvention wie s_boden_eq_u)
+bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
@@ -283,13 +284,14 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 23ull); // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 25ull); // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
 	boden_eq_n = s_boden_eq_n; boden_eq_u = s_boden_eq_u; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; boden_eq_abstand = s_boden_eq_abstand; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
 	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
 	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
+	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
 	schale_alpha = s_schale_alpha; // ★ P9c N2F-SCHALE: Konstruktionszeit-Kopie (read-once-Doktrin); die Kernel entstehen erst in alloc_schale (Indexlisten-Groesse steht erst nach dem Listenbau fest)
 
 #ifdef FORCE_FIELD
@@ -438,7 +440,7 @@ void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend 
 	// No-Op-Doppelgate: schale_n==0 = nie alloziert; schale_alpha==0 = alloziert, aber nur als
 	// Extract-Seite (lbm_f traegt eine Deckungspunkt-Liste, darf aber NIE blenden -- Slot-22-Soll nah==0).
 	if(schale_n==0u||schale_alpha==0.0f) return;
-	kernel_schale_blend.set_parameters(2u, t, schale_alpha).enqueue_run();
+	kernel_schale_blend.set_parameters(2u, t, schale_paritaet ? 0.0f : schale_alpha).enqueue_run(); // Paritaetsarm: alpha exakt 0, aber der Kernel LAEUFT (sonst waere der Beweis ein No-Op)
 }
 
 // ★ C1b Stufe 2: Facettendaten der Domaene bauen, hochladen, Kernel neu binden (FACETTEN-STUFE2.md F1/F2).
@@ -1574,9 +1576,20 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_velocity_inlet(); // FORK: rho am Einlass mitlaufen lassen
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
-	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_boden_eq(); // V1-Port (No-Op wenn aus)
+	// ★ REIHENFOLGE-UMSTELLUNG 2026-08-22 (Heiko-Vorgabe): die Aufpraegung nah->fern laeuft jetzt
+	// VOR dem Moving-Floor-Fix, nicht mehr danach. Vorher stand schale_blend am Ende und gewann
+	// damit ueber boden_eq -- in den untersten Zellen ueberschrieb die Rueckkopplung genau das
+	// Bodenband, das der Boden-Fix eben gesetzt hatte. Jetzt gilt die umgekehrte Rangfolge: die
+	// Rueckkopplung bringt die feine Loesung ein, der Boden-Fix legt sich darueber und behaelt das
+	// letzte Wort an der Fahrbahn.
+	//
+	// FOLGE FUER DEN LISTENBAUER: der z_lo-Ausschluss (z >= CFD_FERN_BODEN_EQ+1, setup.cpp) war
+	// noetig, SOLANGE der Blend gewann. Jetzt ist er eine zweite, ueberfluessige Absicherung --
+	// er bleibt vorerst drin (er schadet nicht und haelt den Kontrollarm bitgleich), ist aber
+	// hiermit als redundant vermerkt. Wer ihn entfernt, muss den A/B gegen den Altstand fahren.
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_schale_blend(); // ★ P9c N2F-SCHALE (No-Op wenn aus ODER alpha==0)
+	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_boden_eq(); // V1-Port (No-Op wenn aus) -- liegt jetzt UEBER dem Blend
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_einlass_eq(); // V1-Port apply_inlet_velocity (No-Op wenn aus; Ecken-Ueberlapp mit boden_eq unkritisch, s. Kernel-Kommentar)
-	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_schale_blend(); // ★ P9c N2F-SCHALE (No-Op wenn aus ODER alpha==0; Ueberlapp mit boden_eq/einlass_eq durch die Setup-Checks ausgeschlossen: z >= BODEN_EQ+1, Schale liegt im Nahfeld-Fussabdruck fern der Einlass-Spalten)
 #if defined(SURFACE) || defined(GRAPHICS)
 	communicate_rho_u_flags(); // rho/u/flags halo data is required for SURFACE extension, and u halo data is required for Q-criterion rendering
 #endif // SURFACE || GRAPHICS

@@ -1285,3 +1285,64 @@ sind die eigenen Kernel des Forks: `apply_facette` liest ein 3x3-Fenster und 18 
 `baue_facetten` ein 5^3-Fenster, die Kraftreduktionen summieren pro Domaene, `schale_extract`
 mittelt ueber ratio^3, der Sparse-Tiles-Pfad haelt eigene Slot-Tabellen.
 **Jeder davon braucht ein Halo-Audit -- das ist die Arbeit, nicht der LBM-Kern.**
+
+---
+
+## 2026-08-22 vormittags: Band-Listenbauer gebaut, Paritaetsbeweis gefuehrt, zwei eigene Fehler gefunden
+
+**REIHENFOLGE UMGESTELLT (Heiko-Vorgabe):** `schale_blend` laeuft jetzt VOR `boden_eq`, nicht mehr
+danach (lbm.cpp `do_time_step`). Vorher gewann die Rueckkopplung ueber das Bodenband; jetzt bringt
+sie die feine Loesung ein und der Boden-Fix legt sich darueber. Der `z_lo`-Ausschluss im
+Listenbauer ist damit eine zweite, redundante Absicherung -- bleibt drin, ist als solche vermerkt.
+
+**BAND-LISTENBAUER (`CFD_N2F_BAND=1`, `_N`, `_PROFIL`, `_UNTERBODEN`).** Band vom Fahrzeug nach
+aussen statt Schale um dessen Bounding-Box; Chebyshev-Distanztransformation per N Runden a drei
+1-D-Dilatationen. Kein neuer Kernel -- `schale_blend` ist "dumm", Geometrie und Gewicht sind
+Host-Daten. Census 8 mm, N=4: **145.869 Saatzellen** (Quervergleich Verdraengungs-Census 146.167,
+Differenz 298 = die Aufstandsflaechen, denen TYPE_X entzogen wird -- passt exakt), **123.510
+Bandzellen** in 4 Lagen, 22.444 im boden_eq-Band ausgelassen, 0 ausserhalb des Fussabdrucks,
+**0 fluidleere Bloecke**. Lage 0 (w=1,0, direkt an der Karosserie): 37.048 Zellen, davon
+**19.690 Unterboden** = 53 %. Abstand zu den getriebenen Entnahmeebenen x- 6 / y- 7 / y+ 7 /
+z+ 18 -- alle >= 4. **Damit ist die Nahfeld-Box fuer diesen Arm NICHT zu eng**, die geplante
+Verbreiterung ist fuer C1 nicht noetig (sie bleibt fuer das Vorwaertsband relevant).
+
+**EIGENER FEHLER 1, gefunden vom eigenen Waechter:** die Fahrbahn-Falle war als Test "Saatmenge >
+10 % der Fahrbahnflaeche" formuliert -- eine 3D-Zellzahl gegen eine 2D-Flaeche. Das Fernfeld-
+Fahrzeug hat bei 8 mm 146.167 Zellen, die Fahrbahnebene nur 384x240 = 92.160; ein Volumen ist
+zwangslaeufig groesser als eine Flaeche, der Waechter schlug also am RICHTIGEN Fahrzeug an.
+Richtig ist der Test auf der Ebene z=0: die Fahrbahn ist dort flaechendeckend, das Fahrzeug
+beruehrt sie nur mit den Aufstandsflaechen. Gemessen jetzt: 0 Saatzellen auf z=0.
+
+**★ BEFUND, der eine Doktrin korrigiert: EIN IDENT-BITBEWEIS UEBER AUSGABEDATEIEN IST IM
+DOPPEL-DOMAENEN-FALL NICHT FUEHRBAR.** Gemessen 2026-08-22 an vier Armen:
+- A/A ohne N2F: `interface_druck.csv` **bitgleich** -> das Fernfeld ist fuer sich deterministisch.
+- Schalen-IDENT (der historisch als "bitexakt bewiesen" vermerkte Arm) gegen aus: **weicht ab**.
+- Band-IDENT gegen aus: weicht ab.
+- Band-IDENT gegen **sich selbst**: **weicht ab**.
+Sobald `CFD_N2F_SCHALE>0` gesetzt ist, wird das Fernfeld nichtdeterministisch -- auch im
+IDENT-Modus, der nichts schreibt ausser dem Gelesenen. Die Aktivierung zieht `schale_extract_u`
+auf dem Nahfeld ins Kopplungsfenster, und das Nahfeld ist ueber `po_mean` feldwirksam
+nichtdeterministisch. Der historische Vermerk kann also NICHT aus einem Lauf-gegen-Lauf-Vergleich
+stammen; er ist als Beleg fuer Bitgleichheit der AUSGABEN nicht belastbar.
+
+**PARITAETSBEWEIS geraeteintern gebaut (Slots 23/24, `CFD_N2F_PARITAET=1`)** -- er haengt an
+nichts als der Arithmetik der Zelle und ist damit vom Determinismus unabhaengig. Der Arm setzt das
+KERNEL-alpha exakt auf 0, laesst den Mechanismus aber voll laufen (Listenbau, Extract, Upload,
+Enqueue). Zwei Anlaeufe waren noetig, beide lehrreich:
+1. `alpha=0` ueber `CFD_N2F_SCHALE` schaltet den Enqueue ab (`schale_alpha==0` ist das Torgatter) --
+   der Beweis lief ins Leere, Wirkpfad NULL. Torwaechter und Kernel-Wert sind jetzt getrennt
+   (`s_schale_paritaet`).
+2. Die Forderung "muss bitexakt 0 sein" war FALSCH GESTELLT. Bei a = 0 ist `u2 == u_lokal` exakt,
+   also `feq == feq_loc` bitgleich -- aber die Schlusszeile lautet `feq[i] += ftrue[i] - feq_loc[i]`,
+   und **a + (b - a) ist in Gleitkomma nicht exakt b**. Der FNEQ-Arm KANN kein bitexaktes No-Op
+   sein. Und der erste Ersatztest (float32-ULP) mass eine Genauigkeit, die das Feld gar nicht
+   traegt: gespeichert wird in FP16C (~11 Bit Mantisse, Aufloesung 4,9e-4).
+**ERGEBNIS: alpha = 0, 262.790 Verteilungen weichen in float32 ab, groesste RELATIVE Abweichung
+0,000062 -- ein Achtel der FP16C-Aufloesung. Im gespeicherten Feld ist das kein Unterschied.
+Pruefagent-M2 ist damit beantwortet.**
+
+**Sauberer Stopp: gebaut, getestet, ein Fehler darin behoben.** Der Mechanismus vom 21.08. war nur
+syntaxgeprueft. Erster Rauchtest: Stopp korrekt (t = 0,056 s statt 0,300, VTK mit der WIRKLICH
+erreichten Zeit im Namen, Stopp-Datei entfernt) -- aber rc=1, weil drei Wirkpfad-Sollwerte aus
+`n_outer` rechnen, also der GEPLANTEN Schrittzahl. Ein geretteter Lauf meldete sich als defekt.
+`n_outer_ist` behoben; zweiter Rauchtest rc=0, Facetten-Wirkpfad Ist = Soll = 88.300.050 exakt.
