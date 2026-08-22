@@ -504,6 +504,166 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 // 3^3-Nachbarschaft (Default; CFD_FACETTEN_FENSTER) jeder wandnahen Fluidzelle. Host, double, kein Kernel-Eingriff, keine Flag-Bits.
 // wand_flag: 0x41 am Fahrzeug (Fahrbahn/Latsch = Ausschluss), TYPE_S im Kanal-Ankerfall.
 // struct Facette: seit Stufe 2 in lbm.hpp (alloc_facetten braucht den Typ)
+// ======================================================================= ELIBB P1 (2026-08-22)
+// REMESH DER VOXEL-AUSSENWAND (Heiko-Vorgabe, Arbeitsliste 11a): geschlossene Dreiecksflaeche
+// ueber dem FINALEN flags-Feld (nicht der STL -- der effektive Solid traegt SAT-Schale,
+// Void-Fill, Duennteile), dann q je Link fuer das kommende Facetten-ELIBB (Plan:
+// FACETTEN-ELIBB-PLAN.md). P1 = Bau + DIAGNOSE (Histogramme, Abdeckung); der fac_q-Upload
+// und der Kernel folgen in P2. Gate: CFD_FACETTEN_REMESH=1, Default aus = bitidentisch.
+// Verfahren: NAIVE SURFACE NETS auf dem Binaerfeld -- je Grenzflaeche solid|fluid ein Quad
+// auf dem dualen Eckgitter, garantiert geschlossen und mannigfaltig, keine MC-Tabellen.
+// Glaettung: TAUBIN lambda|mu (0,5 / -0,53) mit harter Vertex-Klemme +-0,5 Zelle -- die
+// Klemme begrenzt den q-Fehler konstruktiv und haelt die Flaeche nahe der effektiven
+// Halfway-Wand (entschaerft den y_w-Eichkonflikt, Arbeitsliste 9).
+struct RemeshQ {
+	std::vector<float> vx, vy, vz;        // Vertices (geglaettet), Gitterkoordinaten (Eckpunkte)
+	std::vector<uint>  tri;               // Dreiecke, 3 Indizes je Dreieck
+	ulong quads=0ull;
+};
+static bool ray_tri(const double ox,const double oy,const double oz, const double dx,const double dy,const double dz,
+                    const double ax,const double ay,const double az, const double bx,const double by,const double bz,
+                    const double cx,const double cy,const double cz, double* t_out) {
+	// Moeller-Trumbore, double (Host, einmalig -- Robustheit vor Tempo)
+	const double e1x=bx-ax, e1y=by-ay, e1z=bz-az, e2x=cx-ax, e2y=cy-ay, e2z=cz-az;
+	const double px=dy*e2z-dz*e2y, py=dz*e2x-dx*e2z, pz=dx*e2y-dy*e2x;
+	const double det=e1x*px+e1y*py+e1z*pz;
+	if(fabs(det)<1e-12) return false;
+	const double inv=1.0/det, tx=ox-ax, ty=oy-ay, tz=oz-az;
+	const double u=(tx*px+ty*py+tz*pz)*inv; if(u<-1e-9||u>1.0+1e-9) return false;
+	const double qx=ty*e1z-tz*e1y, qy=tz*e1x-tx*e1z, qz=tx*e1y-ty*e1x;
+	const double v=(dx*qx+dy*qy+dz*qz)*inv; if(v<-1e-9||u+v>1.0+1e-9) return false;
+	const double t=(e2x*qx+e2y*qy+e2z*qz)*inv; if(t<=1e-9) return false;
+	*t_out=t; return true;
+}
+static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uint Nz,
+                                 const uchar wand_flag, const string& out_dir) {
+	const auto idx=[&](const uint x,const uint y,const uint z){ return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
+	const auto solid=[&](const int x,const int y,const int z){
+		if(x<0||y<0||z<0||x>=(int)Nx||y>=(int)Ny||z>=(int)Nz) return false;
+		return (L.flags[idx((uint)x,(uint)y,(uint)z)]&(TYPE_S|TYPE_E))==TYPE_S && L.flags[idx((uint)x,(uint)y,(uint)z)]==wand_flag;
+	};
+	// ---- 1) Grenzflaechen sammeln: Quad je solid(wand_flag)|fluid-Paar, Ecken auf dem dualen Gitter
+	std::unordered_map<ulong,uint> vmap; RemeshQ M;
+	std::vector<std::array<uint,4>> quads;
+	const auto vkey=[&](const uint x,const uint y,const uint z){ return (ulong)x+((ulong)y+(ulong)z*(ulong)(Ny+1u))*(ulong)(Nx+1u); };
+	const auto vgen=[&](const uint x,const uint y,const uint z)->uint{
+		const ulong k=vkey(x,y,z); auto it=vmap.find(k);
+		if(it!=vmap.end()) return it->second;
+		const uint id=(uint)M.vx.size(); vmap.emplace(k,id);
+		M.vx.push_back((float)x); M.vy.push_back((float)y); M.vz.push_back((float)z);
+		return id;
+	};
+	const int fd[6][3]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+		if(!solid((int)x,(int)y,(int)z)) continue;
+		for(uint f=0u; f<6u; f++) {
+			const int nx2=(int)x+fd[f][0], ny2=(int)y+fd[f][1], nz2=(int)z+fd[f][2];
+			if(nx2<0||ny2<0||nz2<0||nx2>=(int)Nx||ny2>=(int)Ny||nz2>=(int)Nz) continue;
+			const uchar bo=L.flags[idx((uint)nx2,(uint)ny2,(uint)nz2)]&(TYPE_S|TYPE_E);
+			if(bo==TYPE_S) continue;                                        // solid|solid: innen
+			// Quad-Ecken der gemeinsamen Flaeche (Eckgitter: Zelle x belegt [x, x+1])
+			uint c[4];
+			if(fd[f][0]!=0) { const uint fx=x+(fd[f][0]>0?1u:0u);
+				c[0]=vgen(fx,y,z); c[1]=vgen(fx,y+1u,z); c[2]=vgen(fx,y+1u,z+1u); c[3]=vgen(fx,y,z+1u); }
+			else if(fd[f][1]!=0) { const uint fy=y+(fd[f][1]>0?1u:0u);
+				c[0]=vgen(x,fy,z); c[1]=vgen(x+1u,fy,z); c[2]=vgen(x+1u,fy,z+1u); c[3]=vgen(x,fy,z+1u); }
+			else { const uint fz=z+(fd[f][2]>0?1u:0u);
+				c[0]=vgen(x,y,fz); c[1]=vgen(x+1u,y,fz); c[2]=vgen(x+1u,y+1u,fz); c[3]=vgen(x,y+1u,fz); }
+			quads.push_back({c[0],c[1],c[2],c[3]});
+		}
+	}
+	M.quads=(ulong)quads.size();
+	if(M.quads==0ull) { print_warning("REMESH: keine Grenzflaechen gefunden (wand_flag pruefen)."); return; }
+	// ---- 2) Taubin-Glaettung auf den Vertices (Nachbarn = Quad-Kanten), Klemme +-0,5 Zelle
+	const uint nv=(uint)M.vx.size();
+	std::vector<std::vector<uint>> adj(nv);
+	for(const auto& q : quads) for(uint e=0u; e<4u; e++) {
+		const uint a=q[e], b=q[(e+1u)&3u];
+		adj[a].push_back(b); adj[b].push_back(a);
+	}
+	std::vector<float> ox=M.vx, oy=M.vy, oz=M.vz;                       // Originale fuer die Klemme
+	std::vector<float> tx(nv), ty(nv), tz(nv);
+	const float lam=0.5f, mu=-0.53f;
+	for(uint it=0u; it<15u; it++) for(uint pass=0u; pass<2u; pass++) {
+		const float f=(pass==0u)?lam:mu;
+		for(uint v=0u; v<nv; v++) {
+			if(adj[v].empty()) { tx[v]=M.vx[v]; ty[v]=M.vy[v]; tz[v]=M.vz[v]; continue; }
+			double sx=0.0, sy=0.0, sz=0.0;
+			for(const uint n : adj[v]) { sx+=M.vx[n]; sy+=M.vy[n]; sz+=M.vz[n]; }
+			const double k=1.0/(double)adj[v].size();
+			tx[v]=M.vx[v]+f*(float)(sx*k-M.vx[v]); ty[v]=M.vy[v]+f*(float)(sy*k-M.vy[v]); tz[v]=M.vz[v]+f*(float)(sz*k-M.vz[v]);
+		}
+		for(uint v=0u; v<nv; v++) {                                      // harte Klemme: q-Fehler begrenzt
+			M.vx[v]=fmin(ox[v]+0.5f, fmax(ox[v]-0.5f, tx[v]));
+			M.vy[v]=fmin(oy[v]+0.5f, fmax(oy[v]-0.5f, ty[v]));
+			M.vz[v]=fmin(oz[v]+0.5f, fmax(oz[v]-0.5f, tz[v]));
+		}
+	}
+	// ---- 3) Triangulieren + Binning (uniformes Gitter, Zellweite 1)
+	for(const auto& q : quads) { M.tri.insert(M.tri.end(),{q[0],q[1],q[2]}); M.tri.insert(M.tri.end(),{q[0],q[2],q[3]}); }
+	const ulong ntri=(ulong)M.tri.size()/3ull;
+	std::unordered_map<ulong,std::vector<uint>> bins;
+	for(ulong t=0ull; t<ntri; t++) {
+		const uint a=M.tri[3ull*t], b=M.tri[3ull*t+1ull], c2=M.tri[3ull*t+2ull];
+		const int x0=(int)floor(fmin(M.vx[a],fmin(M.vx[b],M.vx[c2]))), x1=(int)floor(fmax(M.vx[a],fmax(M.vx[b],M.vx[c2])));
+		const int y0=(int)floor(fmin(M.vy[a],fmin(M.vy[b],M.vy[c2]))), y1=(int)floor(fmax(M.vy[a],fmax(M.vy[b],M.vy[c2])));
+		const int z0=(int)floor(fmin(M.vz[a],fmin(M.vz[b],M.vz[c2]))), z1=(int)floor(fmax(M.vz[a],fmax(M.vz[b],M.vz[c2])));
+		for(int zz=z0; zz<=z1; zz++) for(int yy=y0; yy<=y1; yy++) for(int xx=x0; xx<=x1; xx++)
+			bins[(ulong)(xx+1)+((ulong)(yy+1)+(ulong)(zz+1)*(ulong)(Nz+2u))*(ulong)(Nx+2u)].push_back((uint)t);
+	}
+	// ---- 4) q je Link fuer alle wandnahen Fluidzellen; DIAGNOSE (P1: nur Histogramm/Abdeckung)
+	// D3Q19-Richtungen 1..18 (Host-Tabelle; P2-AUFLAGE: gegen die Kernel-c()-Tabelle verifizieren!)
+	const int cd[18][3]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
+	                     {1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},
+	                     {1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+	ulong links_solid=0ull, links_getroffen=0ull, links_fallback=0ull, zellen=0ull;
+	ulong qh[10]={0,0,0,0,0,0,0,0,0,0}; double qsum=0.0;
+	for(uint z=1u; z<Nz-1u; z++) for(uint y=1u; y<Ny-1u; y++) for(uint x=1u; x<Nx-1u; x++) {
+		const ulong n=idx(x,y,z);
+		if((L.flags[n]&(TYPE_S|TYPE_E))!=0u) continue;
+		bool wandnah=false;
+		for(uint i=0u; i<18u&&!wandnah; i++) if(solid((int)x+cd[i][0],(int)y+cd[i][1],(int)z+cd[i][2])) wandnah=true;
+		if(!wandnah) continue;
+		zellen++;
+		const double cx0=(double)x+0.5, cy0=(double)y+0.5, cz0=(double)z+0.5; // Zellmitte im Eckgitter
+		for(uint i=0u; i<18u; i++) {
+			if(!solid((int)x+cd[i][0],(int)y+cd[i][1],(int)z+cd[i][2])) continue;
+			links_solid++;
+			const double dxl=(double)cd[i][0], dyl=(double)cd[i][1], dzl=(double)cd[i][2];
+			const double len=sqrt(dxl*dxl+dyl*dyl+dzl*dzl);
+			double best=1e30;
+			// Kandidaten aus den Bins entlang des Links (Start- und Zielzelle reichen bei |c|<=sqrt2)
+			for(uint kk=0u; kk<2u; kk++) {
+				const int bx=(int)x+(int)kk*cd[i][0], by=(int)y+(int)kk*cd[i][1], bz=(int)z+(int)kk*cd[i][2];
+				auto itb=bins.find((ulong)(bx+1)+((ulong)(by+1)+(ulong)(bz+1)*(ulong)(Nz+2u))*(ulong)(Nx+2u));
+				if(itb==bins.end()) continue;
+				for(const uint t : itb->second) {
+					const uint a=M.tri[3u*t], b=M.tri[3u*t+1u], c2=M.tri[3u*t+2u];
+					double tt;
+					if(ray_tri(cx0,cy0,cz0, dxl,dyl,dzl, M.vx[a],M.vy[a],M.vz[a], M.vx[b],M.vy[b],M.vz[b], M.vx[c2],M.vy[c2],M.vz[c2], &tt))
+						if(tt<best) best=tt;
+				}
+			}
+			if(best<=1.0+1e-6) {                                            // q = Schnittabstand / Linklaenge, in (0,1]
+				links_getroffen++;
+				const double q=fmin(1.0, best); qsum+=q;
+				{ int hb=(int)(q*10.0); if(hb>9) hb=9; qh[hb]++; }
+			} else links_fallback++;                                        // kein Schnitt im Link -> Kernel wird HWBB fallen
+		}
+	}
+	print_info("REMESH (ELIBB P1): "+to_string(M.quads)+" Grenzquads, "+to_string((ulong)M.vx.size())+" Vertices, "+to_string(ntri)+" Dreiecke (Surface Nets + Taubin 15x, Klemme +-0,5 Zelle).");
+	print_info("REMESH q-ABDECKUNG: "+to_string(zellen)+" wandnahe Zellen, "+to_string(links_solid)+" Solid-Links; getroffen "+to_string(links_getroffen)+" ("+to_string((float)(100.0*(double)links_getroffen/(double)max(1ull,links_solid)),1u)+" %), FALLBACK->HWBB "+to_string(links_fallback)+". Mittleres q = "+to_string((float)(qsum/(double)max(1ull,links_getroffen)),3u)+" (Halfway-Referenz 0,5).");
+	{ string h="REMESH q-HISTOGRAMM (Dezile 0,0-1,0): "; for(int k2=0;k2<10;k2++) h+=to_string(qh[k2])+(k2<9?" ":""); print_info(h); }
+	// VTK der Flaeche fuer die Sichtpruefung (Iron Rule 5 gilt fuers MESSEN; sichten ist erlaubt)
+	std::ofstream vtk(out_dir+"remesh_flaeche.vtk");
+	vtk << "# vtk DataFile Version 3.0\nRemesh ELIBB P1\nASCII\nDATASET POLYDATA\nPOINTS " << M.vx.size() << " float\n";
+	for(uint v=0u; v<nv; v++) vtk << M.vx[v] << " " << M.vy[v] << " " << M.vz[v] << "\n";
+	vtk << "POLYGONS " << ntri << " " << 4ull*ntri << "\n";
+	for(ulong t=0ull; t<ntri; t++) vtk << "3 " << M.tri[3ull*t] << " " << M.tri[3ull*t+1ull] << " " << M.tri[3ull*t+2ull] << "\n";
+	vtk.close();
+	print_info("REMESH: Flaeche geschrieben -> "+out_dir+"remesh_flaeche.vtk (Gitterkoordinaten der feinen Domaene).");
+}
+
 // 3x3-Jacobi in double: Eigenvektor zum kleinsten Eigenwert von M (symmetrisch).
 static void jacobi3(double M[3][3], double ew[3], double ev[3][3]) {
 	for(int i=0;i<3;i++) for(int j=0;j<3;j++) ev[i][j] = (i==j)?1.0:0.0;
@@ -2717,6 +2877,10 @@ static void main_setup_fahrzeug_dd() {
 		// ueberschrieb den Nahfeld-Census kommentarlos. Jetzt je ein Unterordner.
 		const string fdn = fac_dir+"nah/", fdf = fac_dir+"fern/"; create_folder(fdn); create_folder(fdf);
 		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, "dd-Nahfeld");
+		if(env_u("CFD_FACETTEN_REMESH", 0u)>0u) { // ★ ELIBB P1 (Heiko 2026-08-22): Voxel-Remesh-Diagnose, reiner Host-Schritt, Default aus = bitidentisch
+			print_info("ELIBB P1: Remesh der Nahfeld-Voxelaussenwand (Surface Nets + Taubin) ...");
+			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), out_dir);
+		}
 		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
