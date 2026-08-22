@@ -246,3 +246,35 @@ Dämpfungszone gemessen und pro Domäne schaltbar · Wand-Audit neu gebaut mit I
 Wirksamkeitsnachweis durch den Kernel · Lauf-Sicherung mit jedem Lauf (19 Quelldateien, Git-Stand,
 Umgebung, Diff) · RHO_CLAMP-Zähler · Λ als Laufzeitparameter · Kopplungsmaße auf ganze grobe Zellen
 geschnappt (auflösungsunabhängig) · Geräteaufteilung gemessen · Hygiene 1 und 2 samt Validierung.
+
+---
+
+# Stand 2026-08-22 abends — Hebel-Liste nach dem Acht-Prüfer-Audit (Heiko-Freigabe: "deinen plan gehe ich mit")
+
+Reihenfolge = Abarbeitung. Jeder Punkt eine Variable, jeder mit Wirknachweis im Binary.
+
+1. **Facetten 1a: BB-Rückfälle zurückholen.** ~35 % der Facetten-Ereignisse fallen per
+   SATGATE/u_s-Klemme/„ohne tangentialen Link" auf reines BB zurück, 20 % der Wandzellen
+   dauerhaft BB. Headroom im bestehenden Pfad. 8-mm-A/B je Klasse.
+2. **Facetten 1b: CFD_FERN_FACETTEN + Band-Wandrückzug** als EIN A/B (die Sperre fällt genau
+   dann, wenn Lage 1-3 kein Gewicht mehr tragen bzw. NURWAKE). Messbefund dahinter: die
+   Wand-Schreibung des Bandes verschlechtert die Fernfeld-Ablösung aktiv (11,2 % gegen 43,7 %
+   ungekoppelt gegen 35,6 % nah); das 4x4x4-Blockmittel traegt keine 32-mm-Abloeseschichten.
+3. **Facetten 1c: Facetten-ELIBB** (q-abhängige Rekonstruktion Marson-25/26-Klasse + iMEM-u_s
+   als Slip-Ziel; q speicherfrei aus y_w/|c*n|). Audit-Verdikt: GEHT, der V2-Einhängepunkt
+   (registerlokal in stream_collide) umgeht die V1-EP-Pull-Falle. Planungsagenten VOR dem Bau
+   (Iron Rule 2), Kugel-Validierung zuerst. Größter Einzelhebel auf den Druckanteil (Cd 98 %
+   druckdominiert).
+4. **CFD_N2F_ZEITMITTEL** (Heiko 2026-08-22): Rückkopplung übergibt heute nur den SCHNAPPSCHUSS
+   nach dem 4. feinen Schritt (räumlich 4x4x4 gemittelt, zeitlich nichts) — Boxmittel über die
+   4 feinen Schritte nachrüsten = Anti-Aliasing zur far-Nyquist, symmetrisch zur Raumfilterung.
+   Die run(1)x4-Infrastruktur existiert im ZEITINTERP-Pfad; Akkumulation auf dem Gerät, kein
+   Host-Transfer je Substep. Default aus, bitidentisch. Eigener 8-mm-A/B (~8 min).
+   Vorwärts ist Heikos Frage schon erfüllt: Halteglied je Fenster, optional ZEITINTERP.
+5. **FNEQ=1 als Produktionsstandard** — nur mit Fx_far-Gate (die EQ-Dissipation dämpft heute
+   die Rückkopplungsschleife; Numerik-Prüfer: ~75x Smagorinsky im Band, a-unabhängig).
+6. **Grenzschicht-Kampagne (DER Cz-Hebel):** van-Driest-Wanddämpfung + HRR/RR-Kollision
+   (Heiko-Todo seit 2026-08-21). Cz-Lücke ist lokalisiert: Dach/Diffusor lösen zu früh,
+   Heckflügel (1/3 des OF13-Abtriebs) sitzt im Totwasser.
+7. **Async-Überlappung N2F-Rückweg** (bis 3,6 % Wanduhr bei 4 mm; Netto-Kopplungskosten heute
+   +0,3-0,7 %). Nice-to-have, kein Blocker.
