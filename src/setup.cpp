@@ -896,6 +896,10 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
+	  LBM_Domain::s_fac_budget = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET", 1.0f)));       // 1a-B4t: Tangentialbudget-Skalar (geklemmt 0,25..4; Ansage unten)
+	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
+	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
+	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
 	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden im kanal NICHT angewandt (nur fahrzeug_dd; M3).");
 	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
@@ -1487,6 +1491,10 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
+	  LBM_Domain::s_fac_budget = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET", 1.0f)));       // 1a-B4t: Tangentialbudget-Skalar (geklemmt 0,25..4; Ansage unten)
+	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
+	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
+	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; // Kugel: optionaler Messarm
 	  if(LBM_Domain::s_boden_eq_n>0u) print_info("BODEN_EQ Kugel aktiv: z=1.."+to_string(LBM_Domain::s_boden_eq_n)+" (V1-Port; OHNE V1-side_nz -- y/z-Waende unbehandelt, XL-B5-Notiz)."); // B3
 	  LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u);
@@ -1771,7 +1779,7 @@ void main_setup_kugel() {
 		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
 		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
-			+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
+			+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
@@ -2346,6 +2354,10 @@ static void main_setup_fahrzeug_dd() {
 	  if((fc>0u||env_u("CFD_FERN_FACETTEN",0u)>0u)&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("dd: YWMIN-Default 0,2 schliesst 15-38 % der GENEIGTEN Flaechen (Scheiben!) still als K4 aus -- Slice-Agent 2026-08-20; CFD_FACETTEN_YWMIN=0.15 ist der deklarierte Messarm (Dachabloesung!).");
 	  if(fc==4u&&LBM_Domain::s_fac_apg!=0.0f) print_warning("Arm 4 (Nullziel) + APG: tw/[0]-Akkumulator und y+-Report tragen APG-Korrektur, Ziel bleibt 0 -- reine Diagnose-Kombination (Gross-Audit N17).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
+	  LBM_Domain::s_fac_budget = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET", 1.0f)));       // 1a-B4t: Tangentialbudget-Skalar (geklemmt 0,25..4; Ansage unten)
+	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
+	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
+	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz; einlass_eq EXPLIZIT 0 fuers Feingitter (Pruefagent M1: Statik-Doktrin, nicht nur Initialisierer); Schalen-alpha EXPLIZIT 0 -- lbm_f traegt spaeter eine Extract-Liste, darf aber NIE blenden (P9c-Wirkpfad-Soll nah==0)
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&(LBM_Domain::s_boden_eq_n>0u||env_u("CFD_FERN_BODEN_EQ",0u)>0u)) print_warning("CFD_BODEN_EQ_ABSTAND > 3: der Scan kostet (2A+1)^2*(A+1) Flag-Reads je Bandzelle je Schritt -- stiller Perf-Fresser (XL-R2).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2) -- Kraefteverfaelschung waechst mit N.");
@@ -4508,7 +4520,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Facetten-Wirkpfad Nahfeld: "+to_string(wz)+" (Soll "+to_string(soll)+" mod 2^32), tau-Klemme "+to_string((ulong)df->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
-			+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
+			+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])):string("")));
 		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Nahfeld -- Lookup oder Bindung defekt.");
 		lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();

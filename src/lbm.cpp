@@ -252,6 +252,8 @@ uint LBM_Domain::s_fac_alpha = 0u;
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
+float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bitidentisch
+float LBM_Domain::s_fac_budget_sn = 1.0f; // CFD_FAC_BUDGET_SN (1a-Bsn), Default bitidentisch
 bool LBM_Domain::s_sgs_wandfrei = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
@@ -284,7 +286,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 27ull); // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 28ull); // [27] Slot-13-Split (Einzellink-diagonal) // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -934,6 +936,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten) ? (string)"\n	#define FACETTEN"
 	"\n	#define def_fac_Y "+to_string(0.5f/nu,8u)+"f"
 	"\n	#define def_fac_tau "+to_string(s_fac_tau,4u)+"f"
+	"\n	#define def_fac_budget "+to_string(s_fac_budget,4u)+"f"
+	"\n	#define def_fac_budget_sn "+to_string(s_fac_budget_sn,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
 	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
 	+((s_facetten&&s_fac_imem&&s_fac_ema>0.0f) ? (string)"\n	#define FACETTEN_EMA"

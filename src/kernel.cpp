@@ -1853,6 +1853,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		S0 += wi;
 )+"#endif"+R( // FACETTEN_ALPHA
 	}
+)+R(	const float G11roh=G11, G22roh=G22; // Rohmomente VOR dem ALPHA2-Downdate -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
 )+"#ifdef FACETTEN_ALPHA2"+R(
 	// ★ J4-alpha Stufe 2 (Plan 2026-08-17): symmetrisches Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T
 	// mit cq = S1/S0 -- eine Kovarianz, garantiert PSD. Der Solve erreicht sein Impulsziel damit
@@ -1950,7 +1951,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
 	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
 	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
-	else { if(t%100ul==0ul) atomic_inc(&hits[13]); return; } // Slot 13: kein tangential wirksamer Link
+	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } return; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten (Einzellink-diagonal -- die ELIBB-heilbare Klasse)
 	} else {
 	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
 	const float Gt11 = G11 - Sn1*Sn1/Snn, Gt22 = G22 - Sn2*Sn2/Snn, Gt12 = G12 - Sn1*Sn2/Snn;
@@ -1969,9 +1970,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
 	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
 	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
-	if(fabs(s1)>2.0f*ut||fabs(s2)>ut) { if(t%100ul==0ul) atomic_inc(&hits[10]); return; } // Slot 10: Gate-Rueckfall (frueher Klemme)
+	if(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut) { if(t%100ul==0ul) atomic_inc(&hits[10]); return; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
 )+"#else"+R(
-	const float s1c = clamp(s1, -2.0f*ut, 2.0f*ut), s2c = clamp(s2, -ut, ut); // Klemmen (Gl. 9)
+	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
 	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
 	s1=s1c; s2=s2c;
 )+"#endif"+R( // FACETTEN_SATGATE
@@ -1980,9 +1981,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
 		sn = -(Sn1*s1+Sn2*s2)/Snn;
 )+"#ifdef FACETTEN_SATGATE"+R(
-		if(fabs(sn)>ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); return; } // Slot 16: sn-Gate-Rueckfall
+		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); return; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
 )+"#else"+R(
-		const float snc = clamp(sn, -ut, ut);
+		const float snc = clamp(sn, -def_fac_budget_sn*ut, def_fac_budget_sn*ut); // Budget-Skalar (1a-Bsn)
 		if(snc!=sn&&t%100ul==0ul) atomic_inc(&hits[16]); // Slot 16: s_n-Klemme
 		sn = snc;
 )+"#endif"+R( // FACETTEN_SATGATE
