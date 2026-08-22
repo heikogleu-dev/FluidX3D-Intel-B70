@@ -312,3 +312,20 @@ Reihenfolge = Abarbeitung. Jeder Punkt eine Variable, jeder mit Wirknachweis im 
     94 % der heilbaren ohneTang-Klasse Einzellink-diagonal (Slot-27, rauch_1a_kugel);
     ein Achsen-only-ELIBB verfehlte genau die Zielpopulation. Variantenwahl (Marson-Familie)
     nach Kosten/Nutzen durch den 1c-Planungsagenten gegen das Paper.
+
+## 12. Void-Fill schliesst die Radhaeuser (2026-08-22, Ursache gefunden)
+**Befund:** Heiko: alle drei Glaettungsstufen (ITER 3/8/15) sehen am Radhaus IDENTISCH
+aus -- also war es schon im Voxelfeld zu, nicht erst in der Remesh-Flaeche. Gemessen:
+die Void-Fill-Flutung laeuft ueber 6 Nachbarn (setup.cpp:316), der LBM stroemt ueber 18.
+**116.651 von 131.322 zugemachten Zellen (89 %) sind NUR ueber eine Diagonale von aussen
+erreichbar.** Bereich X[88,141] Y[109,207] Z[25,86] -- vorderes Drittel, untere Haelfte,
+symmetrisch zur Mittelebene (Fahrzeug-y-Mitte 158): die beiden vorderen Radhaeuser und
+der Kuehlerbereich, genau Heikos Beobachtung.
+**Fertig gebaut:** Diagnose laeuft in jedem Lauf mit, Schalter `CFD_VOIDFILL_KONN=18`,
+Default 6 = bitidentisch. Grobgitter zum Vergleich: nur 52 Zellen betroffen.
+**Offen:** A/B 8 mm mit KONN=18 auf Cd/Cz. Vorsicht -- der offene Motorraum ist GEWOLLT
+(setup.cpp:331 ff.), die Aenderung darf ihn nicht vergroessern, nur die diagonal
+angebundenen Taschen oeffnen. Abnahme: Hohlraum-Zahl (1.341.590 fein) darf sich um
+hoechstens die 116.651 aendern, und der Durchschusstest muss weiter bestehen.
+**Erst NACH P2** -- ob eine offene Radhaustasche etwas bewegt, zeigt sich sinnvoll erst,
+wenn die Wandbehandlung dort ueberhaupt q-abhaengig ist.

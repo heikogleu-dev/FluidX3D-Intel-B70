@@ -321,12 +321,53 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 			if((lbm.flags[nn]&TYPE_X)==0u && !reach[(size_t)nn]) { reach[(size_t)nn]=true; stack.push_back(nn); }
 		}
 	}
-	ulong filled = 0ull;
+	// ★ 2026-08-22 (Heiko: alle drei Glaettungsstufen sehen am Radhaus gleich aus -- also war
+	// es schon im VOXELFELD zu, nicht erst in der Flaeche). Die Flutung oben laeuft ueber SECHS
+	// Nachbarn. Der LBM stroemt aber ueber 18 Richtungen: ein Hohlraum, der nur ueber eine
+	// Diagonale nach aussen offen ist, ist fuer die Stroemung erreichbar, fuer diese Flutung
+	// nicht -- und wird zugemacht. Zweite Flutung mit der Gitterkonnektivitaet als DIAGNOSE
+	// (kein Eingriff), damit die Zahl auf dem Tisch liegt, bevor jemand daran dreht.
+	const int c18[18][3]={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
+	                      {1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},
+	                      {1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+	std::vector<bool> reach18((size_t)((ulong)Nx*Ny*Nz), false);
+	{
+		std::vector<ulong> st2;
+		auto seed2 = [&](const int x, const int y, const int z) {
+			const ulong n = idx(x,y,z);
+			if((lbm.flags[n]&TYPE_X)==0u && !reach18[(size_t)n]) { reach18[(size_t)n]=true; st2.push_back(n); }
+		};
+		for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) { seed2(bx0,y,z); seed2(bx1,y,z); }
+		for(int z=bz0; z<=bz1; z++) for(int x=bx0; x<=bx1; x++) { seed2(x,by0,z); seed2(x,by1,z); }
+		for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) { seed2(x,y,bz0); seed2(x,y,bz1); }
+		while(!st2.empty()) {
+			const ulong n = st2.back(); st2.pop_back();
+			const int z=(int)(n/((ulong)Nx*Ny)), y=(int)((n/(ulong)Nx)%(ulong)Ny), x=(int)(n%(ulong)Nx);
+			for(int k=0; k<18; k++) {
+				const int xx=x+c18[k][0], yy=y+c18[k][1], zz=z+c18[k][2];
+				if(xx<bx0||xx>bx1||yy<by0||yy>by1||zz<bz0||zz>bz1) continue;
+				const ulong nn = idx(xx,yy,zz);
+				if((lbm.flags[nn]&TYPE_X)==0u && !reach18[(size_t)nn]) { reach18[(size_t)nn]=true; st2.push_back(nn); }
+			}
+		}
+	}
+	const bool konn18 = env_u("CFD_VOIDFILL_KONN", 6u)>=18u; // Default 6 = bitidentisch
+	ulong filled = 0ull, nur18 = 0ull;
+	int dx0=1<<30, dx1=-1, dy0=1<<30, dy1=-1, dz0=1<<30, dz1=-1;
 	for(int z=bz0; z<=bz1; z++) for(int y=by0; y<=by1; y++) for(int x=bx0; x<=bx1; x++) {
 		const ulong n = idx(x,y,z);
-		if((lbm.flags[n]&TYPE_X)==0u && !reach[(size_t)n]) { lbm.flags[n] = TYPE_S|TYPE_X; filled++; }
+		if((lbm.flags[n]&TYPE_X)!=0u) continue;
+		const bool r6=reach[(size_t)n], r18=reach18[(size_t)n];
+		if(!r6&&r18) { // nur ueber eine Diagonale erreichbar -- 6er-Flutung wuerde zumachen
+			nur18++;
+			if(x<dx0)dx0=x; if(x>dx1)dx1=x; if(y<dy0)dy0=y; if(y>dy1)dy1=y; if(z<dz0)dz0=z; if(z>dz1)dz1=z;
+		}
+		const bool zu = konn18 ? !r18 : !r6;
+		if(zu) { lbm.flags[n] = TYPE_S|TYPE_X; filled++; }
 	}
-	print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert");
+	print_info("Void-Fill: "+to_string(filled)+" eingeschlossene Zellen als solid markiert (Konnektivitaet "+string(konn18?"18 = Gitter":"6")+").");
+	if(nur18>0ull) print_warning("Void-Fill DIAGNOSE: "+to_string(nur18)+" Zellen sind NUR ueber eine Diagonale von aussen erreichbar -- die 6er-Flutung macht sie zu, die Stroemung koennte hinein. Bereich X["+to_string(dx0)+","+to_string(dx1)+"] Y["+to_string(dy0)+","+to_string(dy1)+"] Z["+to_string(dz0)+","+to_string(dz1)+"]. Schalter CFD_VOIDFILL_KONN=18.");
+	else print_info("Void-Fill DIAGNOSE: 6er- und 18er-Flutung erreichen dieselben Zellen -- die Konnektivitaet ist hier kein Thema.");
 
 	// ---------------------------------------------------------------- Hohlraum-Ueberwachung
 	// ★★ DER OFFENE INNENRAUM IST GEWOLLT. NICHT ZUSCHMIEREN. ★★
