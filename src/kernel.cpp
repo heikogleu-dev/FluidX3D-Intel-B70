@@ -3079,6 +3079,29 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float ftrue[def_velocity_set]; // Paarung EXAKT gegen die EsoPull-Konvention (Herleitung im Kopfkommentar): pair(0)=0, pair(2k-1)=2k, pair(2k)=2k-1
 	ftrue[0] = fhn[0];
 	for(uint i=1u; i<def_velocity_set; i+=2u) { ftrue[i]=fhn[i+1u]; ftrue[i+1u]=fhn[i]; }
+	// ★★ PAARUNGS- UND MOMENTEN-BEWEIS (Ersatz fuer den Paritaetszaehler, 2026-08-22 mittags).
+	// WARUM ER GEBRAUCHT WIRD: der urspruengliche Zaehler weiter unten vergleicht feq[i] gegen
+	// ftrue[i], NACHDEM feq[i] += ftrue[i]-feq_loc[i] gerechnet wurde. Bei a==0 ist feq==feq_loc
+	// bitgleich, der Test lautet also x + (y-x) == y fuer BELIEBIGE x und y. Er ist damit
+	// strukturell blind gegen genau die zwei Fehler, die er laut Kommentar ausschliessen sollte:
+	// eine falsche Paarung schriebe ein anderes y (kuerzt sich weg), eine falsche Momentenrechnung
+	// ein anderes x (kuerzt sich ebenfalls weg). Gefunden vom Pruefagenten 2026-08-22; das
+	// "BESTANDEN" vom selben Morgen belegte fast nichts.
+	//
+	// DIESER TEST IST UNABHAENGIG: er rechnet die Momente aus ftrue NEU und stellt sie gegen die
+	// aus fhn. Die Behauptung, die der ganze Arm traegt, lautet: post-stream-load liest die
+	// EsoPull-Paare vertauscht, also ist rho invariant und u exakt negiert. Ist die Paarung falsch,
+	// ist ftrue eine andere Permutation und die Momente negieren NICHT -- der Test schlaegt an.
+	// Er laeuft in BEIDEN Armen, die ftrue benutzen (FNEQ und IDENT), und haengt nicht an alpha.
+	if(t%100ul==0ul) {
+		float rho_t, uxt, uyt, uzt; calculate_rho_u(ftrue, &rho_t, &uxt, &uyt, &uzt);
+		const float su = fmax(fmax(fabs(uxm), fabs(uym)), fmax(fabs(uzm), 1e-4f)); // Bezug: groesste Komponente, Boden 1e-4 gegen Division durch ~0 in Staugebieten
+		const float du = fmax(fmax(fabs(uxt-ulx), fabs(uyt-uly)), fabs(uzt-ulz))/su;
+		const float dr = fabs(rho_t-rho_l)/fmax(fabs(rho_l), 1e-4f);
+		const float dd = fmax(du, dr);
+		if(dd>1.0e-5f) atomic_inc(&diag[25]);                                  // 1 je ZELLE (nicht je DDF): kein uint-Wickel
+		atomic_max(&diag[26], convert_uint_sat(fmin(dd, 4.0f)*1.0e9f));        // Mass, gesaettigt statt undefiniert
+	}
 	if(modus==2u) { // IDENT-Debug-Arm: exaktes No-Op -- harter Paritaetsbeweis der Paarung (Abnahme d)
 		store_f(nn, ftrue, fi, j, t TS_A);
 		return;
@@ -3088,9 +3111,10 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// Nichtgleichgewichtsanteil (bei exakter Equilibrium-Zelle MUSS f_true - feq_loc = 0 sein).
 	float feq_loc[def_velocity_set]; calculate_f_eq(rho_l, ulx, uly, ulz, feq_loc);
 	for(uint i=0u; i<def_velocity_set; i++) feq[i] += ftrue[i]-feq_loc[i];
-	// ★ PARITAETSZAEHLER (Pruefagent-M2, gebaut 2026-08-22). Der FNEQ-Arm MUSS bei a == 0 exakt
-	// degenerieren: u2 == u_lokal, also feq == feq_loc, also feq[i] + ftrue[i] - feq_loc[i] ==
-	// ftrue[i]. Jede Abweichung ist ein Bruch der Paarung oder der Momentenrechnung.
+	// ★ RUNDUNGSZAEHLER (hiess bis 2026-08-22 mittags "Paritaetszaehler"). Er misst, WAS ER MISST:
+	// die Gleitkomma-Rundung von x + (y-x) gegen y, und dass alpha als exakte 0 im Kernel ankommt.
+	// Er misst NICHT die Paarung und NICHT die Momentenrechnung -- x kuerzt sich algebraisch heraus
+	// (Pruefagenten-Befund 2026-08-22). Der echte Beweis dafuer steht oben, Slots 25/26.
 	// WARUM GERAETEINTERN und nicht per Dateivergleich: im Doppel-Domaenen-Fall ist ein
 	// Bitvergleich zweier Laeufe UNMOEGLICH -- die blosse Aktivierung der Rueckkopplung zieht
 	// schale_extract_u auf dem Nahfeld ins Kopplungsfenster, und das Nahfeld ist ueber po_mean
@@ -3107,10 +3131,10 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 			// unterscheiden, landen im 16-Bit-Format auf DEMSELBEN Wert -- ein Vergleich in float32-
 			// ULP misst also eine Genauigkeit, die das Feld gar nicht traegt.
 			const float rel = fabs(feq[i]-ftrue[i])/fmax(fabs(ftrue[i]), 1e-6f);
-			const uint sk = (uint)(rel*1.0e9f); // in 1e-9-Schritten, damit der uint-Slot es traegt
+			const uint sk = convert_uint_sat(fmin(rel, 4.0f)*1.0e9f); // gesaettigt: float->uint ausserhalb des Bereichs ist in OpenCL implementierungsdefiniert, und im Diagnosezweig (alpha>0) wird rel gross
 			ulp_max = sk>ulp_max ? sk : ulp_max;
 		}
-		if(abw>0u) { atomic_add(&diag[23], abw); atomic_max(&diag[24], ulp_max); }
+		if(abw>0u) { atomic_inc(&diag[23]); atomic_max(&diag[24], ulp_max); } // 1 je ZELLE: mit 19 je Zelle wickelte der uint-Slot bei Default-N und Wake-Kasten schon nach ~1 s (Pruefagent-Befund 4)
 	}
 	store_f(nn, feq, fi, j, t TS_A);
 } // schale_blend()

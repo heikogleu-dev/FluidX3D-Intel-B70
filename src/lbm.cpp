@@ -284,7 +284,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 25ull); // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 27ull); // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -1577,16 +1577,29 @@ void LBM::do_time_step(const bool sync_single_gpu) { // call kernel_stream_colli
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_apply_pressure_outlet();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_stream_collide(); // run LBM stream_collide kernel after domain communication
 	// ★ REIHENFOLGE-UMSTELLUNG 2026-08-22 (Heiko-Vorgabe): die Aufpraegung nah->fern laeuft jetzt
-	// VOR dem Moving-Floor-Fix, nicht mehr danach. Vorher stand schale_blend am Ende und gewann
-	// damit ueber boden_eq -- in den untersten Zellen ueberschrieb die Rueckkopplung genau das
-	// Bodenband, das der Boden-Fix eben gesetzt hatte. Jetzt gilt die umgekehrte Rangfolge: die
-	// Rueckkopplung bringt die feine Loesung ein, der Boden-Fix legt sich darueber und behaelt das
-	// letzte Wort an der Fahrbahn.
+	// VOR dem Moving-Floor-Fix, nicht mehr danach. Der Boden-Fix behaelt damit das letzte Wort an
+	// der Fahrbahn.
 	//
-	// FOLGE FUER DEN LISTENBAUER: der z_lo-Ausschluss (z >= CFD_FERN_BODEN_EQ+1, setup.cpp) war
-	// noetig, SOLANGE der Blend gewann. Jetzt ist er eine zweite, ueberfluessige Absicherung --
-	// er bleibt vorerst drin (er schadet nicht und haelt den Kontrollarm bitgleich), ist aber
-	// hiermit als redundant vermerkt. Wer ihn entfernt, muss den A/B gegen den Altstand fahren.
+	// ★ RICHTIGSTELLUNG DERSELBEN SITZUNG (Pruefagent-Befund 2, MITTEL/HOCH): hier stand als
+	// Begruendung, der Blend habe vorher "genau das Bodenband ueberschrieben, das der Boden-Fix
+	// eben gesetzt hatte". DAS IST FALSCH. z_lo = max(1u, CFD_FERN_BODEN_EQ+1u) steht schon in
+	// a4c3fa5 in BEIDEN Listenbauern (dort Zeilen 2772 und 2861) -- die Zellmengen waren immer
+	// disjunkt, es gab kein Ueberschreiben zu reparieren. Die Umstellung bleibt (sie ist Heikos
+	// Vorgabe und die Rangfolge ist die physikalisch gewollte), aber sie repariert nichts.
+	//
+	// WAS SIE STATTDESSEN TUT -- und das ist der eigentliche Punkt: sie ist NICHT wirkungslos,
+	// obwohl die Mengen disjunkt sind. Esoteric-Pull laesst store_f(n) fuer jedes ungerade i in
+	// den Speicher des NACHBARN j[i] schreiben, und load_f liest genau diese Slots. Die unterste
+	// Blend-Lage (z = nz+1) und die oberste boden_eq-Zelle (z = nz) sind direkte Nachbarn. Wer
+	// zuerst schreibt, bestimmt, was der andere liest. Beide Reihenfolgen koppeln also, nur in
+	// die jeweils andere Richtung. FOLGE: jeder Lauf mit CFD_FERN_BODEN_EQ>0 UND aktivem N2F ist
+	// gegen a4c3fa5 nicht mehr bitgleich -- und das ist der Normalfall. Die frueheren Schalen-A/Bs
+	// sind mit diesem Binary nicht reproduzierbar.
+	//
+	// FOLGE FUER DEN LISTENBAUER: der z_lo-Ausschluss ist NICHT redundant (die gegenteilige Notiz
+	// in setup.cpp war ebenfalls falsch und ist dort korrigiert). Ohne ihn schriebe der Blend in
+	// Zellen, die boden_eq danach vollstaendig ueberschreibt -- ein echter, teilweise wirkungsloser
+	// Blend plus zusaetzliche Nachbarkopplung. Er bleibt und ist tragend.
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_schale_blend(); // ★ P9c N2F-SCHALE (No-Op wenn aus ODER alpha==0)
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_boden_eq(); // V1-Port (No-Op wenn aus) -- liegt jetzt UEBER dem Blend
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->enqueue_einlass_eq(); // V1-Port apply_inlet_velocity (No-Op wenn aus; Ecken-Ueberlapp mit boden_eq unkritisch, s. Kernel-Kommentar)
