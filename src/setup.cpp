@@ -2895,13 +2895,29 @@ static void main_setup_fahrzeug_dd() {
 		// der Annahme "hoechster Punkt = Dach". Bei diesem Fahrzeug ist der hoechste Punkt der
 		// HECKFLUEGEL, nicht die Kabine -- ohne dieses Profil sieht man das nicht.
 		{
-			string prof; const uint schritte=12u;
+			string prof; const uint schritte=12u; uint hprof[12]={0}, hx[12]={0};
 			for(uint k=0u; k<schritte; k++) {
 				const uint x = sx0 + (sx1-sx0)*k/(schritte-1u);
 				uint hmax=0u;
 				for(uint z=sz1+1u; z-->0u; ) { bool tr=false; for(uint y=sy0; y<=sy1&&!tr; y++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)]==255u) tr=true; if(tr) { hmax=z; break; } }
 				prof += (k?" ":"") + to_string(x) + ":" + to_string(hmax);
+				hprof[k]=hmax; hx[k]=x;
 			}
+			// ★ ANBAUTEIL-ERKENNUNG (Heiko-Befund 2026-08-22 nachmittags): "hoechster Punkt" ist bei
+			// diesem Fahrzeug NICHT das Dach. Gemessen: 158:37 171:37 184:34 196:29 209:38 -- die
+			// Kabine erreicht 37 bei x=158, faellt auf 29 (Motordeckel) und der HECKFLUEGEL steigt
+			// bei x=209 auf 38. CFD_N2F_BAND_WAKE_START=0 setzte den Kastenstart damit bei 91 % der
+			// Fahrzeuglaenge statt bei 54 %, ohne ein Wort. Ein globales Maximum, VOR dem eine echte
+			// Senke liegt, ist ein Anbauteil und kein Dach -- das wird jetzt angesagt, samt der
+			// Grobzelle, die der Nutzer stattdessen einsetzen kann.
+			uint k_max=0u; for(uint k=1u; k<schritte; k++) if(hprof[k]>hprof[k_max]) k_max=k;
+			uint senke=0u, k_kabine=0u;
+			for(uint k=0u; k<k_max; k++) { // tiefste Stelle VOR dem globalen Maximum
+				if(hprof[k]>hprof[k_kabine]) k_kabine=k;
+			}
+			for(uint k=k_kabine; k<k_max; k++) senke = max(senke, (uint)(hprof[k_kabine]>hprof[k] ? hprof[k_kabine]-hprof[k] : 0u));
+			if(k_kabine<k_max && senke>=3u)
+				print_warning("N2F-BAND HOEHENPROFIL: der hoechste Punkt (x = "+to_string(hx[k_max])+", z = "+to_string(hprof[k_max])+") ist ein ANBAUTEIL, kein Dach -- davor liegt eine Senke von "+to_string(senke)+" Grobzellen (Kabinenmaximum z = "+to_string(hprof[k_kabine])+" bei x = "+to_string(hx[k_kabine])+"). CFD_N2F_BAND_WAKE_START=0 setzt den Kastenstart damit bei "+to_string((float)(100.0*(double)(hx[k_max]-sx0)/(double)max(1u,sx1-sx0)),0u)+" % der Fahrzeuglaenge statt bei "+to_string((float)(100.0*(double)(hx[k_kabine]-sx0)/(double)max(1u,sx1-sx0)),0u)+" %. Wer den Kasten AB KABINENDACH will: CFD_N2F_BAND_WAKE_START_X="+to_string(hx[k_kabine])+".");
 			// RADSTAND (Heiko-Vorschlag 2026-08-22): die Raeder sind die Fahrzeugzellen auf den
 			// untersten z-Ebenen. Ihr x-Histogramm hat zwei Haufen -- Vorder- und Hinterachse.
 			// Der Mittelpunkt dazwischen ist ein BEGRUENDETER Kastenstart, im Unterschied zum
@@ -3887,13 +3903,30 @@ static void main_setup_fahrzeug_dd() {
 				const float nrm[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 				double md[6]={0,0,0,0,0,0}, fimp=0.0, fdru=0.0, rmn=1e30, rmx=-1e30, mein=0.0, fimp_xp=0.0, fdru_xp=0.0; ulong nverw=0ull; uint rmn_f=0u, rmx_f=0u;
 				const char* fname[6] = {"x-","x+","y-","y+","z-","z+"};
+				// ★ SOLID-TEST UEBER DIE FLAGS, NICHT UEBER rho (Korrektur 2026-08-22 nachmittags).
+				// Vorher stand hier `if(!(r>0.5&&r<2.0)) continue;` als Solid-Ersatz. Das ist in beide
+				// Richtungen falsch: eine Solidzelle mit rho == 1 kommt durch, und eine echte
+				// Dichte-Entgleisung wird als "ungueltig" verworfen. Gemessen an b8_nurwake: der
+				// Dichte-Waechter brach ab mit min 0,5513 / max 1,1424, BEIDE auf der x--Flaeche --
+				// und die schneidet bei wx0 = 209 mitten durch das Fahrzeug. Es war kein
+				// Nachlauf-Befund, es war Karosserie. Die Flags liegen auf dem Host (der
+				// Listenbauer liest sie), die Geometrie ist statisch -- der Test kostet nichts.
+				// Die Indexabbildung ist woertlich die von plane_cell_index (kernel.cpp).
+				auto ebenen_idx=[&](const PlaneSpec& q, const ulong i) {
+					const uint a=(uint)(i%(ulong)q.extent_a), b=(uint)(i/(ulong)q.extent_a);
+					const uint x = q.axis==0u ? q.origin.x : q.origin.x+a;
+					const uint y = q.axis==0u ? q.origin.y+a : (q.axis==1u ? q.origin.y : q.origin.y+b);
+					const uint z = q.axis==2u ? q.origin.z : q.origin.z+b;
+					return (ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
+				};
 				for(uint f=0u; f<6u; f++) {
 					lbm_c.extract_plane_macros(bp[f], bf);
 					const ulong np=(ulong)bp[f].extent_a*(ulong)bp[f].extent_b;
 					for(ulong i=0ull; i<np; i++) {
 						const double r=(double)bf[4ull*i], ux=(double)bf[4ull*i+1ull], uy=(double)bf[4ull*i+2ull], uz=(double)bf[4ull*i+3ull];
-						if(r<rmn) { rmn=r; rmn_f=f; } if(r>rmx) { rmx=r; rmx_f=f; } // Flaeche mitfuehren: ein Ausschlag auf der x--Ebene (durch das Fahrzeug) ist etwas anderes als einer im freien Nachlauf // ★ VOR dem Filter (Pruefagent): stand er dahinter, konnten rho_min/rho_max konstruktiv nie ausserhalb [0,5;2,0] melden -- das Instrument war gegen genau die Entgleisung blind, die es fangen soll
-						if(!(r>0.5&&r<2.0)) { nverw++; continue; }           // Solid/ungueltig ueberspringen, aber gezaehlt
+						const ulong nc=ebenen_idx(bp[f], i);
+						if(nc>=(ulong)cNx*(ulong)cNy*(ulong)cNz || (lbm_c.flags[nc]&(TYPE_S|TYPE_E))!=0u) { nverw++; continue; } // KEIN Fluid: Karosserie, Fahrbahn oder Kopplungsrand
+						if(r<rmn) { rmn=r; rmn_f=f; } if(r>rmx) { rmx=r; rmx_f=f; } // nur ueber FLUID -- und ohne rho-Fenster, damit eine echte Entgleisung sichtbar bleibt
 						const double un = ux*(double)nrm[f][0] + uy*(double)nrm[f][1] + uz*(double)nrm[f][2];
 						md[f] += r*un;                                      // Gittereinheiten, dA = 1 Zelle
 						if(un<0.0) mein += -r*un;                           // Einstrom getrennt, als Bezugsgroesse
