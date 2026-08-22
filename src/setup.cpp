@@ -2518,13 +2518,18 @@ static void main_setup_fahrzeug_dd() {
 	// Vorlaeufer: V1 fuhr 2026-05-16 eine "Plateau-Rampe" nach demselben Gedanken (Phase 6C).
 	const uint n2f_band_plateau = max(1u, min(n2f_band_n>1u?n2f_band_n-1u:1u, env_u("CFD_N2F_BAND_PLATEAU", 2u)));
 	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_band_n<2u) print_error("CFD_N2F_BAND_PROFIL=2 braucht N >= 2: bei N=1 ist die einzige Lage die Nulllage -- das ganze Band waere gewichtslos (B-P3).");
-	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_wandfrei>=n2f_band_plateau) print_warning("CFD_N2F_BAND_WANDFREI ("+to_string(n2f_wandfrei)+") frisst das Profil-2-Plateau ("+to_string(n2f_band_plateau)+" Lagen) ganz oder teilweise -- die Plateau-Ansage beschreibt dann nicht mehr die wirksame Rampe.");
+	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_wandfrei>0u) print_info("N2F-BAND PROFIL 2 + WANDFREI: das Plateau zaehlt AB Lage "+to_string(n2f_wandfrei+1u)+" (verschoben, nicht gefressen) -- wirksames Profil: Lagen 1.."+to_string(n2f_wandfrei)+" frei, dann "+to_string(n2f_band_plateau)+" Lagen voll, dann Halbierung, Lage "+to_string(n2f_band_n)+" = 0.");
 	if(getenv("CFD_N2F_BAND_PLATEAU")&&n2f_band_prof!=2u) print_warning("CFD_N2F_BAND_PLATEAU ist gesetzt, wirkt aber nur bei CFD_N2F_BAND_PROFIL=2 (B3; Ansage-Doktrin).");
 	auto band_w = [&](const uint d) { // d = 1..N, gibt w in (0,1]; a = alpha*w
 		if(n2f_band_prof==2u) {                                   // Plateau + geometrisch
+			// ★ 2026-08-22 spaet (Heiko): das Plateau zaehlt AB WANDFREI+1 -- der Puffer sitzt
+			// HINTER der freien Wandzone statt von ihr gefressen zu werden. Synthese der beiden
+			// Befunde: Wand-Schreibung unterdrueckt Abtrieb (Wandrueckzug, -0,27 Cz) UND das Band
+			// war zu schwach (Plateau). wandfrei=0 -> exakt das bisherige Profil, bitidentisch.
+			const uint ds = (d>n2f_wandfrei) ? d-n2f_wandfrei : 1u;   // verschobene Tiefe (Lagen <= wandfrei sind ohnehin nicht gelistet)
 			if(d>=n2f_band_n) return 0.0f;                        // aeusserste Lage exakt 0 -- keine Kante
-			if(d<=n2f_band_plateau) return 1.0f;                  // Pufferzone volle Staerke
-			return (float)pow(0.5, (double)(d-n2f_band_plateau));
+			if(ds<=n2f_band_plateau) return 1.0f;                 // Pufferzone volle Staerke, ab wandfrei+1
+			return (float)pow(0.5, (double)(ds-n2f_band_plateau));
 		}
 		return n2f_band_prof==0u ? (float)(n2f_band_n+1u-d)/(float)n2f_band_n
 		                         : (float)(cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n)*cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n));
