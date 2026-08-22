@@ -300,3 +300,15 @@ Reihenfolge = Abarbeitung. Jeder Punkt eine Variable, jeder mit Wirknachweis im 
    wahren Wand -- fuers Wandmodell A/B-pflichtig, fuer ELIBB (q je Link) genau richtig.
 10. **Band-Skalierungsregel (Heiko):** Default-N aus dx ableiten -- konstante physikalische
     Bandtiefe, N halbiert bei doppeltem dx. Ueberschreibbar, Ansage im Log.
+
+11. **1c-Anforderungen praezisiert (Heiko 2026-08-22 abends):**
+    (a) FACETTENQUELLE = Remesh der VOXEL-Aussenwand (Marching-Cubes/Dual-Contouring +
+    Glaettung, Standardtechnik), NICHT die STL -- der effektive Solid ist nicht mehr die STL
+    (SAT-Schale +438k Zellen, Void-Fill, Duennteile). Die Voxel-Huelle beschreibt den Koerper,
+    den der Loeser wirklich rechnet, und liegt nahe der effektiven Halfway-Wand (entschaerft
+    den y_w-Eichkonflikt aus Punkt 9).
+    (b) ELIBB-LINK-KLASSEN: Ein-Zellen-Schema (EsoPull), q-ABHAENGIG (ELIBB-U-Fehlschlag V1),
+    und ALLE geschnittenen Links inkl. DIAGONALEN mit eigenem q = y_w/|c*n| -- gemessen sind
+    94 % der heilbaren ohneTang-Klasse Einzellink-diagonal (Slot-27, rauch_1a_kugel);
+    ein Achsen-only-ELIBB verfehlte genau die Zielpopulation. Variantenwahl (Marson-Familie)
+    nach Kosten/Nutzen durch den 1c-Planungsagenten gegen das Paper.
