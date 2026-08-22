@@ -1548,3 +1548,13 @@ Beide 4-mm-Arme bei t=335 ms, Karosseriezone, je Grobzellen-Lage vom Fahrzeug:
 FOLGE (Heiko-Regel "wenn binaer -> FNEQ rueckt vor"): FNEQ=1-A/B auf 8 mm gestartet
 (eine Variable gegen b8_breit_n16). Der Blockflecken-Anteil bleibt davon unberuehrt ->
 CFD_N2F_ZEITMITTEL (Arbeitsliste Punkt 4) und langfristig weichere Raumrestriktion.
+
+## 2026-08-22 abends — FNEQ=1 ist Produktionsstandard (Heiko-Entscheid)
+
+A/B `b8_breit_n16_fneq` gegen `b8_breit_n16` (eine Variable): Texturkante an der Bandgrenze
++171 % -> +8 % (weg), Band-Textur zurueck auf Umgebungsniveau, Lauf stabil (rc=0, kein
+Waechter), Paarungsbeweis Slots 25/26 scharf bestanden (0 Verletzungen). Ehrlicher Preis:
+cd_druck 1,568 -> 1,647 (2 sigma) -- der Kopplungs-Cd-Effekt schrumpft von -0,19 auf -0,11,
+der Rest war EQ-Artefakt (kuenstliche Dissipation drueckte Cd mit).
+Default CFD_N2F_SCHALE_FNEQ: 0 -> 1. EQ-Arm nur noch explizit, mit Warnung. Default-AUS der
+Kopplung bleibt bitidentisch. EQ-Altlaeufe sind gegen FNEQ-Laeufe nicht direkt vergleichbar.

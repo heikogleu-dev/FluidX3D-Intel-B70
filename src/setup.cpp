@@ -2414,7 +2414,15 @@ static void main_setup_fahrzeug_dd() {
 	//  CFD_N2F_SCHALE_XPLUS_SKAL Gewichtsskalierung [0;1] NUR fuer x+-Zellen (Wake-Messarm, Default 1,0).
 	//  CFD_N2F_SCHALE_IDENT      1 = Debug: Blend als exaktes No-Op (Paritaetsbeweis der f-Paarung).
 	const uint  n2f_lagen = env_u("CFD_N2F_SCHALE_LAGEN", 4u);
-	const uint  n2f_fneq  = min(1u, env_u("CFD_N2F_SCHALE_FNEQ", 0u));
+	// ★ DEFAULT-FLIP 2026-08-22 abends (Heiko: "FNEQ=1 ja, wird Standard"). Beleg: der EQ-Arm
+	// aequilibriert a-UNABHAENGIG (fneq-Loeschung = ~75x Smagorinsky-Zusatzdissipation im Band,
+	// Numerik-Pruefer) und erzeugte den binaeren Textur-Abdruck an der Bandgrenze (Arm 1:
+	// +150 % Texturkante). FNEQ-A/B b8_breit_n16_fneq: Kante weg (+8 % statt +171 %), Lauf
+	// stabil, Paarungsbeweis Slots 25/26 mit 0 Verletzungen bestanden. Der ehrliche Preis:
+	// cd_druck-Effekt der Kopplung schrumpft von -0,19 auf -0,11 (der Rest war EQ-Artefakt).
+	// Betrifft NUR aktive Kopplung -- Default-AUS (CFD_N2F_SCHALE=0) bleibt bitidentisch.
+	// Alle EQ-Altlaeufe vor diesem Datum sind gegen FNEQ-Laeufe nicht direkt vergleichbar.
+	const uint  n2f_fneq  = min(1u, env_u("CFD_N2F_SCHALE_FNEQ", 1u));
 	const uint  n2f_ident = min(1u, env_u("CFD_N2F_SCHALE_IDENT", 0u));
 	const uint  n2f_modus = n2f_ident ? 2u : n2f_fneq; // IDENT schlaegt FNEQ (Debug-Arm)
 	const float n2f_xskal = env_f("CFD_N2F_SCHALE_XPLUS_SKAL", 1.0f);
@@ -2509,7 +2517,7 @@ static void main_setup_fahrzeug_dd() {
 				+(n2f_band_prof==0u?string("linear"):n2f_band_prof==1u?string("cos^2"):("Plateau("+to_string(n2f_band_plateau)+" Lagen voll)+geometrisch"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
 				+"), Unterbodenspalt "+(n2f_band_ub>0u?"ENTHALTEN":"AUSGENOMMEN (Vergleichsarm)")+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ)":" (EQ)")+".");
 			if(n2f_wake>0u) print_info("N2F-BAND WAKE-KASTEN aktiv: achsparalleler Kasten in y/z-Ausdehnung der Fahrzeug-BBox, x von "+(n2f_wake_start==2u?string("RADSTANDMITTE"):n2f_wake_start==0u?string("HOECHSTER PUNKT"):string("HECK"))+" bis "+to_string(n2f_wake_abst)+" Grobzellen vor dem Nahfeld-Auslass; geht als ZWEITE SAATMENGE in dieselbe Distanztransformation, bekommt also denselben Auslauf wie das Koerperband.");
-			if(n2f_modus==0u) print_info("N2F-BAND EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");
+			if(n2f_modus==0u) print_warning("N2F-BAND: CFD_N2F_SCHALE_FNEQ=0 EXPLIZIT gesetzt -- der EQ-Arm ist seit 2026-08-22 NICHT mehr Standard (a-unabhaengige fneq-Loeschung, binaerer Textur-Abdruck). Nur noch fuer Vergleichslaeufe gegen EQ-Altbestand verwenden. Alte Empfehlung: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");
 			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im BAND-Modus werden sie NICHT angewandt (Ansage-Doktrin).");
 		}
 		else if(n2f_volumen>0u) {
