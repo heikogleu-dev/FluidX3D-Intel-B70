@@ -1621,3 +1621,42 @@ behoben ueber ~15 Pruefrunden.
 remesh_flaeche.vtk sichten); (2) f4_wandfrei_prod-Wiederholung NACH Heiko-Go (VTK; waehrend
 des Laufs keine GPU-Tools am Desktop!); (3) Anrampe gegen die innere Bandkante (8-mm-A/B:
 0/0/0,25/0,5/1,0/0,5/0,25/0); (4) ELIBB P2 nach Sichtung der Remesh-Flaeche.
+
+## 2026-08-22 spaet — ELIBB P1 Rauchtest + Pruefagent (Neustart-Sitzung)
+
+**Rauchtest (`p1_remesh_rauch`, 8 mm, `CFD_FACETTEN_DIAG=2`, 16 s):** 780.874 Grenzquads,
+780.402 Vertices, 1.561.748 Dreiecke; q-Abdeckung 3.508.284/3.508.284 Links (100 %),
+0 Fallback, Mittel q=0,499, Dezile 549/46898/209815/262227/1113963/1361494/262790/208593/41615/340.
+VTK 50 MB nach `export/p1_remesh_rauch/nah/remesh_flaeche.vtk`.
+
+**Heikos Sichtung:** Duennteile sauber; **enge Bereiche (Radhaus, Kuehler) werden teils
+zugeschmiert.** Deckt sich mit Pruefbefund 3 und ist der erste echte P1-Mangel.
+
+**Pruefagent (adversarial, gegen 5257fe0 + 4795880):**
+- **HOCH (Abnahmeluecke, kein Codefehler):** 100 % + Mittel 0,499 beweisen die richtige
+  SEITE nicht — ein Spiegelfehler q->1-q saehe identisch aus. Fehlende Abnahmen:
+  (a) Schnittzahl je Link mit t in (0,1] muss UNGERADE sein (gerade = Gegenflaechentreffer);
+  (b) Kugel-Referenz gegen analytisches q (Rauchtest lief nur am Fahrzeug);
+  (c) Achs- gegen Diagonallinks getrennt histogrammieren.
+- **MITTEL (Bug):** Bin-Schluessel setup.cpp:612/638 nutzt `(Nz+2u)` als y-Blockgroesse
+  statt `(Ny+2u)`. Nahfeld hat Ny>Nz -> Bin-Kollisionen. q bleibt korrekt (ray_tri prueft
+  exakt), aber verschmolzene Bins/Totkandidaten. Vor 4 mm fixen.
+- **MITTEL (= Heikos Beobachtung):** Komponentenklemme setup.cpp:597 erlaubt, dass bei
+  1-Zellen-Spalt BEIDE Waende exakt die Fluidmitte erreichen -> Seitenquad degeneriert
+  (det=0) und der Spalt ist aerodynamisch zu, obwohl das Voxelgitter ihn offen hat.
+  Kreuzen verhindert die Klemme, Beruehren nicht.
+- **Bestaetigt (Entwarnung):** 2-Bin-Suche ist vollstaendig, auch diagonal; Cutoff
+  t in (1e-9, 1+1e-6] korrekt; 100 % strukturell plausibel (Klemme +-0,5); Host-`cd[18]`
+  stimmt EXAKT mit der Kernel-`c()`-Reihenfolge (kernel.cpp:940-942) — P2-Auflage erfuellt;
+  Dezil-Klemme korrekt; Flaeche am Latsch bewusst offen.
+- **NIEDRIG:** Quads nicht orientiert (blockiert den Normalen-Vorzeichentest, stoert
+  VTK-Shading); 4 mm ~3,1 M Quads, Bins 0,7-1,5 GB (CSR statt unordered_map empfohlen),
+  VTK ASCII ~200-250 MB -> binaer oder gaten.
+
+**P1-Korrekturliste, in dieser Reihenfolge:**
+1. Engstellen-Schutz: Taubin-Klemme lokal auf die freie Weite begrenzen bzw. Vertices
+   in Spalten <=2 Zellen einfrieren (Voxelgeometrie schlaegt dort Glaettung).
+   Zaehler: Anzahl eingefrorener Vertices + min. Restweite je Spalt.
+2. Bin-Schluessel `(Nz+2u)` -> `(Ny+2u)`.
+3. Die drei fehlenden Abnahmezahlen (ungerade Schnittzahl, Kugel-q, Achs/Diagonal).
+4. Erst danach P2 (fac_q + Kernel).
