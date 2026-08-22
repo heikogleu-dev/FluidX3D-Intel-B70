@@ -1590,3 +1590,14 @@ BESTER Feldkonsistenz der vier (RMS 5,21 gegen 5,61-5,92) und kleinstem Band (~1
 N16-Zellen). => Rationaler 4-mm-Produktionskandidat: b8_sp_c-Konfiguration + WANDFREI.
 Produktionsfreigabe liegt bei Heiko. Code der Verschiebung pruefagenten-bestaetigt
 (0e01748 sauber; Nacharbeiten 9069bc8: Randfall-Guard wf+plateau>=N-1, Census-Ansage).
+
+## 2026-08-22 nacht — 4-mm-PRODUKTION f4_wandfrei_prod (Heiko-Freigabe): BAUPLAN-KRITERIUM 2 ERFUELLT
+
+Absturz bei t=0,405 s (CL_OUT_OF_RESOURCES -5: Zeichentool auf der Desktop-B70 waehrend des
+Laufs); Daten bis dahin gueltig, 205 Samples im Fenster 0,2-0,405. Gegen f4_std_diff2
+(gleiches Fenster): **cz_druck_rest -0,8421 -> -0,9262** -- Bauplan-Kriterium 2 (<= -0,92)
+ERSTMALS erfuellt. cd_druck +0,11 (wie prognostiziert), cz_band gehalten. Effekt bei 4 mm
+kleiner als bei 8 mm (-0,084 gegen -0,27); Prognose nicht falsifiziert, unterer Bandrand.
+Fehlend: letzte 95 ms + VTK-Dump. Innere Bandkante am Feld vermessen (Lage 2->3: du 8,0->3,8,
+Textur 3,8->1,1) -- Anrampe als naechster 8-mm-Arm geplant. FNEQ-Wirkung am Bandende
+bestaetigt (weiche Kante +30 % statt +150 %).
