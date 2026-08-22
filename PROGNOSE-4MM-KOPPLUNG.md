@@ -43,3 +43,31 @@ CFD_N2F_BAND_WAKE=1 CFD_N2F_BAND_WAKE_START_X=<Kabinendach>`, dazu `CFD_FAC_CD_E
   u-Negation). Der Planungsagent prueft das gerade.
 - Der Wake-Kasten rueckt zu nah an den Nahfeld-Auslass: CFD_N2F_BAND_WAKE_ABSTAND ist in
   GROBZELLEN (Default 16) und damit bei 4 mm nur noch 256 mm statt 512 mm.
+
+---
+
+## NACHTRAG vor dem Start: alpha 0,25 statt 0,50
+
+Der 8-mm-Arm `b8_breit_n16_a025` (eine Variable gegen `b8_breit_n16`) hat den Knopf gefunden,
+den der Bauplan an der falschen Stelle vermutet hatte:
+
+| | cd_druck | RMS Diff | Massenquelle | Klemme fern | untere Grenze |
+|---|---|---|---|---|---|
+| Kontrolle | 1,759 +- 0,022 | 9,715 | -- | 92.144 | 12.306 |
+| alpha 0,50 | 1,568 +- 0,028 | 3,613 | 1,68 % | 693.347 | 524.762 |
+| alpha 0,25 | 1,499 +- 0,029 | 3,929 | 1,02 % | 252.897 | 185.198 |
+
+Halbes alpha: -64 % Klemmtreffer, -39 % Massenquelle, Kosten 8,7 % Feldkonsistenz.
+Damit ist `div(u_blend) ~ alpha*grad(w)*Delta_u` bestaetigt -- und die Bauplan-Annahme
+"eine breitere Rampe reduziert das linear" endgueltig widerlegt (N=8 -> N=16 aenderte
+1,63 % -> 1,68 %, also nichts).
+
+**Unerklaert und deshalb benannt:** cd_druck ist NICHT monoton in alpha. Bei alpha = 0 muss
+es zwangslaeufig auf 1,759 zurueck, bei 0,25 steht es bei 1,499, bei 0,50 bei 1,568 --
+irgendwo zwischen 0 und 0,25 liegt ein Minimum. Der Unterschied 0,25 gegen 0,50 ist mit
+1,7 sigma schwach. Die Wahl alpha = 0,25 ist ueber Klemme und Massenquelle begruendet,
+NICHT ueber cd_druck.
+
+**Angepasste Vorhersage 1:** cd_druck faellt von 0,8428 um 10 bis 16 Prozent auf
+0,708 bis 0,758 (8-mm-Effekt bei alpha 0,25: -14,8 %). *Falsifiziert ueber 0,80.*
+Vorhersagen 2 bis 5 bleiben unveraendert.
