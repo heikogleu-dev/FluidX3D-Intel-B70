@@ -2494,11 +2494,11 @@ static void main_setup_fahrzeug_dd() {
 	// KOERPERbands werden nicht gelistet -- das Band zieht sich von der Wand zurueck. Messgrund:
 	// die Wand-Schreibung verschlechtert die Fernfeld-Abloesung aktiv (11,2 % gegen 43,7 %
 	// ungekoppelt gegen 35,6 % nah; das 4x4x4-Blockmittel traegt keine 32-mm-Abloeseschichten).
-	// Der Wake-Kasten bleibt unberuehrt. Default 0 = bitidentisch.
+	// Auch wandnahe KASTENKERN-Zellen (Chebyshev <= k zum Fahrzeug) werden entfernt -- im w3-Lauf 30 % des Kastens. Default 0 = bitidentisch.
 	const uint n2f_wandfrei  = env_u("CFD_N2F_BAND_WANDFREI", 0u);
 	if(n2f_wandfrei>0u&&n2f_band==0u) print_warning("CFD_N2F_BAND_WANDFREI ohne CFD_N2F_BAND=1 ist ein stiller No-Op (Ansage-Doktrin).");
 	if(n2f_band>0u&&n2f_wandfrei>=n2f_band_n) print_error("CFD_N2F_BAND_WANDFREI >= N: das ganze Koerperband waere leer -- dafuer gibt es CFD_N2F_BAND_NURWAKE=1 (Fahrzeug als reine Sperre, sauberere Semantik).");
-	if(n2f_band>0u&&n2f_wandfrei>0u) print_info("N2F-BAND WANDFREI (1b): Koerperband-Lagen 1.."+to_string(n2f_wandfrei)+" werden NICHT gelistet -- das Band beginnt erst bei Lage "+to_string(n2f_wandfrei+1u)+". Wake-Kasten unberuehrt. Damit ist auch CFD_FERN_FACETTEN freigegeben (die Lage-1-Sperre entfaellt, s. dort).");
+	if(n2f_band>0u&&n2f_wandfrei>0u) print_info("N2F-BAND WANDFREI (1b): Koerperband-Lagen 1.."+to_string(n2f_wandfrei)+" werden NICHT gelistet -- das Band beginnt erst bei Lage "+to_string(n2f_wandfrei+1u)+". Wandnahe Kastenkern-Zellen werden MIT entfernt (Scan). Damit ist auch CFD_FERN_FACETTEN freigegeben (nur ohne NURWAKE (die Lage-1-Sperre entfaellt, s. dort).");
 	if(n2f_nurwake>0u&&n2f_band==0u) print_warning("CFD_N2F_BAND_NURWAKE=1 ohne CFD_N2F_BAND=1 ist ein stiller No-Op -- der Schalter wirkt ausschliesslich im BAND-Listenbauer (Pruefagent-B-N6).");
 	const uint n2f_wake_start= min(2u, env_u("CFD_N2F_BAND_WAKE_START", 0u)); // 0 = hoechster Punkt, 1 = Heck, 2 = Radstandmitte
 	const uint n2f_wake_abst = env_u("CFD_N2F_BAND_WAKE_ABSTAND", 16u);
@@ -2517,6 +2517,7 @@ static void main_setup_fahrzeug_dd() {
 	// Vorlaeufer: V1 fuhr 2026-05-16 eine "Plateau-Rampe" nach demselben Gedanken (Phase 6C).
 	const uint n2f_band_plateau = max(1u, min(n2f_band_n>1u?n2f_band_n-1u:1u, env_u("CFD_N2F_BAND_PLATEAU", 2u)));
 	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_band_n<2u) print_error("CFD_N2F_BAND_PROFIL=2 braucht N >= 2: bei N=1 ist die einzige Lage die Nulllage -- das ganze Band waere gewichtslos (B-P3).");
+	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_wandfrei>=n2f_band_plateau) print_warning("CFD_N2F_BAND_WANDFREI ("+to_string(n2f_wandfrei)+") frisst das Profil-2-Plateau ("+to_string(n2f_band_plateau)+" Lagen) ganz oder teilweise -- die Plateau-Ansage beschreibt dann nicht mehr die wirksame Rampe.");
 	if(getenv("CFD_N2F_BAND_PLATEAU")&&n2f_band_prof!=2u) print_warning("CFD_N2F_BAND_PLATEAU ist gesetzt, wirkt aber nur bei CFD_N2F_BAND_PROFIL=2 (B3; Ansage-Doktrin).");
 	auto band_w = [&](const uint d) { // d = 1..N, gibt w in (0,1]; a = alpha*w
 		if(n2f_band_prof==2u) {                                   // Plateau + geometrisch
@@ -2553,7 +2554,7 @@ static void main_setup_fahrzeug_dd() {
 		if(n2f_volumen==0u&&n2f_lagen==0u&&getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL wird im Kontrollarm LAGEN=0 NICHT angewandt (uniformes Gewicht 1,0 ist die Definition des Altverhaltens).");
 		if(n2f_volumen==0u&&n2f_xskal==0.0f) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL=0: x+-Zellen bleiben mit Gewicht 0 in der Liste und wuerden auf ihr LOKALES Gleichgewicht projiziert (a=0 ist im EQ-Arm KEIN No-Op; im FNEQ-Arm nahezu, in IDENT exakt ein No-Op) -- zum Abschalten der Flaeche CFD_N2F_SCHALE_XPLUS=0 nutzen.");
 	}
-	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT")||getenv("CFD_N2F_BAND_WAKE")||getenv("CFD_N2F_BAND_NURWAKE")||getenv("CFD_N2F_BAND_WAKE_START")||getenv("CFD_N2F_BAND_WAKE_START_X")||getenv("CFD_N2F_BAND_WAKE_ABSTAND")||getenv("CFD_N2F_BAND_PLATEAU")||getenv("CFD_N2F_PARITAET"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_BAND_WAKE/_START/_START_X/_ABSTAND, CFD_N2F_PARITAET, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c; die WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Liste -- getenv ist Exaktvergleich, Pruefagent-B8).");
+	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT")||getenv("CFD_N2F_BAND_WAKE")||getenv("CFD_N2F_BAND_NURWAKE")||getenv("CFD_N2F_BAND_WAKE_START")||getenv("CFD_N2F_BAND_WAKE_START_X")||getenv("CFD_N2F_BAND_WAKE_ABSTAND")||getenv("CFD_N2F_BAND_PLATEAU")||getenv("CFD_N2F_BAND_WANDFREI")||getenv("CFD_N2F_PARITAET"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_BAND_WAKE/_START/_START_X/_ABSTAND, CFD_N2F_PARITAET, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c; die WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Liste -- getenv ist Exaktvergleich, Pruefagent-B8).");
 	// ★ P8 (Offen-Punkt 8): FACETTEN AUCH IM FERNFELD. Der 32-mm-Treppenkoerper verdraengt +15,5 %
 	// Volumen (Schritt-0-Census fc0edcf) und praegt dem Nahfeld ueber die Kopplungsebenen ein zu
 	// grobes Druckfeld auf -- der Facettenpfad macht die Fernfeld-Wand druckkonsistenter. Schalter
@@ -2920,7 +2921,11 @@ static void main_setup_fahrzeug_dd() {
 		// stromab HOEHER als z_lo -- der Blend schriebe dann in Zellen, die boden_eq danach
 		// ueberschreibt. Das Maximum beider deckt beide Faelle.
 		const uint z_lo = max(1u, max(env_u("CFD_FERN_BODEN_EQ", 0u), env_u("CFD_FERN_BODEN_EQ_DOWN", 0u))+1u); // boden_eq-Band bleibt unangetastet -- TRAGEND, nicht redundant
-		if(env_u("CFD_FERN_FACETTEN",0u)>0u&&n2f_wandfrei==0u&&n2f_nurwake==0u) print_error("CFD_N2F_BAND=1 mit CFD_FERN_FACETTEN>0 OHNE Wandrueckzug: Lage 1 IST definitionsgemaess die karosserienahe Zellschicht, also genau die FERN_FACETTEN-Menge -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nur mit CFD_N2F_BAND_WANDFREI>=1 oder NURWAKE freigegeben (1b, 2026-08-22).");
+		// ★ Pruefagent 2026-08-22 spaet (HOCH): die NURWAKE-Schiene der Freigabe war UNSICHER --
+		// im NURWAKE-Arm ist d der KASTEN-Abstand, nicht der Wandabstand; wandnahe RAMPEN-Zellen
+		// blieben gelistet und ueberschrieben die FERN_FACETTEN-Schicht still (N1-Klasse).
+		// Bewiesen sicher ist allein wandfrei>0 UND nurwake==0 (EsoPull-Slot-Analyse verifiziert).
+		if(env_u("CFD_FERN_FACETTEN",0u)>0u&&!(n2f_wandfrei>0u&&n2f_nurwake==0u)) print_error("CFD_N2F_BAND=1 mit CFD_FERN_FACETTEN>0: freigegeben ist NUR die Kombination CFD_N2F_BAND_WANDFREI>=1 ohne NURWAKE (im NURWAKE-Arm ist der Bandabstand Kasten-, nicht Wandabstand -- wandnahe Rampenzellen ueberschrieben die Facettenschicht still). Lage 1 IST definitionsgemaess die karosserienahe Zellschicht, also genau die FERN_FACETTEN-Menge -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nur mit CFD_N2F_BAND_WANDFREI>=1 oder NURWAKE freigegeben (1b, 2026-08-22).");
 		// ---- SAATMENGE. HIER SITZT DIE GEFAEHRLICHSTE FALLE DES GANZEN ARMS:
 		// Die FAHRBAHN ist bei z=0 flaechendeckend TYPE_S. Mit `flags&TYPE_S` als Saat waere das
 		// "Band ums Fahrzeug" ein N Zellen dicker Teppich ueber cNx*cNy Zellen -- bei 4 mm sind das
@@ -3066,7 +3071,7 @@ static void main_setup_fahrzeug_dd() {
 		// ---- LISTE. Reihenfolge z,y,x aufsteigend = aufsteigend im linearen Index (deterministisch,
 		// Muster des Volumen-Listenbauers; keine std::map noetig).
 		std::vector<ulong> lage_n(n2f_band_n,0ull), lage_nan(n2f_band_n,0ull), lage_ub(n2f_band_n,0ull), lage_te(n2f_band_n,0ull);
-		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausserhalb=0ull, ausgelassen_w0=0ull, ausgelassen_wf=0ull, ausgelassen_wf_kern=0ull;
+		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausgelassen_ub_kern=0ull, ausserhalb=0ull, ausgelassen_w0=0ull, ausgelassen_wf=0ull, ausgelassen_wf_kern=0ull;
 		const int n2f_r=(int)ratio, n2f_w0=-(n2f_r/2);
 		for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
 			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
@@ -3078,7 +3083,7 @@ static void main_setup_fahrzeug_dd() {
 			// Zelle unter dem Fahrzeug. Billig und robust auch bei nicht-quaderfoermigem Koerper.
 			bool unterboden=false;
 			for(uint zz=z+1u; zz<=sz1&&!unterboden; zz++) if(ist_fzg(dt[(size_t)((ulong)x+((ulong)y+(ulong)zz*(ulong)cNy)*(ulong)cNx)])) unterboden=true;
-			if(unterboden&&n2f_band_ub==0u) { ausgelassen_ub++; continue; }
+			if(unterboden&&n2f_band_ub==0u) { ausgelassen_ub++; if(wake_kern) ausgelassen_ub_kern++; continue; } // Kern getrennt: geht ins WAKE-ABNAHME-Soll (Pruefagent-Befund 3)
 			// Deckungspunkt muss im Nahfeld-Fussabdruck liegen, sonst gibt es keine feine Quelle.
 			if(x<NF_OX||x>=NF_OX+cex||y<NF_OY||y>=NF_OY+cey||z>=NF_OZ+cez) { ausserhalb++; continue; }
 			const uint lage = wake_kern ? 0u : (uint)d-1u;
@@ -3225,7 +3230,7 @@ static void main_setup_fahrzeug_dd() {
 			if(n2f_wake>0u) {
 				ulong kern_gelistet=0ull;
 				for(const ulong nn : n2f_liste_c) if(dt[(size_t)nn]==254u) kern_gelistet++;
-				const ulong wake_soll = wake_n - ausgelassen_wf_kern; // 1b: wandnahe Kernzellen bewusst nicht gelistet
+				const ulong wake_soll = wake_n - ausgelassen_wf_kern - ausgelassen_ub_kern; // minus WANDFREI und minus Unterboden-Filter (Pruefagent-Befund 3: im UNTERBODEN=0-Arm brach die Abnahme sonst faelschlich ab) // 1b: wandnahe Kernzellen bewusst nicht gelistet
 				if(kern_gelistet!=wake_soll) print_error("N2F-BAND WAKE ABNAHME GESCHEITERT: Census-Soll (Kernzellen minus WANDFREI) "+to_string(wake_soll)+" an, gelistet sind "+to_string(kern_gelistet)+" ("+to_string((float)(100.0*(double)kern_gelistet/(double)max(1ull,wake_n)),1u)+" %). Die Differenz ist ein LAUTLOSER No-Op -- genau Fehler B1 vom 2026-08-22.");
 				else print_info("N2F-BAND WAKE ABNAHME: "+to_string(kern_gelistet)+" Kernzellen gelistet == Soll ("+to_string(wake_n)+" Census minus "+to_string(ausgelassen_wf_kern)+" WANDFREI).");
 			}
@@ -4576,7 +4581,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Facetten-Wirkpfad Fernfeld (P8): "+to_string(wzc)+" (Soll "+to_string(sollc)+" mod 2^32), tau-Klemme "+to_string((ulong)dc->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)dc->rho_clamp_hits[9])
 			+(env_u("CFD_FERN_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[10])+", Skalar "+to_string((ulong)dc->rho_clamp_hits[12])
-			+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
+			+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)dc->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[16])+", alpha>ut "+to_string((ulong)dc->rho_clamp_hits[18])+" (PEMA/APG im Fernfeld AUS)"):string("")));
 		if(wzc!=(sollc&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Fernfeld -- Lookup oder Bindung defekt (P8).");
 		if(env_u("CFD_FERN_FACETTEN",0u)>=3u) { // iMEM-Erhaltung analog Nahfeld (Delta-m/Normal-Rest aus dem kumulativen Akkumulator)
