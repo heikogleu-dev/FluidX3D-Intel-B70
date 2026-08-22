@@ -54,3 +54,48 @@ Harness-Nachweis Pflicht. (2) ELIBB nicht massenerhaltend (Marson) -- Delta-m-Ba
 (3) Kraftpfad: object_force bleibt Phantom; Reibungs-Akkumulator erweitern. (4) FP16C:
 FP32-Sprosse in der Leiter. (5) Marson-PDF lokal nicht mehr vorhanden -- Belegkette ist
 die V1-Vollextraktion; FQ-Koeffizienten und Marson-Thesis (NELI) nie beschafft.
+
+---
+
+# P1 ABGESCHLOSSEN (2026-08-22) — was P2 daraus erbt
+
+## Was P1 belegt hat (Messung, nicht Annahme)
+| Frage | Antwort | Beleg |
+|---|---|---|
+| Liefert der Remesh ueberhaupt q? | 100 % der Solid-Links, 0 HWBB-Rueckfall | `p1_fz8` |
+| Ist q besser als HWBB? | Rohe Voxelflaeche gibt q **exakt 0,5000** auf ALLEN Links = HWBB. Erst die Glaettung erzeugt Information. | `p1_kugel_ref` |
+| Wie genau? | RMS gegen die analytische Kugel 0,2642 (roh) -> 0,1563 (15x) -> saettigt bei 0,1430 | `p1_it*` |
+| Trifft der Strahl die richtige Flaeche? | ABNAHME PARITY bestanden: jede Verbindung schneidet die Flaeche ungerade oft | beide Faelle |
+| Verschliesst die Flaeche Wege? | ABNAHME DURCHSCHUSS bestanden: 0 von 3.749.916 Achs-Fluidverbindungen gekappt | `p1_fz{3,8,15}` |
+| Taugt die STL als q-Quelle? | **Nein.** Nur 40,5 % der Solid-Links haben eine STL-Flaeche in Reichweite, 59,5 % sind SAT-Schale und Void-Fill. Die Wand des LBM ist der Voxelkoerper. | `p1_stl_ab` |
+| Richtungstabelle? | Host-`cd[18]` deckt sich EXAKT mit der Kernel-`c()` (kernel.cpp:940-942), spaltenweise geprueft | Pruefagent |
+
+## Feste Entscheidungen fuer P2
+1. **q kommt aus der geglaetteten Remesh-Flaeche**, nicht aus der STL. Begruendet oben.
+2. **Glaettungstiefe Standard 8** (`CFD_FACETTEN_REMESH_ITER`). ELIBB rechnet mit
+   a2=(1-q)/q; bei ITER=8 ist q_min 0,196 (Kugel) bzw. 0,169 (Fahrzeug-Engstellen),
+   also a2_max rund 5. Bei ITER=15 waere a2_max schon 9-15. Der Geometriegewinn von 15
+   gegenueber 8 betraegt nur 12 % des Resthubs -- schlechtes Tauschverhaeltnis.
+3. **q-Boden ist Pflicht, keine Kuer.** Auch bei ITER=8 gibt es einen Schwanz nach unten.
+   Vorschlag: q < q_min -> HWBB (q=0,5) statt Extrapolation, mit eigenem Zaehler.
+   q_min als Schalter, Startwert 0,1. Der Zaehler ist die Abnahme: er MUSS feuern und
+   klein bleiben (bei ITER=15 waren es 549 von 3,5 Mio = 0,016 %).
+4. **Eq. 25e in Marson 2021 (PRE 103:053308) ist ein Druckfehler** -- a2=(1-q)/q nutzen.
+
+## Was P2 als Erstes braucht
+1. **q auf die GPU.** Nur Solid-Links, in der Reihenfolge der `cd[18]`-Tabelle.
+   Groessenordnung 4 mm: rund 3 Mio wandnahe Zellen x 18. Als `uchar` quantisiert
+   (q in 1/255) reicht die Aufloesung locker -- der q-Fehler der FLAECHE ist 0,14,
+   die Quantisierung 0,004. Speicher damit im dreistelligen MB-Bereich statt GB.
+2. **Esoteric-Pull-Richtungskonvention** (gerade/ungerade i) -- die EINZIGE Auflage,
+   die der Pruefagent fuer P2 offen gelassen hat. Vor dem ersten Kernel klaeren.
+3. **Kugel-Gate zuerst** (Iron Rule Testleiter: CPU -> iGPU -> B70). Die Kugel hat
+   analytisches q und eine Literatur-Cd-Kurve; ein ELIBB, das dort nicht traegt,
+   braucht am Fahrzeug nicht getestet zu werden.
+
+## Was P2 NICHT loesen muss
+Die zugeschmierten Radhaeuser (Arbeitsliste 12) sind ein VOXEL-Problem, kein
+Flaechenproblem -- Void-Fill mit 6er- statt Gitterkonnektivitaet. Der Schalter
+`CFD_VOIDFILL_KONN=18` liegt fertig da. Bewusst nach P2 eingeplant: ob eine offene
+Radhaustasche etwas bewegt, laesst sich erst beurteilen, wenn die Wandbehandlung dort
+ueberhaupt q-abhaengig ist.
