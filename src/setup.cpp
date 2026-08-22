@@ -2448,6 +2448,24 @@ static void main_setup_fahrzeug_dd() {
 	const uint  n2f_band_n   = max(1u, env_u("CFD_N2F_BAND_N", 8u));
 	const uint  n2f_band_prof= min(1u, env_u("CFD_N2F_BAND_PROFIL", 0u));
 	const uint  n2f_band_ub  = min(1u, env_u("CFD_N2F_BAND_UNTERBODEN", 1u));
+	// ★ WAKE-KASTEN (Heiko 2026-08-22). Statt Frontalprojektion + alles stromab ein schlichter
+	// achsparalleler Kasten: y-Weite und z-Hoehe der Fahrzeug-BBox, x von einem waehlbaren Start
+	// bis kurz vor den Nahfeld-Auslass. Vier Zahlen statt einer Silhouettenmaske -- und weil der
+	// Kasten als ZWEITE SAATMENGE in dieselbe Distanztransformation geht, bekommt er denselben
+	// Auslauf wie das Koerperband, ohne eine Zeile Sonderlogik.
+	//  CFD_N2F_BAND_WAKE          1 = Kasten dazu (Default 0 = nur Koerperband).
+	//  CFD_N2F_BAND_WAKE_START    0 = am DACHSCHEITEL (Default, Heiko-Vorschlag: erfasst Heckdeck
+	//                             und Backlight mit, wo die Nah-Fern-Differenz am groessten ist),
+	//                             1 = am HECK (konservativ, reiner Nachlauf) -- Ein-Variablen-A/B.
+	//  CFD_N2F_BAND_WAKE_ABSTAND  Grobzellen, die vor dem Nahfeld-Auslass FREI bleiben (Default 16).
+	//                             Grund ist NICHT Zirkularitaet -- x+ ist Druckauslass und wird
+	//                             nicht getrieben --, sondern die Randkontamination der feinen
+	//                             Loesung: die letzte Fussabdruck-Spalte bildet auf die feine
+	//                             TYPE_E-Auslassebene ab; von dort wuerde man u_inf ins Totwasser
+	//                             einspeisen, also das Gegenteil der Absicht.
+	const uint n2f_wake      = min(1u, env_u("CFD_N2F_BAND_WAKE", 0u));
+	const uint n2f_wake_start= min(2u, env_u("CFD_N2F_BAND_WAKE_START", 0u)); // 0 = hoechster Punkt, 1 = Heck, 2 = Radstandmitte
+	const uint n2f_wake_abst = env_u("CFD_N2F_BAND_WAKE_ABSTAND", 16u);
 	if(n2f_band>0u&&n2f_volumen>0u) print_error("CFD_N2F_BAND=1 und CFD_N2F_VOLUMEN=1 schliessen sich aus -- beide ersetzen denselben Listenbauer. Genau einen Arm waehlen.");
 	// Gewichtsprofil als eine Funktion, damit Census-Ausgabe und Listenbau garantiert dasselbe
 	// rechnen (getrennte Formeln waren im Altbau schon einmal auseinandergelaufen).
@@ -2462,6 +2480,7 @@ static void main_setup_fahrzeug_dd() {
 				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
 				+(n2f_band_prof==0u?string("linear"):string("cos^2"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
 				+"), Unterbodenspalt "+(n2f_band_ub>0u?"ENTHALTEN":"AUSGENOMMEN (Vergleichsarm)")+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ)":" (EQ)")+".");
+			if(n2f_wake>0u) print_info("N2F-BAND WAKE-KASTEN aktiv: achsparalleler Kasten in y/z-Ausdehnung der Fahrzeug-BBox, x von "+(n2f_wake_start==2u?string("RADSTANDMITTE"):n2f_wake_start==0u?string("HOECHSTER PUNKT"):string("HECK"))+" bis "+to_string(n2f_wake_abst)+" Grobzellen vor dem Nahfeld-Auslass; geht als ZWEITE SAATMENGE in dieselbe Distanztransformation, bekommt also denselben Auslauf wie das Koerperband.");
 			if(n2f_modus==0u) print_info("N2F-BAND EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");
 			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im BAND-Modus werden sie NICHT angewandt (Ansage-Doktrin).");
 		}
@@ -2828,6 +2847,43 @@ static void main_setup_fahrzeug_dd() {
 			dt[(size_t)nn]=255u; saat++;
 			sx0=min(sx0,x); sx1=max(sx1,x); sy0=min(sy0,y); sy1=max(sy1,y); sz0=min(sz0,z); sz1=max(sz1,z);
 		}
+		// DACHSCHEITEL: kleinstes x, an dem das Fahrzeug seine groesste Hoehe erreicht. Zweiter Lauf,
+		// weil sz1 erst nach dem ersten feststeht. Das ist die Vorderkante des Daches.
+		uint x_dach=cNx, x_radmitte=0u;
+		for(uint y=sy0; y<=sy1; y++) for(uint x=sx0; x<=sx1; x++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz1*(ulong)cNy)*(ulong)cNx)]==255u) { x_dach=min(x_dach,x); break; }
+		if(x_dach>=cNx) x_dach=sx0; // kein Treffer auf der obersten Ebene (duenne Anbauteile) -> Fahrzeugfront
+		// HOEHENPROFIL laengs x, damit die Wahl des Wake-Kastenstarts auf Daten steht und nicht auf
+		// der Annahme "hoechster Punkt = Dach". Bei diesem Fahrzeug ist der hoechste Punkt der
+		// HECKFLUEGEL, nicht die Kabine -- ohne dieses Profil sieht man das nicht.
+		{
+			string prof; const uint schritte=12u;
+			for(uint k=0u; k<schritte; k++) {
+				const uint x = sx0 + (sx1-sx0)*k/(schritte-1u);
+				uint hmax=0u;
+				for(uint z=sz1+1u; z-->0u; ) { bool tr=false; for(uint y=sy0; y<=sy1&&!tr; y++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)]==255u) tr=true; if(tr) { hmax=z; break; } }
+				prof += (k?" ":"") + to_string(x) + ":" + to_string(hmax);
+			}
+			// RADSTAND (Heiko-Vorschlag 2026-08-22): die Raeder sind die Fahrzeugzellen auf den
+			// untersten z-Ebenen. Ihr x-Histogramm hat zwei Haufen -- Vorder- und Hinterachse.
+			// Der Mittelpunkt dazwischen ist ein BEGRUENDETER Kastenstart, im Unterschied zum
+			// hoechsten Punkt, der bei diesem Fahrzeug zufaellig am Heckfluegel liegt.
+			{
+				std::vector<uint> hist(sx1-sx0+1u, 0u);
+				// NUR die UNTERSTE Ebene. Erste Fassung nahm sz0 und sz0+1 -- damit dominierte der
+				// FRONTSPLITTER das Histogramm und die "Vorderachse" landete 3 Grobzellen hinter der
+				// Fahrzeugnase (gemessen 2026-08-22: x = 86 bei Fahrzeugfront 83). Der Splitter ist
+				// flach und breit, die Reifenlatsche beruehren als einzige wirklich den Boden.
+				for(uint y=sy0; y<=sy1; y++) for(uint x=sx0; x<=sx1; x++)
+					if(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz0*(ulong)cNy)*(ulong)cNx)]==255u) hist[x-sx0]++;
+				uint vx=0u, hx=0u; const uint mitte=(sx1-sx0)/2u; uint bv=0u, bh=0u;
+				for(uint k=0u; k<=mitte; k++)            if(hist[k]>bv) { bv=hist[k]; vx=sx0+k; }   // staerkster Haufen vorn
+				for(uint k=mitte+1u; k<hist.size(); k++) if(hist[k]>bh) { bh=hist[k]; hx=sx0+k; }   // staerkster Haufen hinten
+				x_radmitte = (bv>0u&&bh>0u) ? (vx+hx)/2u : x_dach;
+				if(bv>0u&&bh>0u&&(vx-sx0<3u||sx1-hx<3u)) print_warning("N2F-BAND RADSTAND: eine erkannte Achse liegt weniger als 3 Grobzellen von der Fahrzeugkante entfernt (vorn "+to_string(vx-sx0)+", hinten "+to_string(sx1-hx)+") -- das ist eher ein Splitter oder Diffusor als ein Radaufstand. Kastenstart lieber ueber CFD_N2F_BAND_WAKE_START_X aus dem Hoehenprofil setzen.");
+				print_info("N2F-BAND RADSTAND: Vorderachse bei Grobzelle x = "+to_string(vx)+" ("+to_string(bv)+" Latschzellen auf der untersten Ebene), Hinterachse x = "+to_string(hx)+" ("+to_string(bh)+"); Mitte x = "+to_string(x_radmitte)+". Als Kastenstart ueber CFD_N2F_BAND_WAKE_START=2 waehlbar.");
+			}
+			print_info("N2F-BAND HOEHENPROFIL (Grobzellen, x:z_max ueber alle y): "+prof+" -- hoechster Punkt bei x = "+to_string(x_dach)+" (z = "+to_string(sz1)+"), Fahrzeug x["+to_string(sx0)+".."+to_string(sx1)+"]. Wer den Wake-Kasten AB KABINENDACH will, liest den x-Wert hier ab und setzt CFD_N2F_BAND_WAKE_START_X.");
+		}
 		if(saat==0ull) print_error("N2F-BAND: keine einzige Fahrzeug-Grobzelle (0x41) gefunden -- Saatmenge leer, das Band waere leer. Voxelisierung des Fernfelds pruefen.");
 		// Fahrbahn-Falle als HARTER Test, nicht als Kommentar. ERSTE FASSUNG WAR FALSCH (2026-08-22):
 		// sie verglich die 3D-Zellzahl der Saat gegen die 2D-Fahrbahnflaeche und schlug damit am
@@ -2839,6 +2895,25 @@ static void main_setup_fahrzeug_dd() {
 		ulong saat_z0=0ull;
 		for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) if(dt[(size_t)((ulong)x+(ulong)y*(ulong)cNx)]==255u) saat_z0++;
 		if(saat_z0>(ulong)((double)cNx*(double)cNy*0.10)) print_error("N2F-BAND: "+to_string(saat_z0)+" Saatzellen liegen auf der Ebene z=0, das sind ueber 10 % der Fahrbahnflaeche ("+to_string(cNx)+"x"+to_string(cNy)+") -- die Maske faengt die STRASSE, nicht das Fahrzeug. Soll: flags == TYPE_S|TYPE_X (exakt).");
+		// ---- WAKE-KASTEN als ZWEITE Saatmenge (Heiko 2026-08-22). Er kommt mit Gewicht 1 in die
+		// Liste UND dient der Distanztransformation als Quelle -- damit laeuft der Auslauf in y, z
+		// und stromab automatisch mit demselben Profil wie am Koerperband, ohne Sonderlogik.
+		uint wx0=0u, wx1=0u, wy0=0u, wy1=0u, wz1=0u; ulong wake_n=0ull;
+		if(n2f_wake>0u) {
+			const uint wake_start_x = env_u("CFD_N2F_BAND_WAKE_START_X", 0u); // 0 = aus; sonst Grobzell-x, ueberstimmt _START
+			wx0 = wake_start_x>0u ? wake_start_x : (n2f_wake_start==2u ? x_radmitte : (n2f_wake_start==0u ? x_dach : sx1+1u));
+			if(wake_start_x>0u) print_info("N2F-BAND WAKE: Start explizit auf Grobzelle x = "+to_string(wake_start_x)+" gesetzt (CFD_N2F_BAND_WAKE_START_X ueberstimmt CFD_N2F_BAND_WAKE_START).");
+			const int x_ende = (int)(NF_OX+cex-1u) - (int)n2f_wake_abst;
+			if(x_ende<=(int)wx0) print_error("N2F-BAND WAKE: Kastenstart (x = "+to_string(wx0)+") liegt hinter dem Ende (x = "+to_string(x_ende)+"). CFD_N2F_BAND_WAKE_ABSTAND ("+to_string(n2f_wake_abst)+" Grobzellen) ist groesser als der Nachlauf im Fussabdruck -- Abstand senken oder Nahfeld-Box verlaengern.");
+			wx1 = (uint)x_ende; wy0 = sy0; wy1 = sy1; wz1 = sz1;
+			for(uint z=z_lo; z<=wz1; z++) for(uint y=wy0; y<=wy1; y++) for(uint x=wx0; x<=wx1; x++) {
+				const size_t k=(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx);
+				if(dt[k]!=0u) continue; // Fahrzeug bleibt Saat (255)
+				dt[k]=254u; wake_n++;   // 254 = Wake-Kern: Quelle der Dilatation UND Listenzelle mit w = 1
+			}
+			print_info("N2F-BAND WAKE-CENSUS: Kasten grob x["+to_string(wx0)+".."+to_string(wx1)+"] y["+to_string(wy0)+".."+to_string(wy1)+"] z["+to_string(z_lo)+".."+to_string(wz1)+"] = "+to_string(wake_n)+" Kernzellen (Start "+(n2f_wake_start==2u?"RADSTANDMITTE x="+to_string(x_radmitte):n2f_wake_start==0u?"HOECHSTER PUNKT x="+to_string(x_dach):"HECK x="+to_string(sx1+1u))+", Fahrzeug-BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z[..%"+to_string(sz1)+"]); frei vor dem Nahfeld-Auslass: "+to_string((int)(NF_OX+cex-1u)-(int)wx1)+" Grobzellen.");
+			if(wake_n==0ull) print_error("N2F-BAND WAKE: Kasten enthaelt keine einzige freie Zelle -- Geometrie pruefen.");
+		}
 		// ---- CHEBYSHEV-DISTANZTRANSFORMATION, separabel: N Runden a drei 1-D-Dilatationen.
 		// Deterministisch, keine Warteschlange, Laufzeit im Millisekundenbereich. Arbeitsbereich ist
 		// die Saat-BBox um N+1 aufgeblasen und aufs Gitter geklemmt -- alles ausserhalb kann per
@@ -2871,7 +2946,8 @@ static void main_setup_fahrzeug_dd() {
 		for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
 			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
 			const uchar d=dt[(size_t)nn];
-			if(d==0u||d==255u) continue;                       // unerreicht oder Saat (= Fahrzeug selbst)
+			if(d==0u||d==255u) continue;                       // unerreicht oder Fahrzeug-Saat
+			const bool wake_kern = (d==254u);                  // Wake-Kasten: Lage 0, volles Gewicht
 			if(z<z_lo) { ausgelassen_zlo++; continue; }
 			// UNTERBODEN-Kennung: liegt in derselben (x,y)-Saeule OBERHALB eine Saatzelle, ist die
 			// Zelle unter dem Fahrzeug. Billig und robust auch bei nicht-quaderfoermigem Koerper.
@@ -2881,11 +2957,12 @@ static void main_setup_fahrzeug_dd() {
 			// Deckungspunkt muss im Nahfeld-Fussabdruck liegen, sonst gibt es keine feine Quelle.
 			if(x<NF_OX||x>=NF_OX+cex||y<NF_OY||y>=NF_OY+cey||z>=NF_OZ+cez) { ausserhalb++; continue; }
 			const uchar bo=lbm_c.flags[nn]&(TYPE_S|TYPE_E);
-			if(bo==TYPE_E) lage_te[d-1u]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier wird sie GEZAEHLT
+			if(bo==TYPE_E) lage_te[wake_kern?0u:(uint)d-1u]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier wird sie GEZAEHLT
+			const uint lage = wake_kern ? 0u : (uint)d-1u;
 			n2f_liste_c.push_back(nn);
-			n2f_gewicht.push_back(band_w(d));
-			n2f_lage.push_back(d-1u);
-			lage_n[d-1u]++; if(unterboden) lage_ub[d-1u]++;
+			n2f_gewicht.push_back(wake_kern ? 1.0f : band_w(d));
+			n2f_lage.push_back(lage);
+			lage_n[lage]++; if(unterboden) lage_ub[lage]++;
 			const uint fdx=(x-NF_OX)*ratio, fdy=(y-NF_OY)*ratio, fdz=(z-NF_OZ)*ratio;
 			n2f_liste_f.push_back((ulong)fdx+((ulong)fdy+(ulong)fdz*(ulong)fNy)*(ulong)fNx);
 			uint fluid=0u;
@@ -2895,7 +2972,7 @@ static void main_setup_fahrzeug_dd() {
 				const uchar bof=lbm_f.flags[(ulong)xx+((ulong)yy+(ulong)zz*(ulong)fNy)*(ulong)fNx]&(TYPE_S|TYPE_E);
 				if(bof!=TYPE_S&&bof!=TYPE_E) fluid++;           // TYPE_MS zaehlt als Fluid -- Kernel-Konvention
 			}
-			if(fluid==0u) { n2f_nanblocks++; lage_nan[d-1u]++; }
+			if(fluid==0u) { n2f_nanblocks++; lage_nan[wake_kern?0u:(uint)d-1u]++; }
 		}
 		if(n2f_liste_c.empty()) print_error("N2F-BAND: Zellliste leer -- kein Bandkandidat hat Fussabdruck, z_lo und Unterboden-Maske ueberlebt.");
 		n2f_w_band = band_w(n2f_band_n); // Aussenlage traegt in die Negations-Schwelle
