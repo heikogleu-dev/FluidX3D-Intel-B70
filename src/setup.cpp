@@ -2490,6 +2490,15 @@ static void main_setup_fahrzeug_dd() {
 	// 255 = Fahrzeug-Saat (Quelle). Ohne die Trennung waere "kein Koerperband" nicht ausdrueckbar:
 	// dt=0 liesse die Dilatation durch den Wagen laufen, dt!=0 macht ihn zur Quelle.
 	const uint n2f_nurwake   = min(1u, env_u("CFD_N2F_BAND_NURWAKE", 0u));
+	// ★ WANDFREI (Arbeitsliste 1b, Heiko-Freigabe 2026-08-22 abends): die ersten k Lagen des
+	// KOERPERbands werden nicht gelistet -- das Band zieht sich von der Wand zurueck. Messgrund:
+	// die Wand-Schreibung verschlechtert die Fernfeld-Abloesung aktiv (11,2 % gegen 43,7 %
+	// ungekoppelt gegen 35,6 % nah; das 4x4x4-Blockmittel traegt keine 32-mm-Abloeseschichten).
+	// Der Wake-Kasten bleibt unberuehrt. Default 0 = bitidentisch.
+	const uint n2f_wandfrei  = env_u("CFD_N2F_BAND_WANDFREI", 0u);
+	if(n2f_wandfrei>0u&&n2f_band==0u) print_warning("CFD_N2F_BAND_WANDFREI ohne CFD_N2F_BAND=1 ist ein stiller No-Op (Ansage-Doktrin).");
+	if(n2f_band>0u&&n2f_wandfrei>=n2f_band_n) print_error("CFD_N2F_BAND_WANDFREI >= N: das ganze Koerperband waere leer -- dafuer gibt es CFD_N2F_BAND_NURWAKE=1 (Fahrzeug als reine Sperre, sauberere Semantik).");
+	if(n2f_band>0u&&n2f_wandfrei>0u) print_info("N2F-BAND WANDFREI (1b): Koerperband-Lagen 1.."+to_string(n2f_wandfrei)+" werden NICHT gelistet -- das Band beginnt erst bei Lage "+to_string(n2f_wandfrei+1u)+". Wake-Kasten unberuehrt. Damit ist auch CFD_FERN_FACETTEN freigegeben (die Lage-1-Sperre entfaellt, s. dort).");
 	if(n2f_nurwake>0u&&n2f_band==0u) print_warning("CFD_N2F_BAND_NURWAKE=1 ohne CFD_N2F_BAND=1 ist ein stiller No-Op -- der Schalter wirkt ausschliesslich im BAND-Listenbauer (Pruefagent-B-N6).");
 	const uint n2f_wake_start= min(2u, env_u("CFD_N2F_BAND_WAKE_START", 0u)); // 0 = hoechster Punkt, 1 = Heck, 2 = Radstandmitte
 	const uint n2f_wake_abst = env_u("CFD_N2F_BAND_WAKE_ABSTAND", 16u);
@@ -2911,7 +2920,7 @@ static void main_setup_fahrzeug_dd() {
 		// stromab HOEHER als z_lo -- der Blend schriebe dann in Zellen, die boden_eq danach
 		// ueberschreibt. Das Maximum beider deckt beide Faelle.
 		const uint z_lo = max(1u, max(env_u("CFD_FERN_BODEN_EQ", 0u), env_u("CFD_FERN_BODEN_EQ_DOWN", 0u))+1u); // boden_eq-Band bleibt unangetastet -- TRAGEND, nicht redundant
-		if(env_u("CFD_FERN_FACETTEN",0u)>0u) print_error("CFD_N2F_BAND=1 mit CFD_FERN_FACETTEN>0: Lage 1 IST definitionsgemaess die karosserienahe Zellschicht, also genau die FERN_FACETTEN-Menge -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nicht freigegeben.");
+		if(env_u("CFD_FERN_FACETTEN",0u)>0u&&n2f_wandfrei==0u&&n2f_nurwake==0u) print_error("CFD_N2F_BAND=1 mit CFD_FERN_FACETTEN>0 OHNE Wandrueckzug: Lage 1 IST definitionsgemaess die karosserienahe Zellschicht, also genau die FERN_FACETTEN-Menge -- der Blend ueberschriebe deren fi NACH apply_facette still (Pruefagent-N1-Klasse). Kombination nur mit CFD_N2F_BAND_WANDFREI>=1 oder NURWAKE freigegeben (1b, 2026-08-22).");
 		// ---- SAATMENGE. HIER SITZT DIE GEFAEHRLICHSTE FALLE DES GANZEN ARMS:
 		// Die FAHRBAHN ist bei z=0 flaechendeckend TYPE_S. Mit `flags&TYPE_S` als Saat waere das
 		// "Band ums Fahrzeug" ein N Zellen dicker Teppich ueber cNx*cNy Zellen -- bei 4 mm sind das
@@ -3057,7 +3066,7 @@ static void main_setup_fahrzeug_dd() {
 		// ---- LISTE. Reihenfolge z,y,x aufsteigend = aufsteigend im linearen Index (deterministisch,
 		// Muster des Volumen-Listenbauers; keine std::map noetig).
 		std::vector<ulong> lage_n(n2f_band_n,0ull), lage_nan(n2f_band_n,0ull), lage_ub(n2f_band_n,0ull), lage_te(n2f_band_n,0ull);
-		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausserhalb=0ull, ausgelassen_w0=0ull;
+		ulong ausgelassen_zlo=0ull, ausgelassen_ub=0ull, ausserhalb=0ull, ausgelassen_w0=0ull, ausgelassen_wf=0ull, ausgelassen_wf_kern=0ull;
 		const int n2f_r=(int)ratio, n2f_w0=-(n2f_r/2);
 		for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
 			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
@@ -3088,6 +3097,21 @@ static void main_setup_fahrzeug_dd() {
 			// eine unangesagte fneq-Loeschschale (5,1 % der Bandzellen des Plateau-Laufs). Der
 			// VOLUMEN-Bauer filtert w<=0 seit jeher; der Band-Bauer zieht nach. Kostet nebenbei
 			// 4-6 % Transfer. NICHT bitidentisch zum Plateau-Lauf f4_kopplung_plateau -- gewollt.
+			if(!wake_kern&&(uint)d<=n2f_wandfrei) { ausgelassen_wf++; continue; }   // ★ 1b WANDFREI: Koerperband-Lagen 1..k nicht listen (dt bleibt gelabelt -- Beweise unberuehrt)
+			// ★ 1b, KONSEQUENZ: auch KASTENKERN-Zellen im Wandabstand <= k fallen unter WANDFREI --
+			// der Kasten ueberlappt das Fahrzeug (Start am Dach), seine wandnahen Zellen wuerden
+			// die FERN_FACETTEN-Schicht am Heck genauso ueberschreiben wie das Koerperband. Der
+			// Chebyshev-Abstand der Kernzellen ist nicht mehr in dt (254 hat ihn ueberschrieben) --
+			// direkter (2k+1)^3-Scan auf ist_fzg, einmalig im Listenbau, ~Sekunden.
+			if(wake_kern&&n2f_wandfrei>0u) {
+				bool wandnah=false; const int k=(int)n2f_wandfrei;
+				for(int dz=-k; dz<=k&&!wandnah; dz++) for(int dy=-k; dy<=k&&!wandnah; dy++) for(int dx2=-k; dx2<=k&&!wandnah; dx2++) {
+					const int xx=(int)x+dx2, yy=(int)y+dy, zz=(int)z+dz;
+					if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
+					if(ist_fzg(dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)])) wandnah=true;
+				}
+				if(wandnah) { ausgelassen_wf_kern++; continue; }
+			}
 			{ const float w_ = wake_kern ? 1.0f : band_w(d); if(w_<=0.0f) { ausgelassen_w0++; continue; } }
 			n2f_gewicht.push_back(wake_kern ? 1.0f : band_w(d));
 			n2f_lage.push_back(lage);
@@ -3210,8 +3234,9 @@ static void main_setup_fahrzeug_dd() {
 			if(n2f_wake>0u) {
 				ulong kern_gelistet=0ull;
 				for(const ulong nn : n2f_liste_c) if(dt[(size_t)nn]==254u) kern_gelistet++;
-				if(kern_gelistet!=wake_n) print_error("N2F-BAND WAKE ABNAHME GESCHEITERT: Census sagt "+to_string(wake_n)+" Kernzellen an, gelistet sind "+to_string(kern_gelistet)+" ("+to_string((float)(100.0*(double)kern_gelistet/(double)max(1ull,wake_n)),1u)+" %). Die Differenz ist ein LAUTLOSER No-Op -- genau Fehler B1 vom 2026-08-22.");
-				else print_info("N2F-BAND WAKE ABNAHME: "+to_string(kern_gelistet)+" Kernzellen angesagt UND gelistet (Ist == Soll).");
+				const ulong wake_soll = wake_n - ausgelassen_wf_kern; // 1b: wandnahe Kernzellen bewusst nicht gelistet
+				if(kern_gelistet!=wake_soll) print_error("N2F-BAND WAKE ABNAHME GESCHEITERT: Census-Soll (Kernzellen minus WANDFREI) "+to_string(wake_soll)+" an, gelistet sind "+to_string(kern_gelistet)+" ("+to_string((float)(100.0*(double)kern_gelistet/(double)max(1ull,wake_n)),1u)+" %). Die Differenz ist ein LAUTLOSER No-Op -- genau Fehler B1 vom 2026-08-22.");
+				else print_info("N2F-BAND WAKE ABNAHME: "+to_string(kern_gelistet)+" Kernzellen gelistet == Soll ("+to_string(wake_n)+" Census minus "+to_string(ausgelassen_wf_kern)+" WANDFREI).");
 			}
 			if(verletzt==0ull&&luecke==0ull) print_info("N2F-BAND MAXIMUM-BEWEIS: "+to_string(geprueft)+" Bandzellen geprueft, 0 Verletzungen; VOLLSTAENDIGKEIT: 0 unerreichte Zellen mit zu nahem Nachbarn -- jede Zelle traegt das HOECHSTE Gewicht aus Fahrzeug-Saat und Wake-Kasten (Abstand zur naechsten Saat, band_w ist monoton nicht-steigend).");
 		}
@@ -3220,7 +3245,7 @@ static void main_setup_fahrzeug_dd() {
 		// ---- CENSUS (Iron Rule: Diagnostik gehoert in den Code)
 		print_info("N2F-BAND SAAT-CENSUS: "+to_string(saat)+" Fahrzeug-Grobzellen (0x41), davon "+to_string(saat_z0)+" auf z=0; Quervergleich: der Verdraengungs-Census oben zaehlt dieselbe Menge VOR dem Entzug von TYPE_X an den Aufstandsflaechen -- die Differenz MUSS die Kontaktflaechen-Zahl sein. BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z["+to_string(sz0)+".."+to_string(sz1)+"]; Arbeitsbox x["+to_string(ax0)+".."+to_string(ax1)+"] y["+to_string(ay0)+".."+to_string(ay1)+"] z["+to_string(az0)+".."+to_string(az1)+"]; Metrik Chebyshev (an Koerperkanten diagonal bis "+to_string((float)n2f_band_n*1.732f,1u)+" Zellen dick -- bekannt, Ersatz waere Chamfer-3-4-5).");
 		ulong ges=0ull; for(uint k=0u; k<n2f_band_n; k++) ges+=lage_n[k];
-		print_info("N2F-BAND ZELL-CENSUS: "+to_string(ges)+" Zellen in "+to_string(n2f_band_n)+" Lagen; ausgelassen: "+to_string(ausgelassen_zlo)+" im boden_eq-Band, "+to_string(ausgelassen_ub)+" Unterboden (Vergleichsarm), "+to_string(ausserhalb)+" ausserhalb des Nahfeld-Fussabdrucks, "+to_string(ausgelassen_w0)+" mit Gewicht 0 (Profil-2-Nulllage, nicht gelistet -- sonst waere sie im EQ-Arm eine fneq-Loeschschale); fluidleere Bloecke (NaN-Skip im Blend): "+to_string(n2f_nanblocks)+".");
+		print_info("N2F-BAND ZELL-CENSUS: "+to_string(ges)+" Zellen in "+to_string(n2f_band_n)+" Lagen; ausgelassen: "+to_string(ausgelassen_zlo)+" im boden_eq-Band, "+to_string(ausgelassen_ub)+" Unterboden (Vergleichsarm), "+to_string(ausserhalb)+" ausserhalb des Nahfeld-Fussabdrucks, "+to_string(ausgelassen_w0)+" mit Gewicht 0 (Profil-2-Nulllage, nicht gelistet), "+to_string(ausgelassen_wf)+" WANDFREI (Koerperband-Lagen 1.."+to_string(n2f_wandfrei)+" zurueckgezogen, dazu "+to_string(ausgelassen_wf_kern)+" wandnahe KASTENKERN-Zellen -- sonst waere sie im EQ-Arm eine fneq-Loeschschale); fluidleere Bloecke (NaN-Skip im Blend): "+to_string(n2f_nanblocks)+".");
 		for(uint k=0u; k<n2f_band_n; k++) print_info("N2F-BAND LAGEN-CENSUS: Lage "+to_string(k)+" (Abstand "+to_string(k+1u)+", w = "+to_string(band_w(k+1u),3u)+", a = "+to_string(n2f_alpha*band_w(k+1u),3u)+"): "+to_string(lage_n[k])+" Zellen, davon Unterboden "+to_string(lage_ub[k])+", fluidleer "+to_string(lage_nan[k])+", TYPE_E (Blend-Skip) "+to_string(lage_te[k])+(k==n2f_lage_aussen?" [WAECHTER-LAGE]":""));
 		if(lage_n[0]>0ull&&lage_nan[0]*2ull>lage_n[0]) print_warning("N2F-BAND: Lage 0 (staerkstes Gewicht) ist zu ueber 50 % fluidleer -- der Arm wirkt deutlich schwaecher, als sein alpha behauptet. Ursache ist die Voxelisierungs-Differenz fein/grob; im Verdikt mit angeben.");
 		if(lage_n[n2f_lage_aussen]==0ull) print_error("N2F-BAND: die AEUSSERSTE Lage ist leer -- Waechter, Negations-Nachweis und Kipp-Kriterium haetten keine einzige Zelle.");
