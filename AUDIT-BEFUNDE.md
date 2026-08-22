@@ -1601,3 +1601,23 @@ kleiner als bei 8 mm (-0,084 gegen -0,27); Prognose nicht falsifiziert, unterer 
 Fehlend: letzte 95 ms + VTK-Dump. Innere Bandkante am Feld vermessen (Lage 2->3: du 8,0->3,8,
 Textur 3,8->1,1) -- Anrampe als naechster 8-mm-Arm geplant. FNEQ-Wirkung am Bandende
 bestaetigt (weiche Kante +30 % statt +150 %).
+
+## TAGESABSCHLUSS 2026-08-22 — Kopplungs-Kampagne: Bauplan-Kriterium 2 erfuellt
+
+**Kernergebnis:** cz_druck_rest 4 mm: -0,842 -> **-0,926** (Kriterium <= -0,92 ERSTMALS
+erfuellt), Kette FNEQ-Standard -> Wandrueckzug (WANDFREI=2) -> Heiko-Plateau-Profil, jede
+Stufe 8-mm-validiert. Preis cd_druck +0,11 (prognostiziert). Produktion f4_wandfrei_prod
+starb bei t=0,405 am Zeichentool (Desktop-B70, CL_OUT_OF_RESOURCES) -- 205 Samples gueltig,
+VTK fehlt, Wiederholung nach Reboot empfohlen. Grafikfehler nach dem Vorfall -> Neustart.
+
+**Heute gebaut und validiert:** band_bilanz.csv; Profil 2 (Plateau+Halbierung, spaeter ab
+WANDFREI+1 verschoben); CFD_N2F_BAND_WANDFREI (+Kastenkern-Scan); NURWAKE (253-Sperre);
+CFD_FAC_BUDGET/_SN (verworfen als Hebel); Slot-27-Split (97 % ohneTang = ELIBB-heilbar);
+Slots 25/26 Paarungsbeweis (ersetzt blinden Zaehler); FNEQ=1 Default; ELIBB P1
+(Surface-Nets-Remesh, ungetestet -- Rauchtest nach Reboot); ~40 Pruefagenten-Befunde
+behoben ueber ~15 Pruefrunden.
+
+**Nach dem Reboot, Reihenfolge:** (1) P1-Rauchtest CFD_FACETTEN_REMESH=1 (Kurzlauf,
+remesh_flaeche.vtk sichten); (2) f4_wandfrei_prod-Wiederholung NACH Heiko-Go (VTK; waehrend
+des Laufs keine GPU-Tools am Desktop!); (3) Anrampe gegen die innere Bandkante (8-mm-A/B:
+0/0/0,25/0,5/1,0/0,5/0,25/0); (4) ELIBB P2 nach Sichtung der Remesh-Flaeche.
