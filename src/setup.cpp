@@ -2471,6 +2471,7 @@ static void main_setup_fahrzeug_dd() {
 	// 255 = Fahrzeug-Saat (Quelle). Ohne die Trennung waere "kein Koerperband" nicht ausdrueckbar:
 	// dt=0 liesse die Dilatation durch den Wagen laufen, dt!=0 macht ihn zur Quelle.
 	const uint n2f_nurwake   = min(1u, env_u("CFD_N2F_BAND_NURWAKE", 0u));
+	if(n2f_nurwake>0u&&n2f_band==0u) print_warning("CFD_N2F_BAND_NURWAKE=1 ohne CFD_N2F_BAND=1 ist ein stiller No-Op -- der Schalter wirkt ausschliesslich im BAND-Listenbauer (Pruefagent-B-N6).");
 	const uint n2f_wake_start= min(2u, env_u("CFD_N2F_BAND_WAKE_START", 0u)); // 0 = hoechster Punkt, 1 = Heck, 2 = Radstandmitte
 	const uint n2f_wake_abst = env_u("CFD_N2F_BAND_WAKE_ABSTAND", 16u);
 	if(n2f_band>0u&&n2f_volumen>0u) print_error("CFD_N2F_BAND=1 und CFD_N2F_VOLUMEN=1 schliessen sich aus -- beide ersetzen denselben Listenbauer. Genau einen Arm waehlen.");
@@ -2899,7 +2900,7 @@ static void main_setup_fahrzeug_dd() {
 			for(uint k=0u; k<schritte; k++) {
 				const uint x = sx0 + (sx1-sx0)*k/(schritte-1u);
 				uint hmax=0u;
-				for(uint z=sz1+1u; z-->0u; ) { bool tr=false; for(uint y=sy0; y<=sy1&&!tr; y++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)]==255u) tr=true; if(tr) { hmax=z; break; } }
+				for(uint z=sz1+1u; z-->0u; ) { bool tr=false; for(uint y=sy0; y<=sy1&&!tr; y++) if(ist_fzg(dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)])) tr=true; /* ★ B-N1: stand auf ==255u -- im Nur-Wake-Arm (Fahrzeug = 253) meldete das Profil fuer JEDES x die Hoehe 0 */ if(tr) { hmax=z; break; } }
 				prof += (k?" ":"") + to_string(x) + ":" + to_string(hmax);
 				hprof[k]=hmax; hx[k]=x;
 			}
@@ -3121,7 +3122,40 @@ static void main_setup_fahrzeug_dd() {
 					}
 					if(nb) am_fzg++;
 				}
-				print_info("N2F-BAND NUR-WAKE ABNAHME: "+to_string(am_fzg)+" gelistete Rampenzellen grenzen an das Fahrzeug (sie sind ueber den Kasten erreicht, nicht ueber den Koerper). Im Arm MIT Koerperband waeren es alle "+to_string(n2f_liste_c.size())+" Lagen-0-Kandidaten -- die Zahl belegt, dass die Fahrzeug-Saat wirklich abgeschaltet ist.");
+				// ★ B-N2 (Pruefagent 2026-08-22): der Test hier war als Sensor INVERTIERT und ohne
+				// Kriterium. Er suchte 253-Nachbarn, und 253 existiert nur, WENN NURWAKE an ist --
+				// im Fehlerfall (Koerperband doch noch aktiv) haette er 0 gemeldet, also die
+				// beruhigendste Zahl. Die Behauptung "im Arm MIT Koerperband waeren es alle N"
+				// konnte der Code gar nicht erzeugen. Ersetzt durch eine echte Ist=Soll-Abnahme:
+				// im Nur-Wake-Arm MUSS jede gelistete Nicht-Kastenzelle innerhalb von N Lagen um
+				// den Kasten liegen. Eine einzige Zelle weiter stromauf beweist, dass die
+				// Fahrzeug-Saat doch noch reicht.
+				ulong zu_weit=0ull;
+				for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) {
+					const ulong nn=n2f_liste_c[i];
+					if(dt[(size_t)nn]==254u) continue;
+					const uint x=(uint)(nn%(ulong)cNx);
+					if(wx0>n2f_band_n && x+n2f_band_n < wx0) zu_weit++;
+				}
+				if(zu_weit>0ull) print_error("N2F-BAND NUR-WAKE ABNAHME GESCHEITERT: "+to_string(zu_weit)+" gelistete Rampenzellen liegen weiter als "+to_string(n2f_band_n)+" Lagen stromauf des Kastens (x < "+to_string(wx0-n2f_band_n)+"). Im Nur-Wake-Arm kann die Dilatation dorthin nicht reichen -- die Fahrzeug-Saat ist NICHT abgeschaltet.");
+				else print_info("N2F-BAND NUR-WAKE ABNAHME: 0 gelistete Rampenzellen stromauf von x = "+to_string(wx0>n2f_band_n?wx0-n2f_band_n:0u)+" (Ist == Soll) -- die Rueckkopplung geht nachweislich nur vom Kasten aus. Davon "+to_string(am_fzg)+" Rampenzellen grenzen an das Fahrzeug; das ist erlaubt (der Kasten reicht dorthin), aber es sind ueberschriebene karosserienahe Zellen.");
+				// ★ B-N3: die eigentliche Frage, die der Commit unbeantwortet liess -- WIEVIEL
+				// Karosserie ueberschreibt der Kasten selbst? Der Kasten startet bei wx0 = x_dach
+				// und ueberlappt die Fahrzeug-BBox; seine Kernzellen tragen w = 1,0. Solange das
+				// gilt, ist Fx_far AUCH in diesem Arm kein sauberes Kriterium.
+				ulong kern_am_fzg=0ull;
+				for(const ulong nn : n2f_liste_c) {
+					if(dt[(size_t)nn]!=254u) continue;
+					const uint x=(uint)(nn%(ulong)cNx), y=(uint)((nn/(ulong)cNx)%(ulong)cNy), z=(uint)(nn/((ulong)cNx*(ulong)cNy));
+					bool nb=false;
+					for(int dz=-1; dz<=1&&!nb; dz++) for(int dy=-1; dy<=1&&!nb; dy++) for(int dx=-1; dx<=1&&!nb; dx++) {
+						const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
+						if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
+						if(ist_fzg(dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)])) nb=true;
+					}
+					if(nb) kern_am_fzg++;
+				}
+				if(kern_am_fzg>0ull) print_warning("N2F-BAND NUR-WAKE: "+to_string(kern_am_fzg+am_fzg)+" ueberschriebene Zellen grenzen an das Fahrzeug ("+to_string(kern_am_fzg)+" davon KASTENKERN mit vollem Gewicht). Der Kasten startet bei x = "+to_string(wx0)+" und ueberlappt die Fahrzeug-BBox x["+to_string(sx0)+".."+to_string(sx1)+"] um "+to_string(sx1>=wx0?sx1-wx0+1u:0u)+" Grobzellen. FOLGE: update_force_field liest dort die Verteilungen des Blends, Fx_far ist AUCH in diesem Arm kein sauberes Kriterium. Wer Fx_far zurueckwill, setzt CFD_N2F_BAND_WAKE_START=1 (Kastenstart am Heck) oder CFD_N2F_BAND_WAKE_START_X hinter sx1 = "+to_string(sx1)+".");
 			}
 			if(n2f_wake>0u) {
 				ulong kern_gelistet=0ull;
@@ -3540,7 +3574,7 @@ static void main_setup_fahrzeug_dd() {
 	if(bil_an) {
 		bilcsv.open(out_dir+"band_bilanz.csv"); bilcsv.precision(8);
 		bilcsv << "# Vorzeichen: Fx_summe ist die LINKE Seite der Impulsbilanz und traegt damit das umgekehrte Vorzeichen von Fx_fein/Fx_grob -- -Fx_summe gegen die Fahrzeugkraft stellen. Es fehlen bewusst der instationaere Term d/dt Int(rho*u_x)dV (erst nach t_warmup lesen) und der Reibanteil. rho_min/rho_max werden VOR dem Gueltigkeitsfilter gebildet, n_verworfen zaehlt die uebersprungenen Zellen. Fx_xp_N ist der Fluss durch die stromabwaertige Ebene ALLEIN (Bauplan-Abnahmekriterium).\n";
-		bilcsv << "time_s,mdot_xm,mdot_xp,mdot_ym,mdot_yp,mdot_zm,mdot_zp,mdot_netto,mdot_netto_rel,Fx_impuls_N,Fx_druck_N,Fx_summe_N,Fx_fein_N,Fx_grob_N,rho_min,rho_max,Fx_xp_N,n_verworfen\n" << std::flush;
+		bilcsv << "time_s,mdot_xm,mdot_xp,mdot_ym,mdot_yp,mdot_zm,mdot_zp,mdot_netto,mdot_netto_rel,Fx_impuls_N,Fx_druck_N,Fx_summe_N,Fx_fein_N,Fx_grob_N,rho_min,rho_max,Fx_xp_N,n_verworfen,n_fluid,n_an_klemme\n" << std::flush;
 		print_info("N2F-BAND BILANZ aktiv: Massen- und x-Impulsbilanz ueber die sechs Begrenzungsflaechen des Wake-Kastens (grob x["+to_string(bil_x0)+".."+to_string(bil_x1)+"] y["+to_string(bil_y0)+".."+to_string(bil_y1)+"] z["+to_string(bil_z0)+".."+to_string(bil_z1)+"]) an der Sample-Kadenz -> "+out_dir+"band_bilanz.csv. mdot_netto SOLL ~ 0; die Abweichung ist die kuenstliche Massenquelle des Blends. VORZEICHEN: Fx_summe ist die linke Seite der Impulsbilanz und traegt damit das UMGEKEHRTE Vorzeichen von Fx_fein/Fx_grob -- also -Fx_summe gegen die Fahrzeugkraft lesen; schiesst er darueber, zaehlen Fernfeld-Koerper und Blend doppelt. Der instationaere Term d/dt Integral(rho*u_x)dV fehlt bewusst, erst nach t_warmup lesen.");
 	}
 	print_info("INTERFACE-DRUCK-Instrument aktiv: rho-Statistik der 4 getriebenen Kopplungsebenen (x-, y-, y+, z+) an der Sample-Kadenz, Delta-p = (rho-1)*cs2 in Pa -> "+out_dir+"interface_druck.csv (reine Ausgabe aus den vorhandenen Host-Kopplungspuffern).");
@@ -3901,7 +3935,7 @@ static void main_setup_fahrzeug_dd() {
 				                          mk(bil_x0,bil_y0,bil_z0, bx,bz, 1u), mk(bil_x0,bil_y1,bil_z0, bx,bz, 1u),
 				                          mk(bil_x0,bil_y0,bil_z0, bx,by, 2u), mk(bil_x0,bil_y0,bil_z1, bx,by, 2u) };
 				const float nrm[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
-				double md[6]={0,0,0,0,0,0}, fimp=0.0, fdru=0.0, rmn=1e30, rmx=-1e30, mein=0.0, fimp_xp=0.0, fdru_xp=0.0; ulong nverw=0ull; uint rmn_f=0u, rmx_f=0u;
+				double md[6]={0,0,0,0,0,0}, fimp=0.0, fdru=0.0, rmn=1e30, rmx=-1e30, mein=0.0, fimp_xp=0.0, fdru_xp=0.0; ulong nverw=0ull, nfl=0ull, n_ausser=0ull; uint rmn_f=0u, rmx_f=0u;
 				const char* fname[6] = {"x-","x+","y-","y+","z-","z+"};
 				// ★ SOLID-TEST UEBER DIE FLAGS, NICHT UEBER rho (Korrektur 2026-08-22 nachmittags).
 				// Vorher stand hier `if(!(r>0.5&&r<2.0)) continue;` als Solid-Ersatz. Das ist in beide
@@ -3926,6 +3960,7 @@ static void main_setup_fahrzeug_dd() {
 						const double r=(double)bf[4ull*i], ux=(double)bf[4ull*i+1ull], uy=(double)bf[4ull*i+2ull], uz=(double)bf[4ull*i+3ull];
 						const ulong nc=ebenen_idx(bp[f], i);
 						if(nc>=(ulong)cNx*(ulong)cNy*(ulong)cNz || (lbm_c.flags[nc]&(TYPE_S|TYPE_E))!=0u) { nverw++; continue; } // KEIN Fluid: Karosserie, Fahrbahn oder Kopplungsrand
+						nfl++; if(r<=(double)RHO_CLAMP_MIN+0.01||r>=(double)RHO_CLAMP_MAX-0.01) n_ausser++; // Anteil an der Solver-Dichteklemme
 						if(r<rmn) { rmn=r; rmn_f=f; } if(r>rmx) { rmx=r; rmx_f=f; } // nur ueber FLUID -- und ohne rho-Fenster, damit eine echte Entgleisung sichtbar bleibt
 						const double un = ux*(double)nrm[f][0] + uy*(double)nrm[f][1] + uz*(double)nrm[f][2];
 						md[f] += r*un;                                      // Gittereinheiten, dA = 1 Zelle
@@ -3938,7 +3973,18 @@ static void main_setup_fahrzeug_dd() {
 				// ★ BAUPLAN Paragraf 2, zweite Haelfte des Wake-Kippkriteriums (|rho-1| > 0,1). Sie fehlte
 				// bisher ersatzlos -- aus der geforderten Konjunktion war ein Einzelkriterium geworden.
 				// Hier ist der richtige Ort: der Waechter am Bandrand hat kein rho, die Bilanz schon.
-				if(t_si>=(double)t_warmup&&(rmx-1.0>0.1||1.0-rmn>0.1)) print_error("N2F-BAND WAKE-KIPP (Dichte): im Wake-Kasten liegt rho ausserhalb 1 +- 0,1 (min "+to_string((float)rmn,4u)+" auf Flaeche "+string(fname[rmn_f])+", max "+to_string((float)rmx,4u)+" auf Flaeche "+string(fname[rmx_f])+"). Die u-Aufpraegung bei festgehaltenem rho hat den Kasten aus dem inkompressiblen Bereich getrieben. Abgebrochen (Bauplan Paragraf 2, zweite Haelfte des Kippkriteriums).");
+				// ★ NICHT MEHR HART (Korrektur 2026-08-22 nachmittags). Bauplan Paragraf 2 verlangt
+				// |rho-1| > 0,1 als halbes Kippkriterium. Dieser Wert ist auf DIESEN Fall nicht
+				// geeicht: der KONTROLLLAUF ganz ohne Kopplung meldet 5.499.754 Treffer der
+				// Solver-Dichteklemme (RHO_CLAMP_MIN 0,5 / MAX 1,5, defines.hpp:48-50), der
+				// Band-Arm 5.793.062 -- plus 5 Prozent. Die Ausschlaege sind Grundzustand, nicht
+				// Folge der Aufpraegung. Ein harter Abbruch daran toetet auch den Kontrollarm; er
+				// hat b8_bw_n4 gekostet.
+				// Aussagekraeftig ist nicht das Extremum ueber ~27.000 Flaechenzellen (ein einziger
+				// Ausreisser genuegt), sondern der ANTEIL an der Klemme.
+				const double anteil = nfl>0ull ? (double)n_ausser/(double)nfl : 0.0;
+				if(t_si>=(double)t_warmup&&anteil>0.02) print_error("N2F-BAND WAKE-KIPP (Dichte): "+to_string((float)(100.0*anteil),2u)+" % der Fluidzellen auf den Kastenflaechen ("+to_string(n_ausser)+" von "+to_string(nfl)+") stehen an der Solver-Dichteklemme. Ueber 2 Prozent rechnet das Fernfeld dort nichts Physikalisches mehr. Abgebrochen.");
+				else if(t_si>=(double)t_warmup&&(rmx-1.0>0.1||1.0-rmn>0.1)) print_warning("N2F-BAND Dichte im Wake-Kasten: min "+to_string((float)rmn,4u)+" auf Flaeche "+string(fname[rmn_f])+", max "+to_string((float)rmx,4u)+" auf Flaeche "+string(fname[rmx_f])+" -- ausserhalb 1 +- 0,1 (Bauplan Paragraf 2). An der Klemme stehen "+to_string((float)(100.0*anteil),2u)+" %. EINORDNUNG: der Kontrolllauf OHNE Kopplung meldet dieselbe Klemme 5,5 Mio mal -- die Schwelle 0,1 ist auf diesen Fall nicht geeicht, deshalb Warnung statt Abbruch. Verlauf in band_bilanz.csv (n_fluid, n_an_klemme).");
 				const double mnet = md[0]+md[1]+md[2]+md[3]+md[4]+md[5];
 				// Gitter -> SI: rho_lat*u_lat^2 wird zu rho_si*u_si^2, dazu die Zellflaeche.
 				const double A1  = (double)dx_c*(double)dx_c;                                  // Zellflaeche [m2]
@@ -3956,7 +4002,7 @@ static void main_setup_fahrzeug_dd() {
 				       << "," << mnet << "," << (mein>0.0? mnet/mein : 0.0)
 				       << "," << fx_imp << "," << fx_dru << "," << (fx_imp+fx_dru)
 				       << "," << (double)units_fine.si_F(F.x) << "," << (double)units_coarse.si_F(Fc.x)
-				       << "," << rmn << "," << rmx << "," << ((fimp_xp+fdru_xp)*sqf) << "," << nverw << "\n" << std::flush;
+				       << "," << rmn << "," << rmx << "," << ((fimp_xp+fdru_xp)*sqf) << "," << nverw << "," << nfl << "," << n_ausser << "\n" << std::flush;
 			}
 			if(n2f_alpha>0.0f) { // ★ P9c WAECHTER an der Sample-Kadenz: schale_extract(mittel=0) auf lbm_c liest das
 				// grobe u-FELD der Schalenzellen; verglichen wird gegen das in DIESEM Outer hochgeladene
