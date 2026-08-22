@@ -898,7 +898,7 @@ void main_setup_kanal() {
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden im kanal NICHT angewandt (nur fahrzeug_dd; M3).");
-	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
+	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im kanal NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	  if(fc>0u) print_info(string("Facettenpfad: ")+(fc==1u?"Paartausch voll (Kontrollarm)":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll (Slip-Velocity-BB)":"iMEM NULLZIEL (tau=0)")); }
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("kanal"))+"/";
@@ -1494,7 +1494,7 @@ void main_setup_kugel() {
 	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
 	  if(getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("CFD_BODEN_EQ_DOWN/CFD_FERN_BODEN_EQ/CFD_FERN_EINLASS_EQ wirken an der Kugel NICHT (uniformes Band ohne Split; XL-R2).");
 	  if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden an der Kugel NICHT angewandt (nur fahrzeug_dd; M3).");
-	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
+	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird an der Kugel NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2).");
 	  if(LBM_Domain::s_boden_eq_n>0u&&getenv("CFD_KUGEL_MG")&&env_u("CFD_KUGEL_MG",1u)==0u) print_warning("BODEN_EQ mit CFD_KUGEL_MG=0: statischer Boden + u_road-Aufpraegung widersprechen sich (XL-3 B8).");
@@ -1898,7 +1898,7 @@ static void main_setup_fahrzeug() {
 	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im Einzelgitter-Fahrzeugfall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
-	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
+	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	{ const char* bq_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_EINLASS_EQ","CFD_KOPPLUNG_ZEITINTERP","CFD_KOPPLUNG_GLATT"}; for(const char* b : bq_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im Einzelgitter-Fahrzeugfall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ/ABSTAND auch kugel, CFD_FERN_EINLASS_EQ auch fernfeld -- XL-R2/R3)."); }
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
@@ -2464,6 +2464,13 @@ static void main_setup_fahrzeug_dd() {
 	//                             TYPE_E-Auslassebene ab; von dort wuerde man u_inf ins Totwasser
 	//                             einspeisen, also das Gegenteil der Absicht.
 	const uint n2f_wake      = min(1u, env_u("CFD_N2F_BAND_WAKE", 0u));
+	// ★ NUR-WAKE-ARM (Heiko 2026-08-22): Rueckkopplung AUSSCHLIESSLICH aus dem Wake-Kasten, ohne
+	// das Koerperband. Das Fahrzeug bleibt SPERRE (die Dilatation darf nicht hindurchlaufen und
+	// seine Zellen duerfen nicht in die Liste), hoert aber auf, QUELLE zu sein. Dafuer braucht es
+	// einen dritten dt-Wert: 253 = Sperre ohne Quelleigenschaft. 254 = Wake-Kern (Quelle),
+	// 255 = Fahrzeug-Saat (Quelle). Ohne die Trennung waere "kein Koerperband" nicht ausdrueckbar:
+	// dt=0 liesse die Dilatation durch den Wagen laufen, dt!=0 macht ihn zur Quelle.
+	const uint n2f_nurwake   = min(1u, env_u("CFD_N2F_BAND_NURWAKE", 0u));
 	const uint n2f_wake_start= min(2u, env_u("CFD_N2F_BAND_WAKE_START", 0u)); // 0 = hoechster Punkt, 1 = Heck, 2 = Radstandmitte
 	const uint n2f_wake_abst = env_u("CFD_N2F_BAND_WAKE_ABSTAND", 16u);
 	if(n2f_band>0u&&n2f_volumen>0u) print_error("CFD_N2F_BAND=1 und CFD_N2F_VOLUMEN=1 schliessen sich aus -- beide ersetzen denselben Listenbauer. Genau einen Arm waehlen.");
@@ -2476,6 +2483,7 @@ static void main_setup_fahrzeug_dd() {
 	if(n2f_alpha>0.0f&&n2f_paritaet>0u) print_warning("CFD_N2F_PARITAET=1: der Kernel bekommt alpha EXAKT 0, der Enqueue laeuft aber. Alle folgenden Ansagen mit \"a = ...\" nennen den GESETZTEN Wert -- WIRKSAM ist ueberall 0. Dieser Lauf ist ein BEWEISLAUF: seine Ergebnisdateien (forces.csv, interface_druck.csv, band_bilanz.csv) sind KEIN alpha-Arm und duerfen nicht als solcher ausgewertet werden.");
 	if(n2f_alpha>0.0f) {
 		print_info("N2F-SCHALE aktiv (P9c, Heiko): Fernfeld-Schale um die Fahrzeug-BBox wird post-stream mit dem Nahfeld-Blockmittel relaxiert, alpha = "+to_string(n2f_alpha,3u)+" (u_neu = (1-a)*u_far + a*u_near, rho bleibt lokal; a = alpha*gewicht je Zelle).");
+		if(n2f_band>0u&&n2f_nurwake>0u) print_info("N2F-BAND NUR-WAKE (CFD_N2F_BAND_NURWAKE=1, Heiko 2026-08-22): das KOERPERBAND entfaellt. Das Fahrzeug bleibt Sperre fuer die Distanztransformation (dt = 253), ist aber KEINE Quelle mehr -- die Rueckkopplung geht ausschliesslich vom Wake-Kasten aus, mit derselben Rampe nach aussen. Nebenwirkung, die den Arm interessant macht: die karosserienahe Zellschicht wird nicht mehr ueberschrieben, damit liest update_force_field im Fernfeld wieder echte Rueckprall-Verteilungen und Fx_far ist als Kriterium zurueck (ausser dort, wo der Kasten selbst ans Fahrzeug stoesst).");
 		if(n2f_band>0u) {
 			print_info("N2F-BAND aktiv (CFD_N2F_BAND=1, Heiko 2026-08-22): BAND-Blend ersetzt den Schalen-Listenbauer -- "
 				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
@@ -2497,7 +2505,7 @@ static void main_setup_fahrzeug_dd() {
 		if(n2f_volumen==0u&&n2f_lagen==0u&&getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL wird im Kontrollarm LAGEN=0 NICHT angewandt (uniformes Gewicht 1,0 ist die Definition des Altverhaltens).");
 		if(n2f_volumen==0u&&n2f_xskal==0.0f) print_warning("CFD_N2F_SCHALE_XPLUS_SKAL=0: x+-Zellen bleiben mit Gewicht 0 in der Liste und wuerden auf ihr LOKALES Gleichgewicht projiziert (a=0 ist im EQ-Arm KEIN No-Op; im FNEQ-Arm nahezu, in IDENT exakt ein No-Op) -- zum Abschalten der Flaeche CFD_N2F_SCHALE_XPLUS=0 nutzen.");
 	}
-	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT")||getenv("CFD_N2F_BAND_WAKE")||getenv("CFD_N2F_BAND_WAKE_START")||getenv("CFD_N2F_BAND_WAKE_START_X")||getenv("CFD_N2F_BAND_WAKE_ABSTAND")||getenv("CFD_N2F_PARITAET"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_BAND_WAKE/_START/_START_X/_ABSTAND, CFD_N2F_PARITAET, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c; die WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Liste -- getenv ist Exaktvergleich, Pruefagent-B8).");
+	if(n2f_alpha==0.0f&&(getenv("CFD_N2F_BAND")||getenv("CFD_N2F_BAND_N")||getenv("CFD_N2F_BAND_PROFIL")||getenv("CFD_N2F_BAND_UNTERBODEN")||getenv("CFD_N2F_VOLUMEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_MITTEL")||getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_FNEQ")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")||getenv("CFD_N2F_SCHALE_IDENT")||getenv("CFD_N2F_BAND_WAKE")||getenv("CFD_N2F_BAND_NURWAKE")||getenv("CFD_N2F_BAND_WAKE_START")||getenv("CFD_N2F_BAND_WAKE_START_X")||getenv("CFD_N2F_BAND_WAKE_ABSTAND")||getenv("CFD_N2F_PARITAET"))) print_warning("CFD_N2F_BAND/_N/_PROFIL/_UNTERBODEN, CFD_N2F_BAND_WAKE/_START/_START_X/_ABSTAND, CFD_N2F_PARITAET, CFD_N2F_VOLUMEN und CFD_N2F_SCHALE_XPLUS/XMINUS/MITTEL/LAGEN/FNEQ/XPLUS_SKAL/IDENT ohne CFD_N2F_SCHALE>0 sind stille No-Ops (P9c; die WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Liste -- getenv ist Exaktvergleich, Pruefagent-B8).");
 	// ★ P8 (Offen-Punkt 8): FACETTEN AUCH IM FERNFELD. Der 32-mm-Treppenkoerper verdraengt +15,5 %
 	// Volumen (Schritt-0-Census fc0edcf) und praegt dem Nahfeld ueber die Kopplungsebenen ein zu
 	// grobes Druckfeld auf -- der Facettenpfad macht die Fernfeld-Wand druckkonsistenter. Schalter
@@ -2870,13 +2878,18 @@ static void main_setup_fahrzeug_dd() {
 		for(uint z=0u; z<cNz; z++) for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) {
 			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
 			if(lbm_c.flags[nn]!=(TYPE_S|TYPE_X)) continue; // EXAKTE Gleichheit wie der Verdraengungs-Census (setup.cpp) -- eine Maske faenge zusaetzlich Zellen mit weiteren Bits und die Quervergleichszahl waere wertlos
-			dt[(size_t)nn]=255u; saat++;
+			dt[(size_t)nn]=(uchar)(n2f_nurwake>0u ? 253u : 255u); saat++; // 253 = Sperre ohne Quelleigenschaft (NUR-WAKE)
 			sx0=min(sx0,x); sx1=max(sx1,x); sy0=min(sy0,y); sy1=max(sy1,y); sz0=min(sz0,z); sz1=max(sz1,z);
 		}
+		// ★ NUR-WAKE: das Fahrzeug traegt je nach Arm 255 (Quelle) oder 253 (nur Sperre). Jede Stelle,
+		// die "ist das eine Fahrzeugzelle?" fragt, muss BEIDE sehen -- sonst faende die
+		// Radstanderkennung im Nur-Wake-Arm kein Fahrzeug und der Fahrbahn-Waechter kein Fahrzeug
+		// auf z=0 (er wuerde still gruenes Licht geben, wo er warnen soll).
+		auto ist_fzg=[&](const uchar d){ return d==255u||d==253u; };
 		// DACHSCHEITEL: kleinstes x, an dem das Fahrzeug seine groesste Hoehe erreicht. Zweiter Lauf,
 		// weil sz1 erst nach dem ersten feststeht. Das ist die Vorderkante des Daches.
 		uint x_dach=cNx, x_radmitte=0u;
-		for(uint y=sy0; y<=sy1; y++) for(uint x=sx0; x<=sx1; x++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz1*(ulong)cNy)*(ulong)cNx)]==255u) { x_dach=min(x_dach,x); break; }
+		for(uint y=sy0; y<=sy1; y++) for(uint x=sx0; x<=sx1; x++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz1*(ulong)cNy)*(ulong)cNx)]>=253u) { x_dach=min(x_dach,x); break; }
 		if(x_dach>=cNx) x_dach=sx0; // kein Treffer auf der obersten Ebene (duenne Anbauteile) -> Fahrzeugfront
 		// HOEHENPROFIL laengs x, damit die Wahl des Wake-Kastenstarts auf Daten steht und nicht auf
 		// der Annahme "hoechster Punkt = Dach". Bei diesem Fahrzeug ist der hoechste Punkt der
@@ -2900,7 +2913,7 @@ static void main_setup_fahrzeug_dd() {
 				// Fahrzeugnase (gemessen 2026-08-22: x = 86 bei Fahrzeugfront 83). Der Splitter ist
 				// flach und breit, die Reifenlatsche beruehren als einzige wirklich den Boden.
 				for(uint y=sy0; y<=sy1; y++) for(uint x=sx0; x<=sx1; x++)
-					if(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz0*(ulong)cNy)*(ulong)cNx)]==255u) hist[x-sx0]++;
+					if(ist_fzg(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz0*(ulong)cNy)*(ulong)cNx)])) hist[x-sx0]++;
 				uint vx=0u, hx=0u; const uint mitte=(sx1-sx0)/2u; uint bv=0u, bh=0u;
 				for(uint k=0u; k<=mitte; k++)            if(hist[k]>bv) { bv=hist[k]; vx=sx0+k; }   // staerkster Haufen vorn
 				for(uint k=mitte+1u; k<hist.size(); k++) if(hist[k]>bh) { bh=hist[k]; hx=sx0+k; }   // staerkster Haufen hinten
@@ -2919,11 +2932,12 @@ static void main_setup_fahrzeug_dd() {
 		// beruehrt sie nur mit den Aufstandsflaechen (bei 8 mm 744 Zellen, und denen wird TYPE_X
 		// ohnehin entzogen). Mehr als ein Zehntel der Ebene bedeutet: die Maske faengt die Strasse.
 		ulong saat_z0=0ull;
-		for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) if(dt[(size_t)((ulong)x+(ulong)y*(ulong)cNx)]==255u) saat_z0++;
+		for(uint y=0u; y<cNy; y++) for(uint x=0u; x<cNx; x++) if(ist_fzg(dt[(size_t)((ulong)x+(ulong)y*(ulong)cNx)])) saat_z0++;
 		if(saat_z0>(ulong)((double)cNx*(double)cNy*0.10)) print_error("N2F-BAND: "+to_string(saat_z0)+" Saatzellen liegen auf der Ebene z=0, das sind ueber 10 % der Fahrbahnflaeche ("+to_string(cNx)+"x"+to_string(cNy)+") -- die Maske faengt die STRASSE, nicht das Fahrzeug. Soll: flags == TYPE_S|TYPE_X (exakt).");
 		// ---- WAKE-KASTEN als ZWEITE Saatmenge (Heiko 2026-08-22). Er kommt mit Gewicht 1 in die
 		// Liste UND dient der Distanztransformation als Quelle -- damit laeuft der Auslauf in y, z
 		// und stromab automatisch mit demselben Profil wie am Koerperband, ohne Sonderlogik.
+		if(n2f_nurwake>0u&&n2f_wake==0u) print_error("CFD_N2F_BAND_NURWAKE=1 ohne CFD_N2F_BAND_WAKE=1: das Fahrzeug ist dann nur noch Sperre und es gibt GAR KEINE Saat -- die Zellliste bliebe leer und der ganze Arm ein No-Op.");
 		uint wx0=0u, wx1=0u, wy0=0u, wy1=0u, wz1=0u; ulong wake_n=0ull;
 		if(n2f_wake>0u) {
 			const uint wake_start_x = env_u("CFD_N2F_BAND_WAKE_START_X", 0u); // 0 = aus; sonst Grobzell-x, ueberstimmt _START
@@ -2972,7 +2986,9 @@ static void main_setup_fahrzeug_dd() {
 					if(dx==0&&dy==0&&dz==0) continue;
 					const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
 					if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
-					if(belegt((uint)xx,(uint)yy,(uint)zz)) nachbar=true;
+					// ★ NUR-WAKE: 253 ist Sperre, keine Quelle -- sonst waere das Koerperband wieder da.
+					const uchar dn2=dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)];
+					if(dn2!=0u&&dn2!=253u) nachbar=true;
 				}
 				if(nachbar) neu.push_back((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx);
 			}
@@ -2986,13 +3002,13 @@ static void main_setup_fahrzeug_dd() {
 		for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
 			const ulong nn=(ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx;
 			const uchar d=dt[(size_t)nn];
-			if(d==0u||d==255u) continue;                       // unerreicht oder Fahrzeug-Saat
+			if(d==0u||d==255u||d==253u) continue;              // unerreicht oder Fahrzeug (Saat 255 bzw. reine Sperre 253)
 			const bool wake_kern = (d==254u);                  // Wake-Kasten: Lage 0, volles Gewicht
 			if(z<z_lo) { ausgelassen_zlo++; continue; }
 			// UNTERBODEN-Kennung: liegt in derselben (x,y)-Saeule OBERHALB eine Saatzelle, ist die
 			// Zelle unter dem Fahrzeug. Billig und robust auch bei nicht-quaderfoermigem Koerper.
 			bool unterboden=false;
-			for(uint zz=z+1u; zz<=sz1&&!unterboden; zz++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)zz*(ulong)cNy)*(ulong)cNx)]==255u) unterboden=true;
+			for(uint zz=z+1u; zz<=sz1&&!unterboden; zz++) if(ist_fzg(dt[(size_t)((ulong)x+((ulong)y+(ulong)zz*(ulong)cNy)*(ulong)cNx)])) unterboden=true;
 			if(unterboden&&n2f_band_ub==0u) { ausgelassen_ub++; continue; }
 			// Deckungspunkt muss im Nahfeld-Fussabdruck liegen, sonst gibt es keine feine Quelle.
 			if(x<NF_OX||x>=NF_OX+cex||y<NF_OY||y>=NF_OY+cey||z>=NF_OZ+cez) { ausserhalb++; continue; }
@@ -3035,7 +3051,7 @@ static void main_setup_fahrzeug_dd() {
 			ulong verletzt=0ull, geprueft=0ull;
 			for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
 				const uchar d=dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)];
-				if(d==0u||d>=254u) continue; // unerreicht, Wake-Kern oder Fahrzeug-Saat
+				if(d==0u||d>=253u) continue; // unerreicht, Fahrzeug-Sperre (253), Wake-Kern (254) oder Fahrzeug-Saat (255)
 				geprueft++;
 				uint dmin=255u;
 				for(int dz=-1; dz<=1; dz++) for(int dy=-1; dy<=1; dy++) for(int dx=-1; dx<=1; dx++) {
@@ -3043,6 +3059,7 @@ static void main_setup_fahrzeug_dd() {
 					if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
 					const uchar dn=dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)];
 					if(dn==0u) continue;
+					if(dn==253u) continue;                        // Sperre ist KEINE Saat (Nur-Wake-Arm)
 					dmin = min(dmin, (dn>=254u) ? 0u : (uint)dn); // beide Saaten zaehlen als Abstand 0
 				}
 				if(dmin+1u<(uint)d) verletzt++;
@@ -3064,13 +3081,32 @@ static void main_setup_fahrzeug_dd() {
 					const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
 					if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
 					const uchar dn=dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)];
-					if(dn!=0u&&(dn>=254u||(uint)dn<n2f_band_n)) nah=true; // Saat oder Lage < N: haette weitergereicht werden muessen
+					if(dn!=0u&&dn!=253u&&(dn>=254u||(uint)dn<n2f_band_n)) nah=true; // Saat oder Lage < N: haette weitergereicht werden muessen (253 = Sperre, keine Saat)
 				}
 				if(nah) luecke++;
 			}
 			if(luecke>0ull) print_error("N2F-BAND VOLLSTAENDIGKEITS-BEWEIS GESCHEITERT: "+to_string(luecke)+" unerreichte Zellen haben einen Nachbarn mit Lage < "+to_string(n2f_band_n)+" oder eine Saat als Nachbarn -- die Dilatation haette sie erreichen muessen. Der Arbeitsbereich ist zu klein (das war Fehler B1).");
 			// ★ Iron Rule 8: der Kasten beweist seine Wirkung im Binary. Angesagte Kernzellen gegen
 			// tatsaechlich GELISTETE. Ohne diesen Test war B1 ein lautloser Teil-No-Op.
+			// ★ WIRKNACHWEIS NUR-WAKE (Iron Rule 8): im Nur-Wake-Arm darf KEINE gelistete Zelle einen
+			// Fahrzeugnachbarn haben, ohne ueber den Kasten erreicht worden zu sein. Direkt pruefbar:
+			// keine Lage-0-Zelle (Abstand 1) darf an das Fahrzeug grenzen, ohne Kastenzelle zu sein.
+			if(n2f_nurwake>0u) {
+				ulong am_fzg=0ull;
+				for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) {
+					const ulong nn=n2f_liste_c[i];
+					if(dt[(size_t)nn]==254u) continue;                  // Kastenzelle: darf ueberall liegen
+					const uint x=(uint)(nn%(ulong)cNx), y=(uint)((nn/(ulong)cNx)%(ulong)cNy), z=(uint)(nn/((ulong)cNx*(ulong)cNy));
+					bool nb=false;
+					for(int dz=-1; dz<=1&&!nb; dz++) for(int dy=-1; dy<=1&&!nb; dy++) for(int dx=-1; dx<=1&&!nb; dx++) {
+						const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
+						if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
+						if(dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)]==253u) nb=true;
+					}
+					if(nb) am_fzg++;
+				}
+				print_info("N2F-BAND NUR-WAKE ABNAHME: "+to_string(am_fzg)+" gelistete Rampenzellen grenzen an das Fahrzeug (sie sind ueber den Kasten erreicht, nicht ueber den Koerper). Im Arm MIT Koerperband waeren es alle "+to_string(n2f_liste_c.size())+" Lagen-0-Kandidaten -- die Zahl belegt, dass die Fahrzeug-Saat wirklich abgeschaltet ist.");
+			}
 			if(n2f_wake>0u) {
 				ulong kern_gelistet=0ull;
 				for(const ulong nn : n2f_liste_c) if(dt[(size_t)nn]==254u) kern_gelistet++;
@@ -4476,7 +4512,7 @@ static void main_setup_fernfeld() {
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
-	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
+	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im fernfeld-Fall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) print_warning("CFD_FACETTEN_DIAG wird im fernfeld-Fall NICHT angewandt.");
@@ -4617,7 +4653,7 @@ void main_setup_facetten_test() {
 	if(getenv("CFD_BODEN_EQ")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird in facetten_test NICHT angewandt (XL-R3).");
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")) print_warning("CFD_KOPPLUNG_ZEITINTERP wird in diesem Fall NICHT angewandt (nur fahrzeug_dd; Pruefagent M3).");
 	if(getenv("CFD_FERN_FACETTEN")) print_warning("CFD_FERN_FACETTEN wird in facetten_test NICHT angewandt (nur fahrzeug_dd; P8-M1).");
-	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
+	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	print_info("facetten_test: ALLE CFD_FACETTEN*/CFD_FAC_*-Env-Werte werden IGNORIERT (Arme hart verdrahtet); kein sichere_lauf, fester Ordner export/facetten_test (Gross-Audit-Ansage).");
 	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N/CFD_SPARSE_TILES/CFD_WANDFUNKTION sind im facetten_test WIRKUNGSLOS (B10).");
 	print_info("C1b T1: Paartabelle unabhaengig aus FZ_C herleiten und gegen die Kernel-Kopie pruefen.");
