@@ -137,3 +137,20 @@ FAC_CD_EVERY=1.
 3. FERN_FACETTEN wirken auf 16-mm-Treppen staerker als auf 32-mm: Fernabloesung wandnah
    naeher an der Nahfeld-Quote als die 8-mm-Differenz (49,5-27 = 22 Pp).
 4. Fx_far bleibt unbrauchbar (Kastenkern beruehrt weiter Karosseriezellen oberhalb k).
+
+---
+
+## VIERTER 4-mm-Arm = PRODUKTION (Heiko-Freigabe 2026-08-22 ~19:00)
+
+Konfiguration = validierter Kandidat C der Plateau-Kette: N=8, WANDFREI=2, PROFIL=2
+(Plateau 2 ab Lage 3), alpha 0,5, Kasten ab Kabinendach x=311, ABSTAND=32, FNEQ-Standard,
+Kadenz 1, VTK am Ende. OHNE Fern-Facetten (nur Richtungssignal bei 8 mm -- eigener Arm).
+
+**Vorhersagen (Bezug f4_std_diff2: cd_druck 0,8428 +- 0,021, cz_druck_rest -0,8255 +- 0,063):**
+1. cz_druck_rest faellt um 0,1 bis 0,3 auf -0,93 bis -1,13 (8-mm-Effekt -0,27, mechanisch
+   aufloesungsunabhaengig). *Falsifiziert ueber -0,88.* Bauplan-Kriterium 2 (<= -0,92) in
+   Reichweite.
+2. cd_druck steigt um 0,05 bis 0,15 (der 8-mm-Preis skaliert mit). *Ueberraschung bei Fall.*
+3. cz_druck_band bleibt innerhalb +- 0,03 (Kontaktband kein Zielkanal).
+4. Kein Waechter-Abbruch: alle Gates sind auf diese Konfigurationsfamilie geeicht bzw. heute
+   neu geeicht (Dichte-Anteil, Kipp ab 0,05 s).
