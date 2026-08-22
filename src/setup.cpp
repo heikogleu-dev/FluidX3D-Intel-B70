@@ -2446,7 +2446,7 @@ static void main_setup_fahrzeug_dd() {
 	//  CFD_N2F_BAND_UNTERBODEN  0 = Zellen im Unterbodenspalt weglassen (Vergleichsarm; Default 1).
 	const uint  n2f_band     = min(1u, env_u("CFD_N2F_BAND", 0u));
 	const uint  n2f_band_n   = min(253u, max(1u, env_u("CFD_N2F_BAND_N", 8u))); // Obergrenze 253: dt nutzt 254 (Wake-Kern) und 255 (Fahrzeug-Saat) als Marken -- ab N=254 schriebe die Dilatation eine Bandzelle als Kern (Pruefagent B9)
-	const uint  n2f_band_prof= min(1u, env_u("CFD_N2F_BAND_PROFIL", 0u));
+	const uint  n2f_band_prof= min(2u, env_u("CFD_N2F_BAND_PROFIL", 0u)); // 0 = linear, 1 = cos^2, 2 = Plateau+geometrisch (Heiko 2026-08-22)
 	const uint  n2f_band_ub  = min(1u, env_u("CFD_N2F_BAND_UNTERBODEN", 1u));
 	// ★ WAKE-KASTEN (Heiko 2026-08-22). Statt Frontalprojektion + alles stromab ein schlichter
 	// achsparalleler Kasten: y-Weite und z-Hoehe der Fahrzeug-BBox, x von einem waehlbaren Start
@@ -2477,7 +2477,23 @@ static void main_setup_fahrzeug_dd() {
 	if(n2f_band>0u&&n2f_volumen>0u) print_error("CFD_N2F_BAND=1 und CFD_N2F_VOLUMEN=1 schliessen sich aus -- beide ersetzen denselben Listenbauer. Genau einen Arm waehlen.");
 	// Gewichtsprofil als eine Funktion, damit Census-Ausgabe und Listenbau garantiert dasselbe
 	// rechnen (getrennte Formeln waren im Altbau schon einmal auseinandergelaufen).
-	auto band_w = [&](const uint d) { // d = 1..N
+	// ★ PROFIL 2: PLATEAU + GEOMETRISCH (Heiko 2026-08-22 nachmittags, aus den 4-mm-Diff-Slices).
+	// Sein Befund: das Band ist "zu breit und zu schwach". Linear und cos^2 verteilen das Gewicht
+	// ueber die ganze Tiefe; die gemessene Fehlerkurve (b8_kontrolle, Karosseriezone) faellt aber
+	// nach 3 bis 4 Lagen steil ab. Die Vorgabe lautet: volle Staerke als PUFFERZONE ueber die
+	// ersten Lagen, dann Halbierung je Lage, letzte Lage exakt 0.
+	// Heikos Beispiel fuer N=8 bei alpha 0,5: 50/50/25/12,5/6,8/3,4/1,7/0 Prozent wirksames a.
+	// Als Gewicht w (a = alpha*w): 1 / 1 / 0,5 / 0,25 / 0,125 / 0,0625 / 0,03125 / 0.
+	// Seine drei letzten Zahlen liegen ~9 % ueber der reinen Halbierung -- Rundung; hier steht die
+	// exakte Halbierung, damit das Profil eine geschlossene Form hat.
+	// Vorlaeufer: V1 fuhr 2026-05-16 eine "Plateau-Rampe" nach demselben Gedanken (Phase 6C).
+	const uint n2f_band_plateau = max(1u, min(n2f_band_n>1u?n2f_band_n-1u:1u, env_u("CFD_N2F_BAND_PLATEAU", 2u)));
+	auto band_w = [&](const uint d) { // d = 1..N, gibt w in (0,1]; a = alpha*w
+		if(n2f_band_prof==2u) {                                   // Plateau + geometrisch
+			if(d>=n2f_band_n) return 0.0f;                        // aeusserste Lage exakt 0 -- keine Kante
+			if(d<=n2f_band_plateau) return 1.0f;                  // Pufferzone volle Staerke
+			return (float)pow(0.5, (double)(d-n2f_band_plateau));
+		}
 		return n2f_band_prof==0u ? (float)(n2f_band_n+1u-d)/(float)n2f_band_n
 		                         : (float)(cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n)*cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n));
 	};
@@ -2488,7 +2504,7 @@ static void main_setup_fahrzeug_dd() {
 		if(n2f_band>0u) {
 			print_info("N2F-BAND aktiv (CFD_N2F_BAND=1, Heiko 2026-08-22): BAND-Blend ersetzt den Schalen-Listenbauer -- "
 				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
-				+(n2f_band_prof==0u?string("linear"):string("cos^2"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
+				+(n2f_band_prof==0u?string("linear"):n2f_band_prof==1u?string("cos^2"):("Plateau("+to_string(n2f_band_plateau)+" Lagen voll)+geometrisch"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
 				+"), Unterbodenspalt "+(n2f_band_ub>0u?"ENTHALTEN":"AUSGENOMMEN (Vergleichsarm)")+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ)":" (EQ)")+".");
 			if(n2f_wake>0u) print_info("N2F-BAND WAKE-KASTEN aktiv: achsparalleler Kasten in y/z-Ausdehnung der Fahrzeug-BBox, x von "+(n2f_wake_start==2u?string("RADSTANDMITTE"):n2f_wake_start==0u?string("HOECHSTER PUNKT"):string("HECK"))+" bis "+to_string(n2f_wake_abst)+" Grobzellen vor dem Nahfeld-Auslass; geht als ZWEITE SAATMENGE in dieselbe Distanztransformation, bekommt also denselben Auslauf wie das Koerperband.");
 			if(n2f_modus==0u) print_info("N2F-BAND EMPFEHLUNG: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");

@@ -88,3 +88,30 @@ denselben Cd-Effekt bei halbem Rechenaufwand?
    8-mm-Leiter zeigte: N=8 schlaegt N=16 in keiner Zone. Groessenordnung +10 bis +20 %.
 3. cd_druck bleibt in derselben Groessenordnung wie im laufenden Arm (+-0,05). Falls nicht,
    haengt der Cd-Effekt an einem der beiden Knoepfe und die Zerlegung wird noetig.
+
+---
+
+## Arm 2 NEU GEFASST (Heiko, nach Sichtung der 4-mm-Diff-Slices)
+
+Heikos Befund am Bild: "das Band ist zu breit und zu schwach". Der Zahlenbefund an der
+0,3-s-Marke von Arm 1 stuetzt ihn: cd_druck 0,8493 -> 0,8163, also -3,9 % bei 0,4 sigma --
+praktisch nichts, waehrend es auf 8 mm -11 % bei 5,4 sigma waren. Mein alpha = 0,25 war ueber
+Klemme und Massenquelle begruendet und hat dabei die WIRKUNG mitgesenkt.
+
+Arm 2: N=8, alpha 0,50, PROFIL 2 (Plateau 2 Lagen voll, dann Halbierung, letzte Lage 0).
+Wirksames a: 50 / 50 / 25 / 12,5 / 6,2 / 3,1 / 1,6 / 0 Prozent.
+Gegen linear N=8 bei alpha 0,5: 50 / 43,8 / 37,5 / 31,2 / 25 / 18,8 / 12,5 / 6,2 Prozent.
+
+**Vorhersagen, vor dem Start:**
+1. cd_druck faellt deutlicher als in Arm 1 (dort -0,033 bei 0,4 sigma). Erwartung -0,08 bis
+   -0,20, also 0,64 bis 0,76. *Falsifiziert, wenn |Delta| unter 0,05 bleibt.* Begruendung:
+   die karosserienahen Lagen tragen jetzt das doppelte a von Arm 1 (50 statt 25 Prozent) und
+   die 8-mm-Leiter zeigte, dass der cd_druck-Effekt am starken Nahbereich haengt.
+2. **Die Massenquelle ist die offene Frage, nicht die Wirkung.** Zwei Terme wirken gegenlaeufig:
+   grad(w) ist im Abfall STEILER als linear (0,25 je Lage gegen 0,0625), aber die aeusseren
+   Lagen tragen fast nichts mehr. Ich sage NICHT vorher, welcher gewinnt -- das misst
+   band_bilanz.csv. Aufgeschrieben, damit hinterher keine Erklaerung nachgeschoben wird.
+3. Fernfeld-Klemmtreffer: steigen gegen Arm 1 (alpha doppelt, N halb), Groessenordnung
+   Faktor 2 bis 4. *Falsifiziert unter Faktor 1,5.*
+4. Der Kopplungsfehler im NAHEN Bereich (bis 4 Grobzellen) wird besser als Arm 1, im AEUSSEREN
+   (ab Lage 6) schlechter -- das Profil verschiebt Gewicht nach innen.
