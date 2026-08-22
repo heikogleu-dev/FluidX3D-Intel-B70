@@ -1387,3 +1387,64 @@ Ein-Zellen-Kanal ueberhaupt tragen kann, oder ob sie gegen die Geometrie anarbei
 NACH der Rueckkopplung wieder aufgetragen werden -- ist richtig und seit `919c122` umgesetzt
 (`schale_blend` vor `boden_eq`, lbm.cpp:1590-1592). `f8_standard_final` ist von 2026-08-21 und
 zeigt noch den Altstand, in dem der Blend ueber den Bodenfix gewann.
+
+## 2026-08-22 mittags — Fx_far ist im BAND-Arm konstruktionsbedingt UNGUELTIG (Heiko-Einwand)
+
+**Mein Fehler:** Ich hatte den Band-Arm auf Grund von `Fx_far_N` = 50.186 N (Basis 3.166 N)
+verworfen, mit Verweis auf den 2026-08-21 verworfenen Volumen-Blend (44.553 N). Heiko hat
+verlangt, erst die Herkunft der Kraft zu klaeren. Zu Recht.
+
+**Mechanismus:** `update_force_field` (kernel.cpp) laeuft auf den SOLID-Zellen des
+Fernfahrzeugs, macht dort `load_f` und rechnet die Momentum-Exchange-Kraft. Unter
+Esoteric-Pull liegen die gelesenen DDFs im Speicher der ANGRENZENDEN FLUIDZELLEN. Lage 0 des
+Bandes ist per Definition genau diese karosserienahe Schicht (Saat = Fahrzeugvoxel,
+Chebyshev-Abstand 1), und `schale_blend` macht dort `store_f`.
+
+**Also misst `Fx_far` die Verteilungen, die der Blend selbst geschrieben hat -- keine Kraft.**
+Der Baum wusste das an einer Stelle bereits: setup.cpp:2851 sperrt `CFD_FERN_FACETTEN` mit
+exakt dieser Begruendung. Die Facetten-Kraft war abgesichert, `object_force` nicht.
+
+**FOLGE FUER DEN VOLUMEN-BLEND (2026-08-21 verworfen):** seine Rot-Box (Fahrzeug-BBox + 100 mm)
+enthielt die karosserienahe Schicht ebenfalls. Sein `Fx_far` war damit nach demselben
+Mechanismus ungueltig. **Die Verwerfung steht auf einer kaputten Metrik und ist neu zu
+pruefen.** Das ist kein Freispruch fuer den Volumen-Blend -- nur die Feststellung, dass das
+Urteil nicht auf dem beruht, worauf es zu beruhen schien.
+
+### Was stattdessen gemessen wurde (Groessen, die der Blend nicht anfasst)
+
+`schnitt_diff_letzter.csv`, Mittelebene y=0, t = 0,492 s, 162.727 feine Fluidzellen:
+
+| Zone | x [m] | RMS Kontrolle | RMS Band | Aenderung |
+|---|---|---|---|---|
+| stromauf der Nase | -9,00..0,01 | 2,613 | 2,296 | -12,1 % |
+| Nase/Splitter | 0,01..0,35 | 6,651 | 4,308 | **-35,2 %** |
+| Mitte/Unterboden | 0,35..1,90 | 7,289 | 2,960 | **-59,4 %** |
+| Heck | 1,90..2,60 | 6,853 | 2,881 | -58,0 % |
+| Nachlauf nah | 2,60..4,00 | 7,780 | 2,876 | **-63,0 %** |
+| Nachlauf fern | 4,00..9,00 | 7,309 | 4,876 | -33,3 % |
+| **gesamt** | | **7,146** | **3,945** | **-44,8 %** |
+
+max |d| 83,88 -> 67,28 m/s. Zugemauerte Zellen 892 in BEIDEN Laeufen (unveraendert -- das
+Band kann dort nicht schreiben, s. Nasen-Befund derselben Sitzung).
+
+Cd (Fenster 0,2-0,5 s, aus dem NAHFELD, das der Band-Blend nicht beruehrt -- `s_schale_alpha`
+ist fuer `lbm_f` explizit 0): Basis 8,950 +- 0,028, Band 7,872 +- 0,036. Cz 0,536 -> 0,476
+(-0,8 sigma, nicht signifikant). Ob 7,872 NAEHER AN DER WAHRHEIT liegt, sagt keine dieser
+Zahlen -- dafuer fehlt eine Referenz (OpenFOAM 13 oder eine feinere Sprosse).
+
+### Default-AUS bitidentisch: BELEGT
+`Fx_far_N` der Kontrolle ist bis t = 0,3 s ziffernidentisch zur Basis (-19924, -19306,
+-10405, 5550, 996, 4384), Divergenz erst ab 0,4 s. Das Fernfeld ist bitgleich; die
+Cd-Abweichung +0,069 stammt aus der dokumentierten po_mean-Nichtdeterminie im Nahfeld.
+
+### Offen
+1. **`Fx_far` als Kriterium reparieren.** Vorschlag: Schalter fuer die Startlage des Bandes
+   (Blend erst ab Chebyshev-Abstand 2), dann liest `update_force_field` wieder echte
+   Rueckprall-Verteilungen. Ein Lauf, eine Variable.
+2. **Volumen-Blend neu bewerten** (s. o.).
+3. **`b8_band_wake` (Dichte-Abbruch)**: rho ausserhalb 1 +- 0,1 im Wake-Kasten, sofort bei
+   Scharfschaltung t = 0,2 s. Kein Anlauftransient. Echter Befund.
+4. **`b8_paritaet`**: an meinem eigenen Konstruktionsfehler gescheitert -- der Kipp-Waechter
+   misst ||u_nah - u_fern||, bei alpha = 0 bleibt die Differenz naturgemaess gross. Der
+   Beweisarm kann seinen eigenen Waechter nicht ueberleben. Unter `CFD_N2F_PARITAET` muss der
+   Waechter melden statt abbrechen.
