@@ -1558,3 +1558,13 @@ cd_druck 1,568 -> 1,647 (2 sigma) -- der Kopplungs-Cd-Effekt schrumpft von -0,19
 der Rest war EQ-Artefakt (kuenstliche Dissipation drueckte Cd mit).
 Default CFD_N2F_SCHALE_FNEQ: 0 -> 1. EQ-Arm nur noch explizit, mit Warnung. Default-AUS der
 Kopplung bleibt bitidentisch. EQ-Altlaeufe sind gegen FNEQ-Laeufe nicht direkt vergleichbar.
+
+## 2026-08-22 abends — Facetten-1a-Screening: Budgets sind nicht der Hebel
+
+B4t (Tangentialbudget x2): VERWORFEN -- cd_druck 1,6465 -> 1,7403 (2,4 sigma, weg von OF13),
+Slot 10 nur -15 %, Slot 16 +27 % (Last verschoben, nicht geheilt). Bsn (sn-Budget x2):
+neutral -- Slot 16 -43 %, Kraefte unveraendert (0,0 sigma). Kombination entfaellt.
+Budgets bleiben 1,0. KERNZAHL: 22,9 von 23,6 Mio ohneTang-Ereignissen am Fahrzeug sind
+Einzellink-diagonal (97 %; Kugel 94 %) -- die Klasse ist so gross wie die u_s-Klemme und
+NUR per ELIBB (1c) erreichbar. 1a schliesst damit: weiter mit 1b (FERN_FACETTEN +
+Band-Wandrueckzug) und 1c (Plan: FACETTEN-ELIBB-PLAN.md).
