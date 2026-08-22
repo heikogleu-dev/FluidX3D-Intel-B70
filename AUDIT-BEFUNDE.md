@@ -1448,3 +1448,43 @@ Cd-Abweichung +0,069 stammt aus der dokumentierten po_mean-Nichtdeterminie im Na
    misst ||u_nah - u_fern||, bei alpha = 0 bleibt die Differenz naturgemaess gross. Der
    Beweisarm kann seinen eigenen Waechter nicht ueberleben. Unter `CFD_N2F_PARITAET` muss der
    Waechter melden statt abbrechen.
+
+## 2026-08-22 nachmittags — der "3,1-m/s-Sockel" war ein Anlauftransient (Heiko-Frage, zwei Agenten)
+
+**Mein Fehler.** Ich hatte aus `export/f4_std_diff/schnitt_diff_letzter.csv` abgelesen, der
+Kopplungsfehler laufe auf der 4-mm-Sprosse ab 192 mm in einen Boden von 3,1 m/s, und daraus
+eine Skalierungsregel abgeleitet ("bei 4 mm reichen 12 Lagen"). Beides ist falsch.
+
+**Ursache:** `f4_std_diff` steht bei **t = 11 ms**, und `forces.csv` endet bei t = 0,020 s --
+der Lauf brach weit vor seinem eigenen `CFD_T_WARMUP=0.2` ab. Der "Sockel" war ein konstanter
+u_x-Versatz von +3,5 m/s: das Fernfeld war schlicht noch nicht auf Geschwindigkeit.
+Gegenprobe an zwei unabhaengigen 4-mm-Laeufen jenseits 192 mm: `f4_std_diff` traegt 38,7 %
+Mittelwertanteil, `f4_std_diff2` nur 0,3 %, Korrelation der beiden Differenzfelder r = +0,03.
+
+**Mit dem vollstaendigen Lauf** `f4_std_diff2` (t = 495 ms, Umgebung bis auf SPONGE_N und den
+VTK-Schalter identisch zu b8_kontrolle) faellt die Kurve durchgehend, ohne Boden:
+
+| Abstand | 8 mm | 4 mm | Grobzellen 8 / 4 |
+|---|---|---|---|
+| 64 mm | 20,42 | 8,80 | 2 / 4 |
+| 128 mm | 12,36 | 4,29 | 4 / 8 |
+| 256 mm | 4,05 | 2,10 | 8 / 16 |
+| 512 mm | 1,56 | 0,94 | 16 / 32 |
+
+**Folge fuer die Bandbreite:** bei GLEICHER LAGENZAHL ist der Restfehler auf beiden Sprossen
+etwa gleich (N=8: 4,05 gegen 4,29). Die Lagenzahl in GROBZELLEN ist damit die richtige
+Kopplungsgroesse, nicht die Millimeter -- Heikos urspruengliche Formulierung "16 Fernzellen"
+war richtig und uebertraegt sich sauber auf 4 mm.
+
+**Was unabhaengig davon stehen bleibt (Code-Befund, verifiziert):** `(C*Delta)^2` steckt als
+Konstante 0.76421222 in kernel.cpp:2294 mit **Delta = 1 Gitterzelle**, in beiden Domaenen
+identisch. Physikalisch ist das nu_t = (C*dx)^2*|S|; das Fernfeld traegt bei gleicher
+Scherung die 16-fache Wirbelviskositaet. Bei tau ~ 0,5 (setup.cpp:2131/2148-2156) ist das
+praktisch die gesamte Viskositaet -- die beiden Domaenen loesen unterschiedliche effektive
+Gleichungen. Korrektes Smagorinsky-Verhalten, aber eine dauerhafte Asymmetrie der Kopplung.
+Frueherer Projektbefund mit derselben Diagnose:
+FluidX3D/findings/2026-06-23_resolution-dependence_sgs-grid-dependence.md
+
+**Lehre fuer mich:** vor jedem Vergleich zweier Laeufe den ZEITSTEMPEL des Schnitts und das
+Ende der forces.csv pruefen. Ein Diff-Slice traegt seine Zeit in der ersten Spalte; ich habe
+sie nicht gelesen.
