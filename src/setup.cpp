@@ -2836,6 +2836,12 @@ static void main_setup_fahrzeug_dd() {
 	//    Wake waechst die Nah-Fern-Diskrepanz ueber die ersten ~0,1 s physikalisch monoton -> es
 	//    waere ein Fehlalarm-Generator. Es laeuft deshalb nur auf der Aussenlage des KOERPERBANDS.
 	std::vector<uchar> n2f_marke;
+	// Kastengrenzen fuer die Impulsbilanz (0 = kein Kasten). Sie sind die Antwort auf den
+	// staerksten Einwand gegen diesen Arm: das aufgepraegte Impulsdefizit liegt in der
+	// Groessenordnung des GESAMTEN Fahrzeugwiderstands (~790 N gegen 611 N bei Cd 0,599), und
+	// das Fernfeld-Fahrzeug erzeugt sein eigenes Defizit weiter. Ob daraus eine Doppelzaehlung
+	// wird, entscheidet keine Ueberlegung, sondern die Bilanz ueber die sechs Kastenflaechen.
+	uint bil_x0=0u, bil_x1=0u, bil_y0=0u, bil_y1=0u, bil_z0=0u, bil_z1=0u; bool bil_an=false;
 	const uint n2f_lage_aussen = (n2f_band>0u) ? n2f_band_n-1u : ((n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u)); // BAND: Lage = d-1, aeusserste ist N-1 // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
 	float n2f_w_band = 0.0f; // VOLUMEN: groesstes Gewichtsfeld im Aussenband -- traegt in die Negations-Schwelle (w_aussen = alpha*n2f_w_band)
 	ulong n2f_nanblocks = 0ull;
@@ -2923,6 +2929,7 @@ static void main_setup_fahrzeug_dd() {
 			}
 			print_info("N2F-BAND WAKE-CENSUS: Kasten grob x["+to_string(wx0)+".."+to_string(wx1)+"] y["+to_string(wy0)+".."+to_string(wy1)+"] z["+to_string(z_lo)+".."+to_string(wz1)+"] = "+to_string(wake_n)+" Kernzellen (Start "+(n2f_wake_start==2u?"RADSTANDMITTE x="+to_string(x_radmitte):n2f_wake_start==0u?"HOECHSTER PUNKT x="+to_string(x_dach):"HECK x="+to_string(sx1+1u))+", Fahrzeug-BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z[..%"+to_string(sz1)+"]); frei vor dem Nahfeld-Auslass: "+to_string((int)(NF_OX+cex-1u)-(int)wx1)+" Grobzellen.");
 			if(wake_n==0ull) print_error("N2F-BAND WAKE: Kasten enthaelt keine einzige freie Zelle -- Geometrie pruefen.");
+			bil_x0=wx0; bil_x1=wx1; bil_y0=wy0; bil_y1=wy1; bil_z0=z_lo; bil_z1=wz1; bil_an=true;
 		}
 		// ---- CHEBYSHEV-DISTANZTRANSFORMATION, separabel: N Runden a drei 1-D-Dilatationen.
 		// Deterministisch, keine Warteschlange, Laufzeit im Millisekundenbereich. Arbeitsbereich ist
@@ -3312,6 +3319,16 @@ static void main_setup_fahrzeug_dd() {
 	}
 	ulong max_cp = 0ull;
 	for(uint p=0u; p<5u; p++) max_cp = max(max_cp, (ulong)cp[p].extent_a*(ulong)cp[p].extent_b);
+	// ★ Die Bilanzebenen des Wake-Kastens laufen ueber DENSELBEN Kopplungspuffer. Ihre Groesse
+	// explizit einrechnen -- sonst haengt die Korrektheit daran, dass die Kopplungsebenen zufaellig
+	// groesser sind (bei 8 mm sind sie es: 16.960 gegen 7.076; bei anderen Aufloesungen nicht
+	// zwingend). extract_plane_macros bricht bei zu kleinem Puffer hart ab, aber erst zur Laufzeit.
+	if(bil_an) {
+		const ulong bx=(ulong)(bil_x1-bil_x0+1u), by=(ulong)(bil_y1-bil_y0+1u), bz=(ulong)(bil_z1-bil_z0+1u);
+		const ulong bmax = max(max(by*bz, bx*bz), bx*by);
+		if(bmax>max_cp) print_info("N2F-BAND BILANZ: groesste Kastenflaeche "+to_string(bmax)+" Zellen ueberschreitet die Kopplungsebenen ("+to_string(max_cp)+") -- Kopplungspuffer wird entsprechend groesser angelegt.");
+		max_cp = max(max_cp, bmax);
+	}
 	lbm_c.alloc_coupling_planes(max_cp); // entnimmt
 	lbm_f.alloc_coupling_planes(max_cp); // empfaengt dieselben Ebenen
 
@@ -3400,6 +3417,21 @@ static void main_setup_fahrzeug_dd() {
 	// (cs2 = 1/3 lattice) via units_coarse.si_p in Pa ausgewiesen. KEIN zusaetzlicher GPU-Read.
 	std::ofstream ipcsv(out_dir+"interface_druck.csv"); ipcsv.precision(8);
 	ipcsv << "time_s,ebene,rho_min,rho_mittel,rho_max,dp_min_pa,dp_mittel_pa,dp_max_pa\n" << std::flush;
+	// ★ BILANZ-CSV des Wake-Kastens (Heiko-Auflage, 2026-08-22). Sechs Begrenzungsflaechen des
+	// Kastens auf dem GROBGITTER, an der Sample-Kadenz per extract_plane_macros ausgelesen:
+	//   mdot_netto  Summe rho*(u.n)*dA ueber alle sechs Flaechen. SOLL ~ 0. Die Abweichung IST die
+	//               kuenstliche Massenquelle, die der Blend erzeugt (er setzt u und laesst rho
+	//               lokal, damit ist div(rho*u) im Rampengebiet nicht mehr null).
+	//   Fx_bilanz   Impulsfluss + Druckanteil in x ueber dieselben Flaechen. Gegen die Fahrzeug-
+	//               kraft zu lesen: konvergiert er dagegen, ist die Aufpraegung konsistent;
+	//               schiesst er darueber hinaus, zaehlen Fernfeld-Koerper und Blend DOPPELT.
+	// Kein zusaetzlicher Kernel -- extract_plane_macros liefert (rho,u) jeder achsennormalen Ebene.
+	std::ofstream bilcsv;
+	if(bil_an) {
+		bilcsv.open(out_dir+"band_bilanz.csv"); bilcsv.precision(8);
+		bilcsv << "time_s,mdot_xm,mdot_xp,mdot_ym,mdot_yp,mdot_zm,mdot_zp,mdot_netto,mdot_netto_rel,Fx_impuls_N,Fx_druck_N,Fx_summe_N,Fx_fein_N,Fx_grob_N,rho_min,rho_max\n" << std::flush;
+		print_info("N2F-BAND BILANZ aktiv: Massen- und x-Impulsbilanz ueber die sechs Begrenzungsflaechen des Wake-Kastens (grob x["+to_string(bil_x0)+".."+to_string(bil_x1)+"] y["+to_string(bil_y0)+".."+to_string(bil_y1)+"] z["+to_string(bil_z0)+".."+to_string(bil_z1)+"]) an der Sample-Kadenz -> "+out_dir+"band_bilanz.csv. mdot_netto SOLL ~ 0; die Abweichung ist die kuenstliche Massenquelle des Blends. Fx_summe gegen die Fahrzeugkraft lesen -- schiesst er darueber, zaehlen Fernfeld-Koerper und Blend doppelt.");
+	}
 	print_info("INTERFACE-DRUCK-Instrument aktiv: rho-Statistik der 4 getriebenen Kopplungsebenen (x-, y-, y+, z+) an der Sample-Kadenz, Delta-p = (rho-1)*cs2 in Pa -> "+out_dir+"interface_druck.csv (reine Ausgabe aus den vorhandenen Host-Kopplungspuffern).");
 	// ★ SONDE einlass_saeule_nah (Iron Rule 5 -- Echtdaten statt PNG-Analysen fuer die Near-Inlet-
 	// Schlieren): zwei Feingitter-z-Saeulen bei x_f = 2 und x_f = 10 hinter dem Near-x--Rand,
@@ -3746,6 +3778,44 @@ static void main_setup_fahrzeug_dd() {
 				const double dpmax  = (double)units_coarse.si_p((rmax-1.0f)/3.0f);
 				ipcsv << t_si << "," << face_name[p] << "," << rmin << "," << rmean << "," << rmax << ","
 				      << dpmin << "," << dpmean << "," << dpmax << "\n" << std::flush;
+			}
+			if(bil_an) { // ★ BILANZ ueber die sechs Kastenflaechen (Massen- und x-Impulsstrom)
+				// Vorzeichenkonvention: n zeigt AUS dem Kasten heraus. mdot > 0 = Ausstrom.
+				// Jede Flaeche wird mit extract_plane_macros gelesen; dieselbe Mechanik wie die
+				// Kopplungsebenen, nur auf anderen Indizes. rho/u kommen in Gittereinheiten,
+				// die Umrechnung nach SI laeuft ueber units_coarse.
+				static std::vector<float> bf; // Wiederverwendeter Host-Puffer
+				const uint bx=bil_x1-bil_x0+1u, by=bil_y1-bil_y0+1u, bz=bil_z1-bil_z0+1u;
+				const PlaneSpec bp[6] = { mk(bil_x0,bil_y0,bil_z0, by,bz, 0u), mk(bil_x1,bil_y0,bil_z0, by,bz, 0u),
+				                          mk(bil_x0,bil_y0,bil_z0, bx,bz, 1u), mk(bil_x0,bil_y1,bil_z0, bx,bz, 1u),
+				                          mk(bil_x0,bil_y0,bil_z0, bx,by, 2u), mk(bil_x0,bil_y0,bil_z1, bx,by, 2u) };
+				const float nrm[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
+				double md[6]={0,0,0,0,0,0}, fimp=0.0, fdru=0.0, rmn=1e30, rmx=-1e30, mein=0.0;
+				for(uint f=0u; f<6u; f++) {
+					lbm_c.extract_plane_macros(bp[f], bf);
+					const ulong np=(ulong)bp[f].extent_a*(ulong)bp[f].extent_b;
+					for(ulong i=0ull; i<np; i++) {
+						const double r=(double)bf[4ull*i], ux=(double)bf[4ull*i+1ull], uy=(double)bf[4ull*i+2ull], uz=(double)bf[4ull*i+3ull];
+						if(!(r>0.5&&r<2.0)) continue;                       // Solid/ungueltig ueberspringen
+						const double un = ux*(double)nrm[f][0] + uy*(double)nrm[f][1] + uz*(double)nrm[f][2];
+						md[f] += r*un;                                      // Gittereinheiten, dA = 1 Zelle
+						if(un<0.0) mein += -r*un;                           // Einstrom getrennt, als Bezugsgroesse
+						fimp += r*ux*un;                                    // Impulsfluss in x
+						fdru += (r-1.0)/3.0*(double)nrm[f][0];              // Druckanteil: (rho-1)*cs2 * n_x
+						rmn=fmin(rmn,r); rmx=fmax(rmx,r);
+					}
+				}
+				const double mnet = md[0]+md[1]+md[2]+md[3]+md[4]+md[5];
+				// Gitter -> SI: rho_lat*u_lat^2 wird zu rho_si*u_si^2, dazu die Zellflaeche.
+				const double A1  = (double)dx_c*(double)dx_c;                                  // Zellflaeche [m2]
+				const double sqf = (double)si_rho*((double)si_u/(double)u_lat)*((double)si_u/(double)u_lat)*A1; // [N] je Gittereinheit
+				const double fx_imp = fimp*sqf;
+				const double fx_dru = fdru*sqf;
+				bilcsv << t_si << "," << md[0] << "," << md[1] << "," << md[2] << "," << md[3] << "," << md[4] << "," << md[5]
+				       << "," << mnet << "," << (mein>0.0? mnet/mein : 0.0)
+				       << "," << fx_imp << "," << fx_dru << "," << (fx_imp+fx_dru)
+				       << "," << (double)units_fine.si_F(F.x) << "," << (double)units_coarse.si_F(Fc.x)
+				       << "," << rmn << "," << rmx << "\n" << std::flush;
 			}
 			if(n2f_alpha>0.0f) { // ★ P9c WAECHTER an der Sample-Kadenz: schale_extract(mittel=0) auf lbm_c liest das
 				// grobe u-FELD der Schalenzellen; verglichen wird gegen das in DIESEM Outer hochgeladene
