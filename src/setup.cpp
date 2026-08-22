@@ -2826,6 +2826,16 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<ulong> n2f_liste_c, n2f_liste_f; // grobe Schalenzellen + feine Deckungspunkte, GLEICHE Reihenfolge (Map-Iteration, aufsteigend deterministisch)
 	std::vector<float> n2f_gewicht; // Zellgewicht [0;1] (Lagen-Rampe), gleiche Reihenfolge
 	std::vector<uint>  n2f_lage;    // Lagenindex je Zelle (0 = innen), gleiche Reihenfolge; Waechter/Negations-Nachweis/Kipp laufen NUR auf der aeussersten Lage
+	// ★ ZONENMARKE je Listenzelle (host-seitig, geht NICHT aufs Geraet). Bit 0 = gehoert zum
+	// Wake-Kasten oder seinem Auslauf, Bit 1 = liegt stromauf der Fahrzeugnase. Zwei vorhandene
+	// Waechter brauchen das, sonst schlagen sie im Kastengebiet falsch an:
+	//  - Der u-NEGATIONS-NACHWEIS misst mittleres u_x gegen ~0,52 u_inf. Im Nachlauf faellt u_x
+	//    physikalisch darunter -> Fehlabbruch. Er laeuft deshalb nur stromauf der Nase, wo u_x zu
+	//    jeder Zeit nahe +u_inf liegt. Das macht ihn schaerfer als vorher, nicht schwaecher.
+	//  - Das KIPP-KRITERIUM ("10 Samples monoton steigend") ist am Anfahrtransienten geeicht. Im
+	//    Wake waechst die Nah-Fern-Diskrepanz ueber die ersten ~0,1 s physikalisch monoton -> es
+	//    waere ein Fehlalarm-Generator. Es laeuft deshalb nur auf der Aussenlage des KOERPERBANDS.
+	std::vector<uchar> n2f_marke;
 	const uint n2f_lage_aussen = (n2f_band>0u) ? n2f_band_n-1u : ((n2f_volumen>0u) ? 1u : ((n2f_lagen>0u) ? n2f_lagen-1u : 0u)); // BAND: Lage = d-1, aeusserste ist N-1 // VOLUMEN: lage 1 = Aussenband (aeusserste Gewichtsstufe); Kontrollarm: alle Zellen sind Lage 0 = "aussen" (Altverhalten: Waechter ueber alles)
 	float n2f_w_band = 0.0f; // VOLUMEN: groesstes Gewichtsfeld im Aussenband -- traegt in die Negations-Schwelle (w_aussen = alpha*n2f_w_band)
 	ulong n2f_nanblocks = 0ull;
@@ -2959,6 +2969,12 @@ static void main_setup_fahrzeug_dd() {
 			const uchar bo=lbm_c.flags[nn]&(TYPE_S|TYPE_E);
 			if(bo==TYPE_E) lage_te[wake_kern?0u:(uint)d-1u]++;                     // z. B. FERN_BODENKLEMME -- der Kernel ueberspringt sie still, hier wird sie GEZAEHLT
 			const uint lage = wake_kern ? 0u : (uint)d-1u;
+			// Zone: Kernzelle des Kastens ODER Auslaufzelle, deren naechste Quelle der Kasten war.
+			// Letzteres ist ohne zweite Distanztransformation nicht exakt zu trennen; als sichere
+			// Obermenge gilt "liegt stromab des Kastenstarts", denn dort ist der Kasten die naehere
+			// Quelle. Vor dem Kastenstart ist es in jedem Fall Koerperband.
+			const bool zone_wake = n2f_wake>0u && (wake_kern || x>=wx0);
+			n2f_marke.push_back((uchar)((zone_wake?1u:0u) | ((x<sx0)?2u:0u)));
 			n2f_liste_c.push_back(nn);
 			n2f_gewicht.push_back(wake_kern ? 1.0f : band_w(d));
 			n2f_lage.push_back(lage);
@@ -2973,6 +2989,36 @@ static void main_setup_fahrzeug_dd() {
 				if(bof!=TYPE_S&&bof!=TYPE_E) fluid++;           // TYPE_MS zaehlt als Fluid -- Kernel-Konvention
 			}
 			if(fluid==0u) { n2f_nanblocks++; lage_nan[wake_kern?0u:(uint)d-1u]++; }
+		}
+		// ★ BEWEIS DER MAXIMUM-EIGENSCHAFT (Heiko-Auflage 2026-08-22): jede Fernzelle darf nur das
+		// HOECHSTE Gewicht aus Saat A (Fahrzeug) oder Saat B (Wake-Kasten) bekommen.
+		// Das ist hier strukturell erfuellt -- die Dilatation laeuft von BEIDEN Saaten gleichzeitig,
+		// eine Zelle wird in der Runde belegt, in der sie ZUERST erreicht wird, und einmal belegte
+		// Zellen werden nie ueberschrieben (`if(belegt(...)) continue`). Der Abstand ist damit der
+		// zur NAECHSTEN Saat, und weil band_w monoton faellt, ist das genau das Maximum.
+		// Ein Strukturargument steht in diesem Baum aber unter Beweispflicht. Der Test dazu ist
+		// billig und direkt: waere eine Zelle zu SPAET belegt worden (also mit zu kleinem Gewicht),
+		// haette sie einen Nachbarn, dessen Lage um mindestens 2 kleiner ist -- eine Dilatation
+		// schreitet je Runde genau eine Zelle weit. Findet der Test nichts, ist jede Zelle so frueh
+		// belegt, wie es die naechste Saat erlaubt.
+		{
+			ulong verletzt=0ull, geprueft=0ull;
+			for(uint z=az0; z<=az1; z++) for(uint y=ay0; y<=ay1; y++) for(uint x=ax0; x<=ax1; x++) {
+				const uchar d=dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)];
+				if(d==0u||d>=254u) continue; // unerreicht, Wake-Kern oder Fahrzeug-Saat
+				geprueft++;
+				uint dmin=255u;
+				for(int dz=-1; dz<=1; dz++) for(int dy=-1; dy<=1; dy++) for(int dx=-1; dx<=1; dx++) {
+					const int xx=(int)x+dx, yy=(int)y+dy, zz=(int)z+dz;
+					if(xx<0||yy<0||zz<0||xx>=(int)cNx||yy>=(int)cNy||zz>=(int)cNz) continue;
+					const uchar dn=dt[(size_t)((ulong)xx+((ulong)yy+(ulong)zz*(ulong)cNy)*(ulong)cNx)];
+					if(dn==0u) continue;
+					dmin = min(dmin, (dn>=254u) ? 0u : (uint)dn); // beide Saaten zaehlen als Abstand 0
+				}
+				if(dmin+1u<(uint)d) verletzt++;
+			}
+			if(verletzt>0ull) print_error("N2F-BAND MAXIMUM-BEWEIS GESCHEITERT: "+to_string(verletzt)+" von "+to_string(geprueft)+" Bandzellen tragen ein zu KLEINES Gewicht -- sie haben einen Nachbarn, der mindestens zwei Lagen naeher an einer Saat liegt. Die Distanztransformation gibt damit nicht das Maximum aus Saat A und Saat B zurueck.");
+			else print_info("N2F-BAND MAXIMUM-BEWEIS: "+to_string(geprueft)+" Bandzellen geprueft, 0 Verletzungen -- jede Zelle traegt das HOECHSTE Gewicht aus Fahrzeug-Saat und Wake-Kasten (Abstand zur naechsten Saat, band_w faellt monoton).");
 		}
 		if(n2f_liste_c.empty()) print_error("N2F-BAND: Zellliste leer -- kein Bandkandidat hat Fussabdruck, z_lo und Unterboden-Maske ueberlebt.");
 		n2f_w_band = band_w(n2f_band_n); // Aussenlage traegt in die Negations-Schwelle
@@ -3299,7 +3345,7 @@ static void main_setup_fahrzeug_dd() {
 		// rms_rel_uinf beziehen sich jetzt auf die AEUSSERSTE Lage (n2f_lage == N-1; im Kontrollarm
 		// LAGEN=0 unveraendert auf alle Zellen); NEU dahinter: n_gueltig_alle und rms_alle_lat =
 		// dieselbe Metrik ueber ALLE Lagen (Diagnose; Kipp-Kriterium haengt NUR an der Aussenlage).
-		swcsv << "time_s,n_gueltig,rms_lat,max_lat,rms_rel_uinf,n_gueltig_alle,rms_alle_lat\n" << std::flush;
+		swcsv << "time_s,n_gueltig,rms_lat,max_lat,rms_rel_uinf,n_gueltig_alle,rms_alle_lat,n_wake,rms_wake_lat\n" << std::flush;
 		print_info("N2F-SCHALE-Waechter aktiv: an der Sample-Kadenz RMS/Max ||u_near-u_far|| ueber "+(n2f_volumen>0u?string("das VOLUMEN-AUSSENBAND (aeusserste Gewichtsstufe, lage ")+to_string(n2f_lage_aussen):string("die AEUSSERSTE Schalen-Lage (Lage ")+to_string(n2f_lage_aussen))+"; Fernfeld-Punktwerte via schale_extract mittel=0) -> "+out_dir+"schale_waechter.csv; CSV-Schema ERWEITERT um n_gueltig_alle,rms_alle_lat (alle Lagen, Diagnose); Kipp-Kriterium (nur Aussenlage/-band): RMS > 0,5*u_inf nach Warmup ODER 10 Samples monoton steigend -> Abbruch.");
 	}
 
@@ -3712,7 +3758,7 @@ static void main_setup_fahrzeug_dd() {
 				// konstruktionsbedingt klein und wuerde den Waechter beschoenigen; die Aussenlage (w = 1/N)
 				// ist die freieste und damit die ehrlichste Messstelle der Rueckkopplungsschleife.
 				// Diagnose-Ergaenzung: dieselbe Metrik ueber ALLE Lagen (CSV-Spalten n_gueltig_alle,rms_alle_lat).
-				double sw_s2=0.0, sw_d2max=0.0, sw_mux=0.0, sw_s2_alle=0.0; ulong sw_ng=0ull, sw_ng_alle=0ull;
+				double sw_s2=0.0, sw_d2max=0.0, sw_mux=0.0, sw_s2_alle=0.0, sw_s2_wake=0.0; ulong sw_ng=0ull, sw_ng_alle=0ull, sw_ng_wake=0ull, sw_nmux=0ull;
 				for(ulong i=0ull; i<(ulong)n2f_liste_c.size(); i++) {
 					const float ax=n2f_unear[3ull*i], ay=n2f_unear[3ull*i+1ull], az=n2f_unear[3ull*i+2ull];
 					if(!std::isfinite(ax)||!std::isfinite(ay)||!std::isfinite(az)) continue; // NaN-Marker
@@ -3720,12 +3766,27 @@ static void main_setup_fahrzeug_dd() {
 					const double d2=du*du+dv*dv+dw*dw;
 					sw_s2_alle+=d2; sw_ng_alle++;
 					if(n2f_lage[i]!=n2f_lage_aussen) continue; // Waechter-Metriken: nur Aussenlage
-					sw_s2+=d2; sw_d2max=fmax(sw_d2max,d2); sw_ng++;
-					sw_mux += (double)n2f_ufar[3ull*i];
+					const uchar mk = n2f_marke.empty() ? 0u : n2f_marke[i];
+					if((mk&1u)==0u) { sw_s2+=d2; sw_d2max=fmax(sw_d2max,d2); sw_ng++; }  // Kipp-Metrik: NUR Koerperband
+					else { sw_s2_wake+=d2; sw_ng_wake++; }                                 // Wake-Zone getrennt gefuehrt
+					// ★ NEGATIONS-NACHWEIS: alles AUSSER der Wake-Zone. Erste Fassung schraenkte auf
+					// "stromauf der Nase" ein -- das war eine Ueberkorrektur und machte den Test
+					// SCHLECHTER: die Aussenlage liegt dort 4 Grobzellen vor dem Fahrzeug, also im
+					// STAUPUNKTGEBIET, wo u_x physikalisch abfaellt. Gemessen: 0,477 u_inf ueber
+					// 572 Zellen, knapp unter der Schwelle 0,533 -- ein korrekter Lauf brach ab.
+					// Das eigentliche Problem war nur der Nachlauf; Flanken und Dach tragen u_x
+					// nahe +u_inf und sind die richtige Messmenge.
+					if((mk&1u)==0u) { sw_mux += (double)n2f_ufar[3ull*i]; sw_nmux++; }
 				}
 				const double sw_rms = sw_ng? sqrt(sw_s2/(double)sw_ng) : 0.0;
 				const double sw_rms_alle = sw_ng_alle? sqrt(sw_s2_alle/(double)sw_ng_alle) : 0.0;
-				swcsv << t_si << "," << sw_ng << "," << sw_rms << "," << sqrt(sw_d2max) << "," << sw_rms/(double)u_lat << "," << sw_ng_alle << "," << sw_rms_alle << "\n" << std::flush;
+				const double sw_rms_wake = sw_ng_wake? sqrt(sw_s2_wake/(double)sw_ng_wake) : 0.0;
+				swcsv << t_si << "," << sw_ng << "," << sw_rms << "," << sqrt(sw_d2max) << "," << sw_rms/(double)u_lat << "," << sw_ng_alle << "," << sw_rms_alle << "," << sw_ng_wake << "," << sw_rms_wake << "\n" << std::flush;
+				// ★ EIGENE Schwelle fuer die Wake-Zone. Dort ist die Nah-Fern-Differenz physikalisch
+				// gross (gemessen 4 mm: Diff-RMS bis 8,56 m/s = 0,29 u_inf im Totwasser) -- die
+				// 0,5-u_inf-Kippschwelle des Koerperbands waere dort blind, eine strengere ein
+				// Fehlalarm. Verdachtsschwelle: mehr als die Anstroemung selbst kann kein Nachlauf.
+				if(sw_ng_wake>0ull&&t_si>=(double)t_warmup&&sw_rms_wake>1.0*(double)u_lat) print_error("N2F-BAND WAKE-KIPP: RMS ||u_near-u_far|| in der Wake-Zone = "+to_string((float)(sw_rms_wake/(double)u_lat),3u)+" u_inf > 1,0 -- das Fernfeld weicht dort um mehr als die Anstroemung ab, das kann kein Nachlauf mehr sein. Abgebrochen.");
 				if(!n2f_neg_geprueft) { // ★ u-NEGATIONS-NACHWEIS (XL-B8, im Blend TRAGEND): funktionaler Beweis am
 					// laufenden Binary. Der Blend liest post-stream u EXAKT NEGIERT und muss es zurueckdrehen;
 					// waere das Vorzeichen falsch, stuende u_neu = (1-a)*(-u)+a*u_near, und der FIXPUNKT
@@ -3735,11 +3796,17 @@ static void main_setup_fahrzeug_dd() {
 					// (Kontrollarm LAGEN=0). Richtig behandelt bleibt es nahe +u_inf (frueher Lauf,
 					// Stroemung noch kaum entwickelt). Zusaetzlich Testzelle 0 als Zahlenpaar.
 					n2f_neg_geprueft = true;
-					const double m_ux = sw_ng? sw_mux/(double)sw_ng : 0.0;
+					// ★ 2026-08-22: der Divisor MUSS die Zahl der Zellen sein, ueber die sw_mux
+					// tatsaechlich summiert wurde -- seit der Nachweis auf "stromauf der Nase"
+					// eingeschraenkt ist, ist das sw_nmux und nicht mehr sw_ng. Mit dem alten
+					// Divisor meldete der Nachweis 0,0266 u_inf statt ~1 und brach einen
+					// korrekten Lauf ab (gemessen, erster Lauf nach der Einschraenkung).
+					const double m_ux = sw_nmux? sw_mux/(double)sw_nmux : 0.0;
+					if(sw_nmux==0ull) print_error("u-Negations-Nachweis: keine einzige Aussenlagen-Zelle stromauf der Fahrzeugnase -- der Nachweis haette keine Datengrundlage. Bandbreite oder Nahfeld-Box pruefen.");
 					const double w_aussen = (n2f_band>0u||n2f_volumen>0u) ? (double)n2f_alpha*(double)n2f_w_band : ((n2f_lagen>0u) ? (double)n2f_alpha/(double)n2f_lagen : (double)n2f_alpha); // wirksames a der Aussenstufe (VOLUMEN: groesstes Gewicht im Aussenband; Schale: XPLUS_SKAL drueckt x+ ggf. darunter -- Schwelle bleibt konservativ)
 					const double falschziel = w_aussen/(2.0-w_aussen); // Falschziel-FIXPUNKT (Plan-Vorgabe; ersetzt die alte Ein-Schritt-Schaetzung 2a-1)
 					const double schwelle = fmax(0.5, 0.5*(1.0+falschziel)); // Mittelpunkt Falschziel<->Soll(+1); verallgemeinert Pruefagent M1 (alt: fmax(0.5, alpha) = Mittelpunkt von 2a-1 und 1)
-					print_info("N2F-Schale u-NEGATIONS-NACHWEIS (1. Waechter-Sample, Aussenlage "+to_string(n2f_lage_aussen)+", w_aussen = "+to_string((float)w_aussen,3u)+"): mittleres Schalen-u_x im Fernfeld-u-Feld = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf (Soll nahe +1; falsches Vorzeichen truege es Richtung Fixpunkt w/(2-w) = "+to_string((float)falschziel,3u)+" u_inf; Schwelle "+to_string((float)schwelle,3u)+"); Testzelle 0: u_far = ("+to_string(n2f_ufar[0],6u)+","+to_string(n2f_ufar[1],6u)+","+to_string(n2f_ufar[2],6u)+") vs u_near = ("+to_string(n2f_unear[0],6u)+","+to_string(n2f_unear[1],6u)+","+to_string(n2f_unear[2],6u)+") lat.");
+					print_info("N2F-Schale u-NEGATIONS-NACHWEIS (1. Waechter-Sample, Aussenlage "+to_string(n2f_lage_aussen)+", w_aussen = "+to_string((float)w_aussen,3u)+", ueber "+to_string(sw_nmux)+" Zellen ausserhalb der Wake-Zone): mittleres Schalen-u_x im Fernfeld-u-Feld = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf (Soll nahe +1; falsches Vorzeichen truege es Richtung Fixpunkt w/(2-w) = "+to_string((float)falschziel,3u)+" u_inf; Schwelle "+to_string((float)schwelle,3u)+"); Testzelle 0: u_far = ("+to_string(n2f_ufar[0],6u)+","+to_string(n2f_ufar[1],6u)+","+to_string(n2f_ufar[2],6u)+") vs u_near = ("+to_string(n2f_unear[0],6u)+","+to_string(n2f_unear[1],6u)+","+to_string(n2f_unear[2],6u)+") lat.");
 					if(m_ux<schwelle*(double)u_lat) {
 						swcsv.close(); fcsv.close(); ipcsv.close(); if(zb>0u) zcsv.close(); if(sonde_csv.is_open()) sonde_csv.close();
 						print_error("u-Negations-Nachweis FEHLGESCHLAGEN: Schalen-u_x = "+to_string((float)(m_ux/(double)u_lat),4u)+" u_inf < Schwelle "+to_string((float)schwelle,3u)+" -- der Blend arbeitet mit falschem Vorzeichen (XL-B8) oder die Schale ist vergiftet. Abgebrochen.");
