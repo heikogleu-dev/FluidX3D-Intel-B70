@@ -110,3 +110,52 @@ Kanal-Anker (bitgleich) -> Kanal N=108 (der einzige Kanal mit y+_1 rund 48; N=38
 y+_1 = 136 und ist fuer jede nu_t-Frage blind) -> Kugel (Achenbach-Band 0,45 bis 0,5;
 ACHTUNG: dort muss SUBGRID aus, die Kugel ist fuer den SGS-Hebel KEINE Sprosse) ->
 8 mm A/B -> 4 mm nur nach ausdruecklicher Freigabe.
+
+---
+
+# FAHRPLAN nach dem Messtag 2026-08-23 (ersetzt die Reihenfolge oben)
+
+Der Plan von heute morgen ist durch die Messungen ueberholt. Was davon uebrig ist:
+
+## Gestrichen
+- **Smagorinsky-Konstante senken.** Die Rechnung sagt, wir liefen in den MSD-Zustand: Smagorinsky
+  liefert im Gleichgewicht strukturell 0,714 der noetigen Wandschichtviskositaet, C 0,173 -> 0,1
+  teilt nu_t durch 2,99 und landet bei 0,7x Gleichgewicht. Kein Arm.
+- **Van Driest.** Falsches Vorzeichen (cf am Kanal schon -55 %), Grenzfall D=0 kollabierte cf um
+  Faktor 16, V1 hatte es strukturell verworfen.
+- **Void-Fill KONN=18 als Produktionsschalter.** Fluid=18 erzwingt Solid=6 (Rosenfeld/Kong);
+  bleibt Diagnose.
+
+## Der eine Versuch, der die offene Frage entscheidet -- und kein neuer Kernelcode noetig
+**`CFD_KANAL_KIPP=26` bzw. `45` gegen `kipp=0`.** Identisches Re_tau, identische Stroemung,
+identisches Wandmodell, EINZIGER Unterschied die getreppte Wand. Steigt die Wandlagen-nu_t bei
+gleichem y+ gegenueber der ebenen Wand, ist spuriose Scherung aus der Voxeltreppe bewiesen;
+steigt sie nicht, ist die Treppen-Deutung endgueltig erledigt. Beide Laeufe mit dem 1/64-Stand
+UND mit gesetzter Warmlaufsperre (`CFD_SGS_DIAG_AB`).
+Zweite, billigere Sonde daneben: die Wandlagen-Bins nach y_w-Klasse und Facetten-Winkel
+aufspalten -- die Daten liegen schon in `export/*/facetten_histogramme.csv` (yw, winkel_grad,
+Zellindex). Sitzt der Ueberschuss auf den SCHRAEGEN Facetten und nicht auf den achsparallelen,
+redet die Treppe; sitzt er ueberall, redet die Instationaritaet.
+
+## Danach, nach Evidenzlage geordnet
+1. **Anstroemturbulenz / Stolpersaat am Fahrzeug** (`CFD_TRIP_*`, Default 0, rund 30 Zeilen).
+   Verifiziert abwesend, zielt direkt auf die Frontabloesung. ACHTUNG: erklaert den KANAL-Fehler
+   NICHT -- der ist periodisch, dort muss sich Turbulenz selbst erhalten, eine Saat zerfaellt.
+2. **Das Wandmodell selbst.** Die cf-Luecke ist wandmodell-dominiert (U_b+ 36,0 statt 24,1,
+   Versatz +12 in U+), nicht SGS-dominiert. Das ist der groesste gemessene Einzelfehler im
+   Projekt und der einzige, der auf dem SAUBERSTEN Fall sitzt -- eine ebene, gitterparallele
+   Wand ohne Geometrieausrede. Angriffspunkt: iMEM-Slipgeschwindigkeit/Spalding auf y_w.
+3. **ELIBB** -- aber mit gedaempfter Erwartung und aus dem richtigen Grund. Es korrigiert die
+   Wandposition um <=0,5 Zelle und laesst die zackige FORM im flags-Feld stehen; der Bauplan
+   zitiert V1 mit "nur ~2 von 20 Prozentpunkten aus der Treppe". Es bleibt richtig als
+   Geometriekorrektur, ist aber KEIN Cz-Hebel-Kandidat erster Ordnung.
+4. **Delta-Reihe 16/8/4 mm** mit den gebauten Slots. Kein Hebel, aber die Entscheidung darueber,
+   ob unsere Aufloesungsabhaengigkeit MSD ist -- und wenn ja, waere jede Verfeinerung ein
+   Rueckschritt, was die ganze 4-mm-Strategie betrifft.
+
+## Ungeklaert, nicht vergessen
+Der **Band-Wandrueckzug** (-0,27 Cz bei 8 mm, 2,4 sigma) ist der einzige je gemessene Cz-Hebel,
+aber Heiko haelt den Wirkpfad fuer unplausibel: das Band wirkt nur im Fernfeld, Cz wird im
+Nahfeld gerechnet. Ein Pfad ist NICHT belegt. Kandidat waere, dass die Nahfeldbox mit nur 96 mm
+Vorlauf so eng sitzt, dass ihr TYPE_E-Rand im Bandgebiet liegt. Entweder den Pfad belegen oder
+den Befund als Zufall abschreiben -- so stehenlassen geht nicht.
