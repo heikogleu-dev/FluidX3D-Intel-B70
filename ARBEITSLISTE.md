@@ -313,7 +313,16 @@ Reihenfolge = Abarbeitung. Jeder Punkt eine Variable, jeder mit Wirknachweis im 
     ein Achsen-only-ELIBB verfehlte genau die Zielpopulation. Variantenwahl (Marson-Familie)
     nach Kosten/Nutzen durch den 1c-Planungsagenten gegen das Paper.
 
-## 12. Void-Fill schliesst die Radhaeuser (2026-08-22, Ursache gefunden)
+## 12. Void-Fill-Konnektivitaet (2026-08-22; Deutung am 23.08. WIDERLEGT, zurueckgestuft)
+**ACHTUNG:** Die Ueberschrift und die Deutung unten sind vom Pruefagenten am 2026-08-23
+widerlegt -- der betroffene Bereich endet VOR der Vorderachse und liegt bei Mitte +-0,39 m,
+die Raeder sitzen bei +-0,6..0,8 m. Es ist Kuehler/Vorderwagen, NICHT das Radhaus. KONN=18
+bleibt reine Diagnose und wird NICHT Produktionsschalter (Fluid=18 erzwingt Solid=6, der
+Kantenlink hat geometrisch null Querschnitt, und der Motorraum kaeme fein +8,7 % und grob
+nur +52 Zellen -- die gekoppelten Koerper waeren nicht mehr dieselbe Geometrie).
+Details in AUDIT-BEFUNDE.md, Abschnitt 2026-08-23. Der historische Text folgt:
+
+### (historisch, Deutung widerlegt)
 **Befund:** Heiko: alle drei Glaettungsstufen (ITER 3/8/15) sehen am Radhaus IDENTISCH
 aus -- also war es schon im Voxelfeld zu, nicht erst in der Remesh-Flaeche. Gemessen:
 die Void-Fill-Flutung laeuft ueber 6 Nachbarn (setup.cpp:316), der LBM stroemt ueber 18.

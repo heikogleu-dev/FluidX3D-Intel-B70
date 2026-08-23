@@ -1790,3 +1790,49 @@ als unbestaetigt, bis ein Pruefer ueber 02b20e6 gelaufen ist.
     reparieren (Nachbarn mitklemmen) oder zuruecknehmen; (5) STL-Frage fair messen
     (Fenster t<=3); (6) Bitgleichheits-A/B des Bin-Fix wiederholen; (7) Pruefer ueber
     den Void-Fill-Befund; DANN P2.
+
+## 2026-08-23 — Pruefagent ueber den Void-Fill-Befund: Deutung WIDERLEGT
+
+Der letzte offene Auditpunkt vom 22.08. ist durch. Code und Zahl tragen, meine Deutung nicht.
+
+### TRAEGT
+- Die 18er-Flutung ist korrekt: gleiche Saat, gleiche Schranken, gleiches Praedikat, beide
+  Flutungen komplett VOR der Fuellschleife; `reach`/`reach18` werden nicht veraendert.
+  `reach` ist per Induktion Teilmenge von `reach18`, `nur18` = filled(6) - filled(18) exakt.
+- Default (KONN=6) bitidentisch: `zu=!r6` ist woertlich die alte Bedingung.
+- Die Zahl 116.651 von 131.322 steht.
+
+### FAELLT: "die beiden vorderen Radhaeuser"
+Nachgerechnet: Fahrzeug fein X[58,577] (519 Zellen = 4,15 m), Vorderachse bei rund 20 % der
+Laenge, also x ~ 162. Der betroffene Bereich endet bei **x=141 -- komplett VOR der
+Vorderachse**. Y[109,207] ist Mitte +-0,39 m, die Raeder sitzen bei +-0,6 bis 0,8 m:
+**keine einzige betroffene Zelle liegt an den Flanken.** Fuellgrad der BBox 35 % -- ein
+Klotz, nicht zwei duenne Seitentaschen. Ehrliche Aussage: **zusammenhaengendes Gebiet im
+vorderen Mittelbau vor der Vorderachse, 0,2 bis 0,69 m ueber der Strasse = Kuehler und
+Vorderwagen.** Die Commit-Ueberschrift von 02b20e6 ist damit nicht gedeckt. Radhaeuser sind
+nach unten und aussen offen und werden vom Void-Fill gar nicht erreicht.
+=> DAMIT IST HEIKOS RADHAUS-BEOBACHTUNG WIEDER UNERKLAERT. Weder Glaettung (alle drei
+ITER-Stufen gleich) noch Void-Fill. Naechste Verdaechtige: die SAT-Schale (438.055 Zellen
+ergaenzt) und die nicht nach aussen orientierte Quad-Wicklung, die das VTK-Shading stoert --
+letzteres waere kein Geometrie-, sondern ein Darstellungsbefund und billig zu pruefen.
+
+### FAELLT: KONN=18 als Produktionsschalter (HOCH, abgeraten)
+- Digitale Topologie (Rosenfeld/Kong, gueltige Paare 6/26, 26/6, 6/18, 18/6): Fluid=18
+  ERZWINGT Solid=6 -- zwei kantenberuehrende Solidzellen gelten dann als nicht dichtend.
+  Fluid=6 / Solid=26 ist die konservative Standardwahl bei Voxel-Hohlraumfuellung.
+- Der D3Q19 streamt den Kantenlink zwar (w=1/36), aber durch einen Kanal mit geometrisch
+  NULL Querschnitt und ohne aufgeloeste Wandschicht. "Erreichbar" ist nicht "durchstroembar";
+  das ist genau das numerische Leck, das der Void-Fill beseitigen soll.
+- Aufloesungsprobe: gefuelltes Volumen 0,0672 m3 fein gegen 0,0535 m3 grob (-20 %) -- dieselbe
+  Hoehle auf beiden Gittern, also Geometrie. Der Diagonalanteil aber 89 % fein gegen 3 % grob:
+  die Pinholes sind Diskretisierung, nicht Geometrie.
+- Kopplungsrisiko: der Motorraum kann nur WACHSEN (+8,7 % fein, +52 Zellen grob) -- die beiden
+  gekoppelten Koerper stellten danach unterschiedliche Geometrie dar.
+=> KONN=18 bleibt reine DIAGNOSE. Arbeitsliste 12 entsprechend zurueckgestuft.
+
+### NIEDRIG, offen
+Invariante `r6 && !r18` wird nicht geprueft (ein print_error kostet nichts); die Ansage
+"nur ueber eine Diagonale erreichbar" ist unpraezise (der HOHLRAUM haengt an einer Diagonale,
+nicht jede Zelle); `env_u`-Falle: 7..17 heisst still 6, >=26 still 18; die zweite Flutung
+laeuft unbedingt in JEDEM Lauf (bei 4 mm 63,6 MB und ~125 M BBox-Zellen x 18, einthreadig,
+Setup-Zeit ungemessen) und sollte auf die Mesh-BBox begrenzt und hinter ein Gate gestellt werden.
