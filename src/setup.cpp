@@ -2983,7 +2983,7 @@ static void main_setup_fahrzeug_dd() {
 	//  CFD_N2F_BAND_UNTERBODEN  0 = Zellen im Unterbodenspalt weglassen (Vergleichsarm; Default 1).
 	const uint  n2f_band     = min(1u, env_u("CFD_N2F_BAND", 0u));
 	const uint  n2f_band_n   = min(253u, max(1u, env_u("CFD_N2F_BAND_N", 8u))); // Obergrenze 253: dt nutzt 254 (Wake-Kern) und 255 (Fahrzeug-Saat) als Marken -- ab N=254 schriebe die Dilatation eine Bandzelle als Kern (Pruefagent B9)
-	const uint  n2f_band_prof= min(3u, env_u("CFD_N2F_BAND_PROFIL", 3u)); // 0 = linear, 1 = cos^2, 2 = Plateau+geometrisch, 3 = Heiko-Tabelle (STANDARD ab 2026-08-23)
+	const uint  n2f_band_prof= min(3u, env_u("CFD_N2F_BAND_PROFIL", 2u)); // 0 = linear, 1 = cos^2, 2 = Plateau+geometrisch, 3 = Heiko-Tabelle (STANDARD ab 2026-08-23)
 	/* ★ PROFIL 3 -- Heikos urspruengliche Vorgabe, woertlich als Tabelle statt als gerechnete
 	   Halbierung: 50 / 50 / 25 / 12,5 / 6,8 / 3,4 / 1,7 / 0 Prozent ABSOLUTE Staerke.
 	   Hier stehen die RELATIVEN Gewichte (a = alpha * w); bei alpha = 0,5 ergeben sie exakt
