@@ -137,14 +137,30 @@ aufspalten -- die Daten liegen schon in `export/*/facetten_histogramme.csv` (yw,
 Zellindex). Sitzt der Ueberschuss auf den SCHRAEGEN Facetten und nicht auf den achsparallelen,
 redet die Treppe; sitzt er ueberall, redet die Instationaritaet.
 
+## VORGESCHALTET: Determinismus wiederherstellen (Rueckmeldung Claude-Chat, 2026-08-23)
+Der Befund "kein Fall ist deterministisch" trifft eine Iron Rule direkt -- bitgleiche
+Regressionsanker waren ein Abnahmemittel und standen ploetzlich nicht mehr zur Verfuegung.
+GEMESSEN am 2026-08-23 (q_det_1 gegen q_det_2, identische Konfiguration):
+  Sample 1: 3,3e-7 | Sample 2: 1,6e-6 | Sample 3: EXAKT 0 | Sample 10: 1,8e-4 | Sample 25: 7,7e-5
+Die Saat liegt bei wenigen float32-ULP, ein Sample ist exakt identisch, und erst danach waechst
+es -- das ist chaotische Verstaerkung einer Rundungssaat, keine Loesungsdivergenz. Zum Vergleich:
+sqrt(N)*eps ueber 56 Mio Terme erlaubt 9e-4.
+=> **Fall 1 (Reduktionsreihenfolge), HEILBAR.** Eine feste Reduktionsbaum-Ordnung in der
+GPU-Kraftreduktion bringt den Bitvergleich zurueck. Das gehoert vor alles andere, weil es
+bestimmt, welche Abnahmen ab jetzt ueberhaupt gueltig sind.
+Abnahme: zwei identische Laeufe byteweise gleich in forces.csv, dd-Fall UND Kugel.
+
 ## Danach, nach Evidenzlage geordnet
-1. **Anstroemturbulenz / Stolpersaat am Fahrzeug** (`CFD_TRIP_*`, Default 0, rund 30 Zeilen).
+1. **Das Wandmodell selbst.** Die cf-Luecke ist wandmodell-dominiert (U_b+ 36,0 statt 24,1,
+   Versatz +12 in U+), nicht SGS-dominiert. Groesster gemessener Einzelfehler im Projekt, und
+   der einzige auf dem SAUBERSTEN Fall -- ebene, gitterparallele Wand ohne Geometrieausrede.
+   Angriffspunkt: iMEM-Slipgeschwindigkeit/Spalding auf y_w.
+   ★ VORGEZOGEN (Rueckmeldung Claude-Chat): ein Wandmodell, das auf der ebenen Wand 55 % cf
+   verfehlt, KONTAMINIERT JEDE NACHFOLGENDE MESSUNG -- auch die zur Anstroemturbulenz. Wer es
+   auf Platz 3 laesst, misst danach gegen einen verschobenen Nullpunkt.
+2. **Anstroemturbulenz / Stolpersaat am Fahrzeug** (`CFD_TRIP_*`, Default 0, rund 30 Zeilen).
    Verifiziert abwesend, zielt direkt auf die Frontabloesung. ACHTUNG: erklaert den KANAL-Fehler
    NICHT -- der ist periodisch, dort muss sich Turbulenz selbst erhalten, eine Saat zerfaellt.
-2. **Das Wandmodell selbst.** Die cf-Luecke ist wandmodell-dominiert (U_b+ 36,0 statt 24,1,
-   Versatz +12 in U+), nicht SGS-dominiert. Das ist der groesste gemessene Einzelfehler im
-   Projekt und der einzige, der auf dem SAUBERSTEN Fall sitzt -- eine ebene, gitterparallele
-   Wand ohne Geometrieausrede. Angriffspunkt: iMEM-Slipgeschwindigkeit/Spalding auf y_w.
 3. **ELIBB** -- aber mit gedaempfter Erwartung und aus dem richtigen Grund. Es korrigiert die
    Wandposition um <=0,5 Zelle und laesst die zackige FORM im flags-Feld stehen; der Bauplan
    zitiert V1 mit "nur ~2 von 20 Prozentpunkten aus der Treppe". Es bleibt richtig als
