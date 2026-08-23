@@ -2293,6 +2293,34 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		}
 		const float Q = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz)); // Q = H*H, turbulent eddy viscosity nut = (C*Delta)^2*|S|, intensity of local strain rate tensor |S|=sqrt(2*S*S)
 		w = 2.0f/(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // 0.76421222 = 18*sqrt(2)*(C*Delta)^2, C = 1/pi*(2/(3*CK))^(3/4) = Smagorinsky-Lilly constant, CK = 3/2 = Kolmogorov constant, Delta = 1 = lattice constant
+)+"#ifdef SGS_DIAG"+R(
+		// ★ P0-DIAGNOSTIK (2026-08-23, GRENZSCHICHT-SGS-PLAN.md): nu_t/nu_0 als DEKADEN-
+		// histogramm, Slots 28..32. Ein omega-Histogramm waere hier WERTLOS -- beide Gitter
+		// stehen schon bei omega = 1,9999 (tau0 = 0,500028 nah, 0,500007 fern), die ganze
+		// Verteilung laege in einem einzigen Bin. Aussagekraeftig ist nur das VERHAELTNIS,
+		// und zwar logarithmisch: nu_t/nu_0 = (tau_neu - tau0)/(tau0 - 0,5). Diese eine Zahl
+		// entscheidet, ob der Smagorinsky-Hebel ueberhaupt gebaut wird: traegt nu_t im
+		// Fernfeld wirklich das Dreihundertfache der molekularen Viskositaet, lohnt der
+		// Umbau -- sonst ist der Hebel tot, bevor er existiert.
+		// GENAUIGKEIT: tau0 - 0,5 ist rund 2,8e-5 bei einer Zahl nahe 0,5, in float bleiben
+		// davon gut zwei Stellen. Fuer Dekadengrenzen reicht das; auf den Einzelwert nicht bauen.
+		// Physikfrei: w wird nicht angefasst, nur gezaehlt (t%100 gegen uint-Wickel).
+		// PRUEFBEFUNDE 2026-08-23, eingearbeitet:
+		//  (3) t=0 ist ein Zaehlpunkt, dort ist fneq==0 und ALLES faellt in den <1-Bin -- das waren
+		//      84 % des nahen und 63 % des fernen <1-Bins. Ausgeschlossen.
+		//  (4) TYPE_E sind kuenstliche Randzellen (rund 2 %) und gehoeren nicht in die Statistik.
+		//  (9) uint wickelt: der 77-%-Bin fuellte bei 8 mm nach 197 ms, bei 4 mm nach 12,3 ms.
+		//      Deshalb JEDE ACHTE Zelle (n&7) -- raeumlich gleichverteilt, Prozente unverzerrt,
+		//      Kopfraum mal acht, und die Atomic-Kontention faellt um denselben Faktor (12).
+		//  (11) Emission gegatet: ohne CFD_SGS_DIAG wird der Block gar nicht erst erzeugt.
+		if(t>0ul&&t%100ul==0ul&&(n&7ul)==0ul&&(flags[n]&TYPE_E)==0u) {
+			const float nu0_ = tau0-0.5f;
+			const float nut_ = 1.0f/w-tau0;
+			const float rv_  = nut_/nu0_; // nu0_ > 0 ist Bauvoraussetzung, wird im Host geprueft
+			const uint  b_   = rv_<1.0f ? 0u : (rv_<10.0f ? 1u : (rv_<100.0f ? 2u : (rv_<1000.0f ? 3u : 4u)));
+			atomic_inc(&rho_clamp_hits[28u+b_]);
+		}
+)+"#endif"+R( // SGS_DIAG
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
 

@@ -138,6 +138,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// lautloser No-Op -- jetzt harte Abweisung. Die WANDFUNKTION dagegen ist von SUBGRID unabhaengig
 	// und wird seit derselben Nacharbeit ausserhalb des SUBGRID-Blocks emittiert.
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu entfernen).");
+	if(s_sgs_diag) print_error("CFD_SGS_DIAG ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu messen).");
 #endif // SUBGRID
 	// R2-Nachpruefer: Ansage NACH den harten Abweisern (vorher stand "aktiv" eine Zeile vor dem exit)
 	if(s_sgs_wandfrei) print_info("SGS_WANDFREI aktiv: kein nu_t in Zellen mit solidem Flaechennachbarn (Wirkpfad-Zaehler Slot 6, Report am Laufende).");
@@ -255,6 +256,7 @@ float LBM_Domain::s_fac_tau = 1.0f;
 float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bitidentisch
 float LBM_Domain::s_fac_budget_sn = 1.0f; // CFD_FAC_BUDGET_SN (1a-Bsn), Default bitidentisch
 bool LBM_Domain::s_sgs_wandfrei = false;
+bool LBM_Domain::s_sgs_diag = false;
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
 uint LBM_Domain::s_sparse_T = 8u;
@@ -286,7 +288,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 28ull); // [27] Slot-13-Split (Einzellink-diagonal) // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, s_sgs_diag ? 33ull : 28ull); // [28..32] nu_t/nu_0-Dekadenhistogramm (<1, 1-10, 10-100, 100-1000, >=1000) -- P0-Diagnostik 2026-08-23, entscheidet den Smagorinsky-Hebel // [27] Slot-13-Split (Einzellink-diagonal) // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -927,6 +929,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// gewesen. Jetzt ausserhalb emittiert; SGS_WANDFREI ohne SUBGRID ist sinnlos und wird im
 	// Konstruktor hart abgewiesen, die WFB ist von SUBGRID unabhaengig.
 	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
+	+((s_sgs_diag)     ? (string)"\n	#define SGS_DIAG"     : (string)"")
 	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
 	"\n	#define def_wf_Y "+to_string(0.5f/nu,8u)+"f"
 	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f"
