@@ -2983,7 +2983,14 @@ static void main_setup_fahrzeug_dd() {
 	//  CFD_N2F_BAND_UNTERBODEN  0 = Zellen im Unterbodenspalt weglassen (Vergleichsarm; Default 1).
 	const uint  n2f_band     = min(1u, env_u("CFD_N2F_BAND", 0u));
 	const uint  n2f_band_n   = min(253u, max(1u, env_u("CFD_N2F_BAND_N", 8u))); // Obergrenze 253: dt nutzt 254 (Wake-Kern) und 255 (Fahrzeug-Saat) als Marken -- ab N=254 schriebe die Dilatation eine Bandzelle als Kern (Pruefagent B9)
-	const uint  n2f_band_prof= min(2u, env_u("CFD_N2F_BAND_PROFIL", 0u)); // 0 = linear, 1 = cos^2, 2 = Plateau+geometrisch (Heiko 2026-08-22)
+	const uint  n2f_band_prof= min(3u, env_u("CFD_N2F_BAND_PROFIL", 3u)); // 0 = linear, 1 = cos^2, 2 = Plateau+geometrisch, 3 = Heiko-Tabelle (STANDARD ab 2026-08-23)
+	/* ★ PROFIL 3 -- Heikos urspruengliche Vorgabe, woertlich als Tabelle statt als gerechnete
+	   Halbierung: 50 / 50 / 25 / 12,5 / 6,8 / 3,4 / 1,7 / 0 Prozent ABSOLUTE Staerke.
+	   Hier stehen die RELATIVEN Gewichte (a = alpha * w); bei alpha = 0,5 ergeben sie exakt
+	   die Prozentwerte oben. Der Unterschied zu Profil 2 sitzt in den letzten drei Stufen:
+	   die reine Halbierung gaebe 6,25 / 3,125 / 1,5625. Die Tabelle wird bei WANDFREI
+	   verschoben gezaehlt, genau wie Profil 2, und endet bei der Bandbreite. */
+	static const float n2f_tab_heiko[7]={1.0f, 1.0f, 0.5f, 0.25f, 0.136f, 0.068f, 0.034f};
 	const uint  n2f_band_ub  = min(1u, env_u("CFD_N2F_BAND_UNTERBODEN", 1u));
 	// ★ WAKE-KASTEN (Heiko 2026-08-22). Statt Frontalprojektion + alles stromab ein schlichter
 	// achsparalleler Kasten: y-Weite und z-Hoehe der Fahrzeug-BBox, x von einem waehlbaren Start
@@ -3038,7 +3045,17 @@ static void main_setup_fahrzeug_dd() {
 	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_wandfrei+n2f_band_plateau>=n2f_band_n-1u) print_error("PROFIL 2: WANDFREI ("+to_string(n2f_wandfrei)+") + PLATEAU ("+to_string(n2f_band_plateau)+") >= N-1 ("+to_string(n2f_band_n-1u)+") -- es bliebe KEINE Rampenlage, die aeusserste gelistete Lage truege volles Gewicht und stuende als harte Kante am Bandrand (Pruefagent 0e01748, Punkt 5). N erhoehen oder Plateau/Wandfrei senken.");
 	if(n2f_band>0u&&n2f_band_prof==2u&&n2f_wandfrei>0u) print_info("N2F-BAND PROFIL 2 + WANDFREI: das Plateau zaehlt AB Lage "+to_string(n2f_wandfrei+1u)+" (verschoben, nicht gefressen) -- wirksames Profil: Lagen 1.."+to_string(n2f_wandfrei)+" frei, dann "+to_string(n2f_band_plateau)+" Lagen voll, dann Halbierung, Lage "+to_string(n2f_band_n)+" = 0.");
 	if(getenv("CFD_N2F_BAND_PLATEAU")&&n2f_band_prof!=2u) print_warning("CFD_N2F_BAND_PLATEAU ist gesetzt, wirkt aber nur bei CFD_N2F_BAND_PROFIL=2 (B3; Ansage-Doktrin).");
+	if(n2f_band>0u&&n2f_band_prof==3u) { // die Tabelle reicht 7 Stufen weit -- das Band vielleicht nicht
+		const uint stufen = (n2f_band_n>n2f_wandfrei+1u) ? n2f_band_n-1u-n2f_wandfrei : 0u;
+		if(stufen<7u) print_warning("N2F-BAND PROFIL 3: die Tabelle hat 7 Stufen, das Band traegt bei N="+to_string(n2f_band_n)+" und WANDFREI="+to_string(n2f_wandfrei)+" aber nur "+to_string(stufen)+". Die Stufen "+to_string(stufen+1u)+"..7 FEUERN NICHT. Fuer alle sieben braucht es CFD_N2F_BAND_N="+to_string(n2f_wandfrei+8u)+".");
+		if(stufen>7u) print_warning("N2F-BAND PROFIL 3: das Band traegt "+to_string(stufen)+" Stufen, die Tabelle nur 7 -- die Lagen dahinter sind gewichtslos.");
+	}
 	auto band_w = [&](const uint d) { // d = 1..N, gibt w in (0,1]; a = alpha*w
+		if(n2f_band_prof==3u) {                                   // Heiko-Tabelle, woertlich
+			if(d>=n2f_band_n) return 0.0f;                        // aeusserste Lage exakt 0 -- keine Kante
+			const uint ds = (d>n2f_wandfrei) ? d-n2f_wandfrei : 1u;
+			return ds<=7u ? n2f_tab_heiko[ds-1u] : 0.0f;          // hinter der Tabelle: aus
+		}
 		if(n2f_band_prof==2u) {                                   // Plateau + geometrisch
 			// ★ 2026-08-22 spaet (Heiko): das Plateau zaehlt AB WANDFREI+1 -- der Puffer sitzt
 			// HINTER der freien Wandzone statt von ihr gefressen zu werden. Synthese der beiden
@@ -3052,6 +3069,14 @@ static void main_setup_fahrzeug_dd() {
 		return n2f_band_prof==0u ? (float)(n2f_band_n+1u-d)/(float)n2f_band_n
 		                         : (float)(cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n)*cos(0.5*3.14159265358979*(double)(d-1u)/(double)n2f_band_n));
 	};
+	if(n2f_band>0u) { // Iron Rule 8: die WIRKSAME Staerke je Lage ins Protokoll, nicht nur den Profilnamen
+		string zl="N2F-BAND WIRKSAME STAERKE je Lage (a = alpha*w, in Prozent): ";
+		for(uint d=1u; d<=n2f_band_n; d++) {
+			if(d<=n2f_wandfrei) { zl+="L"+to_string(d)+"=frei "; continue; }
+			zl+="L"+to_string(d)+"="+to_string(100.0f*n2f_alpha*band_w(d),1u)+" ";
+		}
+		print_info(zl);
+	}
 	if(n2f_alpha>0.0f&&n2f_paritaet>0u) print_warning("CFD_N2F_PARITAET=1: der Kernel bekommt alpha EXAKT 0, der Enqueue laeuft aber. Alle folgenden Ansagen mit \"a = ...\" nennen den GESETZTEN Wert -- WIRKSAM ist ueberall 0. Dieser Lauf ist ein BEWEISLAUF: seine Ergebnisdateien (forces.csv, interface_druck.csv, band_bilanz.csv) sind KEIN alpha-Arm und duerfen nicht als solcher ausgewertet werden.");
 	if(n2f_alpha>0.0f) {
 		print_info("N2F-SCHALE aktiv (P9c, Heiko): Fernfeld-Schale um die Fahrzeug-BBox wird post-stream mit dem Nahfeld-Blockmittel relaxiert, alpha = "+to_string(n2f_alpha,3u)+" (u_neu = (1-a)*u_far + a*u_near, rho bleibt lokal; a = alpha*gewicht je Zelle).");
@@ -3060,7 +3085,7 @@ static void main_setup_fahrzeug_dd() {
 		if(n2f_band>0u) {
 			print_info("N2F-BAND aktiv (CFD_N2F_BAND=1, Heiko 2026-08-22): BAND-Blend ersetzt den Schalen-Listenbauer -- "
 				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
-				+(n2f_band_prof==0u?string("linear"):n2f_band_prof==1u?string("cos^2"):("Plateau("+to_string(n2f_band_plateau)+" Lagen voll)+geometrisch"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
+				+(n2f_band_prof==0u?string("linear"):n2f_band_prof==1u?string("cos^2"):n2f_band_prof==3u?string("Heiko-Tabelle 50/50/25/12,5/6,8/3,4/1,7"):("Plateau("+to_string(n2f_band_plateau)+" Lagen voll)+geometrisch"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
 				+"), Unterbodenspalt "+(n2f_band_ub>0u?"ENTHALTEN":"AUSGENOMMEN (Vergleichsarm)")+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ)":" (EQ)")+".");
 			if(n2f_wake>0u) print_info("N2F-BAND WAKE-KASTEN aktiv: achsparalleler Kasten in y/z-Ausdehnung der Fahrzeug-BBox, x von "+(n2f_wake_start==2u?string("RADSTANDMITTE"):n2f_wake_start==0u?string("HOECHSTER PUNKT"):string("HECK"))+" bis "+to_string(n2f_wake_abst)+" Grobzellen vor dem Nahfeld-Auslass; geht als ZWEITE SAATMENGE in dieselbe Distanztransformation, bekommt also denselben Auslauf wie das Koerperband.");
 			if(n2f_modus==0u) print_warning("N2F-BAND: CFD_N2F_SCHALE_FNEQ=0 EXPLIZIT gesetzt -- der EQ-Arm ist seit 2026-08-22 NICHT mehr Standard (a-unabhaengige fneq-Loeschung, binaerer Textur-Abdruck). Nur noch fuer Vergleichslaeufe gegen EQ-Altbestand verwenden. Alte Empfehlung: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");

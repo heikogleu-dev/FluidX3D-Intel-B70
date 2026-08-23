@@ -329,3 +329,15 @@ angebundenen Taschen oeffnen. Abnahme: Hohlraum-Zahl (1.341.590 fein) darf sich 
 hoechstens die 116.651 aendern, und der Durchschusstest muss weiter bestehen.
 **Erst NACH P2** -- ob eine offene Radhaustasche etwas bewegt, zeigt sich sinnvoll erst,
 wenn die Wandbehandlung dort ueberhaupt q-abhaengig ist.
+
+## 13. Bandbreite gegen Heikos Profil (2026-08-23, ENTSCHEIDUNG OFFEN)
+Heikos Gewichtstabelle hat SIEBEN Stufen (50/50/25/12,5/6,8/3,4/1,7), das Band traegt
+bei `CFD_N2F_BAND_N=8` und `WANDFREI=2` aber nur fuenf. Gemessen (Ansage im Log):
+- N=8:  L3..L8 = 50 / 50 / 25 / 12,5 / 6,8 / 0   -- Stufen 3,4 und 1,7 feuern NICHT
+- N=10: L3..L10 = 50 / 50 / 25 / 12,5 / 6,8 / 3,4 / 1,7 / 0 -- alle sieben
+Heiko: "den rest der kopplung so lassen wie es jetzt ist" -> N bleibt bei 8, das Profil
+endet nach 6,8 %. Fuer alle sieben Stufen braeuchte es N=10 (zwei Zellen breiteres Band).
+NICHT eigenmaechtig geaendert. A/B N=8 gegen N=10 bei 8 mm waere billig und wuerde die
+Frage beantworten, ob die beiden aeussersten Stufen ueberhaupt etwas tragen -- vorherige
+Messung sagt: Profilform und N lagen innerhalb 0,1-0,7 sigma, der Cz-Hebel ist allein
+der Wandrueckzug. Erwartung deshalb: kein messbarer Unterschied.
