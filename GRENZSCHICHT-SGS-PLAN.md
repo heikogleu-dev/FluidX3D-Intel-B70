@@ -175,3 +175,44 @@ aber Heiko haelt den Wirkpfad fuer unplausibel: das Band wirkt nur im Fernfeld, 
 Nahfeld gerechnet. Ein Pfad ist NICHT belegt. Kandidat waere, dass die Nahfeldbox mit nur 96 mm
 Vorlauf so eng sitzt, dass ihr TYPE_E-Rand im Bandgebiet liegt. Entweder den Pfad belegen oder
 den Befund als Zufall abschreiben -- so stehenlassen geht nicht.
+
+---
+
+# DUAL-B70-BOX, gerechnet 2026-08-23 (Heiko-Vorgabe)
+
+**Raender (Heiko):** x- 0,4 m | y+- 0,4 m | z+ 0,8 m | x+ 4,0 m
+Fahrzeug aus scenes/vehicle.stl: 4,436 x 1,839 x 1,208 m (Halbbreite 0,919).
+
+```
+Box   8,836 x 2,639 x 2,008 m = 46,82 m3
+dx    3,604 mm bei 1000 Mio Zellen
+gerastet: dx = 3,60 mm -> 2456 x 732 x 556 = 1000 Mio   (alle durch 4 teilbar, 4:1 sauber)
+Nachlauf 4,0 m = 0,90 L   (heute 1,990 m = 0,45 L)
+```
+Alternativen auf glattem Raster: 3,65 mm -> 967 Mio, 3,70 mm -> 925 Mio.
+
+**VRAM-Probe (V2-MESSUNG, logs/f4_wandfrei_prod.log: 29.274 MB fuer 508,7 Mio Zellen):**
+60,3 Byte je Zelle inkl. der 4,18-GB-F-BBox-Ersparnis. 1000 Mio Zellen = 56,2 GB, also
+**28,1 GB je Karte**. Verfuegbar 30,9 GB je Karte, auf der Desktop-Karte 29,3 GB.
+Passt mit 1,2 GB Reserve auf der Desktop-Karte, 2,8 GB auf der zweiten -- waehrend der
+Produktion bleibt der Browser zu.
+
+**Desktop-VRAM, richtig gemessen** ueber den xe-TTM-Allokator (`/sys/kernel/debug/dri/0/tile0/vram_mm`
+bzw. `sudo -n /usr/local/bin/b70-vram`): total 32.656 MiB, free 31.529 MiB, also **1.127 MiB
+belegt** bei laufendem gnome-shell, Firefox, VS Code und einem Kanallauf. Deckt sich mit dem
+Wissensspeicher-Wert von rund 1,6 GB.
+★ NICHT ueber /proc/*/fdinfo messen: dort zaehlen geteilte Puffer je Deskriptor mehrfach --
+ich kam damit auf 7,4 GB, also Faktor sieben zu hoch. Der Wissensspeicher warnt genau davor
+(knowledge/gpu-vram.md, ALTER Fork, 23.06.2026: "die EINE wahre OOM-Zahl ist vram_mm free").
+
+**Damit auch die Erklaerung des GPU-Abbruchs vom 22.08. praezisiert:** der Produktionslauf
+belegte 29,3 GB, plus rund 1,1 GB Desktop = 30,4 GB von 32,65. Die Reserve betrug 2,2 GB, und
+das Zeichentool hat mehr als diese 2,2 GB angefordert. Nicht "12 GB zu viel".
+
+**Offen zur Aufloesung:** 3,60 mm gegen 4,00 mm ist ein 10-Prozent-Schritt (Treppenamplitude
+-10 %, Facettenzahl +23 %, Rechenaufwand je Volumen +37 %). Heikos Begruendung ist mehr Detail
+nach dem Voxelizer und glattere Facetten. Gegenzahl aus der V2-Messung von heute: der Remesh
+senkt den Wandpositionsfehler gegen die analytische Kugel um 32 % bei UNVERAENDERTER Aufloesung,
+weil die rohe Voxelflaeche q == 0,5000 auf ALLEN Links liefert -- die Wandlage wird heute gar
+nicht gelesen, und das ist aufloesungsunabhaengig. Heiko-Entscheidung: der Remesh bleibt in
+jeder Aufloesung erhalten.

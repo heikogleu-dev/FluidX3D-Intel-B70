@@ -1895,3 +1895,18 @@ Warmlaufsperre `CFD_SGS_DIAG_AB` (der Zaehler lief bisher ab Schritt 1, am Fahrz
 der HARTKODIERTE Massstab "~21 bei y+ = 70,7" ist raus -- er wurde auch im Kanal gedruckt, wo
 26,9 gilt, und hat meine eigene Analyse in die Irre gefuehrt; Wickelwaechter jetzt je Domaene
 und ueber alle 19 Slots statt ueber die Domaenensumme.
+
+## 2026-08-23, Nachtrag zum Tagesende
+
+**Kanal-Aufloesungsreihe, ZWISCHENSTAND (Lauf N=76 war beim Sitzungsende noch nicht fertig):**
+N=38 cf = 0,0015369 (-55,4 %), N=76 bei 9.580 Samples cf = 0,00159835 (**-53,6 %**).
+Halbe Zellweite bringt 1,8 Prozentpunkte -- praktisch KEINE Aufloesungskonvergenz. Das stuetzt
+die Diagnose "wandmodell-dominiert, nicht aufloesungslimitiert", ist aber als Zwischenstand
+gekennzeichnet und gilt erst nach Laufende.
+
+**EIGENER FEHLER, VRAM:** Ich habe den Desktop-VRAM live ueber `/proc/*/fdinfo` gemessen und kam
+auf 7,4 GB. Richtig sind **1,1 GB** (xe-TTM-Allokator: total 32.656 MiB, free 31.529 MiB). Faktor
+sieben zu hoch, weil fdinfo geteilte Puffer je Deskriptor mehrfach zaehlt. Der Wissensspeicher
+enthaelt genau diese Warnung samt dem richtigen Weg -- ich habe gemessen, statt nachzuschlagen.
+Daraus hatte ich zusaetzlich die falsche Erklaerung gebaut, der Produktionslauf habe 4 GB zu
+viel gebraucht; tatsaechlich lag die Reserve bei 2,2 GB und das Zeichentool hat mehr angefordert.
