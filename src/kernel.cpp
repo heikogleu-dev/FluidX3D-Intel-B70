@@ -2306,6 +2306,10 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// davon gut zwei Stellen. Fuer Dekadengrenzen reicht das; auf den Einzelwert nicht bauen.
 		// Physikfrei: w wird nicht angefasst, nur gezaehlt (t%100 gegen uint-Wickel).
 		// PRUEFBEFUNDE 2026-08-23, eingearbeitet:
+		//  WARMLAUFSPERRE (Pruefbefund 6, 2026-08-23): der Zaehler lief bisher AB SCHRITT 1, also
+		//  auch waehrend der Einschwingphase -- am Fahrzeug stammten damit 40 Prozent der
+		//  Stichproben aus einem Zustand, den der Lauf selbst als transient verwirft.
+		//  def_sgs_diag_ab wird vom Host aus dem Warmlauf gesetzt.
 		//  (3) t=0 ist ein Zaehlpunkt, dort ist fneq==0 und ALLES faellt in den <1-Bin -- das waren
 		//      84 % des nahen und 63 % des fernen <1-Bins. Ausgeschlossen.
 		//  (4) Der Filter (flags&TYPE_E)==0 wirft NICHT nur die kuenstlichen Randzellen hinaus:
@@ -2320,7 +2324,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		//      und koennte damit ganze Wandorientierungen systematisch treffen oder verfehlen.
 		//      Der Hash ist gittergroessen-unabhaengig (Pruefbefund 13, 2026-08-23).
 		//  (11) Emission gegatet: ohne CFD_SGS_DIAG wird der Block gar nicht erst erzeugt.
-		if(t>0ul&&t%100ul==0ul&&((n*2654435761ul)&4227858432ul)==0ul&&(flags[n]&TYPE_E)==0u) {
+		if(t>=def_sgs_diag_ab&&t>0ul&&t%100ul==0ul&&((n*2654435761ul)&4227858432ul)==0ul&&(flags[n]&TYPE_E)==0u) {
 			const float nu0_ = tau0-0.5f;
 			const float nut_ = 1.0f/w-tau0;
 			const float rv_  = nut_/nu0_; // nu0_ > 0 ist Bauvoraussetzung, wird im Host geprueft

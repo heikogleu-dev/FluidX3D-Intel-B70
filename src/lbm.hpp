@@ -225,7 +225,8 @@ public:
 	void bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per, const bool band_slot=false); // Liste hochladen, Kernel binden; band_slot=true -> kfb_*-Satz
 	void kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar, const bool band_slot=false); // Kernel + double-Endsumme
 	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
-	static bool s_sgs_diag;     // P0-Diagnostik: nu_t/nu_0-Dekadenhistogramm, Slots 28..32 (CFD_SGS_DIAG). Default aus = kein Define, kein alloc, kein Zaehlen.
+	static bool s_sgs_diag;
+	static ulong s_sgs_diag_ab;  // erster Zeitschritt, ab dem das nu_t-Histogramm zaehlt (Warmlaufsperre)     // P0-Diagnostik: nu_t/nu_0-Dekadenhistogramm, Slots 28..32 (CFD_SGS_DIAG). Default aus = kein Define, kein alloc, kein Zaehlen.
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)
 	static float s_wf_tau;      // 1 = volle WFB, 0 = nur Free-Slip-Tausch (Zwischenarm)
 	static uint s_sponge_n;  // 0 = aus; Zonenbreite in Zellen (CFD_SPONGE_N)

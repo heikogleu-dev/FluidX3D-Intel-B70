@@ -1836,3 +1836,62 @@ Invariante `r6 && !r18` wird nicht geprueft (ein print_error kostet nichts); die
 nicht jede Zelle); `env_u`-Falle: 7..17 heisst still 6, >=26 still 18; die zweite Flutung
 laeuft unbedingt in JEDEM Lauf (bei 4 mm 63,6 MB und ~125 M BBox-Zellen x 18, einthreadig,
 Setup-Zeit ungemessen) und sollte auf die Mesh-BBox begrenzt und hinter ein Gate gestellt werden.
+
+## 2026-08-23 Abschluss — Grenzschicht-Diagnostik: was traegt und was nicht
+
+**Die ehrliche Bilanz des Tages: vier eigene Deutungen zurueckgenommen, kein Cz-Hebel gewonnen,
+aber der Suchraum deutlich verkleinert und drei Messwerkzeuge gebaut.**
+
+### TRAEGT (ohne Vorbehalt)
+- **Kanal-cf exakt reproduziert:** 0,0015369 gegen den Aktenwert 0,00154 = **-55,4 %** gegen die
+  Referenz 0,0034424. Aus etabliertem Code, nicht aus meinem.
+- **Der Kanal ist NICHT SGS-limitiert.** Das wahre U_b+ ist 36,0 statt 24,1 (Log-Layer-Versatz
+  +12). Ein 29-%-nu_t-Defizit in einer Zelllage verschiebt U+ um O(1-3), nicht um 12. Die
+  cf-Luecke ist **wandmodell-dominiert**. (Die frueher gedruckte Zeile "Ub_plus = 24,1035 trifft
+  das Ziel" ist KEIN Befund -- das ist der CFR-Regler auf seinem Ziel, normiert mit dem SOLL-u_tau.)
+- **Der Fahrzeug-Einlass hat keinerlei Anstroemturbulenz** (setup.cpp, u_lat/0/0), der Kanal saet.
+- **Die Voxelaufdickung ist gemessen:** 55,70 % der Solid-Links haben die STL hinter der Voxelwand.
+  Heiko-Entscheidung: bleibt so ("lieber zu dick als gar nicht voxeliert").
+
+### ZURUECKGENOMMEN (vier eigene Deutungen)
+1. "Der Spalt ist aerodynamisch dicht" -> Restspalt-Messung sagt 1,0033 Zellen, nichts unter 0,5.
+2. "Die Glaettung schmiert das Radhaus zu" -> alle ITER-Stufen identisch; es war der Void-Fill.
+3. "Die Radhaeuser sind die Ursache" -> der Void-Fill-Bereich endet VOR der Vorderachse; es ist
+   Kuehler und Vorderwagen. Und KONN=18 bleibt Diagnose (Fluid=18 erzwingt Solid=6).
+4. "Das Fernfeld liegt eine Dekade hoeher" -> Faktor 1,8 im Median.
+5. "Die Ueberdissipations-Lesart traegt, C senken ist die richtige Richtung" -> FALSCH. Der
+   richtige Massstab ist 0,714*kappa*y+ (Smagorinsky liefert im Gleichgewicht strukturell 71,4 %,
+   aufloesungsunabhaengig). C 0,173 -> 0,1 landet bei 0,7x Gleichgewicht = MSD-Zustand.
+6. "Der Kanal liegt exakt auf der Erwartung, der Ueberschuss am Fahrzeug ist geometrisch" ->
+   FALSCH, und zwar durch einen inneren Widerspruch: y+ = 136,5 ist der SOLL-Wert. Der Lauf misst
+   u_tau IST = 0,002008 (Faktor 0,669) und y+ = 92,0 -- dieselbe Zahl wie mein cf-Defizit, denn
+   cf ~ u_tau^2. Mit y+ = 92 ist die Erwartung 26,9, und der Kanal liegt SELBST 1,3-1,6x darueber,
+   auf einer ebenen Wand ohne jede Treppe.
+
+### GEBAUT (Werkzeuge, alle hinter CFD_SGS_DIAG, Default aus = kein alloc, keine Emission)
+- nu_t/nu_0-Dekadenhistogramm je Domaene (Slots 28..32)
+- Wandlagen-Histogramm mit Bins 5/15/30/60 (33..37), Teilsatz anliegend u_x>0 (38..42),
+  oberer Schwanz 60-120/120-240/240-480/>=480 (43..46)
+- Restspaltweite, Diagonalschnitt-Abnahme, Topologie/Euler, Kugel-Grundwahrheit, freie Weite,
+  Void-Fill-Konnektivitaetsdiagnose (alles im Remesh-Pfad)
+
+### BEKANNTE GRENZEN DIESER WERKZEUGE (wichtig fuer den Nachfolger)
+- **Die Wandlagen-Kennzahl ist in einer Konstantspannungsschicht fast tautologisch:** aus
+  (nu+nu_t)|S| = tau_w mit nu_t = C^2|S| folgt nu_t/nu direkt aus tau_w. Sie misst also weitgehend
+  tau_w zurueck, nicht Modellguete.
+- Der Zaehler misst |S| INSTANTAN, der Massstab kommt aus der MITTLEREN Scherung. Im
+  instationaeren Nachlauf ist E[|S|]/|S_quer| deutlich groesser als 1; Verhaeltnisbildung heilt das nicht.
+- Der Massstab haengt mit 1/y_w^2 von der Wandlage ab. Kanal: y_w exakt 0,500. Fahrzeug:
+  Median 0,500, q10 0,170, q90 1,069 -- 15,9 % der Wandzellen haben allein daraus einen
+  >=2,9x hoeheren Massstab.
+- kappa*y+ setzt GLEICHGEWICHT voraus. Am Fahrzeug gilt das an Scheiben, Heck, Radhaeusern und
+  Latsch nicht. Der u_x>0-Filter rettet das nicht (Kanal 0 % gefiltert, Fahrzeug 27 %).
+- Kein Fall in diesem Projekt ist deterministisch: zwei identische Laeufe liefern im dd-Fall UND
+  an der Kugel verschiedene Kraefte. Ein Datei-Bitvergleich ist als Abnahme nicht verfuegbar.
+
+### BEHOBEN AN DEN WERKZEUGEN (letzte Runde)
+Warmlaufsperre `CFD_SGS_DIAG_AB` (der Zaehler lief bisher ab Schritt 1, am Fahrzeug stammten
+40 % der Stichproben aus der Einschwingphase); Etikett "jede 8. Zelle" auf 1/64 richtiggestellt;
+der HARTKODIERTE Massstab "~21 bei y+ = 70,7" ist raus -- er wurde auch im Kanal gedruckt, wo
+26,9 gilt, und hat meine eigene Analyse in die Irre gefuehrt; Wickelwaechter jetzt je Domaene
+und ueber alle 19 Slots statt ueber die Domaenensumme.

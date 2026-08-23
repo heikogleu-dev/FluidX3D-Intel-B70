@@ -257,6 +257,7 @@ float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bi
 float LBM_Domain::s_fac_budget_sn = 1.0f; // CFD_FAC_BUDGET_SN (1a-Bsn), Default bitidentisch
 bool LBM_Domain::s_sgs_wandfrei = false;
 bool LBM_Domain::s_sgs_diag = false;
+ulong LBM_Domain::s_sgs_diag_ab = 0ull;
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
 uint LBM_Domain::s_sparse_T = 8u;
@@ -930,6 +931,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// Konstruktor hart abgewiesen, die WFB ist von SUBGRID unabhaengig.
 	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
 	+((s_sgs_diag)     ? (string)"\n	#define SGS_DIAG"     : (string)"")
+	+((s_sgs_diag)     ? (string)"\n	#define def_sgs_diag_ab "+to_string(s_sgs_diag_ab)+"ul" : (string)"")
 	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
 	"\n	#define def_wf_Y "+to_string(0.5f/nu,8u)+"f"
 	"\n	#define def_wf_tau "+to_string(s_wf_tau,4u)+"f"

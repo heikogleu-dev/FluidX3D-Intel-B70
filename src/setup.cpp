@@ -455,7 +455,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		for(uint b=0u; b<5u; b++) ges+=h[b];
 		if(ges>0ull) {
 			const double p100=100.0/(double)ges;
-			print_info(string("  nu_t/nu_0 ")+wo+" (Dekaden, jede 8. Zelle, t%100, ohne t=0 und ohne TYPE_E): <1 "+to_string(h[0])+" ("+to_string((float)((double)h[0]*p100),1u)+" %), 1-10 "+to_string(h[1])+" ("+to_string((float)((double)h[1]*p100),1u)+" %), 10-100 "+to_string(h[2])+" ("+to_string((float)((double)h[2]*p100),1u)+" %), 100-1000 "+to_string(h[3])+" ("+to_string((float)((double)h[3]*p100),1u)+" %), >=1000 "+to_string(h[4])+" ("+to_string((float)((double)h[4]*p100),1u)+" %)");
+			print_info(string("  nu_t/nu_0 ")+wo+" (Dekaden, jede 64. Zelle per Hash, t%100, ab Warmlaufende, ohne TYPE_E): <1 "+to_string(h[0])+" ("+to_string((float)((double)h[0]*p100),1u)+" %), 1-10 "+to_string(h[1])+" ("+to_string((float)((double)h[1]*p100),1u)+" %), 10-100 "+to_string(h[2])+" ("+to_string((float)((double)h[2]*p100),1u)+" %), 100-1000 "+to_string(h[3])+" ("+to_string((float)((double)h[3]*p100),1u)+" %), >=1000 "+to_string(h[4])+" ("+to_string((float)((double)h[4]*p100),1u)+" %)");
 			const double hoch=(double)(h[2]+h[3]+h[4])*p100;
 			if(hoch>50.0) print_warning(string("  nu_t/nu_0 ")+wo+": "+to_string((float)hoch,1u)+" % der Stichproben liegen ueber dem Zehnfachen der molekularen Viskositaet -- die Loesung ist dort SGS-dominiert, nicht molekular.");
 			// ★ Pruefbefund 10: ohne Ist!=Soll-Test wickelt der uint-Zaehler still und liefert
@@ -477,7 +477,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 				   ACHTUNG: diese Eichung gilt NUR fuer das Nahfeld bei 8 mm. Das Fernfeld hat ein
 				   rund viermal hoeheres y+, dort liegt die Erwartung bei rund 85 -- die Bins sind
 				   dort NICHT aussagekraeftig und werden nur nachrichtlich gedruckt. */
-				print_info(string("  nu_t/nu_0 ")+wo+" WANDNAECHSTE LAGE (Gleichgewicht 0,714*kappa*y+ ~ 21 bei y+ = 70,7; Eichung gilt NUR fuers Nahfeld bei 8 mm): <5 "+to_string(hw[0])+" ("+to_string((float)((double)hw[0]*q),1u)+" %), 5-15 "+to_string(hw[1])+" ("+to_string((float)((double)hw[1]*q),1u)+" %), 15-30 "+to_string(hw[2])+" ("+to_string((float)((double)hw[2]*q),1u)+" %), 30-60 "+to_string(hw[3])+" ("+to_string((float)((double)hw[3]*q),1u)+" %), >=60 "+to_string(hw[4])+" ("+to_string((float)((double)hw[4]*q),1u)+" %)");
+				print_info(string("  nu_t/nu_0 ")+wo+" WANDNAECHSTE LAGE (Erwartung = 0,714*kappa*y+ mit dem GEMESSENEN u_tau dieses Laufs -- NICHT mit dem Sollwert; Bins 5/15/30/60): <5 "+to_string(hw[0])+" ("+to_string((float)((double)hw[0]*q),1u)+" %), 5-15 "+to_string(hw[1])+" ("+to_string((float)((double)hw[1]*q),1u)+" %), 15-30 "+to_string(hw[2])+" ("+to_string((float)((double)hw[2]*q),1u)+" %), 30-60 "+to_string(hw[3])+" ("+to_string((float)((double)hw[3]*q),1u)+" %), >=60 "+to_string(hw[4])+" ("+to_string((float)((double)hw[4]*q),1u)+" %)");
 				/* KEINE Lesart-Warnung mehr. Eine einzelne Aufloesung entscheidet die Frage
 				   "zu viel oder zu wenig modellierte Mischung" nicht: Modeled-Stress Depletion ist
 				   als Delta-ABHAENGIGKEIT definiert (feiner = weniger Mischung = fruehere
@@ -505,8 +505,14 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 					if(mt>3865470566ull) print_error(string("  nu_t/nu_0 ")+wo+" oberer Schwanz: Wickelgefahr (Bin ueber 90 % des uint-Bereichs).");
 				}
 			}
-			ulong maxb=0ull; for(uint b=0u; b<5u; b++) if(h[b]>maxb) maxb=h[b];
-			for(uint b=0u; b<5u; b++) { if(hw[b]>maxb) maxb=hw[b]; if(hv[b]>maxb) maxb=hv[b]; } // Waechter auf ALLE Histogramme
+			/* WICKELWAECHTER JE DOMAENE (Pruefbefund 13): ueber die Summe zu pruefen ist blind --
+			   ein Zaehler, der in EINER Domaene bereits gewickelt IST, steht danach niedrig und
+			   faellt nie auf. Die Rohwerte je Domaene sind uint, also wird jeder einzeln geprueft. */
+			ulong maxb=0ull;
+			for(uint d=0u; d<L.get_D(); d++) for(uint sl=28u; sl<47u; sl++) {
+				const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl];
+				if(v>maxb) maxb=v;
+			}
 			if(maxb>3865470566ull) print_error(string("  nu_t/nu_0 ")+wo+": ein Bin steht bei "+to_string(maxb)+" und damit ueber 90 % des uint-Bereichs -- WICKELGEFAHR, die Prozente sind nicht mehr belastbar. Lauf kuerzen oder Stichprobe ausduennen.");
 		} else print_error(string("  nu_t/nu_0 ")+wo+": Histogramm LEER, obwohl CFD_SGS_DIAG gesetzt ist -- lautloser No-Op. Haeufigste Ursache: CFD_SGS_WANDFREI ueberspringt den ganzen SUBGRID-Block fuer genau die Wandzellen, dann bleiben auch die Wandlagen-Slots null (Pruefbefund 9).");
 	}
@@ -1442,7 +1448,7 @@ void main_setup_kanal() {
 	if(env_u("CFD_SPONGE_N",0u)>0u)      print_warning("CFD_SPONGE_N wird im Kanal NICHT angewandt (periodisch, kein Rand zu daempfen).");
 	if(env_u("CFD_PO_HART",0u)>0u||getenv("CFD_PO_SIGMA")!=nullptr) print_warning("CFD_PO_HART/CFD_PO_SIGMA wirken nur mit Druck-Auslass -- der Kanal hat keinen."); // R2-Nachpruefer: env_u statt getenv-Falle
 	if(env_on("CFD_SPARSE_TILES"))       print_warning("CFD_SPARSE_TILES wird im Kanal NICHT angewandt.");
-	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u;
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u);
 	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
 	{ const uint wf = env_u("CFD_WANDFUNKTION", 0u); LBM_Domain::s_wandfunktion = wf>0u; LBM_Domain::s_wf_tau = (wf==2u) ? 0.0f : 1.0f;
 	  if(wf>0u) print_info(string("Wandfunktion (Han et al. 2021): ")+(wf==2u?"NUR FREE-SLIP-TAUSCH (Zwischenarm)":"voll (Spalding, kappa=0,41, B=5,5)")); }
@@ -2034,7 +2040,7 @@ void main_setup_kugel() {
 	// dort nur am groben Gitter. Ein still wirkungsloser Schalter waere genau die Fehlerklasse,
 	// die dieses Projekt sonst jagt.
 	if(env_u("CFD_SPONGE_N", 0u)>0u) print_warning("CFD_SPONGE_N ist gesetzt, wird in diesem Fall aber NICHT angewandt (die Zone rampt am Domaenenrand, dort stehen hier mitbewegte Waende). Nur fernfeld und fahrzeug_dd nutzen sie.");
-	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; // alle drei, damit keine Instanz einen Wert der vorigen erbt
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u); // alle drei, damit keine Instanz einen Wert der vorigen erbt
 	// ★ Audit-Nacharbeit 6/10: Wandfunktions-Statiken an JEDER Konstruktorstelle setzen; der Schalter
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
@@ -2484,7 +2490,7 @@ static void main_setup_fahrzeug() {
 	// dort nur am groben Gitter. Ein still wirkungsloser Schalter waere genau die Fehlerklasse,
 	// die dieses Projekt sonst jagt.
 	if(env_u("CFD_SPONGE_N", 0u)>0u) print_warning("CFD_SPONGE_N ist gesetzt, wird in diesem Fall aber NICHT angewandt (die Zone rampt am Domaenenrand, dort stehen hier mitbewegte Waende). Nur fernfeld und fahrzeug_dd nutzen sie.");
-	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; // alle drei, damit keine Instanz einen Wert der vorigen erbt
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u); // alle drei, damit keine Instanz einen Wert der vorigen erbt
 	// ★ Audit-Nacharbeit 6/10: Wandfunktions-Statiken an JEDER Konstruktorstelle setzen; der Schalter
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
@@ -2911,7 +2917,7 @@ static void main_setup_fahrzeug_dd() {
 	// GETRIEBEN, und die Uebergabe geschieht in der EINEN Randzellschicht. Bei N=64 haette diese Zelle
 	// den Faktor 2906 -- die Kopplung wuerde genau an ihrer Eintrittsstelle verschmiert.
 	// Es gibt also KEINE vertretbare Zonenbreite am Nahfeld. Deshalb hier hart auf null.
-	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; // alle drei, damit keine Instanz einen Wert der vorigen erbt
+	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u); // alle drei, damit keine Instanz einen Wert der vorigen erbt
 	// ★ Audit-Nacharbeit 6/10: Wandfunktions-Statiken an JEDER Konstruktorstelle setzen; der Schalter
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
@@ -2974,7 +2980,7 @@ static void main_setup_fahrzeug_dd() {
 	// read-once haette die Zone also genau der falschen Domaene gegeben.
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
-	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u;
+	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u);
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
@@ -5292,7 +5298,7 @@ static void main_setup_fernfeld() {
 	// ★ Nachpruefer-Befund 2026-08-15: diese sechste Konstruktorstelle FEHLTE in der Verdrahtung von
 	// CFD_SGS_WANDFREI -- der Schalter waere im fernfeld-Fall still wirkungslos gewesen (die
 	// Commit-Behauptung "alle 5 Aufrufstellen" hatte schlicht falsch gezaehlt: es sind sechs).
-	LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u;
+	LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u);
 	// ★ Nachpruefer-Befund 2026-08-09: die Obergrenze stand hier nur im Kommentar, geprueft wurde sie
 	// nur im dd-Fall. Damit lief CFD_SPONGE_N=400 im Diagnosefall ungeprueft durch.
 	if(LBM_Domain::s_sponge_n>120u) print_error("CFD_SPONGE_N ueber 120 ist nicht vorgesehen (im dd-Fall kaeme die Zone der Kopplungs-Entnahmeebene x- bei 152 Zellen zu nahe; der Diagnosefall bleibt vergleichbar).");
