@@ -461,9 +461,54 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			// ★ Pruefbefund 10: ohne Ist!=Soll-Test wickelt der uint-Zaehler still und liefert
 			// plausibel aussehende falsche Prozente. Bei 4 mm waere das nach 12,3 ms passiert.
 			// Die n&7-Stichprobe und das Emissionsgate entschaerfen es; der Waechter bleibt.
+			// Wandnaechste Lage getrennt -- das ist die Zahl, die zwischen den beiden Lesarten
+			// entscheidet (zu viel gegen zu wenig wandnahe Mischung).
+			ulong hw[5]={0ull,0ull,0ull,0ull,0ull}, gw=0ull;
+			for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<5u; b++) hw[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[33u+b];
+			for(uint b=0u; b<5u; b++) gw+=hw[b];
+			if(gw>0ull) {
+				const double q=100.0/(double)gw;
+				/* MASSSTAB, korrigiert nach Pruefbefund 4 (2026-08-23): NICHT kappa*y+, sondern
+				   0,714*kappa*y+. Setzt man die Gleichgewichtsscherung |S| = u_tau/(kappa*y1) in
+				   FluidX3Ds eigene Konstante ein, liefert Smagorinsky (C*Delta)^2/(kappa^2*y1^2)
+				   = 0,030021/(0,41^2*0,25) = 0,714 der noetigen Wandschicht-Viskositaet -- und
+				   zwar AUFLOESUNGSUNABHAENGIG. Bei y+ = 70,7 (Facettenmedian Nahfeld 8 mm) sind
+				   das rund 21, nicht 29. Die Bingrenze 15-30 ist damit die Gleichgewichtszone.
+				   ACHTUNG: diese Eichung gilt NUR fuer das Nahfeld bei 8 mm. Das Fernfeld hat ein
+				   rund viermal hoeheres y+, dort liegt die Erwartung bei rund 85 -- die Bins sind
+				   dort NICHT aussagekraeftig und werden nur nachrichtlich gedruckt. */
+				print_info(string("  nu_t/nu_0 ")+wo+" WANDNAECHSTE LAGE (Gleichgewicht 0,714*kappa*y+ ~ 21 bei y+ = 70,7; Eichung gilt NUR fuers Nahfeld bei 8 mm): <5 "+to_string(hw[0])+" ("+to_string((float)((double)hw[0]*q),1u)+" %), 5-15 "+to_string(hw[1])+" ("+to_string((float)((double)hw[1]*q),1u)+" %), 15-30 "+to_string(hw[2])+" ("+to_string((float)((double)hw[2]*q),1u)+" %), 30-60 "+to_string(hw[3])+" ("+to_string((float)((double)hw[3]*q),1u)+" %), >=60 "+to_string(hw[4])+" ("+to_string((float)((double)hw[4]*q),1u)+" %)");
+				/* KEINE Lesart-Warnung mehr. Eine einzelne Aufloesung entscheidet die Frage
+				   "zu viel oder zu wenig modellierte Mischung" nicht: Modeled-Stress Depletion ist
+				   als Delta-ABHAENGIGKEIT definiert (feiner = weniger Mischung = fruehere
+				   Abloesung) und braucht die Reihe 16/8/4 mm. Und ein Ueberschuss gegen das
+				   Gleichgewicht sagt nicht, ob die Konstante zu gross oder die Scherung |S|
+				   spurios ist -- an Voxeltreppen ist |S| bauartbedingt ueberhoeht. Die frueheren
+				   beiden Warnungen an dieser Stelle haben genau diesen unzulaessigen Schluss
+				   gezogen und sind entfernt (Pruefbefunde 5 und 6, 2026-08-23). */
+			}
+			ulong hv[5]={0ull,0ull,0ull,0ull,0ull}, gv=0ull;
+			for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<5u; b++) hv[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[38u+b];
+			for(uint b=0u; b<5u; b++) gv+=hv[b];
+			if(gv>0ull) {
+				const double q2=100.0/(double)gv;
+				print_info(string("  nu_t/nu_0 ")+wo+" WANDNAH und ANLIEGEND (u_x > 0, "+to_string((float)(100.0*(double)gv/(double)max(1ull,gw)),1u)+" % der Lage): <5 "+to_string((float)((double)hv[0]*q2),1u)+" %, 5-15 "+to_string((float)((double)hv[1]*q2),1u)+" %, 15-30 "+to_string((float)((double)hv[2]*q2),1u)+" %, 30-60 "+to_string((float)((double)hv[3]*q2),1u)+" %, >=60 "+to_string((float)((double)hv[4]*q2),1u)+" %");
+			}
+			// Oberen Schwanz aufloesen (Slots 43..46)
+			{
+				ulong ht[4]={0ull,0ull,0ull,0ull}, gt=0ull;
+				for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<4u; b++) ht[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[43u+b];
+				for(uint b=0u; b<4u; b++) gt+=ht[b];
+				if(gt>0ull) { const double q3=100.0/(double)gt;
+					print_info(string("  nu_t/nu_0 ")+wo+" oberer Schwanz (Anteil der Zellen mit rv>=60): 60-120 "+to_string((float)((double)ht[0]*q3),1u)+" %, 120-240 "+to_string((float)((double)ht[1]*q3),1u)+" %, 240-480 "+to_string((float)((double)ht[2]*q3),1u)+" %, >=480 "+to_string((float)((double)ht[3]*q3),1u)+" %");
+					ulong mt=0ull; for(uint b=0u; b<4u; b++) if(ht[b]>mt) mt=ht[b];
+					if(mt>3865470566ull) print_error(string("  nu_t/nu_0 ")+wo+" oberer Schwanz: Wickelgefahr (Bin ueber 90 % des uint-Bereichs).");
+				}
+			}
 			ulong maxb=0ull; for(uint b=0u; b<5u; b++) if(h[b]>maxb) maxb=h[b];
+			for(uint b=0u; b<5u; b++) { if(hw[b]>maxb) maxb=hw[b]; if(hv[b]>maxb) maxb=hv[b]; } // Waechter auf ALLE Histogramme
 			if(maxb>3865470566ull) print_error(string("  nu_t/nu_0 ")+wo+": ein Bin steht bei "+to_string(maxb)+" und damit ueber 90 % des uint-Bereichs -- WICKELGEFAHR, die Prozente sind nicht mehr belastbar. Lauf kuerzen oder Stichprobe ausduennen.");
-		} else print_warning(string("  nu_t/nu_0 ")+wo+": Histogramm LEER, obwohl CFD_SGS_DIAG gesetzt ist -- lautloser No-Op (oder der Lauf war kuerzer als 100 Schritte).");
+		} else print_error(string("  nu_t/nu_0 ")+wo+": Histogramm LEER, obwohl CFD_SGS_DIAG gesetzt ist -- lautloser No-Op. Haeufigste Ursache: CFD_SGS_WANDFREI ueberspringt den ganzen SUBGRID-Block fuer genau die Wandzellen, dann bleiben auch die Wandlagen-Slots null (Pruefbefund 9).");
 	}
 #ifdef RHO_CLAMP
 	ulong u=0ull, o=0ull; L.rho_clamp_hits_total(u, o);

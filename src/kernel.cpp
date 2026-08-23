@@ -2308,17 +2308,52 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// PRUEFBEFUNDE 2026-08-23, eingearbeitet:
 		//  (3) t=0 ist ein Zaehlpunkt, dort ist fneq==0 und ALLES faellt in den <1-Bin -- das waren
 		//      84 % des nahen und 63 % des fernen <1-Bins. Ausgeschlossen.
-		//  (4) TYPE_E sind kuenstliche Randzellen (rund 2 %) und gehoeren nicht in die Statistik.
-		//  (9) uint wickelt: der 77-%-Bin fuellte bei 8 mm nach 197 ms, bei 4 mm nach 12,3 ms.
-		//      Deshalb JEDE ACHTE Zelle (n&7) -- raeumlich gleichverteilt, Prozente unverzerrt,
-		//      Kopfraum mal acht, und die Atomic-Kontention faellt um denselben Faktor (12).
+		//  (4) Der Filter (flags&TYPE_E)==0 wirft NICHT nur die kuenstlichen Randzellen hinaus:
+		//      TYPE_MS (mitbewegte Wandnachbarn, 0x03) traegt das TYPE_E-Bit ebenfalls, also faellt
+		//      die GESAMTE mitbewegte Fahrbahnlage mit heraus (262.337 fein / 90.702 grob bei 8 mm).
+		//      Fuer die Fahrzeug-Grenzschichtfrage ist das richtig -- die Strasse gehoert nicht in
+		//      die Statistik -- aber es ist eine ANDERE Wirkung als der Name nahelegt. Wer den
+		//      Filter je lockert, holt die Fahrbahn unbemerkt herein (Pruefbefund 8, 2026-08-23).
+		//  (9) uint wickelt. Deshalb nur jede 64. Zelle, und zwar ueber einen multiplikativen
+		//      Hash statt ueber n&63: die Bitmaske entartet je nach Gittergroesse zu einer
+		//      Ebenenschar (im Grobgitter war n&7 exakt (x+y) mod 8, in JEDER z-Lage identisch)
+		//      und koennte damit ganze Wandorientierungen systematisch treffen oder verfehlen.
+		//      Der Hash ist gittergroessen-unabhaengig (Pruefbefund 13, 2026-08-23).
 		//  (11) Emission gegatet: ohne CFD_SGS_DIAG wird der Block gar nicht erst erzeugt.
-		if(t>0ul&&t%100ul==0ul&&(n&7ul)==0ul&&(flags[n]&TYPE_E)==0u) {
+		if(t>0ul&&t%100ul==0ul&&((n*2654435761ul)&4227858432ul)==0ul&&(flags[n]&TYPE_E)==0u) {
 			const float nu0_ = tau0-0.5f;
 			const float nut_ = 1.0f/w-tau0;
 			const float rv_  = nut_/nu0_; // nu0_ > 0 ist Bauvoraussetzung, wird im Host geprueft
 			const uint  b_   = rv_<1.0f ? 0u : (rv_<10.0f ? 1u : (rv_<100.0f ? 2u : (rv_<1000.0f ? 3u : 4u)));
 			atomic_inc(&rho_clamp_hits[28u+b_]);
+			/* ★ WANDNAHE LAGE, Slots 33..37 (2026-08-23). Der Dekadenhistogramm oben mittelt ueber
+			   das GANZE Gitter -- Nachlauf und Freistrom eingeschlossen -- und beantwortet damit
+			   nicht die Frage, um die es geht: traegt die anliegende Grenzschicht ZU VIEL oder ZU
+			   WENIG modellierte Mischung? Der Massstab dafuer ist nicht die molekulare Viskositaet,
+			   sondern das Gleichgewichtsprofil der Logschicht, nu_t/nu = kappa*y+ mit kappa = 0,41.
+			   Bei y+ = 72 (Facettenmedian 8 mm) sind das rund 30; die Bingrenzen 5/15/30/60 klammern
+			   diesen Wert ein. Deutlich darunter hiesse Modeled-Stress Depletion (zu wenig
+			   wandnahe Mischung, verfruehte Abloesung) -- dann waere jede Senkung von C die
+			   falsche Richtung. Deutlich darueber traegt die Ueberdissipations-Lesart.
+			   EINSCHRAENKUNG, bewusst: "Lage 1" ist jede Zelle mit solidem 18er-Nachbarn, also auch
+			   Unterboden, Raeder und abgeloeste Gebiete -- keine reine anliegende Grenzschicht.
+			   Der Test kostet 18 uchar-Reads, aber nur auf den Zaehlschritten. */
+			bool wand1_ = false;
+			for(uint i=1u; i<def_velocity_set; i++) wand1_ = wand1_||(flags[j[i]]&TYPE_BO)==TYPE_S;
+			if(wand1_) {
+				const uint bw_ = rv_<5.0f ? 0u : (rv_<15.0f ? 1u : (rv_<30.0f ? 2u : (rv_<60.0f ? 3u : 4u)));
+				atomic_inc(&rho_clamp_hits[33u+bw_]);
+				/* Slots 38..42: dieselbe Lage, aber NUR mit vorwaertsgerichteter Stroemung.
+				   In abgeloesten Gebieten GEHOERT viel nu_t hin -- sie mitzuzaehlen wuerde den
+				   Ueberdissipations-Befund kuenstlich aufblasen. Dieser Teilsatz ist die
+				   ehrliche Fassung: anliegende Stroemung, wo kappa*y+ ueberhaupt gilt. */
+				if(uxn>0.0f) atomic_inc(&rho_clamp_hits[38u+bw_]);
+				/* Slots 43..46 loesen den nach oben OFFENEN Bin auf. Ohne sie laesst sich nicht
+				   sagen, ob eine Senkung von nu_t bei 20 oder bei 200 landet -- und genau davon
+				   haengt ab, ob eine Aenderung der Konstante ueberhaupt in der richtigen
+				   Groessenordnung waere (Pruefbefund 11). */
+				if(rv_>=60.0f) atomic_inc(&rho_clamp_hits[43u+(rv_<120.0f?0u:(rv_<240.0f?1u:(rv_<480.0f?2u:3u)))]);
+			}
 		}
 )+"#endif"+R( // SGS_DIAG
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
