@@ -216,3 +216,32 @@ senkt den Wandpositionsfehler gegen die analytische Kugel um 32 % bei UNVERAENDE
 weil die rohe Voxelflaeche q == 0,5000 auf ALLEN Links liefert -- die Wandlage wird heute gar
 nicht gelesen, und das ist aufloesungsunabhaengig. Heiko-Entscheidung: der Remesh bleibt in
 jeder Aufloesung erhalten.
+
+---
+
+# KIPP-VERSUCH, Aufbau (2026-08-24)
+
+**Frage:** Kommt die erhoehte Wandlagen-nu_t am Fahrzeug aus der VOXELTREPPE oder aus der
+Instationaritaet? Der Kanal trennt das, weil dort alles ausser der Wandneigung gleich bleibt.
+
+**Arme, alle N=38, 80 ETT, identischer Build:**
+- `kipp=0`  -- ebene, gitterparallele Wand, KEINE Treppe
+- `kipp=26` -- atan(1/2) = 26,565 Grad, Treppenperiode 2, Nicht-Tie-Winkel
+- `kipp=45` -- Tie-Fall (argmax mehrdeutig, Tie-Break deterministisch)
+Warmlaufsperre `CFD_SGS_DIAG_AB=126700` (= 20 ETT, aus kanal_zeit.csv abgelesen) in ALLEN
+Armen, damit die nu_t-Zahlen nur den ausgewerteten Bereich sehen.
+`CFD_FACETTEN_YWMIN=0.15` wegen der Codebedingung fuer kipp=26.
+
+**Was FALSIFIZIERT die Treppen-Deutung:** liegt das Verhaeltnis nu_t/Erwartung bei kipp=26 und
+kipp=45 NICHT hoeher als bei kipp=0, erzeugt die Treppe keine spuriose Scherung, und der
+Ueberschuss am Fahrzeug muss eine andere Ursache haben (Instationaritaet, Druckgradient,
+Wandlagenstreuung y_w).
+
+**Was der Versuch NICHT beantwortet:** ob die Treppe am FAHRZEUG denselben Beitrag liefert --
+dort kommen Kruemmung, Druckgradient und ein breites y_w-Spektrum dazu. Der Kanal zeigt nur,
+ob der Mechanismus ueberhaupt existiert und wie gross er unter Idealbedingungen ist.
+
+**Bitvergleich als Abnahme steht jetzt zur Verfuegung** (po_mean atomikfrei seit 849b14f):
+Armdifferenzen lassen sich von Rauschen trennen, ohne Statistik ueber Wiederholungen.
+ACHTUNG: `cf_impulsaustausch` bleibt nichtdeterministisch (object_force), also NICHT als
+Vergleichsgroesse benutzen -- `cf_kraftbilanz` und die nu_t-Slots sind sauber.
