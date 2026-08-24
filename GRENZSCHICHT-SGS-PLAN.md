@@ -150,6 +150,11 @@ GPU-Kraftreduktion bringt den Bitvergleich zurueck. Das gehoert vor alles andere
 bestimmt, welche Abnahmen ab jetzt ueberhaupt gueltig sind.
 Abnahme: zwei identische Laeufe byteweise gleich in forces.csv, dd-Fall UND Kugel.
 
+## ★ AUFTRAG FUER DEN 2026-08-25 (Heiko, 2026-08-24 abends)
+1. **Den Facetten-Kraft/Reibungs-Fehler FIXEN** -- die K2-Verletzung im ebenen Kanal (siehe
+   direkt darunter). Nicht nur diagnostizieren: beheben.
+2. **Danach der volle Code-Audit-Korrektur-Loop** ueber den entstandenen Stand.
+
 ## NEU AN DER SPITZE (2026-08-24 abends): K2 im ebenen Kanal aufklaeren
 Die K2-Abnahme (Reibungspfad der Facetten gegen die Kraftbilanz, 1-Prozent-Schranke) ist auch
 bei `kipp=0` verletzt -- an der ebenen, gitterparallelen Wand. Damit widersprechen sich zwei
