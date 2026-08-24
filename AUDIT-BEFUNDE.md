@@ -1954,3 +1954,47 @@ der u_tau-Faktor sogar in der falschen Richtung (er ist nicht monoton in der Auf
 Das VORAB NOTIERTE FALSIFIKATIONSKRITERIUM war dagegen brauchbar: "liegt das Verhaeltnis
 nicht ueber 1,49, ist MSD widerlegt" -- es liegt darueber, also ueberlebt die Lesart, und
 ich konnte das schwache Ergebnis nicht nachtraeglich als Bestaetigung umdeuten.
+
+## 2026-08-24 — Nichtdeterminismus vollstaendig lokalisiert (Kette sauber isoliert)
+
+**Fuenf Messungen, jede mit ihrem eigenen Zweck:**
+| | Aufbau | u-Feld | Kraefte |
+|---|---|---|---|
+| 1 | Kanal N=20, drei identische Laeufe | -- | Spalten 1-6 bitgleich, NUR `cf_impulsaustausch` weicht ab |
+| 2 | Kugel, 20 Schritte | **bitgleich** | weichen ab (schon ab Schritt 10) |
+| 3 | Kugel, voller Lauf, po_mean aktiv | weicht ab | weichen ab |
+| 4 | Kugel, voller Lauf, Rand GANZ WEG (`PO_FACES=0`) | bitgleich | weichen ab |
+| 5 | Kugel, voller Lauf, Rand AKTIV, po_mean nicht gelesen (`PO_HART=1`) | **bitgleich** | weichen ab |
+
+**Zeile 5 ist der saubere Test** -- Zeile 4 war es NICHT: `PO_FACES=0` entfernt den Rand ganz,
+x_max wird eine nackte TYPE_E-Zelle mit rho UND u vorgeschrieben (ueberbestimmt, reflektierend,
+siehe setup.cpp:2146-2149). Das ist ein anderer Fall. `PO_HART=1` laesst den Rand stehen
+(31.553 Zellen) und liest nur `po_mean` nicht.
+
+**ERGEBNIS:**
+- **`po_mean` (atomare Reduktion am Druckauslass) = Quelle der LOESUNGSdivergenz.** Sie koppelt
+  jeden Schritt zurueck. Verzoegerter Einsatz erklaert: solange alle Workgroup-Teilsummen
+  bitgleich sind, ist die atomare Kette permutationsinvariant; erst wenn der Nachlauf die
+  Auslassebene erreicht und die Werte spreizen, zaehlt die Reihenfolge.
+- **`object_force` = davon unabhaengige Quelle, betrifft NUR die Kraftmeldung.** Beleg aus dem
+  Kanal: von sieben Spalten weicht genau die eine ab, die aus `object_force` stammt.
+- **Alle uebrigen Atomics sind Diagnosezaehler ohne Rueckkopplung** (Codebefund des Pruefers:
+  kernel.cpp:2833-2853 Workgroup-Baum deterministisch, dann atomic_add_f; update_force_field
+  schreibt F ohne Atomic).
+- **Aufwand:** po_mean NIEDRIG (N=31.553, rund 500 Teilsummen -> Teilsummenpuffer plus
+  Ein-Work-Item-Finalkernel in Indexordnung, rund 15 Zeilen). object_force MITTEL (N=14,26 Mio,
+  Zwei-Ebenen-Baum oder Host-Summe ueber die F-BBox).
+
+**DREI EIGENE FEHLER auf dem Weg:**
+1. "Kein Fall in diesem Projekt ist deterministisch" (23.08.) -- zu weit gefasst.
+2. "Der Kanal ist EXAKT deterministisch" (heute frueh) -- auch falsch: `cf_impulsaustausch`
+   weicht ab. Ich hatte nur `cf_kraftbilanz` verglichen. Der Befund stuetzt die
+   object_force-These aber, statt sie zu widerlegen.
+3. `PO_FACES=0` als Isolationstest -- entfernt den Rand statt der Reduktion.
+Dazu: der Feld-Hash im Kugelfall war byteweise, der im Kanal ist wortweise. Angeglichen;
+die oben zitierten Hashwerte stammen aus der byteweisen Fassung (Verdikte unveraendert,
+weil je Paar dieselbe Fassung lief).
+
+**PRAEZISIERUNG (Pruefbefund 7):** bitgleicher u-Hash heisst bitgleiches **u**, nicht
+zwingend bitgleiches fi -- u ist ein Moment. Aussage also: "das u-Feld ist bitgleich",
+nicht "der Zeitschritt ist deterministisch".

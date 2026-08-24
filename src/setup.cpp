@@ -2400,6 +2400,29 @@ void main_setup_kugel() {
 	}
 	print_info("---------------------------------------------------------------");
 
+	// ★ FELD-HASH (2026-08-24). Wortgleich zu dem im Kanalfall (setup.cpp:1699), damit die
+	// Frage entscheidbar wird, die den ganzen Determinismus-Punkt gattert: weicht die LOESUNG
+	// zwischen zwei identischen Laeufen ab, oder nur die KRAFTMELDUNG? Die Kraefte kommen aus
+	// einer Reduktion ueber Millionen Zellen; weicht nur sie ab, ist der Bitvergleich ueber
+	// eine feste Reduktionsordnung wiederherstellbar. Weicht das u-Feld ab, ist es
+	// Loesungsdivergenz und jeder A/B braucht dauerhaft Statistik.
+	// Rein lesend, gegatet, Default aus.
+	if(env_u("CFD_FELD_HASH", 0u)>0u) {
+		lbm.u.read_from_device();
+		ulong h=1469598103934665603ull;
+		for(ulong i=0ull; i<3ull*lbm.get_N(); i++) {
+			uint b; const float v=(i<lbm.get_N())?lbm.u.x[i%lbm.get_N()]:((i<2ull*lbm.get_N())?lbm.u.y[i%lbm.get_N()]:lbm.u.z[i%lbm.get_N()]);
+			memcpy(&b, &v, 4);
+			// ★ WORTWEISE, nicht byteweise -- exakt wie der Kanalfall (setup.cpp:1702). Das ist
+			// KEIN lehrbuchtreues FNV-1a (das mischt byteweise), aber es ist die Variante, die im
+			// Projekt schon als Regressionsanker steht. Meine erste Fassung hier war byteweise:
+			// dasselbe Feld haette eine ANDERE Zahl ergeben, und jeder kuenftige Vergleich
+			// Kanal gegen Kugel waere still falsch gewesen (Pruefbefund 6, 2026-08-24).
+			h ^= (ulong)b; h *= 1099511628211ull;
+		}
+		print_info("FELD-HASH(u) = "+to_string(h));
+	}
+
 	// Der Intel-Runtime-Teardown laeuft beim regulaeren Rueckweg in ein "double free or
 	// corruption (out)" (rc=134), nachdem alle Dateien geschrieben sind. Upstream hat denselben
 	// Exit-Bug an anderer Stelle und musste den "sauberen" Fix einen Tag spaeter zurueckrudern.
