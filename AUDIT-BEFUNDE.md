@@ -2034,3 +2034,41 @@ nachgerechnet vom Pruefer).
 **OFFEN:** `object_force` bleibt nichtdeterministisch und betrifft die Kraftmeldung (14,26 Mio
 Zellen, also Zwei-Ebenen-Baum oder Host-Summe ueber die F-BBox). Und der Kostenvergleich
 alt/neu ist NICHT gemessen -- der Pruefer schaetzt wenige Mikrosekunden, das ist eine Luecke.
+
+## 2026-08-24 Abschluss — Kipp-Versuch ohne gueltiges Ergebnis, aber mit einem Befund darunter
+
+### DER BEFUND: K2 ist auch im EBENEN Kanal verletzt
+Die K2-Abnahme vergleicht den Reibungspfad der Facetten gegen die Kraftbilanz und verlangt
+Uebereinstimmung auf 1 %. Sie scheitert in ALLEN DREI Armen -- auch bei `kipp=0`, also an der
+ebenen, gitterparallelen Wand im einfachsten denkbaren Fall. Das ist damit kein Kipp-Problem,
+sondern eines der Facetten-Wandbehandlung selbst.
+**Das verschiebt den Befund vom 23.08.:** die cf-Luecke von -55 % war als "wandmodell-dominiert"
+eingeordnet. Jetzt sagt der Code selbst, dass sein Reibungspfad und seine Kraftbilanz nicht
+einmal miteinander konsistent sind. Nicht "das Modell trifft die Physik nicht", sondern
+"das Modell ist mit sich selbst uneins" -- eine Stufe darunter.
+=> **Vor jeder weiteren Wandmodell-Messung aufzuklaeren.** Solange sich zwei Zahlen um mehr als
+1 % widersprechen, ist mindestens eine falsch, und die -55 % stehen auf beiden.
+
+### Der Kipp-Versuch selbst: KEIN gueltiges Ergebnis
+| Arm | u_tau | y1+ | Erwartung | gemessen | Verhaeltnis | cf_kraftbilanz |
+|---|---|---|---|---|---|---|
+| kipp=0 (eben)    | 0,002008 |  91,3 | 26,7 |  40,0 | 1,49 | 0,00154 |
+| kipp=26 (Treppe) | 0,005829 | 265,2 | 77,6 | 111,7 | 1,44 | 0,01314 |
+| kipp=45 (Treppe) | 0,004587 | 208,7 | 61,1 |  73,1 | 1,20 | 0,00807 |
+
+Das vorab notierte Falsifikationskriterium IST erfuellt (das Verhaeltnis steigt mit der Treppe
+nicht, es faellt). **Trotzdem kein Befund**, aus zwei Gruenden:
+1. Alle Arme sind von der eigenen K2-Abnahme disqualifiziert.
+2. **Die Versuchsanlage war falsch.** "Gleiche Stroemung, nur die Wand gekippt" trifft nicht zu:
+   u_tau unterscheidet sich um Faktor 2,9, cf um Faktor 8,5. Die gekippte Wand ist eine ganz
+   andere, viel rauere Wand. Das haette beim Entwurf auffallen muessen.
+
+### ZWEI EIGENE FEHLER
+1. Die erste Kipp-Serie mit einem eigenen `timeout` abgeschossen -- SIGTERM ging an die Queue und
+   riss den laufenden Lauf mit (k_kipp26 starb bei ETT 18 von 80). Steht woertlich in
+   MEINE-FEHLER.md des Vorgaengerbaums, und ich bin trotzdem hineingelaufen.
+2. Einen Versuch entworfen, dessen Kontrollannahme die Messung nicht hergibt.
+
+### Nebenbefund zur Warmlaufsperre
+`CFD_SGS_DIAG_AB=126700` (20 ETT) aendert cf NICHT (0,00153685 mit und ohne). Die Sperre wirkt
+also nur auf die nu_t-Zaehler, nicht auf die Physik -- wie beabsichtigt.
