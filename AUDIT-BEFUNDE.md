@@ -1910,3 +1910,47 @@ sieben zu hoch, weil fdinfo geteilte Puffer je Deskriptor mehrfach zaehlt. Der W
 enthaelt genau diese Warnung samt dem richtigen Weg -- ich habe gemessen, statt nachzuschlagen.
 Daraus hatte ich zusaetzlich die falsche Erklaerung gebaut, der Produktionslauf habe 4 GB zu
 viel gebraucht; tatsaechlich lag die Reserve bei 2,2 GB und das Zeichentool hat mehr angefordert.
+
+## 2026-08-24 — Delta-Reihe Kanal, und der Determinismus ist lokalisiert
+
+### KORREKTUR zu gestern: der Kanal IST deterministisch
+Gestern stand hier "kein Fall in diesem Projekt ist deterministisch". Das war zu weit gefasst:
+geprueft waren nur der dd-Fall und die Kugel -- **beide haben einen Druckauslass**. Heute
+gemessen, drei identische Kanallaeufe bei N=20 (kn_20, kn_20_a, kn_20_b):
+```
+cf_kraftbilanz = 0.00166673  in ALLEN DREI, Spannweite 0,00 %
+```
+Der Kanal hat keinen Druckauslass (setup.cpp:1398 sagt es selbst). Damit ist die
+Nichtdeterminismus-Quelle punktgenau: **die po_mean-Reduktion am Druckauslass**, nicht
+"irgendeine Reduktionsreihenfolge". Der Bitvergleich als ABNAHMEMITTEL ist nicht verloren --
+am Kanal sofort verfuegbar, am Fahrzeug nach Determinisierung dieser einen Reduktion.
+
+### Delta-Reihe im Kanal, drei Punkte, alle auf 80 ETT
+| | u_tau-Faktor | Delta+ | y1+ | Erwartung 0,714*kappa*y1+ | gemessen | Verhaeltnis | cf |
+|---|---|---|---|---|---|---|---|
+| N=20 | 0,716 | 371,3 | 185,7 | 54,3 | 84,9 | **1,56** | -51,6 % |
+| N=38 | 0,669 | 182,6 |  91,3 | 26,7 | 39,9 | **1,49** | -55,4 % |
+| N=76 | 0,725 |  98,9 |  49,5 | 14,5 | 15,1 | **1,05** | -53,5 % |
+
+**Das Verhaeltnis faellt MONOTON mit der Verfeinerung** -- und weil der Kanal deterministisch
+ist, sind die Unterschiede real und kein Rauschen. Das ist die MSD-Signatur auf belastbaren
+Daten: die modellierte Mischung faellt gegenueber dem Gleichgewichtsbedarf, waehrend cf nicht
+folgt (die aufgeloeste Spannung uebernimmt nur teilweise und ungleichmaessig).
+
+**EINSCHRAENKUNGEN, ausdruecklich:**
+- cf ist NICHT monoton (-51,6 / -55,4 / -53,5). Bei deterministischen Laeufen heisst das:
+  echt, aber nicht als einfacher Trend lesbar.
+- Der N=20-Wert ruht auf einer Bin-Mittenschaetzung -- dort liegt praktisch alles im >=60-Bin
+  (99,8 % davon in 60-120). Feinere Bins waeren noetig, um ihn zu haerten.
+- Zwischen Delta+ 371 und 183 bewegt sich das Verhaeltnis kaum (1,56 -> 1,49); der ganze
+  Abfall sitzt zwischen 183 und 99.
+- Alle drei Punkte enthalten die 20 ETT Warmlauf im Zaehler (Warmlaufsperre bewusst NICHT
+  gesetzt, damit die drei gleich behandelt sind).
+
+### MEINE PROGNOSE WAR FALSCH
+Vorhergesagt (PROGNOSE-KANAL-N20.md, vor dem Lauf): Verhaeltnis 2,0 (Spanne 1,8-2,3),
+cf -57 bis -58 %, u_tau-Faktor 0,62. Gemessen: 1,56 / -51,6 % / 0,716. Alle drei daneben,
+der u_tau-Faktor sogar in der falschen Richtung (er ist nicht monoton in der Aufloesung).
+Das VORAB NOTIERTE FALSIFIKATIONSKRITERIUM war dagegen brauchbar: "liegt das Verhaeltnis
+nicht ueber 1,49, ist MSD widerlegt" -- es liegt darueber, also ueberlebt die Lesart, und
+ich konnte das schwache Ergebnis nicht nachtraeglich als Bestaetigung umdeuten.
