@@ -391,10 +391,12 @@ void LBM_Domain::allocate(Device& device) {
 
 void LBM_Domain::enqueue_apply_pressure_outlet() { // FORK: Druck-Auslass
 	if(po_N_active==0u) return; // nicht konfiguriert -> nichts zu tun (kein Leerlauf-Dispatch)
-	// Reihenfolge ist tragend: erst den Akkumulator leeren, dann den Flaechenmittelwert bilden, dann
-	// anwenden. Alle drei auf derselben in-order-Warteschlange, also ohne zusaetzliche Barriere.
-	kernel_po_clear_mean.enqueue_run();
+	// Reihenfolge ist tragend: Teilsummen bilden, dann in Indexordnung zusammenfassen, dann anwenden.
+	// Alle drei auf derselben in-order-Warteschlange, also ohne zusaetzliche Barriere. po_clear_mean
+	// entfiel mit dem Umbau -- po_final_mean schreibt mit "=", und jeder Teilsummen-Slot wird jeden
+	// Schritt ueberschrieben (2026-08-24).
 	kernel_po_reduce_mean.enqueue_run();
+	kernel_po_final_mean.enqueue_run();
 	kernel_apply_pressure_outlet.enqueue_run();
 }
 
@@ -1823,9 +1825,15 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 	po_cells.write_to_device();
 	po_interior.write_to_device();
 	po_mean = Memory<float>(device, 1ull);
-	kernel_po_clear_mean  = Kernel(device, 1ull, "po_clear_mean", po_mean);
-	kernel_po_reduce_mean = Kernel(device, (ulong)N_po, "po_reduce_mean", rho, po_interior, N_po, po_mean);
+	// ★ 2026-08-24: Teilsummenpuffer je Arbeitsgruppe statt atomarer Addition. Die Allokation MUSS
+	// vor der Kernel-Bindung stehen -- ein Move-Assignment auf einen bereits gebundenen Puffer ist
+	// die im Baum zweimal dokumentierte Use-after-free-Klasse.
+	po_groups = (uint)(((ulong)N_po+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE);
+	po_part = Memory<float>(device, (ulong)po_groups);
+	kernel_po_reduce_mean = Kernel(device, (ulong)N_po, "po_reduce_mean", rho, po_interior, N_po, po_part);
+	kernel_po_final_mean  = Kernel(device, 1ull, "po_final_mean", po_part, po_groups, N_po, po_mean);
 	kernel_apply_pressure_outlet = Kernel(device, (ulong)N_po, "apply_pressure_outlet", u, rho, po_cells, po_interior, N_po, po_rho, po_sigma, po_mean, po_hart);
+	print_info("Druck-Auslass REDUKTION: "+to_string(N_po)+" Innenzellen in "+to_string(po_groups)+" Arbeitsgruppen, Endsumme in Indexordnung (atomikfrei, bitreproduzierbar seit 2026-08-24).");
 	print_info(po_hart ? ("Druck-Auslass: HARTE Klemme rho = "+to_string(po_rho,4u)+" je Zelle (CFD_PO_HART=1, der alte Zustand als Kontrollarm), u aus der Innenzelle.")
 		: ("Druck-Auslass: rho_out = "+to_string(po_rho,4u)+" als FLAECHENMITTEL verankert (Ankerrate sigma = "+to_string(po_sigma,4u)
 		+"), rho der Einzelzelle laeuft frei mit, u aus der Innenzelle. Der Druck ist damit global festgelegt, seine Verteilung ueber die Ebene aber nicht."));

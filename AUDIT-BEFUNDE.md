@@ -1998,3 +1998,39 @@ weil je Paar dieselbe Fassung lief).
 **PRAEZISIERUNG (Pruefbefund 7):** bitgleicher u-Hash heisst bitgleiches **u**, nicht
 zwingend bitgleiches fi -- u ist ein Moment. Aussage also: "das u-Feld ist bitgleich",
 nicht "der Zeitschritt ist deterministisch".
+
+## 2026-08-24 — po_mean atomikfrei: der Nichtdeterminismus der LOESUNG ist behoben
+
+**Umbau:** `po_reduce_mean` schrieb bisher `atomic_add_f(&po_mean[0], cache[0]/N_po)` -- eine
+atomare Addition je Arbeitsgruppe auf einen EINZELNEN Float. Jetzt schreibt jede Gruppe
+exklusiv ihren Slot in `po_part`, und der neue Kernel `po_final_mean` summiert in
+INDEXORDNUNG. `po_clear_mean` entfiel ersatzlos (Endsumme schreibt mit `=`), die Startzahl
+bleibt also bei drei Kerneln. Bauart wortgleich zu `kraft_facetten_gpu`, das denselben Weg
+schon geht.
+
+**METHODISCHER FUND, der vorausging und wichtiger ist als der Fix:**
+Sechs identische Kugellaeufe lieferten **VIER verschiedene** u-Feld-Hashes -- und zwei davon
+stimmten zufaellig ueberein. **Ein Einzelpaar ist damit kein gueltiger Determinismustest.**
+Alle Isolationstests dieses Vormittags standen auf Einzelpaaren; die Codebefunde bleiben,
+die Messform war zu schwach. Gilt rueckwirkend auch fuer "der Kanal ist deterministisch"
+und fuer die PO_HART-Isolation.
+
+**ABNAHMEN:**
+| | vorher | nachher |
+|---|---|---|
+| verschiedene u-Feld-Hashes (6 Laeufe) | **4 von 6** | **1 von 6** |
+| Cd | 1,012537 +- 0,000055 | 1,012560 +- **0,000000** |
+| ALT gegen NEU nach 20 Schritten | \multicolumn{2}{c}{**identischer Hash** 12537327743888629416, je 3 Laeufe stabil} |
+
+Der letzte Test ist der scharfe: in dem Bereich, in dem die Auslassebene noch gleichfoermig ist
+und beide Staende uebereinstimmen MUESSEN, tun sie es bitgenau. Mein erster Physiktest ueber Cd
+war zu weich -- Cd kommt aus `object_force`, das SELBST noch nichtdeterministisch ist, das
+Rauschband mischte also Loesungsdivergenz und Meldejitter (Pruefbefund 5).
+
+**Numerik nebenbei verbessert:** vorher 494 Divisionen und 494 atomare Additionen, jetzt 493
+Additionen und EINE Division. Fehler im Mittelwert von rund 1,2e-5 auf 6e-9 (Worst Case,
+nachgerechnet vom Pruefer).
+
+**OFFEN:** `object_force` bleibt nichtdeterministisch und betrifft die Kraftmeldung (14,26 Mio
+Zellen, also Zwei-Ebenen-Baum oder Host-Summe ueber die F-BBox). Und der Kostenvergleich
+alt/neu ist NICHT gemessen -- der Pruefer schaetzt wenige Mikrosekunden, das ist eine Luecke.

@@ -87,7 +87,9 @@ private:
 	float po_sigma = 1.0f; // Ankerrate des Flaechenmittels gegen rho_out
 	uint po_hart = 0u;     // 1 = alter harter Rand je Zelle (CFD_PO_HART), der Kontrollarm
 	Memory<float> po_mean;   // Mittelwert der Dichte ueber die Innenzellen der Auslassebene, je Schritt neu
-	Kernel kernel_po_clear_mean, kernel_po_reduce_mean;
+	Memory<float> po_part;   // Teilsumme je Arbeitsgruppe -- ersetzt die atomare Addition (2026-08-24)
+	uint po_groups = 0u;     // Zahl der Arbeitsgruppen = ceil(N_po/WORKGROUP_SIZE)
+	Kernel kernel_po_reduce_mean, kernel_po_final_mean;
 #ifdef FORCE_FIELD
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)

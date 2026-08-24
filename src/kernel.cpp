@@ -2826,13 +2826,10 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float old = val; while((old=atomic_xchg(addr, atomic_xchg(addr, 0.0f)+old))!=0.0f);
 )+"#endif"+R(
 }
-)+R(kernel void po_clear_mean(global float* po_mean) { // eine Arbeitseinheit, setzt den Akkumulator zurueck
-	if(get_global_id(0)==0u) po_mean[0] = 0.0f;
-} // po_clear_mean()
-
-)+R(kernel void po_reduce_mean(const global float* rho, const global ulong* po_interior, const uint N_po, global float* po_mean) {
-	// Mittelwert der Dichte ueber die INNENZELLEN der Auslassebene. Gleiche Bauart wie object_force:
-	// erst in lokalem Speicher zusammenfassen, dann eine atomare Addition je Arbeitsgruppe.
+)+R(kernel void po_reduce_mean(const global float* rho, const global ulong* po_interior, const uint N_po, global float* po_part) {
+	// Mittelwert der Dichte ueber die INNENZELLEN der Auslassebene: erst im lokalen Speicher
+	// zusammenfassen, dann schreibt jede Gruppe exklusiv ihren Slot. Die Endsumme bildet
+	// po_final_mean in Indexordnung -- OHNE Atomik (Umbau 2026-08-24, siehe dort).
 	const uint gid = get_global_id(0);
 	const uint lid = get_local_id(0);
 	local float cache[cl_workgroup_size];
@@ -2847,10 +2844,27 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
 		barrier(CLK_LOCAL_MEM_FENCE);
 	}
-	// Kein !=0-Test: bei der Abweichungsablage ist eine exakt verschwindende Teilsumme moeglich und
-	// harmlos, aber sie zu ueberspringen waere es nicht -- der Beitrag dieser Gruppe fehlte dann.
-	if(lid==0u) atomic_add_f(&po_mean[0], cache[0]/(float)N_po);
+	// ★ 2026-08-24: OHNE ATOMIK. Vorher stand hier ein atomic_add_f je Arbeitsgruppe auf einen
+	// EINZELNEN Float -- die Additionsreihenfolge haing damit an der Gruppenreihenfolge, und weil
+	// po_mean jeden Schritt in die Randbedingung zurueckkoppelt, war das die einzige
+	// loesungswirksame Ordnungsabhaengigkeit im Zeitschritt (gemessen: sechs identische
+	// Kugellaeufe lieferten VIER verschiedene u-Feld-Hashes). Jetzt schreibt jede Gruppe
+	// exklusiv ihren Slot, und po_final_mean summiert in Indexordnung. Bauart wortgleich zu
+	// kraft_facetten_gpu (kernel.cpp:3365 ff.), das denselben Weg schon geht.
+	// Kein !=0-Test noetig: jeder Slot wird jeden Schritt ueberschrieben.
+	if(lid==0u) po_part[get_group_id(0)] = cache[0];
 } // po_reduce_mean()
+
+)+R(kernel void po_final_mean(const global float* po_part, const uint n_groups, const uint N_po, global float* po_mean) {
+	// EIN Arbeitselement, Summe in FESTER Indexordnung -- damit ist das Ergebnis bitreproduzierbar.
+	// Die Division steht am ENDE statt je Gruppe: 493 Additionen und EINE Division statt 494
+	// Divisionen und 494 atomarer Additionen, also zugleich der numerisch bessere Weg (der
+	// Fehler im Mittelwert faellt von rund 1,2e-5 auf die Groessenordnung 1e-10).
+	if(get_global_id(0)!=0u) return;
+	float s = 0.0f;
+	for(uint g=0u; g<n_groups; g++) s += po_part[g];
+	po_mean[0] = s/(float)N_po;
+} // po_final_mean()
 
 )+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
