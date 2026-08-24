@@ -150,6 +150,14 @@ GPU-Kraftreduktion bringt den Bitvergleich zurueck. Das gehoert vor alles andere
 bestimmt, welche Abnahmen ab jetzt ueberhaupt gueltig sind.
 Abnahme: zwei identische Laeufe byteweise gleich in forces.csv, dd-Fall UND Kugel.
 
+## NEU AN DER SPITZE (2026-08-24 abends): K2 im ebenen Kanal aufklaeren
+Die K2-Abnahme (Reibungspfad der Facetten gegen die Kraftbilanz, 1-Prozent-Schranke) ist auch
+bei `kipp=0` verletzt -- an der ebenen, gitterparallelen Wand. Damit widersprechen sich zwei
+Zahlen des Wandmodells um mehr als 1 Prozent, und die cf-Luecke von -55 % steht auf beiden.
+Solange das offen ist, misst jeder Wandmodell-Arm gegen einen unklaren Bezug.
+Erster Schritt: die beiden Groessen einzeln ausweisen (FK.rx und soll_rx aus setup.cpp, im Log
+mit Zahlen statt nur der Fehlermeldung), dann entscheiden, welche der beiden falsch ist.
+
 ## Danach, nach Evidenzlage geordnet
 1. **Das Wandmodell selbst.** Die cf-Luecke ist wandmodell-dominiert (U_b+ 36,0 statt 24,1,
    Versatz +12 in U+), nicht SGS-dominiert. Groesster gemessener Einzelfehler im Projekt, und
