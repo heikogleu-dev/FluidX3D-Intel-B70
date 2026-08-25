@@ -194,6 +194,8 @@ public:
 	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; static float s_boden_eq_u; static uint s_boden_eq_abstand; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_fac_alpha;
+	static bool s_fac_elibb;  // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
+	static float s_fac_qmin;  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 	static bool s_fac_quergate; // ★ 2026-08-25 Querimpuls-Gate im iMEM-Solve
 	static bool s_fac_lsq; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall im iMEM-Solve // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)
 	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich)
@@ -205,6 +207,7 @@ public:
 	long fac_diagz_wert = -1l; // Konstruktionszeit-Kopie von s_fac_diagz (Gross-Audit: Spaet-Lese-Pfad geschlossen)
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
+	bool fac_elibb_on = false; // ★ B2: ELIBB-Konstruktionszustand (eingefroren wie diagz)
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)
 	bool fac_ema_on = false;
 	static float s_fac_tau;  // 1 = voll, 0 = nur Tausch (CFD_FACETTEN=2)
@@ -216,6 +219,7 @@ public:
 	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
 	Memory<float> fac_tau;   // Akkumulator 6 float je Facette: [0] Summe tau_w (y+), [1..3] Ist-Wandkraft x/y/z (Cd-Reibung), [4] Delta-m-Leck (iMEM; Paararm 0), [5] Normalkontamination (iMEM; Paararm 0); nur Zellen mit tatsaechlicher Modifikation
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
+	Memory<uchar> fac_q; // ★ B1: q je Link (18 uchar je aktive Facette; 0 = kein Schnitt -> HWBB, sonst q = qb/254, 127 = exakt 0,5)
 	// ★ kraft_facetten-GPU-Reduktion: Druckanteil des Cd-Pfads auf dem Geraet statt per Voll-F-Transfer.
 	Memory<ulong> kf_liste;  // Markerzellen-Indexliste (Host-Scan-Reihenfolge der F-BBox)
 	Memory<float> kf_psum;   // 3 float je Arbeitsgruppe: px,py,pz-Teilsummen (atomikfrei)

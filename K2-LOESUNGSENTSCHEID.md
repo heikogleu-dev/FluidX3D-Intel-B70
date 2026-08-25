@@ -81,3 +81,62 @@ kein Atomic, V1-Vorlage mit allen bekannten Fallen-Fixes vorhanden).
   separater Track, entscheidet NICHT über W1.
 - Eq.-25e-Widerspruch im Wissensspeicher: operativ entschärft (PoU-Blende + q=0,5-Gate
   entscheidet empirisch); dokumentiert in AUDIT-BEFUNDE.md.
+
+## Heikos Frage: "Koennen nicht die FACETTEN selbst die Treppenrauigkeit ausloeschen, ganz ohne ELIBB?"
+
+Die Idee war der Grund fuer den Facettenweg -- und sie ist als ZIEL richtig. Die Antwort
+zerfaellt in eine Struktureinsicht:
+
+**Die Facette hat heute nur die halbe Wand in der Hand.** Jede Wandbehandlung hat zwei
+Seiten: das ZIEL (was soll die Wand tun -- tau_w aus Spalding auf n/y_w der Facette) und
+den AKTOR (womit wird es aufgepraegt -- die Linkpopulationen). Die Facette beherrscht
+heute nur die Zielseite. Der Aktor ist der rohe Bounce-Back, und der reflektiert an der
+LINKMITTE -- die effektive Wandgeometrie ist damit die TREPPE, egal wie perfekt die
+Facette ihr Ziel rechnet. iMEM ADDIERT nur Impuls auf diese Treppe (additives q_i,
+kernel.cpp Pass 2); es verschiebt den Reflexionspunkt nicht. Empirisch belegt: TROTZ
+aktivem iMEM liegt u_t an der 45-Grad-Treppe bei ~14 % des Gleichgewichts -- die
+Rauigkeit kommt vom unbehandelten BB-Anteil, und an den kommt das heutige Facettenschema
+konstruktiv nicht heran (Normalinjektion ist aus gutem Grund genullt, Gl.-28-Entscheid;
+und die alpha-Identitaet toetet Einzellink-Autoritaet exakt).
+
+**ELIBB ist deshalb kein Konkurrent der Facetten-Idee, sondern ihre VOLLENDUNG:** q je
+Link wird AUS DER FACETTE gelesen (q = y_w / (-n . c) -- Schnitt der Facettenebene mit
+dem Link) und traegt die Facettengeometrie in den Aktor hinein. Der Reflexionspunkt
+wandert von der Linkmitte auf die Facettenebene; die effektive Wand IST dann die
+Facette. "Alles direkt die Facetten nehmen" heisst technisch genau das. Der Voxelizer
+bleibt die einzige Geometriequelle (nie STL), die Facette die einzige Wandwahrheit.
+
+**Die Idee in Reinform bleibt als Eskalation benannt:** die Voll-Rekonstruktion aller
+19 Populationen der Wandzelle aus Facettendaten (W4, Maeyama-Schule) ist "nur noch
+Facette, gar kein Link-BB mehr". Sie ist verworfen als ERSTER Schritt (wirft den
+validierten Ebene-Pfad weg), nicht als Endpunkt: heilt ELIBB+iMEM den 45-Grad-Zustand
+nicht ausreichend, ist W4 der facettentreue naechste Schritt -- vor jedem Kraftterm.
+
+**B1-Designentscheid daraus:** q kommt in Stufe 1 aus der ZELLEIGENEN Facettenebene
+(fac_geo n/y_w -- null neue Geometriemaschinerie, kipp0 liefert exakt q=0,5, und es ist
+woertlich "die Facette als Wand"). Das geglaettete Remesh-Netz (P1, Ray-Triangle) bleibt
+Stufe 2, falls das Kugel-RMS-Gate mehr Genauigkeit verlangt. Quantisierung uchar/254
+statt V1s 4-Bit/14: q=0,5 bleibt exakt (127/254), Restrauigkeit sinkt von 1/28 auf
+1/508 Linklaenge.
+
+## REVISION W2 (nach Pruefagent, 2026-08-25 nachmittags)
+
+Der Pruefagent hat die selbst gestellte K.O.-Frage bestaetigt: mit u_W = u_s IN der Blende
+waere bei q = 0,5 (Identitaet) der Wandmodell-Impuls an JEDER ebenen Partie ausgefallen --
+Kanalboden, Fahrzeug-Unterboden. Revision: **die Blende ist rein geometrisch (u_W = 0)**
+und verschiebt nur den Reflexionspunkt auf die Facettenebene; den Wandmodell-Impuls traegt
+weiterhin der bestehende Additivterm samt alpha (dessen Mathematik nur am Additivterm
+haengt und exakt bleibt). Kein Stapeln: die Blende traegt kein u_W. Bei q = 0,5 kollabiert
+der Pfad BITGLEICH auf das heutige iMEM -- der kipp0-Anker prueft wieder echte
+Bitgleichheit (qb==127-Kurzschluss). Die "ersetzt q_i und alpha"-Formulierung des
+urspruenglichen B2-Plans ist damit ueberholt.
+
+Weitere Pruefbefunde eingearbeitet: F1 (Guards standen in totem #ifndef-Block -- zweimal;
+jetzt unbedingt), F2 (fac_q fehlte in der stream_collide-Signatur -- OpenCL-Compilefehler),
+W3 (Harness-nebb nutzte feq der falschen Richtung; korrigiert, Drift neu gemessen:
++5,4e-4 / +8,0e-4 statt -1,1e-3 / -2,0e-4), H1 (Statik-Symmetrie facetten_test).
+
+**W1-Kennzeichnung bis B3:** im ELIBB-Arm sind fac_tau[1..5], Reibungs-Cd und Delta-m
+"Modell-Soll, kein Ist" -- die Blende wirkt ungebucht. K2 wird im ELIBB-Arm ueber
+Feld-CSVs bewertet (u_t-Gleichgewicht, Re_tau, Profile), nicht ueber den fac_tau-Pfad.
+B3 (Buchung Sum c(fhn_neu - fpre) je Facette) ist der naechste Baustein.

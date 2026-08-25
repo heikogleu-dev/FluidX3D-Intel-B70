@@ -130,6 +130,12 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #ifndef FORCE_FIELD
 	if(s_facetten) print_error("CFD_FACETTEN braucht FORCE_FIELD (f_bbox-Indexfeld).");
 #endif // FORCE_FIELD
+	// ★ Pruefbefund F1 (2026-08-25): diese Guards standen erst im #ifndef-D3Q19-, dann im #ifndef-FORCE_FIELD-Block und waren im
+	// Produktionsbuild FUNKTIONAL TOT. Jetzt unbedingt. alpha-Sperre entfaellt (Revision W2:
+	// die Blende ist rein geometrisch, Additivterm+alpha bleiben und ihre Mathematik gilt exakt).
+	if(s_fac_elibb&&(s_fac_ema>0.0f||s_fac_pema>0.0f)) print_error("CFD_FAC_ELIBB mit EMA/PEMA ist nicht definiert (Filter mischen Blende und Additivpfad) -- Messarm rein halten.");
+	if(s_fac_elibb&&s_fac_apg!=0.0f) print_error("CFD_FAC_ELIBB mit APG ist nicht gebaut -- Messarm rein halten.");
+	if(s_fac_elibb) print_info("ELIBB 18-Link AKTIV (B2, Revision W2): rein geometrische q-Blende (u_W=0) + bestehender Additivterm; q=0,5 ist bitgleich iMEM. Wirkpfad Slot 67. fac_tau-Buchung des Blenden-Austauschs erst mit B3 -- bis dahin sind fac_tau[1..5]/Reibungs-Cd im ELIBB-Arm Modell-Soll, kein Ist.");
 	// C1b: WFB und Facetten am selben Einfuegepunkt schliessen sich aus -- hart, kein stilles Nacheinander.
 	if(s_facetten&&s_wandfunktion) print_error("CFD_FACETTEN und CFD_WANDFUNKTION gleichzeitig ist nicht definiert -- genau einen Pfad waehlen.");
 	facetten_on = s_facetten;
@@ -251,6 +257,8 @@ float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Kon
 bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
+bool LBM_Domain::s_fac_elibb = false; // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
+float LBM_Domain::s_fac_qmin = 0.1f;  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
 // MODELLAENDERUNG, kein Numerikfix. LSQ gewichtet t1 (Stroemungsrichtung, Ziel = Spalding-tau_w, die
@@ -298,7 +306,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 68ull); // ★ LEGENDE, Stand 2026-08-25 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	rho_clamp_hits = Memory<uint>(device, 68ull); // [67] ELIBB-Wirkpfad (saettigend) // ★ LEGENDE, Stand 2026-08-25 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
 	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
 	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
 	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden
@@ -384,6 +392,8 @@ void LBM_Domain::allocate(Device& device) {
 		if(fac_pema_on) { fac_pu = Memory<float>(device, 6ull); kernel_stream_collide.add_parameters(fac_pu); }
 		fac_diagz_on = s_fac_imem&&s_fac_diagz>=0l; fac_diagz_wert = s_fac_diagz; // Gross-Audit: Konstruktionswert einfrieren -- alloc_facetten liest sonst die Statik der falschen Instanz
 		if(fac_diagz_on) { fac_diag = Memory<float>(device, 19ull); kernel_stream_collide.add_parameters(fac_diag); } // 19: [17] alpha, [18] dp_ds
+		fac_elibb_on = s_fac_imem&&s_fac_elibb; // ★ B2: Konstruktionszustand einfrieren (dieselbe Lektion wie diagz)
+		if(fac_elibb_on) { fac_q = Memory<uchar>(device, 18ull); kernel_stream_collide.add_parameters(fac_q); } // Platzhalter; alloc_facetten_domain baut und rebindet
 	}
 
 	// FORK -- Block-Tiling: tile_slot ist per TS_P der LETZTE Parameter jedes fi-Kernels, muss also NACH
@@ -516,11 +526,48 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		else print_info("Diagnose-Facette: Zelle "+to_string((ulong)fac_diagz_wert)+" -> fid "+to_string((ulong)fac_diag_fid));
 		fac_diag.write_to_device();
 	}
+	if(fac_elibb_on) { // ★★ B1 (K2-LOESUNGSENTSCHEID, 2026-08-25): q je Link aus der ZELLEIGENEN
+		// Facettenebene -- Stufe 1 des Entscheids ("die Facette ist die Wand", Heikos Weg).
+		// q_d = y_w / (-n . c_d) = Schnitt der Ebene mit dem Link, in Bruchteilen der Linklaenge.
+		// Kodierung uchar: 0 = kein Schnitt in (0,1] (Link bleibt implizites HWBB), sonst
+		// q = qb/254 -- 127 ist EXAKT 0,5 (254*0,5 = 127, float-exakt; Entscheid: uchar/254
+		// statt V1s 4-Bit/14, Restquantisierung 1/508 statt 1/28 Linklaenge).
+		// D3Q19-Richtungstabelle WOERTLICH wie der Kernel (c() Spalten, kernel.cpp D3Q19-Zweig).
+		static const int CX19[19]={0,1,-1,0,0,0,0,1,-1,1,-1,0,0,1,-1,1,-1,0,0};
+		static const int CY19[19]={0,0,0,1,-1,0,0,1,-1,0,0,1,-1,-1,1,0,0,1,-1};
+		static const int CZ19[19]={0,0,0,0,0,1,-1,0,0,1,-1,1,-1,0,0,-1,1,-1,1};
+		fac_q = Memory<uchar>(device, 18ull*aktiv);
+		ulong nq_schnitt=0ull, nq_boden=0ull, nq_klemme1=0ull; ulong hist[15]={0}; // hist: qb/17 grob (0..14)
+		for(ulong kq=0ull; kq<aktiv; kq++) {
+			const float nx=fac_geo[8ull*kq], ny=fac_geo[8ull*kq+1ull], nz=fac_geo[8ull*kq+2ull], yw=fac_geo[8ull*kq+3ull];
+			for(uint d=1u; d<19u; d++) {
+				const float ndc = nx*(float)CX19[d]+ny*(float)CY19[d]+nz*(float)CZ19[d];
+				uchar qb=0u;
+				if(ndc<-1e-6f) { // wandzeigender Link
+					const float sq = yw/(-ndc); // Bruchteil der Linklaenge
+					if(sq>0.0f&&sq<=1.0f) {
+						float sqe = sq;
+						if(sqe<(float)s_fac_qmin) { sqe=0.5f; nq_boden++; } // q-Boden (P1-Entscheid): zu nah an der Wand -> HWBB, gezaehlt
+						qb=(uchar)fmin(fmax((float)(int)(sqe*254.0f+0.5f),1.0f),254.0f);
+						nq_schnitt++;
+					} else if(sq>1.0f&&sq<=1.5f) { qb=254u; nq_klemme1++; nq_schnitt++; } // Ebene knapp hinter dem Nachbarzentrum (Aufdickung): q=1 geklemmt
+					// sq>1,5: Ebene weit weg -- Link bleibt HWBB (qb=0), kein Zaehler (normaler Fall der Stufenrueckseite)
+				}
+				fac_q[18ull*kq+(ulong)(d-1u)] = qb;
+				if(qb>0u) hist[qb/17u]++;
+			}
+		}
+		fac_q.write_to_device();
+		string hs=""; for(uint hb=0u; hb<15u; hb++) hs+=to_string(hist[hb])+(hb<14u?" ":"");
+		print_info("ELIBB fac_q: "+to_string(nq_schnitt)+" geschnittene Links auf "+to_string(aktiv)+" Facetten ("+to_string((double)nq_schnitt/(double)aktiv,2u)+" je Facette), q-Boden(sq<"+to_string((float)s_fac_qmin,2u)+")->0,5: "+to_string(nq_boden)+", q>1-Klemme: "+to_string(nq_klemme1));
+		print_info("  q-Histogramm (Bins von 17/254, 0-basiert): "+hs+"  -- kipp0-Gate: ALLES muss im Bin 7 (q=0,5) liegen");
+	}
 	fac_geo.write_to_device(); fac_idx.write_to_device(); fac_tau.write_to_device(); fac_tau_n.write_to_device();
 	kernel_stream_collide.set_parameters(fac_param_pos, fac_geo, fac_idx, fac_tau, fac_tau_n);
 	if(fac_ema_on) { fac_us = Memory<float>(device, 3ull*aktiv); for(ulong q3=0ull;q3<3ull*aktiv;q3++) fac_us[q3]=0.0f; fac_us.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u, fac_us); }
 	if(fac_pema_on) { fac_pu = Memory<float>(device, 6ull*aktiv); for(ulong q6=0ull;q6<6ull*aktiv;q6++) fac_pu[q6]=0.0f; fac_pu.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+(fac_ema_on?5u:4u), fac_pu); }
 	if(diagz_gebaut&&fac_diag.length()>=19ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
+	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
 	facetten_bound = true;
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
@@ -970,6 +1017,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_satgate) ? (string)"\n	#define FACETTEN_SATGATE" : (string)"") // (a-strich): Klemme -> BB-Rueckfall
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>0u) ? (string)"\n	#define FACETTEN_ALPHA" : (string)"") // J4-alpha: Massenkorrektur, Sum q = 0 je Facette
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"")
+	+((s_facetten&&s_fac_imem&&s_fac_elibb) ? (string)"\n	#define FACETTEN_ELIBB" : (string)"") // ★ B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")
 	+((s_facetten&&s_fac_imem&&s_fac_quergate) ? (string)"\n	#define FACETTEN_QUERGATE" : (string)"") // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"
