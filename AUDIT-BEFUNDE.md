@@ -2492,3 +2492,39 @@ keine zusaetzliche Autoritaet, kostet Scatter -- verworfen.
 EMPFEHLUNG DES AGENTEN: tote, flaechenredundante Facetten (m5/m8) DEKLARIERT deaktivieren
 statt heilen; 26 Grad ueber den Cluster; 45 Grad ist danach ehrlich ein Zustands-/
 Buchungsproblem (Treppenrauigkeit), kein Loeserproblem.
+
+## EBENE-WAND-AGENT, ABSCHLUSS (2026-08-25): K2-Ebene ist eine FP32-BULK-IMPULSQUELLE
+
+Mit der frischen, GEFENSTERTEN Serie (k2_n20/38/76) und fuenf Kontrollarmen:
+
+| Lauf | Modell/Soll | Angewandt/Modell | K2 | K2 aus Impulsbilanz | b je Zelle/Schritt |
+|---|---|---|---|---|---|
+| n20 | 1,0046 | 0,9997 | 1,0043 | 0,9937 | 4,64e-9 |
+| n38 | 1,0257 | 0,9996 | 1,0253 | 1,0024 | 4,82e-9 |
+| n76 | 1,0387 | 0,9992 | 1,0378 | 0,9967 | 4,53e-9 |
+
+1. Der Anwendungspfad ist SAUBER (0,9992-0,9997; das kleine Minus ist die Projektion der
+   Querfluktuationen, quantitativ erklaert). Der Modellterm traegt formal den Ueberschuss --
+   ABER er ist im stationaeren Kanal von der Impulsbilanz DIKTIERT, nicht vom Wandgesetz:
+   der 2x2-Solve ist exakt, also folgt <tw> der Bilanz zwangslaeufig.
+2. Die exakt nachgerechnete Impulsbilanz (fq-Rekonstruktion auf 6 Stellen, Speicherterm aus
+   den Fensterendpunkten) erklaert K2 NICHT. Es fehlt eine Impulsquelle
+   **b = 4,5-4,8e-9 je Zelle und Schritt, KONSTANT ueber N=20/38/76, ueber zwei
+   Fensterlaengen (80/160 ETT) und zwei Code-Arme (SATGATE an/aus)** -- Signatur einer
+   FP32-Drift des BULK-Updates (Build: -cl-finite-math-only -cl-mad-enable). Das Wandmodell
+   extrahiert sie ehrlich zusaetzlich zu f*V; K2 waechst damit LINEAR mit N
+   (b*delta/tau_w reproduziert 0,4 -> 2,5 -> 3,8 % quantitativ).
+3. Alle drei Ausgangshypothesen als K2-Ursache WIDERLEGT (nachgerechnet): Jensen-Effekt
+   +0,13-0,31 % und bilanzneutral; Abtastpunkt ist ein grosser MODELLGUETE-Befund
+   (Kernel sieht 0,698-0,707 * u1 -- BB-Theorie sagt exakt 2/3! -- die erste Lage laeuft bei
+   u+ ~ 26 gegen Spalding-18), aber K2-blind; Fensterregelung +-0,02-0,13 %.
+4. KONSEQUENZ FUERS GATE: das K2-1-%-Gate scheitert bei N>=38 SYSTEMATISCH an b, obwohl der
+   Facettenpfad sauber ist. Redefinition noetig: K2 gegen die bilanzkorrigierte Quelle, oder
+   das vorgeschlagene Chunk-Impuls-Audit einbauen (je Chunk b_chunk drucken; Bulk-Drift ->
+   +4,7e-9 zeitkonstant auch im Warmlauf). Lokalisierungs-A/B: identischer Lauf ohne
+   -cl-mad-enable (opencl.hpp:317) -- verschwindet b, ist es die FMA-Kontraktion.
+5. NEBENBEFUND MODELLGUETE (gross, getrennt von K2): der iMEM-Abtastpunkt VOR der Korrektur
+   sieht systematisch 2/3 des wahren u der ersten Lage (Wandlinks tragen die No-Slip-
+   Reflexion, P1 ~ -u/3). Das erklaert einen Teil des u_tau-Defizits (IST/Ziel 0,67-0,73)
+   NEBEN der Treppenrauigkeit. Ein 3/2-Korrekturfaktor auf das abgetastete u_t waere die
+   billigste Massnahme -- gehoert als eigener Messarm in die Leiter, NICHT still eingebaut.
