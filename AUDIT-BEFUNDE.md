@@ -2570,3 +2570,59 @@ LEITER GESTOPPT, kein Fahrzeuglauf. Naechste Schritte (Reihenfolge):
    bis Vorzeichen und q->0,5-Grenzfall stimmen.
 2. Erst mit bestandenem Harness zurueck auf die Kugel.
 3. CFD_FAC_ELIBB bleibt Default AUS; der Kontrollpfad ist bitgleich unberuehrt.
+
+## INJEKTIONSJAGD (2026-08-25): der q>0,5-ZWEIG der Blende ist der Injektor
+
+QDIAG-Diagnosearme (Host-only, eine Variable je Lauf, Kugel DX=40, SATGATE=0, BUDGET=0,25):
+
+| Arm | Cd nominal |
+|---|---|
+| Kontrolle ELIBB aus | +4,9036 |
+| Blende voll | -3,3294 |
+| QDIAG=1: q=1-Klemme aus | -3,2662 |
+| **QDIAG=2: NUR q<0,5-Zweig** | **+2,4558** |
+| QDIAG=3: nur q>0,5-Zweig | -3,1416 |
+
+Eindeutig: der q<0,5-Zweig ist sauber (Vorzeichen physikalisch, Richtung plausibel --
+Glaettung senkt die Treppen-Rauigkeitslast); der q>0,5-Zweig injiziert Impuls. Theoretisch
+konsistent: bei Bouzidi ist der zweite Operand fuer q>0,5 die EIGENE
+Gegenrichtungs-Population f*_ib(x_f), nicht die Wandrekonstruktion; die V1-PoU-Blende
+(und damit B2) verwendet fuer beide Zweige nebb. Fuer q<0,5 ersetzt nebb den
+Upstream-Operanden (Marson-Idee, funktioniert); fuer q>0,5 ist es der FALSCHE Operand.
+
+Der Saeulen-Harness (Test E) reproduziert die Injektion NICHT -- der 1D-Fall hat keine
+gekruemmte Linkpopulation; die Falsifikation brauchte das Feld. Lehre fuers
+Harness-Design: Impulsaustausch-Tests brauchen mindestens einen schraegen 3D-Minifall.
+
+ZWISCHENSTAND SCHEMA: CFD_FAC_QDIAG=2 (nur q<0,5, q>0,5 -> Identitaet = HWBB) ist das
+reduzierte, nicht-injizierende Schema -- halbe Korrektur, null Risiko. Der korrekte
+q>0,5-Operand (f*_ib-basiert) ist Folgearbeit mit eigenem Harness-Nachweis.
+
+## g4-ARME (2026-08-25): auch das reduzierte Schema verschlechtert die Kippwaende -- und der Grund ist eine ASYMMETRIE
+
+| Arm | u_tau IST/Ziel | K2 | Vergleich Kontrolle |
+|---|---|---|---|
+| 26 Grad QDIAG=2 | 2,245 | -1,633 | Kontrolle: 1,943 / -1,049 -> schlechter |
+| 45 Grad QDIAG=2 | 1,685 | 0,0278 | Kontrolle: 1,529 / 0,0336 -> Zustand schlechter |
+
+Erklaerung, die alle heutigen Messungen konsistent macht: die q-Blende hat zwei Haelften.
+q<0,5-Links ziehen die effektive Wand NAEHER ans Fluid (mehr Widerstand); q>0,5-Links
+wuerden sie WEITER wegschieben (weniger Widerstand). QDIAG=2 aktiviert nur die
+widerstandsERHOEHENDE Haelfte -- die Stufenklassen (m4: q=0,26-0,52; m6: q klein) ruecken
+naeher, die entlastenden q>0,5-Links (m5-Diagonale 0,735, m7-Axial 0,78) bleiben BB.
+Ein einseitiges Schema MUSS die ohnehin ueberziehende Treppe (u_tau IST schon 1,5-1,9x
+Ziel) weiter verschaerfen. Der korrekte q>0,5-Zweig ist also NICHT optional -- er ist
+die drag-reduzierende Haelfte der Physik. Die volle Blende hatte ihn aktiv, aber mit dem
+FALSCHEN Operanden (Injektion, s. Injektionsjagd).
+
+KONSEQUENZ: Der naechste Baustein ist der KORREKTE q>0,5-Operand. Bouzidi verlangt dort
+die eigene Gegenrichtungs-Population f*_ib(x_f); im Esoteric-Pull-Ladezustand ist das
+naechstliegend verfuegbare Objekt fpre[ib] (t-1-Upstream) -- waehrend der bb-Operand
+fpre[i] sogar t-2 traegt (Harness A). Die Zeitversatz-Frage ist genau die, die der
+B0-Harness fuer den q>0,5-Zweig NIE geprueft hat. VOR der Implementierung: Planungsagent
++ 3D-Minifall-Harness (schraege Wand), der den Impulsaustausch beider Zweige gegen eine
+Referenz mit exakter Wandlage prueft. KEIN weiterer GPU-Tuning-Lauf vorher.
+
+STAND: CFD_FAC_ELIBB bleibt Default AUS; Kontrollpfad bitgleich; kipp0-Gate haelt.
+Alle heutigen ELIBB-Messungen waren Screening-Laeufe am kleinen Kanal/Kugel -- kein
+Produktionslauf beruehrt.
