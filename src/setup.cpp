@@ -509,12 +509,22 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			   ein Zaehler, der in EINER Domaene bereits gewickelt IST, steht danach niedrig und
 			   faellt nie auf. Die Rohwerte je Domaene sind uint, also wird jeder einzeln geprueft. */
 			ulong maxb=0ull;
-			for(uint d=0u; d<L.get_D(); d++) for(uint sl=28u; sl<49u; sl++) {
+			for(uint d=0u; d<L.get_D(); d++) for(uint sl=30u; sl<49u; sl++) { // ★ Pruefbefund 3-D: war 28 -- seit der Verschiebung fielen Geschwindigkeitsklemme (28) und SPONGE (29) unter eine nu_t-Meldung
 				const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl];
 				if(v>maxb) maxb=v;
 			}
 			if(maxb>3865470566ull) print_error(string("  nu_t/nu_0 ")+wo+": ein Bin steht bei "+to_string(maxb)+" und damit ueber 90 % des uint-Bereichs -- WICKELGEFAHR, die Prozente sind nicht mehr belastbar. Lauf kuerzen oder Stichprobe ausduennen.");
 		} else print_error(string("  nu_t/nu_0 ")+wo+": Histogramm LEER, obwohl CFD_SGS_DIAG gesetzt ist -- lautloser No-Op. Haeufigste Ursache: CFD_SGS_WANDFREI ueberspringt den ganzen SUBGRID-Block fuer genau die Wandzellen, dann bleiben auch die Wandlagen-Slots null (Pruefbefund 9).");
+	}
+	{	// ★ Pruefbefund 3-B/3-A (2026-08-25): WICKELWAECHTER fuer ALLE uebrigen Slots, unabhaengig
+		// von CFD_SGS_DIAG. Gezaehlt wird je Facetten- bzw. Zellbesuch auf jedem 100. Schritt; bei
+		// grossen Gittern wickelt uint. Ein gewickelter Bin sieht klein und harmlos aus -- genau die
+		// Falle, an der die RHO_CLAMP-Zahlen tagelang hingen.
+		ulong mx=0ull; uint mxs=0u;
+		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
+			for(uint sl=0u; sl<68u; sl++) { const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl]; if(v>mx) { mx=v; mxs=sl; } } }
+		if(mx>3865470566ull) print_error(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+", ueber 90 % des uint-Bereichs -- WICKELGEFAHR, alle daraus gerechneten Prozente sind wertlos.");
+		else if(mx>2147483648ull) print_warning(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+" (ueber die Haelfte des uint-Bereichs) -- bei laengerem Lauf wickelt er.");
 	}
 	// ★ 2026-08-25: Ansage der beiden neuen Wirkpfad-Zaehler. Beide gegatet (t%100), also
 	// Stichproben, keine Ereigniszahlen.
@@ -522,30 +532,43 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		ulong vk=0ull, sp=0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
 			vk+=(ulong)L.lbm_domain[d]->rho_clamp_hits[28]; sp+=(ulong)L.lbm_domain[d]->rho_clamp_hits[29]; }
-		if(vk>0ull) print_warning(string("  GESCHWINDIGKEITSKLEMME ")+wo+": "+to_string(vk)+" Stichproben-Treffer (t%100). Wo sie greift, ist der Impuls NICHT erhalten -- f_eq traegt rho*u_geklemmt statt j+F/2.");
+		if(vk>0ull) print_warning(string("  GESCHWINDIGKEITSKLEMME ")+wo+": "+to_string(vk)+" Treffer (saettigend). Wo sie greift, ist der Impuls NICHT erhalten -- f_eq traegt rho*u_geklemmt statt j+F/2.");
 		else print_info(string("  Geschwindigkeitsklemme ")+wo+": 0 Treffer (Impuls ungestoert).");
+		{ // ★ Pruefbefund A4: Slot 59 wurde NIRGENDS gelesen -- ein reiner Schreibzaehler.
+			ulong bw=0ull; for(uint d=0u; d<L.get_D(); d++) bw+=(ulong)L.lbm_domain[d]->rho_clamp_hits[59];
+			if(bw>0ull) print_info(string("  Bewegtwand-Term ")+wo+": "+to_string(bw)+" Randzellen-Auswertungen mit u_w != 0 (saettigend).");
+			else print_info(string("  Bewegtwand-Term ")+wo+": 0 -- keine mitbewegte Wand in dieser Domaene.");
+		}
 		{ // ★ 2026-08-25 Guo-Korrektur: Wirkpfad UND Groesse (Slots 60..63)
 			ulong g[4]={0ull,0ull,0ull,0ull}, gs=0ull;
 			for(uint d=0u; d<L.get_D(); d++) for(uint k=0u; k<4u; k++) { const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[60u+k]; g[k]+=v; gs+=v; }
 			if(gs>0ull) print_info(string("  Guo-Korrektur ")+wo+": relative Aenderung von |Pi^neq| -- <0,1%: "+to_string(100.0*(double)g[0]/(double)gs,1u)+"%, <1%: "+to_string(100.0*(double)g[1]/(double)gs,1u)+"%, <10%: "+to_string(100.0*(double)g[2]/(double)gs,1u)+"%, >=10%: "+to_string(100.0*(double)g[3]/(double)gs,1u)+"%");
 			else if(LBM_Domain::s_sgs_guo) print_warning(string("  Guo-Korrektur ")+wo+": Zaehler NULL -- entweder kein SUBGRID/VOLUME_FORCE in dieser Domaene, oder lautloser No-Op.");
 		}
-		if(LBM_Domain::s_sponge_n>0u) {
-			if(sp>0ull) print_info(string("  SPONGE ")+wo+": "+to_string(sp)+" Zonen-Stichproben (t%100; geklemmte Zellen zaehlen doppelt).");
-			else print_error(string("  SPONGE ")+wo+": Zone konfiguriert (n="+to_string(LBM_Domain::s_sponge_n)+"), aber der Zaehler ist NULL -- lautloser No-Op.");
-		}
+		// ★ Pruefbefund X-1 (2026-08-25, HOCH): s_sponge_n ist eine STATIK. Im dd-Fall traegt sie beim
+		// Bericht den FERNFELD-Wert, waehrend hier das NAHFELD geprueft wird -- das Nahfeld hat gar
+		// keine Zone, sein Zaehler ist zu Recht null. Der Waechter haette also im Normalfall der
+		// dd-Produktion (CFD_SPONGE_N>0) zugeschlagen, und print_error ruft exit(1): der Lauf waere
+		// VOR der Cd/Cz-Ausgabe gestorben. Jetzt Ansage statt Abbruch, und die Statik wird als das
+		// benannt, was sie ist. Ein echter Zonen-Waechter braucht ein Domaenen-Member (Folgearbeit).
+		ulong spk=0ull; for(uint d=0u; d<L.get_D(); d++) spk+=(ulong)L.lbm_domain[d]->rho_clamp_hits[66];
+		if(sp>0ull) print_info(string("  SPONGE ")+wo+": "+to_string(sp)+" Zonenbesuche, davon "+to_string(spk)+" mit greifender wmin-Klemme ("+to_string(sp>0ull?100.0*(double)spk/(double)sp:0.0,1u)+" %). Beide Zaehler saettigend, getrennte Slots.");
+		else if(LBM_Domain::s_sponge_n>0u) print_warning(string("  SPONGE ")+wo+": Zaehler NULL, waehrend die (domaenenuebergreifende) Statik n="+to_string(LBM_Domain::s_sponge_n)+" meldet. Im dd-Fall ist das fuers Nahfeld ERWARTET (keine Zone); in einer Einzelgitter-Domaene waere es ein lautloser No-Op.");
 	}
 #ifdef RHO_CLAMP
 	ulong u=0ull, o=0ull; L.rho_clamp_hits_total(u, o);
 	summe += u+o;
-	print_info(string("  RHO_CLAMP ")+wo+": "+to_string(u+o)+" Treffer (untere Grenze "+to_string(u)+", obere "+to_string(o)+")");
+	// ★ Pruefbefund X-3 (2026-08-25): seit der Gatung sind das STICHPROBEN auf t%100, keine
+	// Ereigniszahlen. Null hier schliesst Klemmungen zwischen den Abtastpunkten NICHT aus -- der
+	// Text darf also keine Unbedenklichkeitsbescheinigung mehr sein.
+	print_info(string("  RHO_CLAMP ")+wo+": "+to_string(u+o)+" Treffer (untere Grenze "+to_string(u)+", obere "+to_string(o)+"); Zaehler SAETTIGT bei 4026531840 statt zu wickeln");
 #else
 	(void)L; (void)wo; (void)summe;
 #endif // RHO_CLAMP
 }
 void dichteklemme_fazit(const ulong summe) {
 #ifdef RHO_CLAMP
-	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben.");
+	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben. (Der Zaehler ist saettigend, nicht gegatet: eine Null ist wieder eine echte Aussage.)");
 	else print_warning("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen: rho hat den physikalischen Bereich verlassen. Dieser Lauf rechnete stellenweise auf einem GEKLEMMTEN Feld und ist kein belastbares Ergebnis -- die Ursache liegt im Betriebspunkt (fehlende Volumenviskositaet bei w gegen 2), nicht in der Klemme.");
 #else
 	(void)summe;
@@ -1342,24 +1365,21 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 			K.ry += ((double)D->fac_tau[6ull*i+2ull]-(snap.empty()?0.0:snap[3ull*i+1ull]))/fs;
 			K.rz += ((double)D->fac_tau[6ull*i+3ull]-(snap.empty()?0.0:snap[3ull*i+2ull]))/fs;
 		}
-		// ★★ 2026-08-25 PRAEZISIONSWAECHTER (Audit-Befund: fac_tau akkumuliert float32 ueber die
-		// GANZE Laufzeit, ohne Reset und ohne Waechter). Die Gefahr ist nicht der Absolutwert,
-		// sondern das Verhaeltnis Akkumulator zu Einzelzuwachs: ueberschreitet es 2^24, verpufft
-		// jede weitere Addition SPURLOS -- der Zaehler steht still und niemand merkt es. Bei 2^20
-		// bleiben dem Zuwachs noch 4 Bit. Statt zu vermuten wird das Verhaeltnis GEMESSEN und je
-		// Lauf einmal je Schwellenklasse gemeldet.
-		if(!snap.empty()&&fenster>0ull) {
-			double rmax = 0.0;
-			for(ulong i=0ull; i<D->fac_N; i++) for(uint k=1u; k<4u; k++) {
-				const double acc = fabs((double)D->fac_tau[6ull*i+(ulong)k]);
-				const double inc = fabs((double)D->fac_tau[6ull*i+(ulong)k]-snap[3ull*i+(ulong)(k-1u)])/fs;
-				if(inc>0.0) rmax = fmax(rmax, acc/inc);
-			}
-			static int gemeldet = 0; // 0 = nichts, 1 = Warnung, 2 = Fehler
-			const int stufe = rmax>=8388608.0 ? 2 : (rmax>=1048576.0 ? 1 : 0);
-			if(stufe>gemeldet) { gemeldet = stufe;
-				const string msg = "fac_tau-Praezision: Akkumulator/Zuwachs = "+to_string(rmax,0u)+" (float32 verliert ab 2^20 = 1048576, ab 2^24 = 16777216 verpufft die Addition ganz)";
-				if(stufe==2) print_error(msg); else print_warning(msg);
+		// ★★ PRAEZISIONSWAECHTER, dritte Fassung (2026-08-25). Die ersten beiden waren beide falsch:
+		// die erste nahm das rohe Maximum von acc/inc und rief print_error -- sie hat zwei laufende
+		// Messungen abgeschossen; die zweite mass acc gegen den FENSTERMITTELWERT des Zuwachses und
+		// explodierte, sobald sich Beitraege wegheben, ohne dass ein Bit verloren geht.
+		// Das richtige Mass steht bereits im Puffer: fac_tau_n[i] IST die Zahl der Additionen in
+		// diesen Akkumulator. Ab 2^24 Additionen gleicher Groessenordnung verpufft jede weitere
+		// spurlos, ab 2^20 bleiben dem Zuwachs 4 Bit. Vorzeichenwechsel machen den Akkumulator nur
+		// KLEINER, also ist n eine konservative obere Schranke -- und sie deckt Slot 0 (tw) mit ab,
+		// der das gemeldete mittlere tau_w traegt und den die zweite Fassung ausliess.
+		{
+			D->fac_tau_n.read_from_device();
+			ulong nmax=0ull; for(ulong i=0ull; i<D->fac_N; i++) { const ulong v=(ulong)D->fac_tau_n[i]; if(v>nmax) nmax=v; }
+			static uint gemeldet = 0u;
+			if(nmax>=1048576ull&&gemeldet<3u) { gemeldet++;
+				print_warning("fac_tau-Praezision: bis zu "+to_string(nmax)+" Additionen in einen float32-Akkumulator (ab 2^20 = 1048576 bleiben dem Zuwachs 4 Bit, ab 2^24 = 16777216 verpufft er spurlos). Kein Abbruch -- aber die Zahlen aus fac_tau tragen ab hier nicht mehr die volle Stellenzahl.");
 			}
 		}
 	}
@@ -1500,8 +1520,8 @@ void main_setup_kanal() {
 	  LBM_Domain::s_fac_diagz = (fc>=3u&&getenv("CFD_FAC_DIAGZ")!=nullptr) ? (long)atoll(getenv("CFD_FAC_DIAGZ")) : -1l;
 	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
 	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle).");
-	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 1u)>0u;
-	  if(LBM_Domain::s_fac_alpha>3u) print_error("CFD_FAC_ALPHA kennt nur 0..3 (1 = Massenkorrektur, 2 = + Momenten-Downdate, 3 = + Rueckfall fuer Einzellink-Facetten).");
+	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
+	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
@@ -1606,7 +1626,8 @@ void main_setup_kanal() {
 	// Statistik-Akkumulatoren je z-Ebene (double, Host)
 	std::vector<double> su(Nz,0.0), suu(Nz,0.0), sww(Nz,0.0), suw(Nz,0.0), suz(Nz,0.0); ulong n_stat=0ull;
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
-	std::vector<double> fac_snap; ulong fac_snap_step=0ull; double fac_fsum=0.0, fac_fn=0.0; // Cd-Pfad (K2/K3)
+	std::vector<double> fac_snap; std::vector<double> fac_snap_tw; std::vector<ulong> fac_snap_n; // ★ 2026-08-25 Pruefbefund C(c): tw (Slot 0) und der Besuchszaehler wurden NIE geschnappt
+	ulong fac_snap_step=0ull; double fac_fsum=0.0, fac_fn=0.0; // Cd-Pfad (K2/K3)
 	std::ofstream diag_csv; // Iron Rule 3: Diagnose-Facetten-Zeitreihe
 	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) { // Audit-Nacharbeit 18: letzter Chunk gekappt, vorher bis zu 99 Schritte Ueberzug
 		const ulong chunk = min((ulong)regel_alle, n_steps-step); // Re-Audit R2: auch fuers CSV-Etikett verwenden
@@ -1658,7 +1679,10 @@ void main_setup_kanal() {
 			if(fac_snap.empty()) { fac_snap_step=step+chunk;
 				lbm.lbm_domain[0]->fac_tau.read_from_device();
 				fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
-				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull]; } }
+				fac_snap_tw.resize(lbm.lbm_domain[0]->fac_N); fac_snap_n.resize(lbm.lbm_domain[0]->fac_N);
+				lbm.lbm_domain[0]->fac_tau_n.read_from_device();
+				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull];
+					fac_snap_tw[i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]; fac_snap_n[i]=(ulong)lbm.lbm_domain[0]->fac_tau_n[i]; } }
 			else { fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk; }
 		}
 	}
@@ -1702,7 +1726,7 @@ void main_setup_kanal() {
 		const ulong s12=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[12], s13=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[13], s10=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[10];
 		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"; Ereignis-Slots t%100-gesampelt seit 405be0f), tau-Klemme "+to_string(kl)
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
-			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)+" (A2-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+")"
+			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // ★ 2026-08-25 Stoerform-Groessenmessung (49..58)
 			const uint* h = &lbm.lbm_domain[0]->rho_clamp_hits[0];
@@ -1731,10 +1755,23 @@ void main_setup_kanal() {
 		// gemeldeten y+ waren also um Faktor 1,4 bzw. 2,1 zu klein. Jetzt je Facette mit ihrem
 		// EIGENEN y_w aus fac_geo[8i+3], danach gemittelt.
 		lbm.lbm_domain[0]->fac_geo.read_from_device();
+		// ★★ 2026-08-25 Pruefbefund C(c), HOCH: dieses Mittel war ein VOLLLAUF-Mittel, waehrend
+		// "Reibung x" und "Soll" strikt gefenstert sind (60 von 80 ETT). Der Fensterbruch betrug
+		// rund 1 Prozentpunkt -- das Zwei- bis Dreifache des gesamten Anwendungspfad-Signals. Damit
+		// war meine Zerlegung "der Ueberschuss sitzt im Modell, nicht in der Anwendung" NICHT
+		// gedeckt. Jetzt wird tw ueber DASSELBE Fenster gemittelt wie die Kraft: Differenz des
+		// Akkumulators geteilt durch die Differenz der Besuchszahl.
+		const bool gef = !fac_snap_tw.empty()&&fac_snap_tw.size()==lbm.lbm_domain[0]->fac_N;
 		double stau=0.0, syp=0.0; ulong ntau=0ull;
-		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; syp+=sqrt(fmax(0.0,(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]))*(double)lbm.lbm_domain[0]->fac_geo[8ull*i+3ull]/(double)nu_lat; }
+		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) {
+			const double acc=(double)lbm.lbm_domain[0]->fac_tau[6ull*i], nb=(double)lbm.lbm_domain[0]->fac_tau_n[i];
+			const double a0=gef?fac_snap_tw[i]:0.0, n0=gef?(double)fac_snap_n[i]:0.0;
+			const double dn=nb-n0; if(dn<=0.0) continue;
+			const double tw_i=(acc-a0)/dn;
+			stau+=tw_i; ntau++; syp+=sqrt(fmax(0.0,tw_i))*(double)lbm.lbm_domain[0]->fac_geo[8ull*i+3ull]/(double)nu_lat;
+		}
 		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=syp/(double)ntau;
-			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+", y+ = "+to_string((float)yp,1u)); }
+			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+(gef?" (GEFENSTERT wie die Kraft)":" (VOLLLAUF -- kein Schnappschuss vorhanden)")+", y+ = "+to_string((float)yp,1u)); }
 		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
 		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
 			const FacKraft FK = kraft_facetten(lbm, Nx, Ny, Nz, TYPE_S, n_steps-fac_snap_step, fac_snap, kipp>0u);
@@ -2114,8 +2151,8 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
-	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 1u)>0u;
-	  if(LBM_Domain::s_fac_alpha>3u) print_error("CFD_FAC_ALPHA kennt nur 0..3 (1 = Massenkorrektur, 2 = + Momenten-Downdate, 3 = + Rueckfall fuer Einzellink-Facetten).");
+	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
+	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
@@ -2427,7 +2464,7 @@ void main_setup_kugel() {
 		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
 		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
-			+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
+			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
@@ -2574,7 +2611,7 @@ static void main_setup_fahrzeug() {
 	// gilt nur im Kanal -- hier wird er angesagt statt lautlos verschluckt.
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f;
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
-	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
+	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im Einzelgitter-Fahrzeugfall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
@@ -3014,8 +3051,8 @@ static void main_setup_fahrzeug_dd() {
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A): alpha = "+to_string(LBM_Domain::s_fac_pema,5u));
-	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 1u)>0u;
-	  if(LBM_Domain::s_fac_alpha>3u) print_error("CFD_FAC_ALPHA kennt nur 0..3 (1 = Massenkorrektur, 2 = + Momenten-Downdate, 3 = + Rueckfall fuer Einzellink-Facetten).");
+	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
+	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
@@ -3060,7 +3097,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u);
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
 	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
@@ -3267,10 +3304,10 @@ static void main_setup_fahrzeug_dd() {
 	// EMA/PEMA/APG/DIAGZ bleiben im Fernfeld bewusst AUS (Messarme, nur Nahfeld verdrahtet).
 	{ const uint ffc = env_u("CFD_FERN_FACETTEN", 0u);
 	  if(ffc>4u) print_error("CFD_FERN_FACETTEN kennt nur 0..4 (1/2 Paartausch voll/Tausch, 3/4 iMEM voll/Nullziel).");
-	  if(ffc>=3u&&env_u("CFD_FAC_ALPHA", 0u)>3u) print_error("CFD_FAC_ALPHA kennt nur 0..3 (gilt auch fuer CFD_FERN_FACETTEN).");
+	  if(ffc>=3u&&env_u("CFD_FAC_ALPHA", 0u)>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (gilt auch fuer CFD_FERN_FACETTEN).");
 	  LBM_Domain::s_facetten = ffc>0u; LBM_Domain::s_fac_imem = ffc>=3u;
-	  LBM_Domain::s_fac_satgate = ffc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
-	  LBM_Domain::s_fac_alpha = (ffc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 1u)>0u;
+	  LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_satgate = ffc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
+	  LBM_Domain::s_fac_alpha = (ffc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
 	  LBM_Domain::s_fac_tau = (ffc==2u||ffc==4u) ? 0.0f : 1.0f;
 	  if(ffc>0u) print_info(string("Facettenpfad FERNFELD (P8): ")+(ffc==1u?"Paartausch voll":ffc==2u?"Paartausch NUR TAUSCH":ffc==3u?"iMEM voll":"iMEM NULLZIEL")
 	  	+" -- 16/32-mm-Treppenkoerper, YWMIN-Vorsicht: CFD_FACETTEN_YWMIN ist eine ZELLWEITE und gilt fuer BEIDE Gitter, am Grobgitter also die "+to_string(ratio)+"-fache physische Distanz."
@@ -5259,7 +5296,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Facetten-Wirkpfad Nahfeld: "+to_string(wz)+" (Soll "+to_string(soll)+" mod 2^32), tau-Klemme "+to_string((ulong)df->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
-			+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
+			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])):string("")));
 		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Nahfeld -- Lookup oder Bindung defekt.");
 		lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
@@ -5299,7 +5336,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Facetten-Wirkpfad Fernfeld (P8): "+to_string(wzc)+" (Soll "+to_string(sollc)+" mod 2^32), tau-Klemme "+to_string((ulong)dc->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)dc->rho_clamp_hits[9])
 			+(env_u("CFD_FERN_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[10])+", Skalar "+to_string((ulong)dc->rho_clamp_hits[12])
-			+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)dc->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
+			+", LSQ-Rueckfall "+to_string((ulong)dc->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)dc->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[16])+", alpha>ut "+to_string((ulong)dc->rho_clamp_hits[18])+" (PEMA/APG im Fernfeld AUS)"):string("")));
 		if(wzc!=(sollc&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Fernfeld -- Lookup oder Bindung defekt (P8).");
 		if(env_u("CFD_FERN_FACETTEN",0u)>=3u) { // iMEM-Erhaltung analog Nahfeld (Delta-m/Normal-Rest aus dem kumulativen Akkumulator)
@@ -5378,7 +5415,7 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");

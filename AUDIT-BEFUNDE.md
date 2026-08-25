@@ -2183,3 +2183,200 @@ je Link, also ELIBB.
    eine VOLUMENbilanz (f*V_fluid), die benetzte Flaeche geht gar nicht ein. Das Etikett
    "Soll f*delta*Flaeche" ist irrefuehrend.
 3. Klemmzahlen als Argument benutzt, obwohl die Zaehler wickeln (siehe C).
+
+---
+
+# 2026-08-25 — AUDIT-KORREKTURSCHLEIFE, WELLE 1 ABGEARBEITET
+
+Auftrag Heiko: "wie immer alle fehler direkt beheben und durch unabhängige agenten
+nochmal prüfen lassen ... wenn du damit durch bist nochmal die große code audit
+korrektur schleife". Commits b608487 und c69d18a.
+
+## Behoben (zehn Befunde)
+
+| # | Befund | Korrektur | Datei |
+|---|--------|-----------|-------|
+| 1 | RHO_CLAMP-Zaehler ungegatet, uint wickelt nach ~21 Schritten | `t%100`-Gatung, beide Zweige | kernel.cpp |
+| 2 | Kanal-y+ hartkodiert y_w=0,5, obwohl der dd-Pfad davor warnt | je Facette aus `fac_geo[8i+3]` | setup.cpp |
+| 3 | Geschwindigkeitsklemme als EINZIGE Klemme unbeobachtet | Slot 28, beide Zweige | kernel.cpp |
+| 4 | SPONGE ohne jeden feuernden Zaehler (HARTER FEHLER nach Iron Rule) | Slot 29, Klemme zaehlt doppelt | kernel.cpp |
+| 5 | `object_force` nichtdeterministisch (atomic_add_f je Arbeitsgruppe) | Grid-Stride + `object_force_final`, feste Summenreihenfolge | kernel.cpp/lbm.cpp |
+| 6 | Zero-Copy-`read_from_device` ist ein No-Op OHNE Queue-Drain | `cl_queue.finish()` bei blocking | opencl.hpp |
+| 7 | `fac_tau` float32 ohne Praezisionswaechter | Kennzahl Akkumulator/Zuwachs, 2^20 / 2^24 | setup.cpp |
+| 8 | Fernfeld-Einlass im Produktionsfall ueberbestimmt | `CFD_FERN_VI` dort verfuegbar + angesagt | setup.cpp |
+| 9 | Bewegtwand-Term im Kraftfeld fehlt | `-6 w_i (c_i.u_w) c_i` ueber die zurueckgeworfenen Links, Slot 59 | kernel.cpp |
+| 10 | Smagorinsky-Pi^neq ohne Guo-Korrektur | `CFD_SGS_GUO` (Default 1), Slots 60..63 | kernel.cpp |
+
+Befund 6 ist der folgenreichste: `is_zero_copy` verlangt `uses_ram`, und das gilt fuer
+CPU **und iGPU** -- also fuer die GESAMTE Fernfeld-Domaene. Beim normalen Puffer wartet ein
+blockierendes `enqueueReadBuffer` in der In-Order-Queue auf alle eingereihten Kernel; bei
+Zero-Copy tat der Aufruf GAR NICHTS. Der Host las den Speicher, waehrend die GPU noch
+hineinschrieb. Jede Fernfeld-Diagnosezahl war damit potenziell halb geschrieben.
+
+## Zwei neue Mechanismen, beide mit Wirkpfad-Zaehler
+
+- **`CFD_FAC_ALPHA=3` (A2-Rueckfall, Slot 64).** Das Rang-1-Downdate
+  `G' = 6 Sum w (c-cq)(c-cq)^T` mit `cq = S1/S0` vernichtet die Einzellink-Facette
+  ANALYTISCH: mit einem Link ist `cq = c_1`, also `c-cq = 0` und `G' == 0`. Solche Facetten
+  fielen in den Slot-13-Return und blieben REINES Bounce-Back, ohne jedes Wandmodell.
+  Gemessen: 50,0 % aller Facetten bei 45 Grad, 33,3 % bei 26 Grad, 0 % eben -- genau die
+  Reihenfolge der K2-Abweichung. Kein Programmierfehler, sondern eine echte Entartung: mit
+  einem einzigen Link ist jede Impulsinjektion eine reine Gleichverschiebung, es bleibt kein
+  deviatorischer Freiheitsgrad fuer die alpha-Nebenbedingung. Der Rueckfall waehlt bewusst:
+  lieber die Wandschubspannung anwenden und die alpha-Nullung fuer diese Facetten aufgeben.
+  Der Preis laeuft messbar mit (fac_tau[4] Delta-m, fac_tau[5] Normalkontamination).
+- **`CFD_FAC_LSQ` (Default 1, Slot 65).** Der alte Skalar-Rueckfall `s1 = R1/G11` erzwingt
+  das Ziel in Richtung 1 exakt und ignoriert die zweite Gleichung ganz. Ist G11 fast entartet,
+  wird s1 riesig, und weil G12 dabei nicht klein sein muss, schleppt die Loesung
+  `Phi2 = G12*s1` mit. Kleinste Quadrate auf dem erreichbaren Unterraum:
+  `s1 = (G11*R1 + G12*R2)/(G11^2 + G12^2)`. Bei G12 = 0 wortgleich der alte Zweig; bei
+  G11 -> 0 laeuft sie gegen R2/G12 statt gegen unendlich.
+
+## WIDERLEGT: meine eigene Stoerform-Hypothese
+
+Behauptung vom 24./25.08.: "iMEM summiert Momente ueber die Solid-Teilmenge, waehrend
+FluidX3D f^ = f - w speichert; an Treppen bis zu vier Groessenordnungen ueber tau_w."
+
+GEMESSEN (Histogramm-Slots 49..53, |2*(S1.t)| gegen |def_fac_tau*twe|):
+- ebene Wand: **100,0 % unter 1 %** des Ziels (Theorie: symmetrische Linkmenge, Offset
+  hebt sich exakt weg -- bestaetigt)
+- 45 Grad: **95,7 % unter 1 %, 4,2 % zwischen 1 und 10 %, nichts darueber**
+
+Die Groessenordnungs-Behauptung ist damit falsifiziert. Der Offset ist an der Treppe klein.
+
+Was die Messung stattdessen zeigt: **|P|/Ziel ist bei 45 Grad exakt BIMODAL** --
+50,0 % unter 1 %, 50,0 % ueber 10 %, nichts dazwischen. Das ist die Signatur der tot
+gelegten Einzellink-Population, nicht die eines Offsets.
+
+## K2 an der EBENEN Wand ist kein Programmierfehler
+
+Die Aufloesungsreihe lag seit Tagen in den Logs, ohne dass ich sie in dieser Richtung
+gelesen haette. kn_20 / kn_38 / kn_76, alle uebrigen Parameter gleich:
+
+| N | y+_1 | f*delta | tau_w modelliert | Modell/Soll | Angewandt/Modell | K2 |
+|---|------|---------|------------------|-------------|------------------|-----|
+| 20 | 259,3 | 4,3889e-6 | 4,39e-6 | **1,0002** | 1,0040 | 1,0043 |
+| 38 | 136,5 | 4,0113e-6 | 4,09e-6 | **1,0196** | 1,0055 | 1,0253 |
+| 76 |  68,2 | 4,1876e-6 | 4,34e-6 | **1,0364** | 1,0014 | 1,0378 |
+
+Der Anwendungspfad liegt flach bei 0,1-0,6 % OHNE Trend. Der Ueberschuss sitzt vollstaendig
+im MODELLIERTEN tau_w, und er waechst monoton, waehrend die erste Zelle aus der Log-Schicht
+faellt (y+ 259 -> 137 -> 68). Das ist Log-Layer-Mismatch des Wandmodells -- eine
+Modelleigenschaft, kein Fehler im Facettenpfad. Die K2-Schwelle von 1 % misst an der ebenen
+Wand also die Genauigkeit des Wandmodells, nicht die Richtigkeit des Codes.
+
+Folge fuer die Abnahme: die 1-%-Schwelle ist an der ebenen Wand nur bei grobem y+ erfuellbar.
+Sie gehoert entweder auf den Anwendungspfad (Angewandt/Modell) umgestellt oder
+aufloesungsabhaengig gefasst.
+
+## WIDERLEGT: Fullway-Folgerung (unabhaengiger Pruefagent)
+
+Die Schrittzahl ist bestaetigt -- der Slot einer Wand wird nur alle ZWEI Schritte angefasst,
+die Zeitrechnung ist exakt Fullway (bitgleich gegen eine Lehrbuch-Fullway-Referenz in jedem
+Anlaufschritt). Die daraus gezogene Folgerung ist WIDERLEGT: die gemessene Wandlage ist fuer
+alle drei Schemata identisch, y_w(tau) reproduziert Ginzburg/d'Humieres (0,5206 / 0,5184 /
+0,5108 / **0,5000 bei tau=0,9333** / 0,4665). y_w, tau_w und jede Kraftbilanz bleiben
+unberuehrt; die Abweichung wirkt nur instationaer.
+
+## PRUEFUNG DER WELLE 1 DURCH UNABHAENGIGE AGENTEN -- vier eigene Eingriffe zurueckgenommen
+
+Zwei Prüfagenten (Kernel-Physik, Host/Bindung) gegen den Diff b608487~1..c69d18a.
+Sie haben mehr gefunden, als die Welle 1 behoben hat.
+
+### K.O.-BEFUND: der A2-Rueckfall war BEWEISBAR WIRKUNGSLOS und haette die Messung verfaelscht
+
+Angewandt wird in Pass 2 (kernel.cpp)
+```
+q_i = 6 w_i (c_i . u_s) + w_i * alpha ,   alpha = -6 (S1 . u_s) / S0
+    = 6 w_i (c_i - c_q) . u_s            mit c_q = S1/S0
+```
+Fuer EINEN Link ist c_q = c_1, also **q_i identisch null, fuer jedes u_s**. `G' = 0` war damit
+keine numerische Entartung, die man reparieren kann, sondern die WAHRE Aussage ueber den unter der
+Massen-Nebenbedingung erreichbaren Unterraum. Die Praemisse meines Eingriffs ("sie blieben reines
+Bounce-Back, als sei das vermeidbar") war falsch -- sie bleiben es, weil alpha sie dazu zwingt.
+
+Schlimmer als wirkungslos: mit zurueckgesetzten Rohmomenten haette
+`phi1 = P1 + G11roh*s1` eine Wandkraft in `fac_tau[1..3]` gebucht, die NICHT angewandt wurde.
+K2 waere besser geworden, ohne dass sich am Feld etwas aendert -- genau die Selbsttaeuschung,
+gegen die die Abnahme gebaut ist.
+
+EMPIRISCH BESTAETIGT: `ab_45_kontrolle` und `ab_45_a2fall` sind in jeder gedruckten Zahl gleich.
+Slot 13 steht in dieser Konfiguration ausserdem bei **7**, nicht bei 50 % -- meine Zahl "50,0 %
+aller Facetten bei 45 Grad" stammte aus einer anderen Konfiguration und trug den Eingriff nicht.
+Damit faellt auch meine Deutung der |P|-Bimodalitaet ("die Signatur der tot gelegten
+Einzellink-Population") -- sie ist unbelegt.
+
+**ZURUECKGENOMMEN.** Der Freiheitsgrad muss aus der GEOMETRIE kommen (ELIBB, q-gewichteter
+Wandabstand), nicht aus dem Zuruecknehmen einer Identitaet.
+
+### Der LSQ-Rueckfall ist eine MODELLAENDERUNG, kein Numerikfix -> Default AUS
+
+Die Formel ist korrekt (beide Zweige, auch im Schur-Komplement; die Normal-Nullung bleibt exakt,
+weil sn aus den ANGEWANDTEN s gebildet wird). Aber:
+- LSQ gewichtet t1 (Stroemungsrichtung, Ziel = Spalding-tau_w, die eigentliche Messgroesse) und
+  t2 (Ziel 0, eine blosse Modellannahme) GLEICH. Fuer ein Wandmodell die falsche Gewichtung.
+- Sie bricht die SATGATE-Invariante "iMEM wirkt nur, wenn es sein Ziel im Budget EXAKT erreichen
+  kann" -- LSQ erreicht es prinzipiell nie exakt, das Gate laesst sie trotzdem durch.
+- Der eingehandelte Fehler in Stroemungsrichtung ist exakt
+  `phi1 - Ziel = G12 (G11 R2 - G12 R1)/(G11^2 + G12^2)`; der alte Zweig traf phi1 exakt.
+- Die Divergenz ist NICHT beseitigt: bei G12 = 0 und G11 -> 1e-8 liefert LSQ dasselbe 1e8*R1.
+
+Default AUS, eigener Messarm, eigene Begruendung.
+
+### NEU statt LSQ: QUERGATE (CFD_FAC_QUERGATE, Default AUS, Slot 64)
+
+Das eigentliche Problem -- Phi2 = G12*s1 bis 10^3 mal twe -- wird jetzt in der Doktrin behandelt,
+die dafuer schon existiert: uebersteigt der Restfehler in Querrichtung die Wandschubspannung, die
+ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen. Ein
+exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
+
+### Der Bewegtwand-Term war nur zu einem FUENFTEL richtig
+
+`calculate_rho_u` summiert ueber ALLE 19 Richtungen, auch ueber Links, deren Streaming-Ursprung
+selbst Solid ist. Fuer die fuehrt niemand je `store_f` aus -- der Slot behaelt den Wert aus
+`initialize()`. Bei ruhender Wand ist das feq(1,0), in Stoerform exakt 0; deshalb ist es nie
+aufgefallen. Bei MITBEWEGTER Wand ist es feq(1,u_w) und nicht null: an der ebenen Fahrbahn sind
+13 der 18 Links tot und tragen **+-5*u_w/3, mit der Paritaet des Zeitschritts oszillierend** --
+drei Groessenordnungen ueber tau_w. Meine Fassung addierte nur den fehlenden Term (-u_w/3) und
+liess vier Fuenftel plus die Oszillation stehen. Jetzt laufen BEIDE Summanden ueber DIESELBE
+Linkmenge. Auch die Commit-Formulierung war ungenau: rho_w ist per Konstruktion 1, und das
+Vorzeichen ist negativ.
+
+### Weitere behobene Pruefbefunde
+
+- **X-1 (HOCH):** mein SPONGE-Waechter haette den dd-Produktionslauf per `print_error` -> `exit(1)`
+  abgebrochen, VOR der Cd/Cz-Ausgabe. `s_sponge_n` ist eine STATIK und traegt beim Nahfeld-Bericht
+  den Fernfeld-Wert. Jetzt Ansage statt Abbruch.
+- **X-2 (HOCH):** mein fac_tau-Praezisionswaechter nahm das ROHE MAXIMUM ueber 3*fac_N Verhaeltnisse
+  und rief `print_error`. Eine einzige nahezu stationaere Facette mit Fensterdelta in ULP-Groesse
+  liefert 1e9. **Er hat genau das getan: `ab_45_kontrolle` und `ab_45_a2fall` sind daran gestorben**
+  (Akkumulator/Zuwachs = 2,4e10). Jetzt beitragsgewichtet und niemals fatal.
+- **X-3 (HOCH):** durch die Gatung wurde aus "NULL Treffer -- die Klemme hat nie gegriffen" eine
+  falsche Unbedenklichkeitsbescheinigung. Text sagt jetzt "Stichprobe".
+- **3-A/3-B:** der Guo-Zaehler feuerte je ZELLE je 100. Schritt -- bei 2e8 Zellen wickelt uint nach
+  rund 2100 Zeitschritten, also genau der Fehler, den Welle 1 bei Slot 0/1 behoben hat. Ebenso das
+  Stoerform-Histogramm bei fac_N ~ 1e6. Beide jetzt zusaetzlich hash-ausgeduennt (jede 64.).
+- **3-D:** der Wickelwaechter lief ab Slot 28 und meldete Geschwindigkeitsklemme und SPONGE als
+  "nu_t-Bin". Jetzt ab 30, plus ein neuer Waechter ueber ALLE 66 Slots, unabhaengig von CFD_SGS_DIAG.
+- **2-b:** `read_from_device_1d/2d/3d` hatten den Zero-Copy-Zweig nicht bekommen; `schreibe_wandprofil`
+  las auf der iGPU weiter unsynchronisiert.
+- **4-a:** `s_fac_lsq`/`s_sgs_guo` fehlten in mehreren Setup-Bloecken -- lautlose Schalter mit
+  Default-Wirkung. Jetzt an allen Stellen gesetzt.
+- **4-c:** die neuen Wirkpfad-Slots wurden nur im Kanal berichtet, nicht in Kugel/dd.
+- **1-b:** Grid-Stride mit `uxx` haette im 65536-Fenster unter der uxx-Grenze zur Endlosschleife.
+- **1-d:** SGS_GUO wurde unabhaengig von VOLUME_FORCE emittiert (heute unerreichbar, Falle bleibt).
+- **3-E:** die Slot-Legende widersprach sich selbst ("[28] Geschwindigkeitsklemme" UND
+  "[28..32] nu_t-Histogramm"). Sie steht jetzt an EINER Stelle.
+
+### Bestaetigt statt widerlegt
+
+- Guo-Vorfaktor, Vorzeichen, Normierung, `uxn` als physikalische Geschwindigkeit: **korrekt**,
+  hergeleitet aus dem tatsaechlich implementierten Kraftterm (nicht aus dem Lehrbuch): das zweite
+  Moment von `Fin` ist `u_aF_b+u_bF_a`, `(1-1/(2tau))` sitzt erst in der Kollision, also gehoert
+  `+1/2` und kein weiterer Faktor dazu.
+- Der Prueferwert fuer die Groessenordnung (rel. Aenderung von |Pi| bei y+ = 137: **7,1e-6**) und
+  die Prognose "100 % im <0,1-%-Bin" wurden von der Messung `ab_eben_guo` **bestaetigt**.
+- object_force-Umbau: Gittergroesse, Abdeckung, unbedingtes Schreiben, serielle Endsumme,
+  In-Order-Reihenfolge und Parameterbindung von `update_force_field` -- alle korrekt.
+  Einschraenkung zur Commit-Meldung: `atomic_add_f` ist NICHT tot, `object_center_of_mass` und
+  `object_torque` benutzen es weiter (werden aber von keinem Setup aufgerufen).

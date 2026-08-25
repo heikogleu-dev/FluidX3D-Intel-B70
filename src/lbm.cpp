@@ -251,7 +251,13 @@ float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Kon
 bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
-bool LBM_Domain::s_fac_lsq = true; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall; CFD_FAC_LSQ=0 ist der Kontrollarm
+bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
+bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
+// MODELLAENDERUNG, kein Numerikfix. LSQ gewichtet t1 (Stroemungsrichtung, Ziel = Spalding-tau_w, die
+// eigentliche Messgroesse) und t2 (Ziel 0, eine blosse Modellannahme) GLEICH -- fuer ein Wandmodell die
+// falsche Gewichtung. Ausserdem bricht sie die SATGATE-Invariante "iMEM wirkt nur, wenn es sein Ziel im
+// Budget EXAKT erreichen kann": LSQ erreicht es prinzipiell nie exakt, das Gate laesst sie trotzdem
+// durch. Braucht einen eigenen Messarm mit eigener Begruendung, nicht den Rang eines Defaults.
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
@@ -292,7 +298,14 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 66ull); // [64] A2-Rueckfall (CFD_FAC_ALPHA=3) // [60..63] Guo-Korrektur: relative Aenderung von |Pi^neq| (<0,1% / <1% / <10% / >=10%) // [59] Bewegtwand-Term im Kraftfeld // ★ 2026-08-25 fest 60: [49..53] Stoerform-Offset 2*(S1.t) gegen das Ziel, [54..58] |P| gegen das Ziel (Dekaden) -- die Groessenmessung VOR dem Eingriff // [33..37] nu_t/nu_0 NUR in der wandnaechsten Lage, Grenzen 5/15/30/60 um die Gleichgewichtserwartung kappa*y+ ~ 30 // [28..32] nu_t/nu_0-Dekadenhistogramm (<1, 1-10, 10-100, 100-1000, >=1000) -- P0-Diagnostik 2026-08-23, entscheidet den Smagorinsky-Hebel // [27] Slot-13-Split (Einzellink-diagonal) // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 68ull); // ★ LEGENDE, Stand 2026-08-25 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
+	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
+	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden
+	// [35..39] nu_t/nu_0 wandnaechste Lage | [40..44] davon anliegend | [45..48] oberer Schwanz
+	// [49..53] Stoerform-Offset |2(S1.t)|/Ziel | [54..58] |P|/Ziel | [59] Bewegtwand-Term
+	// [60..63] Guo-Korrektur, rel. Aenderung von |Pi^neq| | [64] Quergate (CFD_FAC_QUERGATE) | [65] LSQ-Rueckfall
+	// ALLE Ereignis-Slots sind t%100-Stichproben; 49..58 und 60..63 zusaetzlich hash-ausgeduennt (jede 64.).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -957,8 +970,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_satgate) ? (string)"\n	#define FACETTEN_SATGATE" : (string)"") // (a-strich): Klemme -> BB-Rueckfall
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>0u) ? (string)"\n	#define FACETTEN_ALPHA" : (string)"") // J4-alpha: Massenkorrektur, Sum q = 0 je Facette
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"")
-	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"") // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
-	+((s_facetten&&s_fac_imem&&s_fac_alpha>2u) ? (string)"\n	#define FACETTEN_A2FALL" : (string)"") // ★ 2026-08-25 CFD_FAC_ALPHA=3: Einzellink-Facetten nicht tot legen, sondern ohne alpha-Downdate loesen
+	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")
+	+((s_facetten&&s_fac_imem&&s_fac_quergate) ? (string)"\n	#define FACETTEN_QUERGATE" : (string)"") // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"
 	"\n	#define def_fac_apg "+to_string(s_fac_apg,6u)+"f" : (string)"") // APG-Messarm: Emission nur bei kappa != 0 (Kommentar-Verklebung R2 geloest) /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"

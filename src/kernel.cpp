@@ -1858,17 +1858,37 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// 2*(S1.t1) faellt bei symmetrischer Linkmenge (ebene Wand) exakt weg, an der Treppe nicht.
 	// Bevor irgendetwas daran geaendert wird, wird seine GROESSE gegen das Ziel def_fac_tau*twe
 	// gemessen -- Dekadenhistogramm 49..53 fuer den Offset, 54..58 fuer P1 selbst.
+	// ★ Pruefbefund 3-C: dieser Block steht UNBEDINGT (kein #ifdef). Die Loesung bleibt bitgleich --
+	// die Zaehler koppeln nicht zurueck -- aber die Behauptung "neue Slots nur unter #ifdef-Emission"
+	// in lbm.cpp gilt fuer ihn nicht. Hiermit richtiggestellt statt stillschweigend.
 	{
 		const float B1o=S1x*t1x+S1y*t1y+S1z*t1z, B2o=S1x*t2x+S1y*t2y+S1z*t2z;
-		if(t%100ul==0ul) {
-			const float zi_ = fmax(def_fac_tau*twe, 1e-30f);
+		// ★ Pruefbefund 3-B (2026-08-25): fac_N ~ 1e6 mal 5000 Abtastungen sprengt uint. Hash-Stichprobe
+		// ueber die Facetten-Nummer (jede 64.), damit die Bins nicht wickeln.
+		if(t%100ul==0ul&&((fid*2654435761u)&4227858432u)==0u) {
+			const float zi_ = def_fac_tau*twe; if(zi_<=0.0f) return; // ★ Pruefbefund B(b): bei Nullziel-Armen (def_fac_tau=0) waere jeder Wert im obersten Bin
 			const float ro_ = sqrt(fma(2.0f*B1o,2.0f*B1o,4.0f*B2o*B2o))/zi_;
 			const float rp_ = sqrt(fma(P1,P1,P2*P2))/zi_;
 			atomic_inc(&hits[49u+(ro_<0.01f?0u:(ro_<0.1f?1u:(ro_<1.0f?2u:(ro_<10.0f?3u:4u))))]);
-			atomic_inc(&hits[54u+(rp_<0.01f?0u:(rp_<0.1f?1u:(rp_<1.0f?2u:(rp_<10.0f?3u:4u))))]);
+			// ★ Pruefbefund B(b): die alten Grenzen 0,01/0,1/1/10 legten die EBENE Wand zu 100 % in den
+			// offenen obersten Bin -- null Information, und die als "bimodal" gelesene 45-Grad-Verteilung
+			// war ein Saettigungsartefakt. Grenzen dorthin, wo die Daten liegen.
+			atomic_inc(&hits[54u+(rp_<1.0f?0u:(rp_<10.0f?1u:(rp_<100.0f?2u:(rp_<1000.0f?3u:4u))))]);
 		}
 	}
-	const float G12roh=G12, Sn1roh=Sn1, Sn2roh=Sn2, Snnroh=Snn; // ★ 2026-08-25 fuer den A2-Rueckfall
+	// ★ 2026-08-25 ZURUECKGENOMMEN: hier standen Rohkopien fuer einen "A2-Rueckfall", der die
+	// Einzellink-Facetten aus dem Slot-13-Return holen sollte. Ein unabhaengiger Pruefagent hat ihn
+	// als BEWEISBAR WIRKUNGSLOS entlarvt, und die Rechnung stimmt: angewandt wird in Pass 2
+	//   q_i = 6 w_i (c_i . u_s) + w_i * alpha  mit  alpha = -6 (S1 . u_s)/S0 ,
+	// also q_i = 6 w_i (c_i - c_q) . u_s. Fuer EINEN Link ist c_q = c_1, damit q_i IDENTISCH NULL --
+	// fuer jedes u_s. G' = 0 war also keine numerische Entartung, sondern die wahre Aussage ueber den
+	// unter der Massen-Nebenbedingung erreichbaren Unterraum. Schlimmer: mit zurueckgesetzten
+	// Rohmomenten haette phi1 = P1 + G11roh*s1 eine Wandkraft in fac_tau[1..3] gebucht, die
+	// nachweislich NICHT angewandt wurde -- K2 waere besser geworden, ohne dass sich am Feld etwas
+	// aendert. Genau die Selbsttaeuschung, gegen die die Abnahme gebaut ist. Der Freiheitsgrad muss
+	// aus der GEOMETRIE kommen (ELIBB, q-gewichteter Wandabstand), nicht aus dem Zuruecknehmen einer
+	// Identitaet. Bestaetigt auch empirisch: ab_45_kontrolle und ab_45_a2fall sind in jeder
+	// gedruckten Zahl gleich.
 	const float G11roh=G11, G22roh=G22; // Rohmomente VOR dem ALPHA2-Downdate -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
 )+"#ifdef FACETTEN_ALPHA2"+R(
 	// ★ J4-alpha Stufe 2 (Plan 2026-08-17): symmetrisches Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T
@@ -1887,23 +1907,6 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		if(G22<1e-4f*G22r) { G22=0.0f; G12=0.0f; Sn2=0.0f; }
 		if(Snn<1e-4f*Snnr) Snn=0.0f; // Entkopplungs-Gate (Snn<1e-8) uebernimmt
 	}
-)+"#ifdef FACETTEN_A2FALL"+R(
-	// ★★ 2026-08-25, GROESSTE EINZELURSACHE VON K2 AN GEKIPPTEN WAENDEN (CFD_FAC_ALPHA=3).
-	// Das Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T vernichtet die Einzellink-Facette ANALYTISCH:
-	// mit einem Link ist cq = c_1, also c-cq = 0 und G' == 0. Solche Facetten fielen in den
-	// Slot-13-Return und blieben damit REINES Bounce-Back -- ohne jedes Wandmodell. Gemessen:
-	// 50,0 % aller Facetten bei 45 Grad, 33,3 % bei 26 Grad, 0 % an der ebenen Wand. Genau die
-	// Reihenfolge der K2-Abweichung. Der Grund ist kein Programmierfehler, sondern eine echte
-	// Entartung: mit einem einzigen Link ist JEDE Impulsinjektion eine reine Gleichverschiebung,
-	// es bleibt kein deviatorischer Freiheitsgrad fuer die alpha-Nebenbedingung.
-	// Der Rueckfall trifft die Wahl bewusst: lieber die Wandschubspannung ANWENDEN und die
-	// alpha-Nullung fuer diese Facetten aufgeben, als gar nichts zu tun. Der Preis ist messbar --
-	// Delta-m (fac_tau[4]) und Normalkontamination (fac_tau[5]) laufen weiter mit.
-	if(G11<1e-8f&&G22<1e-8f&&(G11roh>=1e-8f||G22roh>=1e-8f)) {
-		G11=G11roh; G22=G22roh; G12=G12roh; Sn1=Sn1roh; Sn2=Sn2roh; Snn=Snnroh;
-		if(t%100ul==0ul) atomic_inc(&hits[64]); // Wirkpfad: Soll ~ Slot 27 des Kontrollarms
-	}
-)+"#endif"+R( // FACETTEN_A2FALL
 )+"#endif"+R( // FACETTEN_ALPHA2
 )+"#ifdef FACETTEN_PEMA"+R(
 	// ★ Beidseitige Filterung (FACETTEN-IMEM-ANALYSE.md, Weg A): EMA auf P-Vektor UND Abtast-u
@@ -1975,6 +1978,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#endif"+R( // FACETTEN_PEMA
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
 	float s1=0.0f, s2=0.0f, sn=0.0f;
+	float res2=0.0f; // ★ 2026-08-25 Restfehler in QUERrichtung t2 (Ziel dort ist 0); nur die Rueckfaelle fuellen ihn
 	// ★ 3x3-Iteration (FACETTEN-IMEM-3X3.md): Entkopplungs-Gate (Gl. 20). Entkoppelt laeuft
 	// WOERTLICH der bisherige 2x2-Pfad (Bitgleichheit der ebenen Waende); gekoppelt wird die
 	// Normalinjektion per Schur-Elimination exakt genullt (I2-Durchfallursache bei 26,6 Grad).
@@ -1982,7 +1986,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(Snn<1e-8f||kop<=1e-6f*Snn*(G11+G22)) {
 	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8, Nachpruefer-Befund 2/3 geschlossen)
 	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
-	// ★★ 2026-08-25 KLEINSTE-QUADRATE-RUECKFALL (CFD_FAC_LSQ, Default 1). Der alte Skalar-Rueckfall
+	// ★★ 2026-08-25 KLEINSTE-QUADRATE-RUECKFALL (CFD_FAC_LSQ, Default AUS -- Pruefbefund 4-A: es ist eine MODELLAENDERUNG, keine Fehlerkorrektur). Der alte Skalar-Rueckfall
 	// s1 = R1/G11 erzwingt das Ziel in Richtung 1 EXAKT und ignoriert die zweite Gleichung ganz.
 	// Ist G11 fast entartet, wird s1 riesig -- und weil G12 dabei NICHT klein sein muss, schleppt
 	// die Loesung dann Phi2 = G12*s1 mit, gemessen 10^2 bis 10^3 mal twe (26-Grad-Wand, Slot 14).
@@ -1991,11 +1995,11 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// laeuft sie gegen R2/G12 statt gegen unendlich. Das Residuum steht dann senkrecht auf dem
 	// Erreichbaren -- das ist die Definition von "so nah am Ziel wie diese Linkmenge es zulaesst".
 )+"#ifdef FACETTEN_LSQ"+R(
-	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
-	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
+	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
+	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; res2=fabs(G22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
 )+"#else"+R(
-	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
-	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
+	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
+	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
 )+"#endif"+R( // FACETTEN_LSQ
 	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } return; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten (Einzellink-diagonal -- die ELIBB-heilbare Klasse)
 	} else {
@@ -2008,14 +2012,24 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
 	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett; }
 )+"#ifdef FACETTEN_LSQ"+R(
-	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } }
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } }
 )+"#else"+R(
-	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; if(t%100ul==0ul) atomic_inc(&hits[14]); }
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); }
 )+"#endif"+R( // FACETTEN_LSQ
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
+	// ★★ 2026-08-25 QUERGATE (CFD_FAC_QUERGATE, Default AUS), Antwort auf Pruefbefund 4-A.
+	// Die Skalar-Rueckfaelle treffen ihr Ziel in Stroemungsrichtung exakt und lassen die zweite
+	// Gleichung laufen: Phi2 = G12*s1 statt 0, gemessen bis 10^3 mal twe. Das ist derselbe Bruch,
+	// den SATGATE fuer die Dynamik schon macht -- iMEM wirkt nur, wenn es sein Ziel erreichen kann.
+	// Hier auf die QUERrichtung erweitert: uebersteigt der Restfehler in t2 die Wandschubspannung,
+	// die ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen,
+	// den niemand bestellt hat. Ein exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
+)+"#ifdef FACETTEN_QUERGATE"+R(
+	if(res2>def_fac_tau*twe) { if(t%100ul==0ul) atomic_inc(&hits[64]); return; } // Slot 64
+)+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
@@ -2213,8 +2227,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// (auch meine eigene Rechnung "0,00039 Prozent der Zellaktualisierungen" vom 23.08.).
 	// Jetzt Stichprobe wie alle uebrigen Zaehler: 1/100 der Schritte. Die Zahl ist damit ein
 	// SAMPLE, kein Ereigniszaehler -- Legende in lbm.hpp sagt es.
-	if(t%100ul==0ul) { if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]);
-	                   else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]); }
+	if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend statt gegatet (Pruefbefund A1)
+	else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
 )+"#endif"+R(
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
@@ -2230,8 +2244,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// (EQUILIBRIUM_BOUNDARIES ist immer definiert). Die Klemme klemmte lautlos, und jede
 		// "0 Treffer"-Meldung stammte von einem Zaehler, der im Binary nie existierte. Genau der
 		// No-Op, vor dem der eigene Kommentar im anderen Zweig warnt.
-		if(t%100ul==0ul) { if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]); // gegatet, siehe oben
-		                   else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]); }
+		if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend, siehe oben
+		else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
 )+"#endif"+R( // RHO_CLAMP
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
@@ -2299,13 +2313,13 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// ★ 2026-08-25: Wirkpfad-Zaehler Slot 28. Die Geschwindigkeitsklemme war die EINZIGE
 		// unbeobachtete Klemme im Kernel -- greift sie, ist der Impuls NICHT mehr erhalten
 		// (f_eq traegt rho*u_geklemmt statt j+F/2). Gegatet wie alle uebrigen Zaehler.
-		if(t%100ul==0ul&&(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)) atomic_inc(&rho_clamp_hits[28]);
+		if((fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // saettigend statt gegatet
 		calculate_forcing_terms(uxn, uyn, uzn, fxn, fyn, fzn, Fin); // calculate volume force terms Fin from velocity field (Guo forcing, Krueger p.233f)
 )+"#else"+R( // VOLUME_FORCE
 		uxn = clamp(uxn, -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(uyn, -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(uzn, -def_c, def_c);
-		if(t%100ul==0ul&&(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)) atomic_inc(&rho_clamp_hits[28]); // Slot 28, siehe oben
+		if((fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // saettigend statt gegatet // Slot 28, siehe oben
 		for(uint i=0u; i<def_velocity_set; i++) Fin[i] = 0.0f;
 )+"#endif"+R( // VOLUME_FORCE
 	}
@@ -2361,17 +2375,24 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// 24.08. stand also auf einer verzerrten Scherrate. uxn traegt an dieser Stelle bereits den
 		// F/(2*rho)-Schub, ist also die PHYSIKALISCHE Geschwindigkeit -- genau die, die hier gehoert.
 )+"#ifdef SGS_GUO"+R(
+)+"#ifdef VOLUME_FORCE"+R(
 		{
 			const float Qroh = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz));
 			Hxx += uxn*fxn; Hyy += uyn*fyn; Hzz += uzn*fzn; // 0,5*(u_a F_b + F_a u_b), Diagonale = u_a F_a
 			Hxy += 0.5f*(uxn*fyn+fxn*uyn); Hxz += 0.5f*(uxn*fzn+fxn*uzn); Hyz += 0.5f*(uyn*fzn+fyn*uzn);
-			if(t%100ul==0ul) { // Wirkpfad UND Groesse: relative Aenderung von |Pi| in vier Klassen
+			// ★ Pruefbefund 3-A (2026-08-25, HOCH): ohne Stichprobe feuert das je ZELLE je 100. Schritt --
+			// bei 2e8 Zellen wickelt uint nach rund 21 Abtastungen, also rund 2100 Zeitschritten. Genau
+			// die Rechnung, mit der derselbe Commit die Gatung von Slot 0/1 begruendet hat. Deshalb
+			// zusaetzlich der multiplikative Hash von SGS_DIAG (jede 64. Zelle); die Prozente bleiben
+			// erwartungstreu, der Zaehler bleibt im Bereich.
+			if(t%100ul==0ul&&((n*2654435761ul)&4227858432ul)==0ul) { // Wirkpfad UND Groesse: relative Aenderung von |Pi| in vier Klassen
 				const float Qneu = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz));
 				const float qr = sqrt(Qroh), qn = sqrt(Qneu);
 				const float rel = qr>0.0f ? fabs(qn-qr)/qr : (qn>0.0f ? 1.0f : 0.0f);
 				atomic_inc(&rho_clamp_hits[60u+(rel<0.001f?0u:(rel<0.01f?1u:(rel<0.1f?2u:3u)))]);
 			}
 		}
+)+"#endif"+R( // VOLUME_FORCE
 )+"#endif"+R( // SGS_GUO
 		const float Q = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz)); // Q = H*H, turbulent eddy viscosity nut = (C*Delta)^2*|S|, intensity of local strain rate tensor |S|=sqrt(2*S*S)
 		w = 2.0f/(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // 0.76421222 = 18*sqrt(2)*(C*Delta)^2, C = 1/pi*(2/(3*CK))^(3/4) = Smagorinsky-Lilly constant, CK = 3/2 = Kolmogorov constant, Delta = 1 = lattice constant
@@ -2487,7 +2508,11 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			// Fall den Zaehler ein zweites Mal erhoeht (Klemmanteil = 2*Klemme+Zone ueber Zone).
 			const float w_roh_ = 1.0f/fma(3.0f, nu_s, 0.5f);
 			w = fmax(w_roh_, def_sponge_wmin);
-			if(t%100ul==0ul) { atomic_inc(&rho_clamp_hits[29]); if(w_roh_<def_sponge_wmin) atomic_inc(&rho_clamp_hits[29]); }
+			// ★ Pruefbefund A3: vorher landeten Zone UND Klemme im SELBEN Slot (Z+K) -- daraus ist K
+			// nicht rekonstruierbar, sp=2e6 ist zwischen (Z=2e6,K=0) und (Z=1e6,K=1e6) mehrdeutig.
+			// Jetzt getrennte Slots, beide saettigend.
+			if(rho_clamp_hits[29]<0xF0000000u) atomic_inc(&rho_clamp_hits[29]);
+			if(w_roh_<def_sponge_wmin&&rho_clamp_hits[66]<0xF0000000u) atomic_inc(&rho_clamp_hits[66]);
 		}
 	}
 )+"#endif"+R( // SPONGE
@@ -3336,34 +3361,36 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(!has_fluid_neighbor) { store3_F(F, n, (float3)(0.0f, 0.0f, 0.0f)); return; }
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
-	float Fb=1.0f, fx=0.0f, fy=0.0f, fz=0.0f;
-	calculate_rho_u(fhn, &Fb, &fx, &fy, &fz); // abuse calculate_rho_u() method for calculating force
-	float Fx=2.0f*Fb*fx, Fy=2.0f*Fb*fy, Fz=2.0f*Fb*fz;
+	// ★★ 2026-08-25, Pruefbefund 2-A. Vorher: calculate_rho_u ueber ALLE 19 Richtungen, also auch ueber
+	// Links, deren Streaming-Ursprung selbst Solid ist. Fuer die fuehrt NIEMAND je store_f aus -- der
+	// Slot behaelt den Wert aus initialize(). Bei ruhender Wand ist das feq(1,0), in Stoerform exakt 0,
+	// deshalb ist es nie aufgefallen. Bei MITBEWEGTER Wand ist es feq(1,u_w) und NICHT null: an der
+	// ebenen Fahrbahn sind 13 der 18 Links tot und tragen +-5*u_w/3 -- mit der Paritaet des Zeitschritts
+	// oszillierend, drei Groessenordnungen ueber tau_w. Meine erste Fassung addierte nur den fehlenden
+	// Bewegtwand-Term und liess diese vier Fuenftel stehen. Jetzt laufen BEIDE Summanden ueber DIESELBE
+	// Linkmenge: nur Links, die wirklich an Fluid zurueckgeworfen werden.
+	//   F = Sum_{Ursprung Fluid} c_i * (2 f_i - 6 w_i (c_i . u_w))   (Krueger S.180, rho_w = 1)
+	// Fuer ruhende Waende ist das Ergebnis physikalisch identisch (die toten Links tragen 0); NICHT
+	// bitgleich, weil sich die Summationsreihenfolge gegenueber calculate_rho_u aendert.
+	float Fx=0.0f, Fy=0.0f, Fz=0.0f;
 )+"#ifdef MOVING_BOUNDARIES"+R(
-	// ★★ 2026-08-25, Audit-Befund behoben: der BEWEGTWAND-TERM fehlte. Der Impulsaustausch je
-	// zurueckgeworfenem Link ist c_i*(2*f_i - B_i) mit B_i = 6*w_i*rho_w*(c_i . u_w) (Krueger S.180,
-	// rho_w = 1 wie in apply_moving_boundaries). Bisher stand hier nur der erste Summand -- am ebenen
-	// mitbewegten Boden fehlten damit exakt rho*u_w/3 je Randzelle und Schritt (die zurueckgeworfene
-	// Linkmenge ist dort {(0,0,-1),(+-1,0,-1),(0,+-1,-1)}, Sum w_i c_ix^2 = 1/18, mal -6). Jede
-	// Kraftbilanz mit TYPE_S und u != 0 war um diesen Betrag falsch -- der laufende Boden zieht
-	// am Fluid, ohne dass die Reaktionskraft irgendwo auftauchte.
-	{
-		const float uwx=u[n], uwy=u[def_N+(ulong)n], uwz=u[2ul*def_N+(ulong)n];
-		if(uwx!=0.0f||uwy!=0.0f||uwz!=0.0f) {
-			float cx_=0.0f, cy_=0.0f, cz_=0.0f;
-			for(uint i=1u; i<def_velocity_set; i++) {
-				const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
-				if((flags[j[ib]]&TYPE_BO)==TYPE_S) continue; // nur Links, die wirklich an Fluid zurueckgeworfen werden
-				const float cix=c(i), ciy=c(def_velocity_set+i), ciz=c(2u*def_velocity_set+i);
-				const float b = -6.0f*w(i)*(cix*uwx+ciy*uwy+ciz*uwz);
-				cx_ = fma(b, cix, cx_); cy_ = fma(b, ciy, cy_); cz_ = fma(b, ciz, cz_);
-			}
-			Fx += cx_; Fy += cy_; Fz += cz_;
-			if(t%100ul==0ul&&(cx_!=0.0f||cy_!=0.0f||cz_!=0.0f)) atomic_inc(&hits[59]); // Wirkpfad-Nachweis
-		}
-	}
+	const float uwx=u[n], uwy=u[def_N+(ulong)n], uwz=u[2ul*def_N+(ulong)n];
+	const bool bewegt = (uwx!=0.0f||uwy!=0.0f||uwz!=0.0f);
 )+"#endif"+R( // MOVING_BOUNDARIES
-	store3_F(F, n, (float3)(Fx, Fy, Fz)); // FORK: bbox-bewusst // 2x because fi are reflected on solid boundary cells (bounced-back)
+	for(uint i=1u; i<def_velocity_set; i++) {
+		const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
+		if((flags[j[ib]]&TYPE_BO)==TYPE_S) continue; // toter Link: nie beschrieben, traegt den initialize()-Wert
+		const float cix=c(i), ciy=c(def_velocity_set+i), ciz=c(2u*def_velocity_set+i);
+		float m = 2.0f*fhn[i];
+)+"#ifdef MOVING_BOUNDARIES"+R(
+		if(bewegt) m = fma(-6.0f*w(i), cix*uwx+ciy*uwy+ciz*uwz, m); // Bewegtwand-Anteil B_i
+)+"#endif"+R( // MOVING_BOUNDARIES
+		Fx = fma(m, cix, Fx); Fy = fma(m, ciy, Fy); Fz = fma(m, ciz, Fz);
+	}
+)+"#ifdef MOVING_BOUNDARIES"+R(
+	if(bewegt&&hits[59]<0xF0000000u) atomic_inc(&hits[59]); // Wirkpfad, saettigend: update_force_field laeuft NICHT jeden Schritt, eine t%100-Gatung waere im ungeeigneten Takt strukturell null
+)+"#endif"+R( // MOVING_BOUNDARIES
+	store3_F(F, n, (float3)(Fx, Fy, Fz)); // FORK: bbox-bewusst // 2x, weil fi an Solidzellen zurueckgeworfen werden
 } // update_force_field()
 )+R(kernel void reset_force_field(global float* F) { // reset force field
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -3403,10 +3430,10 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// Jetzt: FESTE Gittergroesse mit Grid-Stride-Schleife -> feste Zahl Teilsummen, feste Summations-
 	// reihenfolge in object_force_final. Nebenbei entfaellt der Atomic-Verkehr komplett.
 	const uint lid = get_local_id(0);
-	const uxx gid = (uxx)get_global_id(0), gs = (uxx)get_global_size(0);
+	const ulong gid = (ulong)get_global_id(0), gs = (ulong)get_global_size(0); // ★ Pruefbefund 1-b: als uxx wickelt die Schleife im 65536-Fenster unter der uxx-Grenze zur Endlosschleife
 	local float3 cache[cl_workgroup_size];
 	float3 s = (float3)(0.0f, 0.0f, 0.0f);
-	for(uxx n=gid; n<(uxx)def_N; n+=gs) if(flags[n]==flag_marker) s += load3_F(F, n); // feste Reihenfolge je Work-Item
+	for(ulong n=gid; n<(ulong)def_N; n+=gs) if(flags[(uxx)n]==flag_marker) s += load3_F(F, (uxx)n); // feste Reihenfolge je Work-Item
 	cache[lid] = s;
 	barrier(CLK_LOCAL_MEM_FENCE); // ★ war CLK_GLOBAL_MEM_FENCE -- der falsche Speicher fuer ein local-Array
 	for(uint st=1u; st<cl_workgroup_size; st*=2u) {
@@ -3419,10 +3446,10 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): woertliche Kopie von object_force mit z-Band-Praedikat
 	// [z_lo,z_hi). coordinates() ist DOMAENENLOKAL -- der LBM-Wrapper erzwingt D=1.
 	const uint lid = get_local_id(0);
-	const uxx gid = (uxx)get_global_id(0), gs = (uxx)get_global_size(0);
+	const ulong gid = (ulong)get_global_id(0), gs = (ulong)get_global_size(0); // ★ Pruefbefund 1-b: als uxx wickelt die Schleife im 65536-Fenster unter der uxx-Grenze zur Endlosschleife
 	local float3 cache[cl_workgroup_size];
 	float3 s = (float3)(0.0f, 0.0f, 0.0f);
-	for(uxx n=gid; n<(uxx)def_N; n+=gs) if(flags[n]==flag_marker&&coordinates(n).z>=z_lo&&coordinates(n).z<z_hi) s += load3_F(F, n);
+	for(ulong n=gid; n<(ulong)def_N; n+=gs) if(flags[(uxx)n]==flag_marker&&coordinates((uxx)n).z>=z_lo&&coordinates((uxx)n).z<z_hi) s += load3_F(F, (uxx)n);
 	cache[lid] = s;
 	barrier(CLK_LOCAL_MEM_FENCE);
 	for(uint st=1u; st<cl_workgroup_size; st*=2u) {
