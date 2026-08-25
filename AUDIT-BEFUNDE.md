@@ -2528,3 +2528,45 @@ Mit der frischen, GEFENSTERTEN Serie (k2_n20/38/76) und fuenf Kontrollarmen:
    Reflexion, P1 ~ -u/3). Das erklaert einen Teil des u_tau-Defizits (IST/Ziel 0,67-0,73)
    NEBEN der Treppenrauigkeit. Ein 3/2-Korrekturfaktor auf das abgetastete u_t waere die
    billigste Massnahme -- gehoert als eigener Messarm in die Leiter, NICHT still eingebaut.
+
+## ELIBB-MESSLEITER g1 (2026-08-25 nachmittags): B2-BLENDE FALSIFIZIERT -- Kugel-Gate schlaegt hart fehl
+
+Sechs Laeufe, je exakt eine Variable (CFD_FAC_ELIBB), Binary 0ab98fd + Folgecommit:
+
+| Arm | aus | an | Urteil |
+|---|---|---|---|
+| kipp0 (Gate) | Hash 4722579264326613690 | Hash identisch | **BESTANDEN (bitgleich)** |
+| kipp26 u_tau IST/Ziel | 1,943 | **2,747** | schlechter |
+| kipp26 K2 | -1,0488 | **-1,6001** | schlechter |
+| kipp45 u_tau IST/Ziel | 1,529 | **1,698** | schlechter |
+| kipp45 K2 | 0,0336 | 0,0139 | schlechter |
+| Kugel Cd (nominal) | +10,5744 | **-4,9498** | **PHYSIKALISCH UNMOEGLICH** |
+| Kugel Delta-m | +273,7 | **-52,6** | Vorzeichenwechsel |
+
+Das NEGATIVE Cd der Kugel ist der harte Beweis: die Blende INJIZIERT Impuls ins Feld --
+das ist kein Buchungs-, sondern ein Feldbefund (object_force). Beide Kippwinkel bestaetigen
+die Richtung: die Wand wird RAUER statt glatter (Re_tau IST steigt), die Zustandsprognose
+des Entscheids ist widerlegt. Die Gates feuern massiv haeufiger (u_s-Klemme/Gate 26 Grad:
+45,2 Mio gegen 21,1 Mio; 45 Grad: 4,05 Mio gegen 0,30 Mio) -- der Solve kaempft gegen die
+Blende. K3 (Druck exakt 0) besteht in allen Armen; kipp0-Bitgleichheit besteht -- der
+Defekt sitzt AUSSCHLIESSLICH im q!=0,5-Zweig der Blende.
+
+WICHTIGE PRAEZEDENZ AUS V1 (knowledge/wall-models.md, 05.08.2026): die gedruckte
+Marson-Eq-25-Form erzeugte bei q=0,5 Spiegelreflexion mit **Cd_v = -1,84** -- dieselbe
+Signaturklasse (negativer Widerstand = Free-Slip/Injektions-Pathologie). Der damalige
+Befund "a2=(1-q)/q passt auf keinen gedruckten Zweig" und der heutige Kugelbefund
+gehoeren vermutlich zur selben Wurzel: die NEBB-/Blenden-OPERANDENWAHL ist falsch, nicht
+die Idee der q-Interpolation.
+
+HARNESS-LUECKE benannt: der B0-Harness prueft Bitgleichheit bei q=0,5 und Massendrift --
+er prueft NICHT das VORZEICHEN des Impulsaustauschs der Blende bei q!=0,5. Genau dort
+sitzt der Defekt. Erweiterung noetig: analytischer Poiseuille-/Couette-Minifall im
+Harness, Impulsaustausch der Blende gegen die BB-Referenz, Vorzeichen und Betrag.
+
+STAND DER LEITER: Stufe 1 (kipp0) bestanden, Stufe 2 (Kugel) NICHT bestanden -->
+LEITER GESTOPPT, kein Fahrzeuglauf. Naechste Schritte (Reihenfolge):
+1. Harness-Erweiterung Impulsaustausch (CPU) -- Operandenwahl der Blende dort
+   durchpermutieren (bb/nebb-Zweige, Vorzeichen von f_neq, Richtung des feq-Operanden),
+   bis Vorzeichen und q->0,5-Grenzfall stimmen.
+2. Erst mit bestandenem Harness zurueck auf die Kugel.
+3. CFD_FAC_ELIBB bleibt Default AUS; der Kontrollpfad ist bitgleich unberuehrt.
