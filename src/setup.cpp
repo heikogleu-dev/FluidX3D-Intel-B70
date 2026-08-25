@@ -1760,7 +1760,11 @@ void main_setup_kanal() {
 			print_info("iMEM-Erhaltung: Delta-m gesamt = "+to_string((float)dm,9u)+" (Kanal-Soll exakt 0), Normalkontamination = "+to_string((float)nk,9u));
 			if(kipp==0u&&dm!=0.0) print_warning("Delta-m am parallelen Kanal nicht exakt 0 -- S1-Komponentenpfad pruefen.");
 		}
-		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt."); // Audit 1/3: Soll mod 2^32 -- der uint-Zaehler wickelt am Fahrzeugmassstab (fac_N~1e6 x 5000 Gates)
+		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
+			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
+			else if((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");
+			else print_info("Pur-Arm (Kanal): Slot 7 = 0 (konstruktiv), ELIBB-Wirkpfad "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+" -- Abnahme in Pur-Form bestanden.");
+		} else if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt."); // Audit 1/3: Soll mod 2^32 -- der uint-Zaehler wickelt am Fahrzeugmassstab (fac_N~1e6 x 5000 Gates)
 		if(kipp==0u&&env_u("CFD_FACETTEN",0u)<3u&&zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		// ★ 2026-08-25 FIX: y_w war hier HARTKODIERT 0,5. Der dd-Pfad warnt ausdruecklich davor
@@ -2489,7 +2493,11 @@ void main_setup_kugel() {
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
 			print_info("iMEM-Erhaltung Kugel: Delta-m = "+to_string((float)dm,6u)+", Normal-Rest = "+to_string((float)nk,6u)); }
-		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel."); // Soll mod 2^32 (Audit 1/3)
+		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
+			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
+			else if((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");
+			else print_info("Pur-Arm (Kugel): Slot 7 = 0 (konstruktiv), ELIBB-Wirkpfad "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+" -- Abnahme in Pur-Form bestanden.");
+		} else if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll an der Kugel."); // Soll mod 2^32 (Audit 1/3)
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 		double stau=0.0; ulong ntau=0ull;
 		for(ulong i2=0ull; i2<lbm.lbm_domain[0]->fac_N; i2++) if(lbm.lbm_domain[0]->fac_tau_n[i2]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i2]/(double)lbm.lbm_domain[0]->fac_tau_n[i2]; ntau++; }
@@ -5325,7 +5333,11 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])):string("")));
-		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Nahfeld -- Lookup oder Bindung defekt.");
+		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
+			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
+			else if((ulong)df->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");
+			else print_info("Pur-Arm (Nahfeld): Slot 7 = 0 (konstruktiv), ELIBB-Wirkpfad "+to_string((ulong)df->rho_clamp_hits[67])+" -- Abnahme in Pur-Form bestanden.");
+		} else if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Nahfeld -- Lookup oder Bindung defekt.");
 		lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		// ★ P8: die Negativ-Kontrolle gilt NUR im BB-Fernfeld -- bei CFD_FERN_FACETTEN>0 ZAEHLT das
 		// Fernfeld seinen Wirkpfad (Ist=Soll prueft der eigene Block unten), der harte Fehlabbruch
