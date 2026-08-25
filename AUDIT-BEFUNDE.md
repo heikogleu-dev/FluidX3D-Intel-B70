@@ -2681,3 +2681,13 @@ nicht weiter totoptimiert; er misst eine Pathologie, die am Fahrzeug 3 % der Kla
 betrifft (97 % sind m2-artig). W5 (Deklaration) + ehrliches Gate sind sein Abschluss.
 FAHRPLAN-PRIORITAET verschoben auf den 3/2-ABTASTPUNKT (Faktor ~2 auf tau_w, deckt die
 c_f-Luecke -55 %) -- UTKORR-A/B laeuft (g10).
+
+## g11-VALIDIERUNG (2026-08-25 nacht): Kette bestanden, Restluecke zugeordnet
+
+JIT-Anker bitgleich; 2x2-Ecke geschlossen (kugel_aus @ neues Binary = 10,5744 exakt);
+Kugel voll (projiziert + QKAPPE 0,65) = +5,25 stabil (346/2541 Links gekappt); Pur-Arm
++1,30 mit BESTANDENER Pur-Abnahme (Slot 67 = 17057, kein exit mehr).
+UTKORR-Antwortkurve 1,0/1,5/2,0 -> 0,716/0,921/1,069: LINEAR, keine Saettigung -- der
+wahre Faktor liegt bei ~1,7 (> Theorie 1,43-1,5): neben dem 2/3-Abtastpunkt steckt ein
+weiterer linearer Eingangsdefizit-Anteil; die Turbulenz-Selbsterhaltungs-These als
+Restluecken-TRAEGER ist damit gekippt (sie bleibt als Beitrag zweiter Ordnung).
