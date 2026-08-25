@@ -2626,3 +2626,35 @@ Referenz mit exakter Wandlage prueft. KEIN weiterer GPU-Tuning-Lauf vorher.
 STAND: CFD_FAC_ELIBB bleibt Default AUS; Kontrollpfad bitgleich; kipp0-Gate haelt.
 Alle heutigen ELIBB-Messungen waren Screening-Laeufe am kleinen Kanal/Kugel -- kein
 Produktionslauf beruehrt.
+
+## NACHGEHOLTE B1-ABNAHME (2026-08-25 abends): die ZELLEIGENE Facettenebene ist als q-Quelle fuer GEKRUEMMTE Flaechen UNTAUGLICH
+
+PROZESSFEHLER ZUERST: Der Entscheid definierte das Kugel-Gate "Upload-q gegen analytisches
+q, RMS <= 0,143" als B1-Abnahme -- die Messleiter lief OHNE dieses Gate. Nachgeholt per
+fac_q-Dump (CFD_FAC_QDUMP, g5_qdump, 725 Facetten):
+
+- Vergleich auf 1661 gemeinsamen Links: Bias +0,65, RMS 0,666 -- GEGEN GATE 0,143.
+- 2256 EXTRA-Schnitte (Upload sagt Schnitt inkl. q=1-Klemme, Analytik nicht in (0,1]).
+- 700 FEHLENDE Schnitte (Analytik ja, Upload qb=0 -> purer BB; konservativ, harmlos).
+- Beispiele: Upload q=1,0 wo die Analytik 0,25-0,42 sagt. y_w der Zellebenen bis 1,10.
+
+REFERENZ-VORBEHALT (ehrlich): meine Analytik nutzte einen Kugel-Fit auf die
+FACETTENZELLZENTREN (R_fit 6,96 gegen nominal 5,625) und die glatte Kugel statt des
+Voxelkoerpers (Heikos Regel: der Voxelkoerper IST die Wand). Beides verschiebt die
+Absolutwerte -- aber Upload 1,0 gegen 0,3 liegt WEIT jenseits jeder Referenzunsicherheit,
+und die q-Verteilung erklaert die QDIAG-Messung vollstaendig: QDIAG=2 (nur q<0,5) war
+sauber, weil es genau die massenhaft falschen q>=0,5-Links DEAKTIVIERT; QDIAG=3 war Gift,
+weil es NUR sie aktiviert. Die Kippkanaele (exakte Ebenen -> exakte q, vom Geometrie-
+Agenten bestaetigt) wurden nur schlechter-nicht-negativ; die Kugel (PCA-Ebenen mit
+y_w > 1 auf grober Kruemmung) kippte ins Unphysikalische.
+
+DAZU der CPU-Gegenbeweis: die Minikugel im 3D-Harness mit ANALYTISCHEM q zeigt KEINE
+Injektion (alle Schemata innerhalb 1,7 %, auch der "falsche" q>0,5-Zweig). Der
+Blenden-Operand ist damit als HAUPTtaeter entlastet (als Fehlerquelle zweiter Ordnung
+bleibt er auf dem Tisch -- Planungsagent laeuft); der Haupttaeter ist die
+Stufe-1-Designentscheidung "q aus der zelleigenen PCA-Ebene".
+
+KONSEQUENZ: B1-Stufe 2 wie im Entscheid vorgesehen -- q aus der GEGLAETTETEN
+REMESH-Flaeche (P1-Maschinerie, Ray-Triangle, validiert RMS 0,143 auf derselben Kugel).
+Der Voxelkoerper bleibt die einzige Geometriequelle (nie STL). Danach: Kugel-q-Gate
+ERST bestehen, dann Leiter.
