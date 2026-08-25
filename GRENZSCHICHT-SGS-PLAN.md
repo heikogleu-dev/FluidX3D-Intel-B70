@@ -1,3 +1,45 @@
+# STAND 2026-08-25 ABEND (aktuellste Fassung, ersetzt die Tagesauftraege oben)
+
+## Erledigt heute
+- Grosse Audit-Korrekturschleife: 25+ Befunde behoben (Determinismus object_force,
+  Zero-Copy-Synchronisierung, saettigende Zaehler, Bewegtwand-Term, Guo-Korrektur,
+  Praezisions-/Sponge-/Fensterwaechter), vier eigene Eingriffe zurueckgenommen
+  (A2-Rueckfall, LSQ-Default, K2-Zerlegung alt, Stoerform-Hypothese). AUDIT-BEFUNDE.md.
+- K2 hat DREI getrennte, belegte Ursachen: (1) EBEN: FP32-Bulk-Impulsquelle
+  b = 4,5-4,8e-9 je Zelle/Schritt (fensterlaengen-, arm- und aufloesungsinvariant) --
+  das 1-%-Gate scheitert ab N=38 systematisch daran; Gate-Redefinition + Chunk-Impuls-
+  Audit + A/B ohne -cl-mad-enable stehen aus. (2) TREPPE: Linkmengen-Geometrie
+  (Slot-13/Rang-2-Klassen, exakt nachgerechnet). (3) MODELLGUETE: iMEM-Abtastpunkt
+  sieht 2/3 des wahren u der ersten Lage (BB-Theorie exakt) -- 3/2-Faktor als Messarm
+  vorgemerkt.
+- K2-LOESUNGSENTSCHEID.md: ELIBB 18-Link (W1) + Deklaration toter Facetten (W5);
+  Cluster (W2) zurueckgestellt, IVW-Kraftterm (W3) Reserve, Vollrekonstruktion (W4)
+  Eskalation. Heikos Facetten-Frage beantwortet: ELIBB = Vollendung der Facetten-Idee
+  (q aus der Facettenebene), W4 = ihre Reinform.
+- ELIBB B0 (Harness, CPU) / B1 (fac_q-Hostpfad) / B2 (geometrische Blende) gebaut,
+  adversarisch geprueft (F1/F2/W1-W3 behoben), kipp0-Gate BITGLEICH bestanden
+  (FELD-HASH identisch).
+- FALSIFIKATION an Kugel + Kippwaenden: der q>0,5-Zweig der PoU-Blende INJIZIERT
+  Impuls (Kugel-Cd -4,95; QDIAG-Arme trennen scharf: nur-q<0,5 ist +2,46 sauber).
+  Das reduzierte Schema allein ist einseitig drag-erhoehend (Asymmetrie: q<0,5 zieht
+  die Wand naeher, q>0,5 wuerde entlasten). CFD_FAC_ELIBB Default AUS, Kontrollpfad
+  bitgleich.
+
+## NAECHSTER BAUSTEIN (in Arbeit)
+Korrekter q>0,5-Operand (Bouzidi verlangt die eigene Gegenrichtungs-Population, nicht
+die Wandrekonstruktion; Esoteric-Pull-Zeitversatz: bb-Operand t-2, Upstream t-1).
+Reihenfolge NACH Iron Rule: Planungsagent -> 3D-Minifall-Harness (schraege Wand,
+Impulsaustausch beider Zweige gegen exakte Wandlage) -> erst dann Kernel -> Kugel.
+KEIN GPU-Tuning-Lauf vorher.
+
+## Danach (unveraendert)
+- B3 Kraftbuchhaltung ELIBB (Blenden-Austausch je Facette buchen)
+- K2-Gate-Redefinition (FP32-Bulkquelle) + Chunk-Impuls-Audit
+- 3/2-Abtastpunkt-Messarm; W5 Deklaration toter Facetten
+- Fahrzeug 8 mm erst nach bestandener Kugel; 4 mm NUR mit explizitem Heiko-Go
+
+---
+
 # Grenzschicht und Fernfeld-SGS — Bauplan (zwei Planungsagenten, 2026-08-23)
 
 Heiko wollte die Hebel 2 (Smagorinsky im Fernfeld) und 5 (Grenzschicht) vorbereitet haben.
