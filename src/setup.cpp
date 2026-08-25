@@ -1814,7 +1814,8 @@ void main_setup_kanal() {
 			// angesagt uebersprungen statt einen legitimen Kurztest zu killen (R3-Nachschliff).
 			if(n_steps-fac_snap_step<5000ull) print_warning("K2-Pruefung UEBERSPRUNGEN: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000) -- dieser Lauf ist KEIN Abnahmelauf.");
 			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");
-			if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
+			if(LBM_Domain::s_fac_elibb_pur) print_info("K3 im Pur-Arm uebersprungen (fac_tau_n bleibt konstruktiv 0 -> n_voll-Kriterium gilt nicht; B3-Pruefbefund 3)."); // Pur-Guard wie beim Slot-7-Fix
+			else if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
 		}
 	}
 	// Feld-Hash (FNV-1a ueber die u-Bitmuster) fuer den Bitvergleich der Aequivalenzarme
@@ -5029,7 +5030,8 @@ static void main_setup_fahrzeug_dd() {
 					fac_csv << t_si << "," << cdg << "," << czg << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest
 					        << "," << cdb << "," << (cdg-cdb) << "," << czb << "," << (czg-czb) << "\n" << std::flush;
-					if(fabs(fac_dm)>1e-4*(double)df->fac_N) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N auf das FENSTER-Delta -- Arm-4-Eichung: Rauschbett ~0,12 kumulativ, Schwelle ~1 vormerken)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
+					if(LBM_Domain::s_fac_elibb&&fabs(fac_dm)>1e-4*(double)df->fac_N) { static bool dm_einmal=false; if(!dm_einmal) { dm_einmal=true; print_info("Delta-m traegt unter ELIBB den REALEN Blenden-Massenfluss (B3) -- Gelb-Band-Schwelle gilt dort nicht; Fenster-Delta = "+to_string((float)fac_dm,6u)+" (einmalige Ansage, weiter in der CSV)."); } }
+					else if(fabs(fac_dm)>1e-4*(double)df->fac_N&&!LBM_Domain::s_fac_elibb) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N auf das FENSTER-Delta -- Arm-4-Eichung: Rauschbett ~0,12 kumulativ, Schwelle ~1 vormerken)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
 				}
 			}
 			if(zb>0u) { // ★ KRAFT-ZBAND: CSV-Zeile sofort auf Platte (Muster forces.csv) + Mittel-Akkumulatoren ab Warmlauf

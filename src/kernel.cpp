@@ -1743,7 +1743,8 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 )+"#ifdef FACETTEN_ELIBB"+R(
 void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, const global uchar* fac_q, const uint fid,
                          const float rhon, const float upx, const float upy, const float upz,
-                         const float fnx, const float fny, const float fnz, global uint* hits, const ulong t) {
+                         const float fnx, const float fny, const float fnz,
+                         global float* fac_tau_acc, float* dp_out, global uint* hits, const ulong t) {
 	// ★★ B2 REVISION nach Pruefbefund W2 (2026-08-25): die Blende ist REIN GEOMETRISCH (u_W = 0).
 	// Die erste Fassung trug u_W = u_s IN der Blende -- bei q = 0,5 ist die Blende aber die
 	// Identitaet, der Wandmodell-Impuls waere an JEDER ebenen Partie (q = 0,5: Kanalboden,
@@ -1808,7 +1809,27 @@ void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, co
 		}
 		beruehrt = true;
 	}
-	if(beruehrt&&t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
+	if(beruehrt) {
+		// ★★ B3 (2026-08-25 nacht): der Blenden-Austausch wird GEBUCHT. Die Blende aendert nur den
+		// EINLAUF -- ihr Wandimpuls ist DeltaF_Wand = -Sum c_i*(fhn_neu - fpre) in EINFACHzaehlung
+		// (kein MEM-2x; das 2x der phi-Buchung gilt fuer den BB-Rundlauf, nicht fuer eine reine
+		// Einlaufmodifikation). Masse: Dm = Sum(fhn_neu - fpre) -> Slot [4], vom bestehenden
+		// Delta-m-Waechter mitueberwacht. Bucht NUR wenn beruehrt (kipp0-Bitanker: qb=127 ->
+		// unberuehrt -> Akkumulator bit-unangetastet). Damit sind Reibungspfad und object_force
+		// wieder EIN Bild -- die g12-Cz-Pfad-Diskrepanz war der Preis der fehlenden Buchung.
+		float dpx=0.0f, dpy=0.0f, dpz=0.0f, dm_=0.0f;
+		for(uint i=1u; i<def_velocity_set; i++) {
+			const float d_ = fhn[i]-fpre[i];
+			if(d_==0.0f) continue;
+			dpx = fma(d_, c(i), dpx); dpy = fma(d_, c(def_velocity_set+i), dpy); dpz = fma(d_, c(2u*def_velocity_set+i), dpz);
+			dm_ += d_;
+		}
+		const uxx a3 = 6ul*(uxx)fid;
+		fac_tau_acc[a3+1ul] += -dpx; fac_tau_acc[a3+2ul] += -dpy; fac_tau_acc[a3+3ul] += -dpz;
+		fac_tau_acc[a3+4ul] += dm_;
+		dp_out[0]=dpx; dp_out[1]=dpy; dp_out[2]=dpz; // ★ B3-Pruefbefund 1b: fuer die +2*Dp_t-Korrektur an der phi-Buchung
+		if(t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
+	}
 } // elibb_rekonstruiere()
 )+"#endif"+R( // FACETTEN_ELIBB
 // ★★ iMEM-Facettenpfad (FACETTEN-IMEM.md, an Asmuth et al. 2021 Gl. 20-28 verankert, Revision
@@ -1849,10 +1870,11 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// OHNE iMEM war sauber, jeder GPU-Arm MIT iMEM brach (Kugel-Cd -3,3/-4,95/-7,1 quer durch alle
 	// Operanden- und q-Quellen-Arme). Die Blende ist GEOMETRIE (Randbedingung), keine Korrektur.
 	// kipp0: qb=127 ueberall -> Blende ist Identitaet -> bitgleich (Anker haelt konstruktiv).
+	float elibb_dp[3] = {0.0f, 0.0f, 0.0f};
 	{
 		float r0, u0x, u0y, u0z;
 		calculate_rho_u(fhn, &r0, &u0x, &u0y, &u0z);
-		elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, nx, ny, nz, hits, t);
+		elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, nx, ny, nz, fac_tau_acc, elibb_dp, hits, t);
 	}
 )+"#ifdef FACETTEN_ELIBB_PUR"+R(
 	return; // ★ Pur-Arm (CFD_FAC_ELIBB=2): NUR die Geometrie-Blende, kein Wandmodell -- Isolationsmessung
@@ -2194,7 +2216,20 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	phi1 += alph*(S1x*t1x+S1y*t1y+S1z*t1z); phi2 += alph*(S1x*t2x+S1y*t2y+S1z*t2z);
 )+"#endif"+R(
 )+"#endif"+R( // FACETTEN_ALPHA
-	const float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
+	float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
+)+"#ifdef FACETTEN_ELIBB"+R(
+	// ★★ B3-Pruefbefund 1b (2026-08-25 nacht, HART): P1 wird NACH der Blende gemessen -- das
+	// MEM-2x von P1 setzt f_out = f_in voraus, die Blende bricht das. Ihr Tangentialanteil steckt
+	// damit bereits MIT FAKTOR 2 in der phi-Buchung; die B3-Kopfbuchung (-Dp) machte die Summe
+	// tangential vorzeichenverkehrt. Korrektur (numerisch verifiziert, schliesst auf ~1e-18):
+	// +2*Dp_tangential HIER. Der Normalanteil der Kopfbuchung bleibt die korrekte Einfachzaehlung;
+	// an den Rueckfall-/Pur-Pfaden (phi bucht nichts) ist die Kopfbuchung allein exakt.
+	{
+		const float edn_ = elibb_dp[0]*nx+elibb_dp[1]*ny+elibb_dp[2]*nz;
+		fwx += 2.0f*(elibb_dp[0]-edn_*nx); fwy += 2.0f*(elibb_dp[1]-edn_*ny); fwz += 2.0f*(elibb_dp[2]-edn_*nz);
+	}
+)+"#endif"+R( // FACETTEN_ELIBB
+)+R(
 	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] Ist-Wandkraft (ungeklemmt == twe*t1; unter PEMA MODELLKRAFT: P gefiltert, P-Fluktuation laeuft als BB durch -- Audit 1/3)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
 )+"#ifdef FACETTEN_ALPHA"+R(

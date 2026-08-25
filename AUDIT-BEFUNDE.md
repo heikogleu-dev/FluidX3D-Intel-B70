@@ -2733,3 +2733,27 @@ ab jetzt schreibt cd_facetten.csv den exakten Facettenpfad-Split cd/cz_druck_ban
 KONTROLLEIGENSCHAFT: das Band ist armstabil (0,692 +- 0,003) -- die Hebel wirken an der
 KAROSSERIE, nicht am Artefakt. Karosserie-Cd 0,91-0,99 bei 8 mm; 4-mm-Kriterium (<= 0,78)
 in messbarer Naehe (ELIBB allein -0,079 auf den Rest).
+
+## B3-PRUEFRUNDE (2026-08-25 nacht): meine Einfachzaehlung BEWIESEN GEKIPPT, Fix verifiziert
+
+NO-GO des Pruefers, numerisch belegt: die Doppelzaehlung sitzt IM SELBEN Schritt -- P1 wird
+NACH der Blende gemessen, das MEM-2x setzt f_out = f_in voraus, die Blende bricht das. Ihr
+Tangentialanteil steckt bereits mit Faktor 2 in der phi-Buchung; meine -Dp-Kopfbuchung
+machte die Gesamtsumme tangential VORZEICHENVERKEHRT (gebucht -4,89e-3 gegen wahr +4,94e-3
+im Nachbau). Meine Sorge "Doppelzaehlung im naechsten Schritt" war dagegen unbegruendet
+(jedes Bounce-Ereignis ist frischer Austausch).
+
+FIX (eingebaut, vom Pruefer vorab numerisch auf ~1e-18 verifiziert): Dp-Export aus der
+Blende + "+2*Dp_tangential" an der phi-Buchung; die Kopfbuchung bleibt (Normalanteil exakt;
+an Rueckfall-/Pur-Pfaden, wo phi nichts bucht, ist sie allein exakt). Feld bitgleich
+(reine Buchung).
+
+DEKLARIERTER FOLGE-BEFUND (Dynamik, offen): P1 misst die Blende doppelt -> der SOLVE
+verfehlt sein Ziel um -Sum(ct*Dp) -- Detektor: K2 am gekippten Kanal im ELIBB-Vollarm.
+WEITER BEHOBEN: Delta-m-Waechter arm-bewusst (die Blenden-Masse ist real und haette das
+Gelb-Band 200-8000x pro Fenster gerissen; unter ELIBB einmalige Ansage statt Dauersirene);
+K3-Pur-Guard (n_voll-Kriterium gilt im Pur-Arm konstruktiv nicht).
+OFFEN NOTIERT: Praezisionswaechter ist im Pur-Arm blind (fac_tau_n bleibt 0, B3 addiert
+trotzdem) -- saturierender Additionszaehler als Folgearbeit; fac_csv-Header nennt zband
+nicht. Die laufende g13-Serie traegt noch die ALTE Buchung -- ihre kugel_b3-Reibungszahlen
+sind OBSOLET, nur die Hash-Anker zaehlen; Neustart nach Serienende.
