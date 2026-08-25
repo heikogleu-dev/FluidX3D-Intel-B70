@@ -1740,107 +1740,7 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 } // apply_facette()
 )+"#endif"+R( // FACETTEN
 )+"#ifdef FACETTEN_IMEM"+R(
-)+"#ifdef FACETTEN_ELIBB"+R(
-void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, const global uchar* fac_q, const uint fid,
-                         const float rhon, const float upx, const float upy, const float upz, global uint* hits, const ulong t) {
-	// ★★ B2 REVISION nach Pruefbefund W2 (2026-08-25): die Blende ist REIN GEOMETRISCH (u_W = 0).
-	// Die erste Fassung trug u_W = u_s IN der Blende -- bei q = 0,5 ist die Blende aber die
-	// Identitaet, der Wandmodell-Impuls waere an JEDER ebenen Partie (q = 0,5: Kanalboden,
-	// Unterboden) konstruktiv ausgefallen. Jetzt: Blende verschiebt NUR den Reflexionspunkt auf
-	// die Facettenebene; den Wandmodell-Impuls traegt weiterhin der bestehende Additivterm
-	// q_i = 6 w_i (c_i . u_s) in Pass 2 (samt alpha-Massenkorrektur -- deren Mathematik haengt nur
-	// am Additivterm und bleibt exakt). Kein Stapeln: die Blende traegt KEIN u_W mehr.
-	// Bei q = 0,5 kollabiert der gesamte Pfad BITGLEICH auf das heutige iMEM -- der ebene
-	// Kanal-Anker prueft damit wieder echte Bitgleichheit (qb==127-Kurzschluss, auch -0.0-fest).
-	// NEBB in STOERFORM (FP16C: f^ = f - w; w-Subtraktion ist Pflicht -- P1-Offset-Falle):
-	//   f~_i = w_i*(rho - 1) + (f_ib - feq_ib(u_pre)),  feq_ib mit c_ib = -c_i.
-	// SNAPSHOT ALLER 19 (V1-Audit-Fix A, 1-Zell-Spalt-Aliasing). Slotlogik: Harness A/B (B0).
-	float fpre[def_velocity_set];
-	for(uint i=0u; i<def_velocity_set; i++) fpre[i]=fhn[i];
-	const float up2 = upx*upx+upy*upy+upz*upz;
-	bool beruehrt = false;
-	for(uint i=1u; i<def_velocity_set; i++) {
-		const uint ib = (i%2u==1u) ? i+1u : i-1u;               // Streaming-Ursprung von fhn[i] ist j[ib]
-		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;             // nur wandstaemmige Links
-		const uchar qb = fac_q[18ul*(uxx)fid+(uxx)(ib-1u)];      // q gehoert zum Link ib (Harness B)
-		if(qb==0u) continue;                                     // Ebene schneidet den Link nicht -> implizites BB bleibt
-		if(qb==127u) continue;                                   // q = 0,5: Blende ist Identitaet -- Kurzschluss haelt auch die -0.0-Kante bitgleich
-		const float q = (float)qb*(1.0f/254.0f);
-		const float cix=c(i), ciy=c(def_velocity_set+i), ciz=c(2u*def_velocity_set+i);
-		const float wi=w(i);
-		const float cup = -(cix*upx+ciy*upy+ciz*upz);            // c_ib . u_pre  (c_ib = -c_i)
-		const float feq_ib = wi*(rhon*(1.0f+3.0f*cup+4.5f*cup*cup-1.5f*up2)-1.0f); // feq_ib(rho,u_pre), Stoerform
-		const float bb = fpre[i];
-		if(q<=0.5f) { // Zweig unveraendert (R6: eine Variable je Schritt; QDIAG=2 hat ihn als sauber vermessen)
-			const float nebb = wi*(rhon-1.0f) + (fpre[ib]-feq_ib); // f~ = w(rho-1) + f_neq_ib -- u_W = 0
-			fhn[i] = fma(2.0f*q, bb, (1.0f-2.0f*q)*nebb);
-		} else {
-			// ★★ K1' (Planungsagent 2026-08-25): der alte q>0,5-Zweig nutzte die Bouzidi-Gewichte
-			// mit dem FALSCHEN zweiten Operanden (Wandrekonstruktion statt eigener Gegenrichtungs-
-			// Population) UND einem neq-Schaetzer mit vollem Upstream-Scher-Bias -- an ebenen
-			// Waenden Ueberbremsung, an STREIFENDEN Links (kleiner Nenner in q = y_w/(-n.c), die
-			// groessten Tangentialtraeger) eine selbstverstaerkende Freigabe-Ratsche: die Kugel-
-			// Injektion (Cd -3,3 bis -4,95). Aufgeloest ist damit auch der Eq.-25-Streit: das
-			// gedruckte a2 = (2-2q)/q ist ein Faktor-2-Druckfehler, korrekt ist (1-q)/q (drei
-			// unabhaengige Beweise im Planungsbericht; die V1-Passage "kein Druckfehler" ist
-			// superseded, ihre Cd_v=-1,84-Messung war exakt diese Pathologie).
-			// K1' = korrigierte Marson-Koeffizienten + KNOTENVERANKERTER neq-Schaetzer (aus bb
-			// statt fpre[ib]; stationaer exakt (1-omega)*f_neq, kein Upstream-Bias). Algebraisch:
-			//   fhn[i] = (1-q)/q * bb + (2q-1)/q * [w(rho-1) + (bb - feq_ib)]
-			//          = bb + (2q-1)/q * (w(rho-1) - feq_ib)
-			// q=0,5: Koeffizient EXAKT 0 -> Identitaet (Bitanker; der qb==127-Kurzschluss oben
-			// bleibt zusaetzlich). fpre[ib] wird in diesem Zweig GAR NICHT mehr gelesen. CPU-3D-
-			// Harness (Treppe + Minikugel, analytisches q): stabil, beste Impulsbilanz-Schliessung
-			// aller Schemata (Drag/Kraft 0,9955). Stoerform exakt (w kuerzt sich im Klammerterm).
-			fhn[i] = fma((2.0f*q-1.0f)/q, wi*(rhon-1.0f)-feq_ib, bb);
-		}
-		beruehrt = true;
-	}
-	if(beruehrt&&t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
-} // elibb_rekonstruiere()
-)+"#endif"+R( // FACETTEN_ELIBB
-// ★★ iMEM-Facettenpfad (FACETTEN-IMEM.md, an Asmuth et al. 2021 Gl. 20-28 verankert, Revision
-// 2026-08-16): Slip-Geschwindigkeit u_s statt Diagonalpaar-Tausch. JEDER Link mit solidem
-// Streaming-Ursprung traegt (linkweise, nicht paarweise); der Zusatzterm q_i = 6 w_i (c_i*u_s)
-// ist dieselbe Termform wie apply_moving_boundaries (rho_wall=1). Register: fhn[i] haelt
-// f_out_opp(t-2) -- der Esoteric-Pull-BB ist ein ZWEI-Schritt-Umlauf (Gegenpruefer, Auflage 1);
-// alle Formeln sind zeitindexfrei. 2x2-System in der Tangentialebene (Quer-Ziel 0 = Modell),
-// Degenerationskaskade fuer Einzellink-Zellen, Klemmen machen Ist!=Soll im Akkumulator sichtbar.
-void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
-                        const global float* fac_geo, const global uint* fac_idx,
-                        global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t
-)+"#ifdef FACETTEN_EMA"+R(
-                        , global float* fac_us // EMA-Zustand 3 float je Facette (1 Zelle = 1 Facette: racefrei)
-)+"#endif"+R( // FACETTEN_EMA
-)+"#ifdef FACETTEN_PEMA"+R(
-                        , global float* fac_pu // PEMA-Zustand 6 float je Facette: P-quer (xyz) + u-quer (xyz)
-)+"#endif"+R( // FACETTEN_PEMA
-)+"#ifdef FACETTEN_DIAGZ"+R(
-                        , global float* fac_diag // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds) der Diagnose-Facette
-)+"#endif"+R( // FACETTEN_DIAGZ
-)+"#ifdef FACETTEN_APG"+R(
-                        , const global float* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
-)+"#endif"+R( // FACETTEN_APG
-)+"#ifdef FACETTEN_ELIBB"+R(
-                        , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
-)+"#endif"+R( // FACETTEN_ELIBB
-)+") {"+R(
-	uxx fbi; if(!f_bbox(n, &fbi)) return;
-	const uint fid = fac_idx[fbi];
-	if(fid==0xFFFFFFFFu) return;
-	const uxx b = 8ul*(uxx)fid;
-	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
-	float rhon, uxn, uyn, uzn;
-	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt)
-	const float und = nx*uxn+ny*uyn+nz*uzn;
-	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
-	float ut = sqrt(utx*utx+uty*uty+utz*utz);
-	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
-)+"#ifdef FACETTEN_ELIBB"+R(
-	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t); return; } // Slot 9 + rein geometrisches ELIBB (B2)
-)+"#else"+R(
 	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return; } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
-)+"#endif"+R( // FACETTEN_ELIBB
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
 	{
 		const float Y  = ut*((2.0f*yw)*def_fac_Y);
@@ -2067,11 +1967,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
 	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
 )+"#endif"+R( // FACETTEN_LSQ
-)+"#ifdef FACETTEN_ELIBB"+R(
-	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t); return; } // Slot 13 + geometrisches ELIBB: genau die Klasse, fuer die B2 gebaut ist
-)+"#else"+R(
 	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } return; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten (Einzellink-diagonal -- die ELIBB-heilbare Klasse)
-)+"#endif"+R( // FACETTEN_ELIBB
 	} else {
 	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
 	const float Gt11 = G11 - Sn1*Sn1/Snn, Gt22 = G22 - Sn2*Sn2/Snn, Gt12 = G12 - Sn1*Sn2/Snn;
@@ -2088,11 +1984,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
 	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); }
 )+"#endif"+R( // FACETTEN_LSQ
-)+"#ifdef FACETTEN_ELIBB"+R(
-	else { if(t%100ul==0ul) atomic_inc(&hits[15]); elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t); return; } // Slot 15 + geometrisches ELIBB
-)+"#else"+R(
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
-)+"#endif"+R( // FACETTEN_ELIBB
 	}
 	// ★★ 2026-08-25 QUERGATE (CFD_FAC_QUERGATE, Default AUS), Antwort auf Pruefbefund 4-A.
 	// Die Skalar-Rueckfaelle treffen ihr Ziel in Stroemungsrichtung exakt und lassen die zweite
@@ -2102,22 +1994,14 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// die ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen,
 	// den niemand bestellt hat. Ein exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
 )+"#ifdef FACETTEN_QUERGATE"+R(
-)+"#ifdef FACETTEN_ELIBB"+R(
-	if(res2>def_fac_tau*twe) { if(t%100ul==0ul) atomic_inc(&hits[64]); elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t); return; } // Slot 64 + geometrisches ELIBB
-)+"#else"+R(
 	if(res2>def_fac_tau*twe) { if(t%100ul==0ul) atomic_inc(&hits[64]); return; } // Slot 64
-)+"#endif"+R( // FACETTEN_ELIBB
 )+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
 	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
 	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
-)+"#ifdef FACETTEN_ELIBB"+R(
-	if(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut) { if(t%100ul==0ul) atomic_inc(&hits[10]); elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t); return; } // Slot 10 + geometrisches ELIBB
-)+"#else"+R(
 	if(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut) { if(t%100ul==0ul) atomic_inc(&hits[10]); return; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
-)+"#endif"+R( // FACETTEN_ELIBB
 )+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
 	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
@@ -2128,11 +2012,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
 		sn = -(Sn1*s1+Sn2*s2)/Snn;
 )+"#ifdef FACETTEN_SATGATE"+R(
-)+"#ifdef FACETTEN_ELIBB"+R(
-		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t); return; } // Slot 16 + geometrisches ELIBB
-)+"#else"+R(
 		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); return; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
-)+"#endif"+R( // FACETTEN_ELIBB
 )+"#else"+R(
 		const float snc = clamp(sn, -def_fac_budget_sn*ut, def_fac_budget_sn*ut); // Budget-Skalar (1a-Bsn)
 		if(snc!=sn&&t%100ul==0ul) atomic_inc(&hits[16]); // Slot 16: s_n-Klemme
@@ -2165,12 +2045,6 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	const float alph = -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0;
 	if(fabs(alph)>ut&&t%100ul==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
 )+"#endif"+R( // FACETTEN_ALPHA
-)+"#ifdef FACETTEN_ELIBB"+R(
-	// ★ B2 (Revision W2): ERST die geometrische Blende (Reflexionspunkt -> Facettenebene, u_W = 0),
-	// DANN unveraendert der Additivterm (Wandmodell-Impuls) samt alpha. Bei q = 0,5 ist die Blende
-	// die Identitaet -> Pfad bitgleich zum ELIBB=0-Arm. Buchung des Blenden-Austauschs: B3.
-	elibb_rekonstruiere(fhn, j, flags, fac_q, fid, rhon, uxn, uyn, uzn, hits, t);
-)+"#endif"+R( // FACETTEN_ELIBB
 	for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3)
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;

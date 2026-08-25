@@ -257,7 +257,8 @@ float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Kon
 bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
-bool LBM_Domain::s_fac_elibb = false; // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
+bool LBM_Domain::s_fac_elibb = false;
+bool LBM_Domain::s_fac_elibb_pur = false; // Pur-Arm (Isolationsmessung) // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 float LBM_Domain::s_fac_qmin = 0.1f;
 float LBM_Domain::s_fac_kappa = 0.4f; // Grazing-Guard-Schwelle (K1'-Begleiter)
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
@@ -1060,6 +1061,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>0u) ? (string)"\n	#define FACETTEN_ALPHA" : (string)"") // J4-alpha: Massenkorrektur, Sum q = 0 je Facette
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"")
 	+((s_facetten&&s_fac_imem&&s_fac_elibb) ? (string)"\n	#define FACETTEN_ELIBB" : (string)"") // ★ B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
+	+((s_facetten&&s_fac_imem&&s_fac_elibb_pur) ? (string)"\n	#define FACETTEN_ELIBB_PUR" : (string)"") // ★ Pur-Arm: NUR Geometrie-Blende (CFD_FAC_ELIBB=2)
 	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")
 	+((s_facetten&&s_fac_imem&&s_fac_quergate) ? (string)"\n	#define FACETTEN_QUERGATE" : (string)"") // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"

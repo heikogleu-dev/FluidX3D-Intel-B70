@@ -196,7 +196,8 @@ public:
 	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; static float s_boden_eq_u; static uint s_boden_eq_abstand; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_fac_alpha;
-	static bool s_fac_elibb;  // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
+	static bool s_fac_elibb;
+	static bool s_fac_elibb_pur; // Pur-Arm  // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	static float s_fac_qmin;
 	static float s_fac_kappa; // Grazing-Guard
 	static uint s_fac_qdiag; // QDIAG-Diagnosearme  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
