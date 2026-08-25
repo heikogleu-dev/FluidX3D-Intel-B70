@@ -565,6 +565,24 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 			}
 		}
 		fac_q.write_to_device();
+		// ★ NACHGEHOLTE B1-ABNAHME (2026-08-25 abends): fac_q + Zellkoordinaten als CSV, damit
+		// das Kugel-Gate "Upload-q gegen analytisches q" offline pruefbar ist. Die Leiter lief
+		// heute OHNE dieses Gate -- Prozessfehler, im Befundbuch. Nur bei CFD_FAC_QDUMP=1.
+		if(getenv("CFD_FAC_QDUMP")) {
+			FILE* fq = fopen((get_exe_path()+"../export/fac_q_dump.csv").c_str(), "w");
+			if(fq) {
+				fprintf(fq, "# fid,x,y,z,nx,ny,nz,yw,qb1..qb18 (qb/254 = q; 0 = kein Schnitt)\n");
+				ulong kq2=0ull;
+				for(const Facette& f : F) { if(f.klasse!=0u) continue;
+					const uint xx=(uint)(f.n%(ulong)Nx), yy=(uint)((f.n/(ulong)Nx)%(ulong)Ny), zz=(uint)(f.n/((ulong)Nx*(ulong)Ny));
+					fprintf(fq, "%lu,%u,%u,%u,%.6f,%.6f,%.6f,%.6f", kq2, xx, yy, zz,
+						fac_geo[8ull*kq2], fac_geo[8ull*kq2+1ull], fac_geo[8ull*kq2+2ull], fac_geo[8ull*kq2+3ull]);
+					for(uint d=1u; d<19u; d++) fprintf(fq, ",%u", (uint)fac_q[18ull*kq2+(ulong)(d-1u)]);
+					fprintf(fq, "\n"); kq2++;
+				}
+				fclose(fq); print_info("fac_q-Dump: export/fac_q_dump.csv ("+to_string((ulong)aktiv)+" Facetten).");
+			}
+		}
 		string hs=""; for(uint hb=0u; hb<15u; hb++) hs+=to_string(hist[hb])+(hb<14u?" ":"");
 		print_info("ELIBB fac_q: "+to_string(nq_schnitt)+" geschnittene Links auf "+to_string(aktiv)+" Facetten ("+to_string((double)nq_schnitt/(double)aktiv,2u)+" je Facette), q-Boden(sq<"+to_string((float)s_fac_qmin,2u)+")->0,5: "+to_string(nq_boden)+", q>1-Klemme: "+to_string(nq_klemme1));
 		print_info("  q-Histogramm (Bins von 17/254, 0-basiert): "+hs+"  -- kipp0-Gate: ALLES muss im Bin 7 (q=0,5) liegen");
