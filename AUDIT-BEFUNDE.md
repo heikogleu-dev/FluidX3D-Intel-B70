@@ -2720,3 +2720,16 @@ SCREENING-FAZIT: (a) Treppenglaettung wirkt am Fahrzeug in Kugel-Richtung
 des Kanals uebersetzt sich NICHT linear in Fahrzeug-Cd (druckdominiert, erwartbar);
 (c) NAECHSTER PFLICHTBAUSTEIN vor jeder Cz-Aussage: B3-Buchung, damit Reibungs- und
 object_force-Pfad wieder EIN konsistentes Bild geben. 4 mm weiterhin nur mit Go.
+
+## g12 KORRIGIERT (Band/Rest-Zerlegung, 2026-08-25 nacht) -- von Heiko als plausibel abgenommen
+
+q_inf = 551,2 Pa (30 m/s ISA), A_ref = 1,85 m2. Band aus kraft_zband (druckdominiert;
+ab jetzt schreibt cd_facetten.csv den exakten Facettenpfad-Split cd/cz_druck_band/rest):
+| Arm | cd_druck | Band | cd_druck_REST | cz_druck |
+|---|---|---|---|---|
+| std | 1,683 | 0,692 | 0,992 | -0,054 |
+| +UTKORR | 1,662 | 0,695 | 0,968 | -0,043 |
+| +ELIBB | 1,605 | 0,692 | 0,912 | -0,035 |
+KONTROLLEIGENSCHAFT: das Band ist armstabil (0,692 +- 0,003) -- die Hebel wirken an der
+KAROSSERIE, nicht am Artefakt. Karosserie-Cd 0,91-0,99 bei 8 mm; 4-mm-Kriterium (<= 0,78)
+in messbarer Naehe (ELIBB allein -0,079 auf den Rest).
