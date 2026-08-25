@@ -5022,10 +5022,13 @@ static void main_setup_fahrzeug_dd() {
 					for(ulong i=0ull;i<df->fac_N;i++){ dm_b+=(double)df->fac_tau[6ull*i+4ull]; rest_b+=(double)df->fac_tau[6ull*i+5ull]; }
 					fac_dm=dm_b-fac_dm0; fac_rest=rest_b-fac_rest0; // FENSTER-Delta (Audit S5): Warmup-Historie abgezogen
 					if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv.precision(8); fac_csv << "# DREI ZEITBASEN (Instrumenten-Audit 2026-08-22): cd/cz_druck = MOMENTAN am Sample; cd/cz_reib = FENSTER-MITTEL seit Warmup; dm/rest = KUMULATIV seit Warmup (wachsend). Kadenz = Sample x CFD_FAC_CD_EVERY.\n";
-		fac_csv << "time_s,cd_druck,cz_druck,cd_reib,cz_reib,dm,rest\n"; }
+		fac_csv << "time_s,cd_druck,cz_druck,cd_reib,cz_reib,dm,rest,cd_druck_band,cd_druck_rest,cz_druck_band,cz_druck_rest\n"; } // ★ 2026-08-25: Band/Rest auch fuer x -- der ehrliche Karosserie-Cd (Radkontakt-Band ist kein Zielkanal)
 					const double qA=(double)q_inf*A_ref;
-					fac_csv << t_si << "," << (double)units_fine.si_F((float)FK.px)/qA << "," << (double)units_fine.si_F((float)FK.pz)/qA << ","
-					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest << "\n" << std::flush;
+					const double cdb=(double)units_fine.si_F((float)FK.pbx)/qA, cdg=(double)units_fine.si_F((float)FK.px)/qA;
+					const double czb=(double)units_fine.si_F((float)FK.pbz)/qA, czg=(double)units_fine.si_F((float)FK.pz)/qA;
+					fac_csv << t_si << "," << cdg << "," << czg << ","
+					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest
+					        << "," << cdb << "," << (cdg-cdb) << "," << czb << "," << (czg-czb) << "\n" << std::flush;
 					if(fabs(fac_dm)>1e-4*(double)df->fac_N) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N auf das FENSTER-Delta -- Arm-4-Eichung: Rauschbett ~0,12 kumulativ, Schwelle ~1 vormerken)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
 				}
 			}
