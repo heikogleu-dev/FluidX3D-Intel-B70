@@ -1740,6 +1740,118 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 } // apply_facette()
 )+"#endif"+R( // FACETTEN
 )+"#ifdef FACETTEN_IMEM"+R(
+)+"#ifdef FACETTEN_ELIBB"+R(
+void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, const global uchar* fac_q, const uint fid,
+                         const float rhon, const float upx, const float upy, const float upz, global uint* hits, const ulong t) {
+	// ★★ B2 REVISION nach Pruefbefund W2 (2026-08-25): die Blende ist REIN GEOMETRISCH (u_W = 0).
+	// Die erste Fassung trug u_W = u_s IN der Blende -- bei q = 0,5 ist die Blende aber die
+	// Identitaet, der Wandmodell-Impuls waere an JEDER ebenen Partie (q = 0,5: Kanalboden,
+	// Unterboden) konstruktiv ausgefallen. Jetzt: Blende verschiebt NUR den Reflexionspunkt auf
+	// die Facettenebene; den Wandmodell-Impuls traegt weiterhin der bestehende Additivterm
+	// q_i = 6 w_i (c_i . u_s) in Pass 2 (samt alpha-Massenkorrektur -- deren Mathematik haengt nur
+	// am Additivterm und bleibt exakt). Kein Stapeln: die Blende traegt KEIN u_W mehr.
+	// Bei q = 0,5 kollabiert der gesamte Pfad BITGLEICH auf das heutige iMEM -- der ebene
+	// Kanal-Anker prueft damit wieder echte Bitgleichheit (qb==127-Kurzschluss, auch -0.0-fest).
+	// NEBB in STOERFORM (FP16C: f^ = f - w; w-Subtraktion ist Pflicht -- P1-Offset-Falle):
+	//   f~_i = w_i*(rho - 1) + (f_ib - feq_ib(u_pre)),  feq_ib mit c_ib = -c_i.
+	// SNAPSHOT ALLER 19 (V1-Audit-Fix A, 1-Zell-Spalt-Aliasing). Slotlogik: Harness A/B (B0).
+	float fpre[def_velocity_set];
+	for(uint i=0u; i<def_velocity_set; i++) fpre[i]=fhn[i];
+	const float up2 = upx*upx+upy*upy+upz*upz;
+	bool beruehrt = false;
+	for(uint i=1u; i<def_velocity_set; i++) {
+		const uint ib = (i%2u==1u) ? i+1u : i-1u;               // Streaming-Ursprung von fhn[i] ist j[ib]
+		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;             // nur wandstaemmige Links
+		const uchar qb = fac_q[18ul*(uxx)fid+(uxx)(ib-1u)];      // q gehoert zum Link ib (Harness B)
+		if(qb==0u) continue;                                     // Ebene schneidet den Link nicht -> implizites BB bleibt
+		if(qb==127u) continue;                                   // q = 0,5: Blende ist Identitaet -- Kurzschluss haelt auch die -0.0-Kante bitgleich
+		const float q = (float)qb*(1.0f/254.0f);
+		const float cix=c(i), ciy=c(def_velocity_set+i), ciz=c(2u*def_velocity_set+i);
+		const float wi=w(i);
+		const float cup = -(cix*upx+ciy*upy+ciz*upz);            // c_ib . u_pre  (c_ib = -c_i)
+		const float feq_ib = wi*(rhon*(1.0f+3.0f*cup+4.5f*cup*cup-1.5f*up2)-1.0f); // feq_ib(rho,u_pre), Stoerform
+		const float bb = fpre[i];
+		if(q<=0.5f) { // Zweig unveraendert (R6: eine Variable je Schritt; QDIAG=2 hat ihn als sauber vermessen)
+			const float nebb = wi*(rhon-1.0f) + (fpre[ib]-feq_ib); // f~ = w(rho-1) + f_neq_ib -- u_W = 0
+			fhn[i] = fma(2.0f*q, bb, (1.0f-2.0f*q)*nebb);
+		} else {
+			// ★★ K1' (Planungsagent 2026-08-25): der alte q>0,5-Zweig nutzte die Bouzidi-Gewichte
+			// mit dem FALSCHEN zweiten Operanden (Wandrekonstruktion statt eigener Gegenrichtungs-
+			// Population) UND einem neq-Schaetzer mit vollem Upstream-Scher-Bias -- an ebenen
+			// Waenden Ueberbremsung, an STREIFENDEN Links (kleiner Nenner in q = y_w/(-n.c), die
+			// groessten Tangentialtraeger) eine selbstverstaerkende Freigabe-Ratsche: die Kugel-
+			// Injektion (Cd -3,3 bis -4,95). Aufgeloest ist damit auch der Eq.-25-Streit: das
+			// gedruckte a2 = (2-2q)/q ist ein Faktor-2-Druckfehler, korrekt ist (1-q)/q (drei
+			// unabhaengige Beweise im Planungsbericht; die V1-Passage "kein Druckfehler" ist
+			// superseded, ihre Cd_v=-1,84-Messung war exakt diese Pathologie).
+			// K1' = korrigierte Marson-Koeffizienten + KNOTENVERANKERTER neq-Schaetzer (aus bb
+			// statt fpre[ib]; stationaer exakt (1-omega)*f_neq, kein Upstream-Bias). Algebraisch:
+			//   fhn[i] = (1-q)/q * bb + (2q-1)/q * [w(rho-1) + (bb - feq_ib)]
+			//          = bb + (2q-1)/q * (w(rho-1) - feq_ib)
+			// q=0,5: Koeffizient EXAKT 0 -> Identitaet (Bitanker; der qb==127-Kurzschluss oben
+			// bleibt zusaetzlich). fpre[ib] wird in diesem Zweig GAR NICHT mehr gelesen. CPU-3D-
+			// Harness (Treppe + Minikugel, analytisches q): stabil, beste Impulsbilanz-Schliessung
+			// aller Schemata (Drag/Kraft 0,9955). Stoerform exakt (w kuerzt sich im Klammerterm).
+			fhn[i] = fma((2.0f*q-1.0f)/q, wi*(rhon-1.0f)-feq_ib, bb);
+		}
+		beruehrt = true;
+	}
+	if(beruehrt&&t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
+} // elibb_rekonstruiere()
+)+"#endif"+R( // FACETTEN_ELIBB
+// ★★ iMEM-Facettenpfad (FACETTEN-IMEM.md, an Asmuth et al. 2021 Gl. 20-28 verankert, Revision
+// 2026-08-16): Slip-Geschwindigkeit u_s statt Diagonalpaar-Tausch. JEDER Link mit solidem
+// Streaming-Ursprung traegt (linkweise, nicht paarweise); der Zusatzterm q_i = 6 w_i (c_i*u_s)
+// ist dieselbe Termform wie apply_moving_boundaries (rho_wall=1). Register: fhn[i] haelt
+// f_out_opp(t-2) -- der Esoteric-Pull-BB ist ein ZWEI-Schritt-Umlauf (Gegenpruefer, Auflage 1);
+// alle Formeln sind zeitindexfrei. 2x2-System in der Tangentialebene (Quer-Ziel 0 = Modell),
+// Degenerationskaskade fuer Einzellink-Zellen, Klemmen machen Ist!=Soll im Akkumulator sichtbar.
+void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
+                        const global float* fac_geo, const global uint* fac_idx,
+                        global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t
+)+"#ifdef FACETTEN_EMA"+R(
+                        , global float* fac_us // EMA-Zustand 3 float je Facette (1 Zelle = 1 Facette: racefrei)
+)+"#endif"+R( // FACETTEN_EMA
+)+"#ifdef FACETTEN_PEMA"+R(
+                        , global float* fac_pu // PEMA-Zustand 6 float je Facette: P-quer (xyz) + u-quer (xyz)
+)+"#endif"+R( // FACETTEN_PEMA
+)+"#ifdef FACETTEN_DIAGZ"+R(
+                        , global float* fac_diag // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds) der Diagnose-Facette
+)+"#endif"+R( // FACETTEN_DIAGZ
+)+"#ifdef FACETTEN_APG"+R(
+                        , const global float* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
+)+"#endif"+R( // FACETTEN_APG
+)+"#ifdef FACETTEN_ELIBB"+R(
+                        , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
+)+"#endif"+R( // FACETTEN_ELIBB
+)+") {"+R(
+	uxx fbi; if(!f_bbox(n, &fbi)) return;
+	const uint fid = fac_idx[fbi];
+	if(fid==0xFFFFFFFFu) return;
+	const uxx b = 8ul*(uxx)fid;
+	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
+)+"#ifdef FACETTEN_ELIBB"+R(
+	// ★★ REIHENFOLGE-FIX (2026-08-25 abends, nach g7): Blende ZUERST, DANN tastet das Wandmodell
+	// den REKONSTRUIERTEN Zustand ab. Vorher lief abtasten -> solve -> Blende -> Additivterm: der
+	// Solve kannte die Blende nicht und injizierte auf veraenderten Populationen -- der CPU-Harness
+	// OHNE iMEM war sauber, jeder GPU-Arm MIT iMEM brach (Kugel-Cd -3,3/-4,95/-7,1 quer durch alle
+	// Operanden- und q-Quellen-Arme). Die Blende ist GEOMETRIE (Randbedingung), keine Korrektur.
+	// kipp0: qb=127 ueberall -> Blende ist Identitaet -> bitgleich (Anker haelt konstruktiv).
+	{
+		float r0, u0x, u0y, u0z;
+		calculate_rho_u(fhn, &r0, &u0x, &u0y, &u0z);
+		elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, hits, t);
+	}
+)+"#ifdef FACETTEN_ELIBB_PUR"+R(
+	return; // ★ Pur-Arm (CFD_FAC_ELIBB=2): NUR die Geometrie-Blende, kein Wandmodell -- Isolationsmessung
+)+"#endif"+R( // FACETTEN_ELIBB_PUR
+)+"#endif"+R( // FACETTEN_ELIBB
+)+R(	float rhon, uxn, uyn, uzn;
+	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt; unter ELIBB: NACH der Geometrie-Blende)
+	const float und = nx*uxn+ny*uyn+nz*uzn;
+	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
+	float ut = sqrt(utx*utx+uty*uty+utz*utz);
+	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
 	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return; } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
 	{
