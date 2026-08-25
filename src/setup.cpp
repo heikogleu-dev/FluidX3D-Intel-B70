@@ -694,7 +694,8 @@ static bool ray_tri(const double ox,const double oy,const double oz, const doubl
 }
 static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uint Nz,
                                  const uchar wand_flag, const string& out_dir, const double* kugel_ref=nullptr,
-                                 const Mesh* stl=nullptr) {
+                                 const Mesh* stl=nullptr,
+                                 std::unordered_map<ulong,std::array<uchar,18>>* q_out=nullptr) { // ★ B1-Stufe 2: q je (Zelle, Richtung) aus der GEGLAETTETEN Flaeche
 	const auto idx=[&](const uint x,const uint y,const uint z){ return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
 	const auto solid=[&](const int x,const int y,const int z){
 		if(x<0||y<0||z<0||x>=(int)Nx||y>=(int)Ny||z>=(int)Nz) return false;
@@ -872,6 +873,7 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 		const ulong sy=(ulong)(bk_alt>0u ? Nz+2u : Ny+2u);
 		return (ulong)(bx+1)+((ulong)(by+1)+(ulong)(bz+1)*sy)*(ulong)(Nx+2u);
 	};
+	std::unordered_map<ulong,std::array<uchar,18>>* qfill = nullptr; // vom GEGLAETTET-Aufruf gesetzt
 	const auto q_scan=[&](const std::vector<float>& VX,const std::vector<float>& VY,const std::vector<float>& VZ)->QStat {
 		QStat S;
 		std::unordered_map<ulong,std::vector<uint>> bins;
@@ -974,6 +976,15 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 						const double eu=q-tq_u; S.n_ref_u++; S.e_sum_u+=eu; S.e2_sum_u+=eu*eu;
 					}
 				}
+			}
+			if(qfill!=nullptr) { // ★ B1-Stufe 2: q je Richtung kodieren -- NACH der Richtungs-Schleife, q_link ist komplett (die erste Fassung sass IN der Schleife und haette spaete Links verloren)
+				std::array<uchar,18> enc; bool any=false;
+				for(uint i2=0u; i2<18u; i2++) {
+					uchar qb2=0u;
+					if(q_link[i2]>0.0&&q_link[i2]<=1.0) { qb2=(uchar)fmin(fmax((double)(int)(q_link[i2]*254.0+0.5),1.0),254.0); any=true; }
+					enc[i2]=qb2;
+				}
+				if(any) (*qfill)[n]=enc;
 			}
 			// RESTSPALT je Zelle mit 1-Zellen-Spalt: q+ plus q- entlang der engsten Achse.
 			if(fw==1u) {
@@ -1109,7 +1120,10 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 		}
 	}
 	bericht("TREPPE", q_scan(ox,oy,oz));       // rohe Voxelflaeche = Bezug
+	qfill = q_out; // ★ B1-Stufe 2: NUR der geglaettete Scan fuellt die Karte
 	bericht("GEGLAETTET", q_scan(M.vx,M.vy,M.vz));
+	qfill = nullptr;
+	if(q_out!=nullptr) print_info("ELIBB Stufe 2: Remesh-q-Karte mit "+to_string((ulong)q_out->size())+" Zellen gefuellt (geglaettete Flaeche).");
 	// VTK der Flaeche fuer die Sichtpruefung (Iron Rule 3 gilt fuers MESSEN; sichten ist erlaubt)
 	std::ofstream vtk(out_dir+"remesh_flaeche.vtk");
 	vtk << "# vtk DataFile Version 3.0\nRemesh ELIBB P1\nASCII\nDATASET POLYDATA\nPOINTS " << M.vx.size() << " float\n";
@@ -2289,7 +2303,9 @@ void main_setup_kugel() {
 	if(zb>0u) print_info("KRAFT-ZBAND aktiv (Kugel, Negativ-Kontrolle): unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx*1000.0f,2u)+" mm (dx = "+to_string(dx*1000.0f,2u)+" mm). GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar.");
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
-	if(env_u("CFD_FACETTEN_REMESH", 0u)>0u) { // ★ ELIBB P1: die Kugel ist der einzige Fall mit ANALYTISCHEM q
+	std::unordered_map<ulong,std::array<uchar,18>> elibb_qmap; // ★ B1-Stufe 2: Remesh-q-Karte
+	const bool elibb_an_kugel = env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u;
+	if(env_u("CFD_FACETTEN_REMESH", 0u)>0u||elibb_an_kugel) { // ★ ELIBB P1 + Stufe 2: bei ELIBB laeuft das Remesh PFLICHTIG (q-Quelle); die Kugel ist der einzige Fall mit ANALYTISCHEM q
 		// Mitte und Radius kommen aus dem Voxelfeld selbst -- Schwerpunkt der Solidzellen und
 		// volumenaequivalenter Radius. Die position()-Konvention (Zellindex gegen zentrierten
 		// Positionsraum) ist hier uneindeutig; ein 0,5-Zellen-Irrtum wuerde einen Bias
@@ -2303,7 +2319,7 @@ void main_setup_kugel() {
 			const double R_vol=pow(3.0*(double)nv_/(4.0*M_PI), 1.0/3.0);
 			const double kref[4]={sx/(double)nv_, sy/(double)nv_, sz/(double)nv_, R_vol};
 			print_info("ELIBB P1 (Kugel): "+to_string(nv_)+" Solidzellen, Schwerpunkt ("+to_string((float)kref[0],2u)+", "+to_string((float)kref[1],2u)+", "+to_string((float)kref[2],2u)+"), volumenaequivalenter Radius "+to_string((float)R_vol,3u)+" Zellen (nominal "+to_string(0.5f*D/dx,3u)+").");
-			remesh_facetten_diag(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, kref);
+			remesh_facetten_diag(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, kref, nullptr, elibb_an_kugel?&elibb_qmap:nullptr);
 		} else print_warning("ELIBB P1 (Kugel): keine Solidzellen mit TYPE_S|TYPE_X -- Remesh uebersprungen.");
 	}
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u&&env_u("CFD_FACETTEN", 0u)==0u) { // ★ Audit 3/3 M2: der Schalter war im Kugelfall stummer No-Op (DIAG=2 lief als Vollsimulation weiter)
@@ -2316,7 +2332,7 @@ void main_setup_kugel() {
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
-		lbm.alloc_facetten(FF);
+		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr);
 	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
@@ -3444,6 +3460,7 @@ static void main_setup_fahrzeug_dd() {
 	}
 	// ★ C1b Stufe 1: jede Instanz baut ihre Facetten aus den EIGENEN flags (FACETTEN-PLAN Stufe 5);
 	// hier nach set_bcs (Revision Auflage 6). Nahfeld ist das Abnahmegitter.
+	std::unordered_map<ulong,std::array<uchar,18>> elibb_qmap_dd; // ★ B1-Stufe 2 (Funktionsscope, VOR beiden Fuellstellen)
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) {
 		// out_dir des Falls entsteht erst weiter unten -- hier derselbe Ausdruck lokal.
 		const string fac_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
@@ -3452,9 +3469,10 @@ static void main_setup_fahrzeug_dd() {
 		// ueberschrieb den Nahfeld-Census kommentarlos. Jetzt je ein Unterordner.
 		const string fdn = fac_dir+"nah/", fdf = fac_dir+"fern/"; create_folder(fdn); create_folder(fdf);
 		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, "dd-Nahfeld");
-		if(env_u("CFD_FACETTEN_REMESH", 0u)>0u) { // ★ ELIBB P1 (Heiko 2026-08-22): Voxel-Remesh-Diagnose, reiner Host-Schritt, Default aus = bitidentisch
+		const bool elibb_an_dd = env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u;
+		if(env_u("CFD_FACETTEN_REMESH", 0u)>0u||elibb_an_dd) { // ★ ELIBB P1 + Stufe 2 (Pflicht-q-Quelle bei ELIBB)
 			print_info("ELIBB P1: Remesh der Nahfeld-Voxelaussenwand (Surface Nets + Taubin) ...");
-			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, nullptr, veh_f);
+			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, nullptr, veh_f, elibb_an_dd?&elibb_qmap_dd:nullptr);
 		}
 		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
@@ -3466,6 +3484,12 @@ static void main_setup_fahrzeug_dd() {
 		create_folder(fdir);
 		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_f.get_N();n++) if(lbm_f.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		FFn = baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdir, "dd-Nahfeld");
+		// ★ B1-Stufe 2: bei ELIBB ist das Remesh die PFLICHT-q-Quelle -- auch ohne CFD_FACETTEN_DIAG
+		// (der Diagnoseblock oben laeuft im Normalfall nicht; die erste Verdrahtung hing daran).
+		if(env_u("CFD_FAC_ELIBB",0u)>0u&&elibb_qmap_dd.empty()) {
+			print_info("ELIBB Stufe 2: Remesh der Nahfeld-Voxelaussenwand fuer fac_q ...");
+			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdir, nullptr, veh_f, &elibb_qmap_dd);
+		}
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_f.get_N();n++) if(lbm_f.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
@@ -3504,7 +3528,7 @@ static void main_setup_fahrzeug_dd() {
 	else print_info("Geschwindigkeits-Einlass Fernfeld AUS (CFD_FERN_VI=0, gemessener Default): rho bleibt am Einlass festgenagelt, der Rand reflektiert -- bekannt und angesagt.");
 	lbm_f.finalize_sparse_tiles();
 	lbm_c.finalize_sparse_tiles();
-	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn); // vor run(0) -- der run()-Guard verlangt die Bindung
+	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) lbm_c.alloc_facetten(FFc); // P8: alloc_facetten_domain nutzt die INSTANZ-F-BBox von lbm_c (Fahrzeug+4 in Grobzellen, oben gesetzt) -- der Wachhund "Facette ausserhalb der F-BBox" prueft die Deckung hart
 
 	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN

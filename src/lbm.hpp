@@ -1,6 +1,8 @@
 #pragma once
 
 #include "defines.hpp"
+#include <unordered_map>
+#include <array>
 #include "opencl.hpp"
 #include "graphics.hpp"
 #include "units.hpp"
@@ -147,7 +149,7 @@ public:
 	Kernel kernel_extract_plane_macros;
 	Kernel kernel_drive_boundary_cubic_lift;
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
-	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny); // C1b: Puffer bauen + binden
+	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr); // C1b: Puffer bauen + binden; qmap = Remesh-q (B1-Stufe 2)
 
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Nur belegt, wenn alloc_schale()
 	// gerufen wurde (CFD_N2F_SCHALE>0) -- sonst bleibt alles unangetastet (Default bitidentisch).
@@ -658,7 +660,7 @@ public:
 	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out=1.0f); // FORK: Druck-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
 	void set_velocity_inlet_faces(const uint face_mask); // FORK: Geschwindigkeits-Einlass -- u vorgeschrieben, rho laeuft mit der Innenzelle mit
-	void alloc_facetten(const std::vector<Facette>& F); // C1b: Einzeldomaene, filtert klasse!=0, laedt hoch, bindet
+	void alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr); // C1b: Einzeldomaene, filtert klasse!=0, laedt hoch, bindet
 	// FORK -- Doppel-Domaene (Kopplung grob -> fein). Reihenfolge: einmal alloc_coupling_planes() auf BEIDEN
 	// Domaenen, danach je Fernfeld-Schritt extract_plane_macros() auf der groben und drive_boundary_from_coarse()
 	// auf der feinen Domaene. Beide erfordern einen vorherigen run() (Kernel brauchen initialisierte Puffer).

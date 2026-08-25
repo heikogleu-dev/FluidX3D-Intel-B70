@@ -483,7 +483,7 @@ void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend 
 
 // ★ C1b Stufe 2: Facettendaten der Domaene bauen, hochladen, Kernel neu binden (FACETTEN-STUFE2.md F1/F2).
 // Filtert klasse!=0 (markierte Zellen behalten reinen BB); fac_a = 1/|n_achse| host-berechnet (R2).
-void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny) {
+void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap) {
 	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
 	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
 	if(FN==0ull) { print_error("alloc_facetten_domain: F-BBox ist leer."); return; }
@@ -540,8 +540,18 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		static const int CZ19[19]={0,0,0,0,0,1,-1,0,0,1,-1,1,-1,0,0,-1,1,-1,1};
 		fac_q = Memory<uchar>(device, 18ull*aktiv);
 		ulong nq_schnitt=0ull, nq_boden=0ull, nq_klemme1=0ull; ulong hist[15]={0}; // hist: qb/17 grob (0..14)
+		// ★★ B1-STUFE 2 (2026-08-25 abends): q aus der GEGLAETTETEN REMESH-FLAECHE hat VORRANG.
+		// Die zelleigene PCA-Ebene ist auf Kruemmung als q-Quelle WIDERLEGT (Kugel-Gate RMS 0,67
+		// statt <=0,143; auch gefiltert 0,32-0,51). Sie bleibt RUECKFALL ohne Remesh (Kanal: exakt).
+		// Grazing-Guard und q-Boden gelten fuer BEIDE Quellen; die Guard-RICHTUNG kommt aus der
+		// PCA-Normale (die Richtung ist robust -- nur ihre Distanz war es nicht).
+		ulong nq_remesh=0ull, nq_ebene=0ull, nq_ohne_map=0ull;
+		std::vector<ulong> fac_zelle; fac_zelle.reserve(aktiv);
+		for(const Facette& f2 : F) if(f2.klasse==0u) fac_zelle.push_back(f2.n);
 		for(ulong kq=0ull; kq<aktiv; kq++) {
 			const float nx=fac_geo[8ull*kq], ny=fac_geo[8ull*kq+1ull], nz=fac_geo[8ull*kq+2ull], yw=fac_geo[8ull*kq+3ull];
+			const std::array<uchar,18>* qm = nullptr;
+			if(qmap!=nullptr) { auto it=qmap->find(fac_zelle[kq]); if(it!=qmap->end()) qm=&it->second; else nq_ohne_map++; }
 			for(uint d=1u; d<19u; d++) {
 				const float ndc = nx*(float)CX19[d]+ny*(float)CY19[d]+nz*(float)CZ19[d];
 				uchar qb=0u;
@@ -552,14 +562,18 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 					// 1 = q>1-Klemme AUS (sq>1 -> BB), 2 = nur q<0,5-Zweig (q>0,5 -> Identitaet),
 					// 3 = nur q>0,5-Zweig (q<0,5 -> Identitaet). 0 = normal. NUR Diagnose.
 					const uint qd = s_fac_qdiag;
-					if(sq>0.0f&&sq<=1.0f) {
-						float sqe = sq;
+					float sqq = -1.0f; // Quellenwahl: Remesh (Stufe 2) VOR Ebene (Rueckfall)
+					if(qm!=nullptr) { const uchar rq=(*qm)[d-1u]; if(rq>0u) { sqq=(float)rq*(1.0f/254.0f); nq_remesh++; } }
+					else if(sq>0.0f&&sq<=1.0f) { sqq=sq; nq_ebene++; }
+					else if(sq>1.0f&&sq<=1.5f) { nq_klemme1++; } // Ebenen-q>1 -> BB (nur ohne Remesh relevant)
+					if(sqq>0.0f) {
+						float sqe = sqq;
 						if(sqe<(float)s_fac_qmin) { sqe=0.5f; nq_boden++; } // q-Boden (P1-Entscheid): zu nah an der Wand -> HWBB, gezaehlt
 						if(qd==2u&&sqe>0.5f) sqe=0.5f; // Arm 2: q>0,5 -> Identitaet
 						if(qd==3u&&sqe<0.5f) sqe=0.5f; // Arm 3: q<0,5 -> Identitaet
 						qb=(uchar)fmin(fmax((float)(int)(sqe*254.0f+0.5f),1.0f),254.0f);
 						nq_schnitt++;
-					} else if(sq>1.0f&&sq<=1.5f) { qb=0u; nq_klemme1++; } // ★ K1'-Begleiter: q>1 -> BB-RUECKFALL statt Klemme (QDIAG=1 mass das kostenneutral; K1' waere mit Muell-q bei q~1 gefaehrlich)
+					} // ★ K1'-Begleiter: q>1 -> BB-RUECKFALL statt Klemme (QDIAG=1 mass das kostenneutral; K1' waere mit Muell-q bei q~1 gefaehrlich)
 					// sq>1,5: Ebene weit weg -- Link bleibt HWBB (qb=0), kein Zaehler (normaler Fall der Stufenrueckseite)
 				}
 				fac_q[18ull*kq+(ulong)(d-1u)] = qb;
@@ -586,7 +600,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 			}
 		}
 		string hs=""; for(uint hb=0u; hb<15u; hb++) hs+=to_string(hist[hb])+(hb<14u?" ":"");
-		print_info("ELIBB fac_q: "+to_string(nq_schnitt)+" geschnittene Links auf "+to_string(aktiv)+" Facetten ("+to_string((double)nq_schnitt/(double)aktiv,2u)+" je Facette), q-Boden(sq<"+to_string((float)s_fac_qmin,2u)+")->0,5: "+to_string(nq_boden)+", q>1-Klemme: "+to_string(nq_klemme1));
+		print_info("ELIBB fac_q: "+to_string(nq_schnitt)+" geschnittene Links auf "+to_string(aktiv)+" Facetten; QUELLE: Remesh "+to_string(nq_remesh)+", Ebenen-Rueckfall "+to_string(nq_ebene)+", ohne Map-Treffer "+to_string(nq_ohne_map)+" Facetten; q-Boden->0,5: "+to_string(nq_boden)+", Ebenen-q>1->BB: "+to_string(nq_klemme1));
+		if(qmap!=nullptr&&nq_remesh==0ull) print_error("ELIBB Stufe 2: Remesh-Map uebergeben, aber NULL Remesh-q verwendet -- lautloser No-Op der Stufe 2.");
 		print_info("  q-Histogramm (Bins von 17/254, 0-basiert): "+hs+"  -- kipp0-Gate: ALLES muss im Bin 7 (q=0,5) liegen");
 	}
 	fac_geo.write_to_device(); fac_idx.write_to_device(); fac_tau.write_to_device(); fac_tau_n.write_to_device();
@@ -600,9 +615,9 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
 }
 
-void LBM::alloc_facetten(const std::vector<Facette>& F) {
+void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap) {
 	if(get_D()!=1u) { print_error("CFD_FACETTEN ist nur fuer eine Domaene gebaut (dd = zwei getrennte Instanzen)."); return; }
-	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny());
+	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap);
 }
 
 void LBM_Domain::finalize_sparse_tiles() {
