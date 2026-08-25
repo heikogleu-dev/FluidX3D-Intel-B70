@@ -542,6 +542,15 @@ public:
 	inline void read_from_device(const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			cl_queue.enqueueReadBuffer(device_buffer, blocking, 0ull, capacity(), (void*)host_buffer, event_waitlist, event_returned);
+		} else if(is_zero_copy&&blocking) {
+			// ★★ 2026-08-25 GEFUNDEN IM AUDIT. Bei Zero-Copy (uses_ram: CPU UND iGPU -- also die
+			// GESAMTE Fernfeld-Domaene) fiel dieser Aufruf bisher ERSATZLOS aus. Beim normalen
+			// Puffer wartet ein blockierendes enqueueReadBuffer in der In-Order-Queue auf alle
+			// vorher eingereihten Kernel; bei Zero-Copy tat es GAR NICHTS -- der Host las den
+			// Speicher, waehrend die GPU noch hineinschrieb. Jede Fernfeld-Diagnosezahl (Klemmen,
+			// fac_tau, Sonden) war damit potenziell halb geschrieben, ohne dass es auffaellt.
+			// Gleiche Semantik wie der Kopierpfad herstellen: Warteschlange leeren.
+			cl_queue.finish();
 		}
 	}
 	inline void write_to_device(const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
@@ -553,6 +562,8 @@ public:
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			const ulong safe_offset=min(offset, range()), safe_length=min(length, range()-safe_offset);
 			if(safe_length>0ull) cl_queue.enqueueReadBuffer(device_buffer, blocking, safe_offset*sizeof(T), safe_length*sizeof(T), (void*)(host_buffer+safe_offset), event_waitlist, event_returned);
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-25 wie oben: Zero-Copy hatte keinerlei Synchronisierung
 		}
 	}
 	inline void write_to_device(const ulong offset, const ulong length, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {

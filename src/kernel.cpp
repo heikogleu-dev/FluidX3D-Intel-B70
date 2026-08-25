@@ -1853,7 +1853,23 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		S0 += wi;
 )+"#endif"+R( // FACETTEN_ALPHA
 	}
-)+R(	const float G11roh=G11, G22roh=G22; // Rohmomente VOR dem ALPHA2-Downdate -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
+)+R(	// ★★ 2026-08-25, MESSUNG VOR DEM EINGRIFF. fhn traegt die STOERFORM f^ = f - w_i. Der wahre
+	// tangentiale Impulsfluss durch die Wandlinks ist Sum 2 ct f_i = P1 + 2*(S1.t1); der Offset
+	// 2*(S1.t1) faellt bei symmetrischer Linkmenge (ebene Wand) exakt weg, an der Treppe nicht.
+	// Bevor irgendetwas daran geaendert wird, wird seine GROESSE gegen das Ziel def_fac_tau*twe
+	// gemessen -- Dekadenhistogramm 49..53 fuer den Offset, 54..58 fuer P1 selbst.
+	{
+		const float B1o=S1x*t1x+S1y*t1y+S1z*t1z, B2o=S1x*t2x+S1y*t2y+S1z*t2z;
+		if(t%100ul==0ul) {
+			const float zi_ = fmax(def_fac_tau*twe, 1e-30f);
+			const float ro_ = sqrt(fma(2.0f*B1o,2.0f*B1o,4.0f*B2o*B2o))/zi_;
+			const float rp_ = sqrt(fma(P1,P1,P2*P2))/zi_;
+			atomic_inc(&hits[49u+(ro_<0.01f?0u:(ro_<0.1f?1u:(ro_<1.0f?2u:(ro_<10.0f?3u:4u))))]);
+			atomic_inc(&hits[54u+(rp_<0.01f?0u:(rp_<0.1f?1u:(rp_<1.0f?2u:(rp_<10.0f?3u:4u))))]);
+		}
+	}
+	const float G12roh=G12, Sn1roh=Sn1, Sn2roh=Sn2, Snnroh=Snn; // ★ 2026-08-25 fuer den A2-Rueckfall
+	const float G11roh=G11, G22roh=G22; // Rohmomente VOR dem ALPHA2-Downdate -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
 )+"#ifdef FACETTEN_ALPHA2"+R(
 	// ★ J4-alpha Stufe 2 (Plan 2026-08-17): symmetrisches Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T
 	// mit cq = S1/S0 -- eine Kovarianz, garantiert PSD. Der Solve erreicht sein Impulsziel damit
@@ -1871,6 +1887,23 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		if(G22<1e-4f*G22r) { G22=0.0f; G12=0.0f; Sn2=0.0f; }
 		if(Snn<1e-4f*Snnr) Snn=0.0f; // Entkopplungs-Gate (Snn<1e-8) uebernimmt
 	}
+)+"#ifdef FACETTEN_A2FALL"+R(
+	// ★★ 2026-08-25, GROESSTE EINZELURSACHE VON K2 AN GEKIPPTEN WAENDEN (CFD_FAC_ALPHA=3).
+	// Das Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T vernichtet die Einzellink-Facette ANALYTISCH:
+	// mit einem Link ist cq = c_1, also c-cq = 0 und G' == 0. Solche Facetten fielen in den
+	// Slot-13-Return und blieben damit REINES Bounce-Back -- ohne jedes Wandmodell. Gemessen:
+	// 50,0 % aller Facetten bei 45 Grad, 33,3 % bei 26 Grad, 0 % an der ebenen Wand. Genau die
+	// Reihenfolge der K2-Abweichung. Der Grund ist kein Programmierfehler, sondern eine echte
+	// Entartung: mit einem einzigen Link ist JEDE Impulsinjektion eine reine Gleichverschiebung,
+	// es bleibt kein deviatorischer Freiheitsgrad fuer die alpha-Nebenbedingung.
+	// Der Rueckfall trifft die Wahl bewusst: lieber die Wandschubspannung ANWENDEN und die
+	// alpha-Nullung fuer diese Facetten aufgeben, als gar nichts zu tun. Der Preis ist messbar --
+	// Delta-m (fac_tau[4]) und Normalkontamination (fac_tau[5]) laufen weiter mit.
+	if(G11<1e-8f&&G22<1e-8f&&(G11roh>=1e-8f||G22roh>=1e-8f)) {
+		G11=G11roh; G22=G22roh; G12=G12roh; Sn1=Sn1roh; Sn2=Sn2roh; Snn=Snnroh;
+		if(t%100ul==0ul) atomic_inc(&hits[64]); // Wirkpfad: Soll ~ Slot 27 des Kontrollarms
+	}
+)+"#endif"+R( // FACETTEN_A2FALL
 )+"#endif"+R( // FACETTEN_ALPHA2
 )+"#ifdef FACETTEN_PEMA"+R(
 	// ★ Beidseitige Filterung (FACETTEN-IMEM-ANALYSE.md, Weg A): EMA auf P-Vektor UND Abtast-u
@@ -1949,8 +1982,21 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(Snn<1e-8f||kop<=1e-6f*Snn*(G11+G22)) {
 	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8, Nachpruefer-Befund 2/3 geschlossen)
 	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
+	// ★★ 2026-08-25 KLEINSTE-QUADRATE-RUECKFALL (CFD_FAC_LSQ, Default 1). Der alte Skalar-Rueckfall
+	// s1 = R1/G11 erzwingt das Ziel in Richtung 1 EXAKT und ignoriert die zweite Gleichung ganz.
+	// Ist G11 fast entartet, wird s1 riesig -- und weil G12 dabei NICHT klein sein muss, schleppt
+	// die Loesung dann Phi2 = G12*s1 mit, gemessen 10^2 bis 10^3 mal twe (26-Grad-Wand, Slot 14).
+	// Richtig ist die kleinste-Quadrate-Loesung auf dem erreichbaren Unterraum {s1*(G11,G12)}:
+	// s1 = (G11*R1 + G12*R2)/(G11^2 + G12^2). Bei G12 = 0 ist sie WORTGLEICH die alte; bei G11 -> 0
+	// laeuft sie gegen R2/G12 statt gegen unendlich. Das Residuum steht dann senkrecht auf dem
+	// Erreichbaren -- das ist die Definition von "so nah am Ziel wie diese Linkmenge es zulaesst".
+)+"#ifdef FACETTEN_LSQ"+R(
+	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
+	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
+)+"#else"+R(
 	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
 	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
+)+"#endif"+R( // FACETTEN_LSQ
 	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } return; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten (Einzellink-diagonal -- die ELIBB-heilbare Klasse)
 	} else {
 	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
@@ -1961,8 +2007,13 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// G~=Rauschen, s=R/1e-8~1e6, Doppelklemme, permanente Injektion (belegt: 546 statt 485
 	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
 	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett; }
+)+"#ifdef FACETTEN_LSQ"+R(
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } }
+)+"#else"+R(
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
 	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; if(t%100ul==0ul) atomic_inc(&hits[14]); }
+)+"#endif"+R( // FACETTEN_LSQ
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
 )+"#ifdef FACETTEN_SATGATE"+R(
@@ -2301,6 +2352,27 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			Hxy += cxi*cyi*fneqi; Hyy += cyi*cyi*fneqi; //Hzy += czi*cyi*fneqi;
 			Hxz += cxi*czi*fneqi; Hyz += cyi*czi*fneqi; Hzz += czi*czi*fneqi;
 		}
+		// ★★ 2026-08-25 GUO-KORREKTUR DES NICHTGLEICHGEWICHTSMOMENTS (Audit-Befund B).
+		// Mit Guo-Antrieb ist das zweite Moment des Kraftterms (1-1/(2*tau))*(u_a F_b + F_a u_b);
+		// das korrekte Nichtgleichgewichtsmoment lautet daher Pi = Sum cc(f-feq) + 0,5*(u_a F_b + F_a u_b)
+		// (Krueger S.234, Guo 2002). Ohne diesen Term ist die SCHERRATE ueberall dort verzerrt, wo die
+		// Volumenkraft nicht vernachlaessigbar ist -- und weil nu_0 hier praktisch 0 ist, verzerrt das
+		// die GESAMTE Viskositaet. Im KANAL ist die Volumenkraft der Antrieb, die Delta-Reihe vom
+		// 24.08. stand also auf einer verzerrten Scherrate. uxn traegt an dieser Stelle bereits den
+		// F/(2*rho)-Schub, ist also die PHYSIKALISCHE Geschwindigkeit -- genau die, die hier gehoert.
+)+"#ifdef SGS_GUO"+R(
+		{
+			const float Qroh = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz));
+			Hxx += uxn*fxn; Hyy += uyn*fyn; Hzz += uzn*fzn; // 0,5*(u_a F_b + F_a u_b), Diagonale = u_a F_a
+			Hxy += 0.5f*(uxn*fyn+fxn*uyn); Hxz += 0.5f*(uxn*fzn+fxn*uzn); Hyz += 0.5f*(uyn*fzn+fyn*uzn);
+			if(t%100ul==0ul) { // Wirkpfad UND Groesse: relative Aenderung von |Pi| in vier Klassen
+				const float Qneu = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz));
+				const float qr = sqrt(Qroh), qn = sqrt(Qneu);
+				const float rel = qr>0.0f ? fabs(qn-qr)/qr : (qn>0.0f ? 1.0f : 0.0f);
+				atomic_inc(&rho_clamp_hits[60u+(rel<0.001f?0u:(rel<0.01f?1u:(rel<0.1f?2u:3u)))]);
+			}
+		}
+)+"#endif"+R( // SGS_GUO
 		const float Q = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz)); // Q = H*H, turbulent eddy viscosity nut = (C*Delta)^2*|S|, intensity of local strain rate tensor |S|=sqrt(2*S*S)
 		w = 2.0f/(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // 0.76421222 = 18*sqrt(2)*(C*Delta)^2, C = 1/pi*(2/(3*CK))^(3/4) = Smagorinsky-Lilly constant, CK = 3/2 = Kolmogorov constant, Delta = 1 = lattice constant
 )+"#ifdef SGS_DIAG"+R(
@@ -3241,7 +3313,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // schale_blend()
 
 )+"#ifdef FORCE_FIELD"+R(
-)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F TS_P) { // calculate force from the fluid on solid boundaries from fi directly
+)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F, const global float* u, global uint* hits TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_force_field() on halo
 )+"#ifdef SPARSE_TILES"+R(
@@ -3266,7 +3338,32 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 	float Fb=1.0f, fx=0.0f, fy=0.0f, fz=0.0f;
 	calculate_rho_u(fhn, &Fb, &fx, &fy, &fz); // abuse calculate_rho_u() method for calculating force
-	store3_F(F, n, 2.0f*Fb*(float3)(fx, fy, fz)); // FORK: bbox-bewusst // 2x because fi are reflected on solid boundary cells (bounced-back)
+	float Fx=2.0f*Fb*fx, Fy=2.0f*Fb*fy, Fz=2.0f*Fb*fz;
+)+"#ifdef MOVING_BOUNDARIES"+R(
+	// ★★ 2026-08-25, Audit-Befund behoben: der BEWEGTWAND-TERM fehlte. Der Impulsaustausch je
+	// zurueckgeworfenem Link ist c_i*(2*f_i - B_i) mit B_i = 6*w_i*rho_w*(c_i . u_w) (Krueger S.180,
+	// rho_w = 1 wie in apply_moving_boundaries). Bisher stand hier nur der erste Summand -- am ebenen
+	// mitbewegten Boden fehlten damit exakt rho*u_w/3 je Randzelle und Schritt (die zurueckgeworfene
+	// Linkmenge ist dort {(0,0,-1),(+-1,0,-1),(0,+-1,-1)}, Sum w_i c_ix^2 = 1/18, mal -6). Jede
+	// Kraftbilanz mit TYPE_S und u != 0 war um diesen Betrag falsch -- der laufende Boden zieht
+	// am Fluid, ohne dass die Reaktionskraft irgendwo auftauchte.
+	{
+		const float uwx=u[n], uwy=u[def_N+(ulong)n], uwz=u[2ul*def_N+(ulong)n];
+		if(uwx!=0.0f||uwy!=0.0f||uwz!=0.0f) {
+			float cx_=0.0f, cy_=0.0f, cz_=0.0f;
+			for(uint i=1u; i<def_velocity_set; i++) {
+				const uint ib = (i%2u==1u) ? i+1u : i-1u; // Streaming-Ursprung von fhn[i] ist j[opposite(i)]
+				if((flags[j[ib]]&TYPE_BO)==TYPE_S) continue; // nur Links, die wirklich an Fluid zurueckgeworfen werden
+				const float cix=c(i), ciy=c(def_velocity_set+i), ciz=c(2u*def_velocity_set+i);
+				const float b = -6.0f*w(i)*(cix*uwx+ciy*uwy+ciz*uwz);
+				cx_ = fma(b, cix, cx_); cy_ = fma(b, ciy, cy_); cz_ = fma(b, ciz, cz_);
+			}
+			Fx += cx_; Fy += cy_; Fz += cz_;
+			if(t%100ul==0ul&&(cx_!=0.0f||cy_!=0.0f||cz_!=0.0f)) atomic_inc(&hits[59]); // Wirkpfad-Nachweis
+		}
+	}
+)+"#endif"+R( // MOVING_BOUNDARIES
+	store3_F(F, n, (float3)(Fx, Fy, Fz)); // FORK: bbox-bewusst // 2x because fi are reflected on solid boundary cells (bounced-back)
 } // update_force_field()
 )+R(kernel void reset_force_field(global float* F) { // reset force field
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -3298,42 +3395,48 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		atomic_add((volatile global uint*)&object_sum[3], local_cells);
 	}
 } // object_center_of_mass()
-)+R(kernel void object_force(const global float* F, const global uchar* flags, const uchar flag_marker, volatile global float* object_sum) {
-	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
-	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
+)+R(kernel void object_force(const global float* F, const global uchar* flags, const uchar flag_marker, global float* of_part) {
+	// ★★ 2026-08-25, DETERMINISMUS. Vorher: je Arbeitsgruppe ein atomic_add_f auf object_sum --
+	// die Additionsreihenfolge haengt an der Scheduling-Reihenfolge, Gleitkomma-Addition ist nicht
+	// assoziativ, also lieferten bitgleiche Laeufe verschiedene Cd/Cz in den letzten Stellen. Das
+	// war die zweite (berichtende) der beiden Divergenzquellen; die erste (po_mean) fiel mit 849b14f.
+	// Jetzt: FESTE Gittergroesse mit Grid-Stride-Schleife -> feste Zahl Teilsummen, feste Summations-
+	// reihenfolge in object_force_final. Nebenbei entfaellt der Atomic-Verkehr komplett.
+	const uint lid = get_local_id(0);
+	const uxx gid = (uxx)get_global_id(0), gs = (uxx)get_global_size(0);
 	local float3 cache[cl_workgroup_size];
-	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? load3_F(F, n) : (float3)(0.0f, 0.0f, 0.0f); // FORK: bbox-bewusst
-	barrier(CLK_GLOBAL_MEM_FENCE);
-	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
-		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
+	float3 s = (float3)(0.0f, 0.0f, 0.0f);
+	for(uxx n=gid; n<(uxx)def_N; n+=gs) if(flags[n]==flag_marker) s += load3_F(F, n); // feste Reihenfolge je Work-Item
+	cache[lid] = s;
+	barrier(CLK_LOCAL_MEM_FENCE); // ★ war CLK_GLOBAL_MEM_FENCE -- der falsche Speicher fuer ein local-Array
+	for(uint st=1u; st<cl_workgroup_size; st*=2u) {
+		if(lid%(2u*st)==0u) cache[lid] += cache[lid+st];
 		barrier(CLK_LOCAL_MEM_FENCE);
 	}
-	if(lid==0u) { // global memory reduction with atomic addition of local_sum
-		const float3 local_sum = cache[0];
-		if(local_sum.x!=0.0f) atomic_add_f(&object_sum[0], local_sum.x);
-		if(local_sum.y!=0.0f) atomic_add_f(&object_sum[1], local_sum.y);
-		if(local_sum.z!=0.0f) atomic_add_f(&object_sum[2], local_sum.z);
-	}
+	if(lid==0u) { const uint g=get_group_id(0); of_part[3u*g]=cache[0].x; of_part[3u*g+1u]=cache[0].y; of_part[3u*g+2u]=cache[0].z; }
 } // object_force()
-)+R(kernel void object_force_zband(const global float* F, const global uchar* flags, const uchar flag_marker, const uint z_lo, const uint z_hi, volatile global float* object_sum) {
+)+R(kernel void object_force_zband(const global float* F, const global uchar* flags, const uchar flag_marker, const uint z_lo, const uint z_hi, global float* of_part) {
 	// FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): woertliche Kopie von object_force mit z-Band-Praedikat
 	// [z_lo,z_hi). coordinates() ist DOMAENENLOKAL -- der LBM-Wrapper erzwingt D=1.
-	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
-	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
+	const uint lid = get_local_id(0);
+	const uxx gid = (uxx)get_global_id(0), gs = (uxx)get_global_size(0);
 	local float3 cache[cl_workgroup_size];
-	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker&&coordinates(n).z>=z_lo&&coordinates(n).z<z_hi ? load3_F(F, n) : (float3)(0.0f, 0.0f, 0.0f); // FORK: bbox-bewusst
-	barrier(CLK_GLOBAL_MEM_FENCE);
-	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
-		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
+	float3 s = (float3)(0.0f, 0.0f, 0.0f);
+	for(uxx n=gid; n<(uxx)def_N; n+=gs) if(flags[n]==flag_marker&&coordinates(n).z>=z_lo&&coordinates(n).z<z_hi) s += load3_F(F, n);
+	cache[lid] = s;
+	barrier(CLK_LOCAL_MEM_FENCE);
+	for(uint st=1u; st<cl_workgroup_size; st*=2u) {
+		if(lid%(2u*st)==0u) cache[lid] += cache[lid+st];
 		barrier(CLK_LOCAL_MEM_FENCE);
 	}
-	if(lid==0u) { // global memory reduction with atomic addition of local_sum
-		const float3 local_sum = cache[0];
-		if(local_sum.x!=0.0f) atomic_add_f(&object_sum[0], local_sum.x);
-		if(local_sum.y!=0.0f) atomic_add_f(&object_sum[1], local_sum.y);
-		if(local_sum.z!=0.0f) atomic_add_f(&object_sum[2], local_sum.z);
-	}
+	if(lid==0u) { const uint g=get_group_id(0); of_part[3u*g]=cache[0].x; of_part[3u*g+1u]=cache[0].y; of_part[3u*g+2u]=cache[0].z; }
 } // object_force_zband()
+)+R(kernel void object_force_final(const global float* of_part, const uint n_groups, global float* object_sum) {
+	if(get_global_id(0)!=0u) return; // eine feste, serielle Summationsreihenfolge -- das ist der ganze Zweck
+	float sx=0.0f, sy=0.0f, sz=0.0f;
+	for(uint g=0u; g<n_groups; g++) { sx+=of_part[3u*g]; sy+=of_part[3u*g+1u]; sz+=of_part[3u*g+2u]; }
+	object_sum[0]=sx; object_sum[1]=sy; object_sum[2]=sz;
+} // object_force_final()
 )+R(kernel void kraft_facetten_gpu(const global float* F, const global ulong* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
 	// FORK kraft_facetten-GPU: Druckanteil des Facetten-Cd-Pfads ohne Host-F-Transfer. Range =
 	// Markerzellen-Indexliste (der Host baut sie in der Dreifachschleifen-Scan-Reihenfolge der

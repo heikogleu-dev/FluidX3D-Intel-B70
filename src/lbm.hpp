@@ -94,6 +94,9 @@ private:
 	Kernel kernel_update_force_field; // calculate forces from fluid on TYPE_S cells
 	Kernel kernel_reset_force_field; // reset force field (also on TYPE_S cells)
 	Kernel kernel_object_center_of_mass; // calculate center of mass of all cells flagged with flag_marker
+	Memory<float> of_part;   // ★ 2026-08-25 Teilsumme (x,y,z) je Arbeitsgruppe -- ersetzt atomic_add_f
+	uint of_groups = 0u;     // FESTE Zahl Arbeitsgruppen (Grid-Stride) -> feste Summationsreihenfolge
+	Kernel kernel_object_force_final;
 	Kernel kernel_object_force; // add up force for all cells flagged with flag_marker
 	Kernel kernel_object_force_zband; // FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): object_force auf das z-Band [z_lo,z_hi)
 	Kernel kernel_object_torque; // add up torque around specified rotation_center for all cells flagged with flag_marker
@@ -190,7 +193,8 @@ public:
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
 	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; static float s_boden_eq_u; static uint s_boden_eq_abstand; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
-	static uint s_fac_alpha; // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)
+	static uint s_fac_alpha;
+	static bool s_fac_lsq; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall im iMEM-Solve // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)
 	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich)
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
@@ -226,7 +230,8 @@ public:
 	ulong kfb_N=0ull; uint kfb_zband=0u; uchar kfb_marker=0u; bool kfb_zper=false, kfb_bound=false; // EIGENE Bindungsschluessel (Pruefagent: der Hauptslot aktualisiert kf_marker/kf_zper VOR dem Bandslot-Vergleich -- geteilte Schluessel waeren ein stiller Stolperdraht)
 	void bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per, const bool band_slot=false); // Liste hochladen, Kernel binden; band_slot=true -> kfb_*-Satz
 	void kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar, const bool band_slot=false); // Kernel + double-Endsumme
-	static bool s_sgs_wandfrei; // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
+	static bool s_sgs_wandfrei;
+	static bool s_sgs_guo; // ★ 2026-08-25 Guo-Korrektur des Nichtgleichgewichtsmoments im Smagorinsky // Test B: kein nu_t in Wandzellen (CFD_SGS_WANDFREI)
 	static bool s_sgs_diag;
 	static ulong s_sgs_diag_ab;  // erster Zeitschritt, ab dem das nu_t-Histogramm zaehlt (Warmlaufsperre)     // P0-Diagnostik: nu_t/nu_0-Dekadenhistogramm, Slots 28..32 (CFD_SGS_DIAG). Default aus = kein Define, kein alloc, kein Zaehlen.
 	static bool s_wandfunktion; // Wandfunktions-Bounce-Back nach Han et al. 2021 (CFD_WANDFUNKTION)

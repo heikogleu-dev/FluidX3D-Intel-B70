@@ -139,6 +139,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// und wird seit derselben Nacharbeit ausserhalb des SUBGRID-Blocks emittiert.
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu entfernen).");
 	if(s_sgs_diag) print_error("CFD_SGS_DIAG ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu messen).");
+	if(!s_sgs_guo) print_warning("CFD_SGS_GUO=0: Pi^neq OHNE Guo-Korrektur -- die Scherrate ist dort verzerrt, wo die Volumenkraft wirkt (Kontrollarm, nicht die Physik).");
 #endif // SUBGRID
 	// R2-Nachpruefer: Ansage NACH den harten Abweisern (vorher stand "aktiv" eine Zeile vor dem exit)
 	if(s_sgs_wandfrei) print_info("SGS_WANDFREI aktiv: kein nu_t in Zellen mit solidem Flaechennachbarn (Wirkpfad-Zaehler Slot 6, Report am Laufende).");
@@ -250,12 +251,14 @@ float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Kon
 bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
+bool LBM_Domain::s_fac_lsq = true; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall; CFD_FAC_LSQ=0 ist der Kontrollarm
 float LBM_Domain::s_fac_apg = 0.0f;
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
 float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bitidentisch
 float LBM_Domain::s_fac_budget_sn = 1.0f; // CFD_FAC_BUDGET_SN (1a-Bsn), Default bitidentisch
 bool LBM_Domain::s_sgs_wandfrei = false;
+bool LBM_Domain::s_sgs_guo = true; // ★ 2026-08-25 Default AN: das ist die richtige Physik, CFD_SGS_GUO=0 ist der Kontrollarm
 bool LBM_Domain::s_sgs_diag = false;
 ulong LBM_Domain::s_sgs_diag_ab = 0ull;
 float LBM_Domain::s_sponge_wmin = 0.5f;
@@ -289,7 +292,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, s_sgs_diag ? 49ull : 30ull); // [33..37] nu_t/nu_0 NUR in der wandnaechsten Lage, Grenzen 5/15/30/60 um die Gleichgewichtserwartung kappa*y+ ~ 30 // [28..32] nu_t/nu_0-Dekadenhistogramm (<1, 1-10, 10-100, 100-1000, >=1000) -- P0-Diagnostik 2026-08-23, entscheidet den Smagorinsky-Hebel // [27] Slot-13-Split (Einzellink-diagonal) // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
+	rho_clamp_hits = Memory<uint>(device, 66ull); // [64] A2-Rueckfall (CFD_FAC_ALPHA=3) // [60..63] Guo-Korrektur: relative Aenderung von |Pi^neq| (<0,1% / <1% / <10% / >=10%) // [59] Bewegtwand-Term im Kraftfeld // ★ 2026-08-25 fest 60: [49..53] Stoerform-Offset 2*(S1.t) gegen das Ziel, [54..58] |P| gegen das Ziel (Dekaden) -- die Groessenmessung VOR dem Eingriff // [33..37] nu_t/nu_0 NUR in der wandnaechsten Lage, Grenzen 5/15/30/60 um die Gleichgewichtserwartung kappa*y+ ~ 30 // [28..32] nu_t/nu_0-Dekadenhistogramm (<1, 1-10, 10-100, 100-1000, >=1000) -- P0-Diagnostik 2026-08-23, entscheidet den Smagorinsky-Hebel // [27] Slot-13-Split (Einzellink-diagonal) // [26] Mass des PAARUNGSBEWEISES, [25] Zahl seiner Verletzungen (Slots 23/24 waren strukturell blind gegen Paarungs- und Momentenfehler -- Pruefagent 2026-08-22) // [24] groesste ULP-Distanz der Paritaets-Abweichungen // [23] N2F-Blend PARITAETS-ZAEHLER (a==0 muss 0 liefern -- Pruefagent-M2, 2026-08-22) // [22] N2F-SCHALE-Blend-Wirkpfad (P9c) // [21] EINLASS_EQ-Wirkpfad // [20] BODEN_EQ-Wirkpfad // [19] APG-Klemme auf 0 // 3x3: +4 Slots (14/15/16/17) + [18] J4-alpha, Legende lbm.hpp; Kontrollarm bitgleich (Emission gated)
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -309,11 +312,14 @@ void LBM_Domain::allocate(Device& device) {
 	object_sum = Memory<float>(device, 1u, 4u); // x, y, z, cell count
 	kernel_stream_collide.add_parameters(F);
 	kernel_update_fields.add_parameters(F);
-	kernel_update_force_field = Kernel(device, N, "update_force_field", fi, flags, t, F);
+	kernel_update_force_field = Kernel(device, N, "update_force_field", fi, flags, t, F, u, rho_clamp_hits); // ★ 2026-08-25 u + hits fuer den Bewegtwand-Term (Slot 59)
 	kernel_reset_force_field = Kernel(device, N, "reset_force_field", F);
 	kernel_object_center_of_mass = Kernel(device, N, "object_center_of_mass", flags, (uchar)0u, object_sum);
-	kernel_object_force = Kernel(device, N, "object_force", F, flags, (uchar)0u, object_sum);
-	kernel_object_force_zband = Kernel(device, N, "object_force_zband", F, flags, (uchar)0u, 0u, 0u, object_sum); // FORK Kraft-Zerlegung: object_sum wiederverwendet, Aufrufe sequenziell
+	of_groups = 1024u; // ★ 2026-08-25 feste Gittergroesse statt N -- Determinismus, s. Kernel-Kommentar
+	of_part = Memory<float>(device, 3ull*(ulong)of_groups);
+	kernel_object_force = Kernel(device, (ulong)of_groups*(ulong)WORKGROUP_SIZE, "object_force", F, flags, (uchar)0u, of_part);
+	kernel_object_force_zband = Kernel(device, (ulong)of_groups*(ulong)WORKGROUP_SIZE, "object_force_zband", F, flags, (uchar)0u, 0u, 0u, of_part); // FORK Kraft-Zerlegung: Aufrufe sequenziell
+	kernel_object_force_final = Kernel(device, (ulong)WORKGROUP_SIZE, "object_force_final", of_part, of_groups, object_sum);
 	kernel_object_torque = Kernel(device, N, "object_torque", F, flags, (uchar)0u, 0.0f, 0.0f, 0.0f, object_sum);
 #endif // FORCE_FIELD
 
@@ -612,20 +618,18 @@ void LBM_Domain::enqueue_object_center_of_mass(const uchar flag_marker) { // cal
 }
 void LBM_Domain::enqueue_object_force(const uchar flag_marker) { // add up force for all cells flagged with flag_marker
 	enqueue_update_force_field(); // update force field if it is not yet up-to-date
-	object_sum.x[0] = 0.0f; // reset object_sum
-	object_sum.y[0] = 0.0f;
-	object_sum.z[0] = 0.0f;
-	object_sum.enqueue_write_to_device();
+	// Kein Nullen mehr noetig: object_force_final schreibt mit "=", und jeder Teilsummen-Slot wird
+	// von seiner Arbeitsgruppe jeden Lauf unbedingt geschrieben (Muster po_final_mean, 849b14f).
 	kernel_object_force.set_parameters(2u, flag_marker).enqueue_run();
+	kernel_object_force_final.enqueue_run();
 	object_sum.enqueue_read_from_device();
 }
 void LBM_Domain::enqueue_object_force_zband(const uchar flag_marker, const uint z_lo, const uint z_hi) { // FORK Kraft-Zerlegung: object_force auf das z-Band [z_lo,z_hi); object_sum WIEDERVERWENDET -- strikt sequenziell zu enqueue_object_force
 	enqueue_update_force_field(); // update force field if it is not yet up-to-date
-	object_sum.x[0] = 0.0f; // reset object_sum
-	object_sum.y[0] = 0.0f;
-	object_sum.z[0] = 0.0f;
-	object_sum.enqueue_write_to_device();
+	// Kein Nullen mehr noetig: object_force_final schreibt mit "=", und jeder Teilsummen-Slot wird
+	// von seiner Arbeitsgruppe jeden Lauf unbedingt geschrieben (Muster po_final_mean, 849b14f).
 	kernel_object_force_zband.set_parameters(2u, flag_marker, z_lo, z_hi).enqueue_run();
+	kernel_object_force_final.enqueue_run();
 	object_sum.enqueue_read_from_device();
 }
 void LBM_Domain::enqueue_object_torque(const float3& rotation_center, const uchar flag_marker) { // add up torque around specified rotation_center for all cells flagged with flag_marker
@@ -932,6 +936,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// gewesen. Jetzt ausserhalb emittiert; SGS_WANDFREI ohne SUBGRID ist sinnlos und wird im
 	// Konstruktor hart abgewiesen, die WFB ist von SUBGRID unabhaengig.
 	+((s_sgs_wandfrei) ? (string)"\n	#define SGS_WANDFREI" : (string)"")
+	+((s_sgs_guo)      ? (string)"\n	#define SGS_GUO"      : (string)"") // ★ 2026-08-25 Guo-Korrektur von Pi^neq, Default AN
 	+((s_sgs_diag)     ? (string)"\n	#define SGS_DIAG"     : (string)"")
 	+((s_sgs_diag)     ? (string)"\n	#define def_sgs_diag_ab "+to_string(s_sgs_diag_ab)+"ul" : (string)"")
 	+((s_wandfunktion) ? (string)"\n	#define WANDFUNKTION"
@@ -952,6 +957,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_satgate) ? (string)"\n	#define FACETTEN_SATGATE" : (string)"") // (a-strich): Klemme -> BB-Rueckfall
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>0u) ? (string)"\n	#define FACETTEN_ALPHA" : (string)"") // J4-alpha: Massenkorrektur, Sum q = 0 je Facette
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"")
+	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"") // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
+	+((s_facetten&&s_fac_imem&&s_fac_alpha>2u) ? (string)"\n	#define FACETTEN_A2FALL" : (string)"") // ★ 2026-08-25 CFD_FAC_ALPHA=3: Einzellink-Facetten nicht tot legen, sondern ohne alpha-Downdate loesen
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"
 	"\n	#define def_fac_apg "+to_string(s_fac_apg,6u)+"f" : (string)"") // APG-Messarm: Emission nur bei kappa != 0 (Kommentar-Verklebung R2 geloest) /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"
