@@ -2157,8 +2157,13 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// Klemme das, was sie sein soll: ein nie ausloesender Waechter. Sonst ist der Lauf kein Ergebnis.
 	// Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- der lautlose No-op,
 	// den dieses Projekt jagt, in meiner eigenen Klemme.
-	if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]);
-	else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]);
+	// ★ 2026-08-25: GEGATET. Vorher ungegatet -- bei 2e8 Zellen wickelt uint nach rund 21
+	// Schritten, und JEDE grosse Klemmzahl aus den Logs davor ist damit NICHT quantitativ
+	// (auch meine eigene Rechnung "0,00039 Prozent der Zellaktualisierungen" vom 23.08.).
+	// Jetzt Stichprobe wie alle uebrigen Zaehler: 1/100 der Schritte. Die Zahl ist damit ein
+	// SAMPLE, kein Ereigniszaehler -- Legende in lbm.hpp sagt es.
+	if(t%100ul==0ul) { if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]);
+	                   else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]); }
 )+"#endif"+R(
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
@@ -2174,8 +2179,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// (EQUILIBRIUM_BOUNDARIES ist immer definiert). Die Klemme klemmte lautlos, und jede
 		// "0 Treffer"-Meldung stammte von einem Zaehler, der im Binary nie existierte. Genau der
 		// No-Op, vor dem der eigene Kommentar im anderen Zweig warnt.
-		if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]);
-		else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]);
+		if(t%100ul==0ul) { if(rhon<=RHO_CLAMP_MIN) atomic_inc(&rho_clamp_hits[0]); // gegatet, siehe oben
+		                   else if(rhon>=RHO_CLAMP_MAX) atomic_inc(&rho_clamp_hits[1]); }
 )+"#endif"+R( // RHO_CLAMP
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
@@ -2240,11 +2245,16 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		uxn = clamp(fma(fxn, rho2, uxn), -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(fma(fyn, rho2, uyn), -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(fma(fzn, rho2, uzn), -def_c, def_c);
+		// ★ 2026-08-25: Wirkpfad-Zaehler Slot 28. Die Geschwindigkeitsklemme war die EINZIGE
+		// unbeobachtete Klemme im Kernel -- greift sie, ist der Impuls NICHT mehr erhalten
+		// (f_eq traegt rho*u_geklemmt statt j+F/2). Gegatet wie alle uebrigen Zaehler.
+		if(t%100ul==0ul&&(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)) atomic_inc(&rho_clamp_hits[28]);
 		calculate_forcing_terms(uxn, uyn, uzn, fxn, fyn, fzn, Fin); // calculate volume force terms Fin from velocity field (Guo forcing, Krueger p.233f)
 )+"#else"+R( // VOLUME_FORCE
 		uxn = clamp(uxn, -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(uyn, -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(uzn, -def_c, def_c);
+		if(t%100ul==0ul&&(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)) atomic_inc(&rho_clamp_hits[28]); // Slot 28, siehe oben
 		for(uint i=0u; i<def_velocity_set; i++) Fin[i] = 0.0f;
 )+"#endif"+R( // VOLUME_FORCE
 	}
@@ -2329,7 +2339,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			const float nut_ = 1.0f/w-tau0;
 			const float rv_  = nut_/nu0_; // nu0_ > 0 ist Bauvoraussetzung, wird im Host geprueft
 			const uint  b_   = rv_<1.0f ? 0u : (rv_<10.0f ? 1u : (rv_<100.0f ? 2u : (rv_<1000.0f ? 3u : 4u)));
-			atomic_inc(&rho_clamp_hits[28u+b_]);
+			atomic_inc(&rho_clamp_hits[30u+b_]);
 			/* ★ WANDNAHE LAGE, Slots 33..37 (2026-08-23). Der Dekadenhistogramm oben mittelt ueber
 			   das GANZE Gitter -- Nachlauf und Freistrom eingeschlossen -- und beantwortet damit
 			   nicht die Frage, um die es geht: traegt die anliegende Grenzschicht ZU VIEL oder ZU
@@ -2346,17 +2356,17 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			for(uint i=1u; i<def_velocity_set; i++) wand1_ = wand1_||(flags[j[i]]&TYPE_BO)==TYPE_S;
 			if(wand1_) {
 				const uint bw_ = rv_<5.0f ? 0u : (rv_<15.0f ? 1u : (rv_<30.0f ? 2u : (rv_<60.0f ? 3u : 4u)));
-				atomic_inc(&rho_clamp_hits[33u+bw_]);
+				atomic_inc(&rho_clamp_hits[35u+bw_]);
 				/* Slots 38..42: dieselbe Lage, aber NUR mit vorwaertsgerichteter Stroemung.
 				   In abgeloesten Gebieten GEHOERT viel nu_t hin -- sie mitzuzaehlen wuerde den
 				   Ueberdissipations-Befund kuenstlich aufblasen. Dieser Teilsatz ist die
 				   ehrliche Fassung: anliegende Stroemung, wo kappa*y+ ueberhaupt gilt. */
-				if(uxn>0.0f) atomic_inc(&rho_clamp_hits[38u+bw_]);
+				if(uxn>0.0f) atomic_inc(&rho_clamp_hits[40u+bw_]);
 				/* Slots 43..46 loesen den nach oben OFFENEN Bin auf. Ohne sie laesst sich nicht
 				   sagen, ob eine Senkung von nu_t bei 20 oder bei 200 landet -- und genau davon
 				   haengt ab, ob eine Aenderung der Konstante ueberhaupt in der richtigen
 				   Groessenordnung waere (Pruefbefund 11). */
-				if(rv_>=60.0f) atomic_inc(&rho_clamp_hits[43u+(rv_<120.0f?0u:(rv_<240.0f?1u:(rv_<480.0f?2u:3u)))]);
+				if(rv_>=60.0f) atomic_inc(&rho_clamp_hits[45u+(rv_<120.0f?0u:(rv_<240.0f?1u:(rv_<480.0f?2u:3u)))]);
 			}
 		}
 )+"#endif"+R( // SGS_DIAG
@@ -2399,7 +2409,13 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			// ein Genauigkeitsdeckel, kein Stabilitaetsschutz. w >= 0,5 heisst tau <= 2.
 			// TRT bleibt konsistent: wp und wm werden weiter unten aus DIESEM w gebildet, Lambda = 3/16
 			// gilt also auch in der Zone.
-			w = fmax(1.0f/fma(3.0f, nu_s, 0.5f), def_sponge_wmin);
+			// ★ 2026-08-25: Wirkpfad-Zaehler Slot 29. SPONGE war ein Mechanismus OHNE jeden
+			// feuernden Zaehler -- nur eine laminare Vorschau beim Start. Gezaehlt wird der
+			// Eintritt in die Zone; die Klemme selbst wird mitgezaehlt, indem der geklemmte
+			// Fall den Zaehler ein zweites Mal erhoeht (Klemmanteil = 2*Klemme+Zone ueber Zone).
+			const float w_roh_ = 1.0f/fma(3.0f, nu_s, 0.5f);
+			w = fmax(w_roh_, def_sponge_wmin);
+			if(t%100ul==0ul) { atomic_inc(&rho_clamp_hits[29]); if(w_roh_<def_sponge_wmin) atomic_inc(&rho_clamp_hits[29]); }
 		}
 	}
 )+"#endif"+R( // SPONGE

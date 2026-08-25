@@ -450,7 +450,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		ulong h[5]={0ull,0ull,0ull,0ull,0ull}, ges=0ull;
 		for(uint d=0u; d<L.get_D(); d++) {
 			L.lbm_domain[d]->rho_clamp_hits.read_from_device();
-			for(uint b=0u; b<5u; b++) h[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[28u+b];
+			for(uint b=0u; b<5u; b++) h[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[30u+b];
 		}
 		for(uint b=0u; b<5u; b++) ges+=h[b];
 		if(ges>0ull) {
@@ -464,7 +464,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			// Wandnaechste Lage getrennt -- das ist die Zahl, die zwischen den beiden Lesarten
 			// entscheidet (zu viel gegen zu wenig wandnahe Mischung).
 			ulong hw[5]={0ull,0ull,0ull,0ull,0ull}, gw=0ull;
-			for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<5u; b++) hw[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[33u+b];
+			for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<5u; b++) hw[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[35u+b];
 			for(uint b=0u; b<5u; b++) gw+=hw[b];
 			if(gw>0ull) {
 				const double q=100.0/(double)gw;
@@ -488,7 +488,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 				   gezogen und sind entfernt (Pruefbefunde 5 und 6, 2026-08-23). */
 			}
 			ulong hv[5]={0ull,0ull,0ull,0ull,0ull}, gv=0ull;
-			for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<5u; b++) hv[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[38u+b];
+			for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<5u; b++) hv[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[40u+b];
 			for(uint b=0u; b<5u; b++) gv+=hv[b];
 			if(gv>0ull) {
 				const double q2=100.0/(double)gv;
@@ -497,7 +497,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			// Oberen Schwanz aufloesen (Slots 43..46)
 			{
 				ulong ht[4]={0ull,0ull,0ull,0ull}, gt=0ull;
-				for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<4u; b++) ht[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[43u+b];
+				for(uint d=0u; d<L.get_D(); d++) for(uint b=0u; b<4u; b++) ht[b]+=(ulong)L.lbm_domain[d]->rho_clamp_hits[45u+b];
 				for(uint b=0u; b<4u; b++) gt+=ht[b];
 				if(gt>0ull) { const double q3=100.0/(double)gt;
 					print_info(string("  nu_t/nu_0 ")+wo+" oberer Schwanz (Anteil der Zellen mit rv>=60): 60-120 "+to_string((float)((double)ht[0]*q3),1u)+" %, 120-240 "+to_string((float)((double)ht[1]*q3),1u)+" %, 240-480 "+to_string((float)((double)ht[2]*q3),1u)+" %, >=480 "+to_string((float)((double)ht[3]*q3),1u)+" %");
@@ -509,12 +509,25 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			   ein Zaehler, der in EINER Domaene bereits gewickelt IST, steht danach niedrig und
 			   faellt nie auf. Die Rohwerte je Domaene sind uint, also wird jeder einzeln geprueft. */
 			ulong maxb=0ull;
-			for(uint d=0u; d<L.get_D(); d++) for(uint sl=28u; sl<47u; sl++) {
+			for(uint d=0u; d<L.get_D(); d++) for(uint sl=28u; sl<49u; sl++) {
 				const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl];
 				if(v>maxb) maxb=v;
 			}
 			if(maxb>3865470566ull) print_error(string("  nu_t/nu_0 ")+wo+": ein Bin steht bei "+to_string(maxb)+" und damit ueber 90 % des uint-Bereichs -- WICKELGEFAHR, die Prozente sind nicht mehr belastbar. Lauf kuerzen oder Stichprobe ausduennen.");
 		} else print_error(string("  nu_t/nu_0 ")+wo+": Histogramm LEER, obwohl CFD_SGS_DIAG gesetzt ist -- lautloser No-Op. Haeufigste Ursache: CFD_SGS_WANDFREI ueberspringt den ganzen SUBGRID-Block fuer genau die Wandzellen, dann bleiben auch die Wandlagen-Slots null (Pruefbefund 9).");
+	}
+	// ★ 2026-08-25: Ansage der beiden neuen Wirkpfad-Zaehler. Beide gegatet (t%100), also
+	// Stichproben, keine Ereigniszahlen.
+	{
+		ulong vk=0ull, sp=0ull;
+		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
+			vk+=(ulong)L.lbm_domain[d]->rho_clamp_hits[28]; sp+=(ulong)L.lbm_domain[d]->rho_clamp_hits[29]; }
+		if(vk>0ull) print_warning(string("  GESCHWINDIGKEITSKLEMME ")+wo+": "+to_string(vk)+" Stichproben-Treffer (t%100). Wo sie greift, ist der Impuls NICHT erhalten -- f_eq traegt rho*u_geklemmt statt j+F/2.");
+		else print_info(string("  Geschwindigkeitsklemme ")+wo+": 0 Treffer (Impuls ungestoert).");
+		if(LBM_Domain::s_sponge_n>0u) {
+			if(sp>0ull) print_info(string("  SPONGE ")+wo+": "+to_string(sp)+" Zonen-Stichproben (t%100; geklemmte Zellen zaehlen doppelt).");
+			else print_error(string("  SPONGE ")+wo+": Zone konfiguriert (n="+to_string(LBM_Domain::s_sponge_n)+"), aber der Zaehler ist NULL -- lautloser No-Op.");
+		}
 	}
 #ifdef RHO_CLAMP
 	ulong u=0ull, o=0ull; L.rho_clamp_hits_total(u, o);
@@ -1675,9 +1688,15 @@ void main_setup_kanal() {
 		if(wz!=(soll&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll -- Lookup oder Bindung defekt."); // Audit 1/3: Soll mod 2^32 -- der uint-Zaehler wickelt am Fahrzeugmassstab (fac_N~1e6 x 5000 Gates)
 		if(kipp==0u&&env_u("CFD_FACETTEN",0u)<3u&&zu!=0ull) print_warning("Am parallelen Kanal muessen ALLE Paare offen sein -- "+to_string(zu)+" Zellen ohne Tausch.");
 		lbm.lbm_domain[0]->fac_tau.read_from_device(); lbm.lbm_domain[0]->fac_tau_n.read_from_device();
-		double stau=0.0; ulong ntau=0ull;
-		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; }
-		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=sqrt(fmax(0.0,mtau))*0.5/(double)nu_lat;
+		// ★ 2026-08-25 FIX: y_w war hier HARTKODIERT 0,5. Der dd-Pfad warnt ausdruecklich davor
+		// ("NICHT hartkodiert 0,5 -- Audit-Rest #6 nicht wiederholen"), der Kanal wiederholte ihn.
+		// An gekippten Waenden ist y_w im Median 0,698 (26 Grad) bzw. 1,040 (45 Grad) -- die
+		// gemeldeten y+ waren also um Faktor 1,4 bzw. 2,1 zu klein. Jetzt je Facette mit ihrem
+		// EIGENEN y_w aus fac_geo[8i+3], danach gemittelt.
+		lbm.lbm_domain[0]->fac_geo.read_from_device();
+		double stau=0.0, syp=0.0; ulong ntau=0ull;
+		for(ulong i=0ull; i<lbm.lbm_domain[0]->fac_N; i++) if(lbm.lbm_domain[0]->fac_tau_n[i]>0u) { stau+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]; ntau++; syp+=sqrt(fmax(0.0,(double)lbm.lbm_domain[0]->fac_tau[6ull*i]/(double)lbm.lbm_domain[0]->fac_tau_n[i]))*(double)lbm.lbm_domain[0]->fac_geo[8ull*i+3ull]/(double)nu_lat; }
+		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=syp/(double)ntau;
 			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+", y+ = "+to_string((float)yp,1u)); }
 		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
 		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
