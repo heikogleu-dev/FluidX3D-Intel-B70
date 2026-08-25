@@ -135,7 +135,10 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// die Blende ist rein geometrisch, Additivterm+alpha bleiben und ihre Mathematik gilt exakt).
 	if(s_fac_elibb&&(s_fac_ema>0.0f||s_fac_pema>0.0f)) print_error("CFD_FAC_ELIBB mit EMA/PEMA ist nicht definiert (Filter mischen Blende und Additivpfad) -- Messarm rein halten.");
 	if(s_fac_elibb&&s_fac_apg!=0.0f) print_error("CFD_FAC_ELIBB mit APG ist nicht gebaut -- Messarm rein halten.");
-	if(s_fac_elibb) print_info("ELIBB 18-Link AKTIV (B2, Revision W2): rein geometrische q-Blende (u_W=0) + bestehender Additivterm; q=0,5 ist bitgleich iMEM. Wirkpfad Slot 67. fac_tau-Buchung des Blenden-Austauschs erst mit B3 -- bis dahin sind fac_tau[1..5]/Reibungs-Cd im ELIBB-Arm Modell-Soll, kein Ist.");
+	if(s_fac_utkorr!=1.0f) print_info("ABTASTPUNKT-MESSARM aktiv: CFD_FAC_UTKORR = "+to_string(s_fac_utkorr,3u)+" auf dem Wandmodell-Eingang (Theorie-Soll 3/2; Ansage-Doktrin).");
+	if(s_fac_kappa!=0.4f) print_info("Grazing-Guard geaendert: CFD_FAC_KAPPA = "+to_string(s_fac_kappa,2u)+" (Default 0,4).");
+	if(s_fac_qdiag!=0u) print_warning("CFD_FAC_QDIAG = "+to_string((ulong)s_fac_qdiag)+" -- DIAGNOSEARM (2 = nur q<0,5, 3 = nur q>0,5; Arm 1 ist seit K1' ohne Funktion). Kein Messarm fuer Abnahmen.");
+	if(s_fac_elibb&&s_fac_imem) print_info("ELIBB 18-Link AKTIV (B2, Revision W2): rein geometrische q-Blende (u_W=0) + bestehender Additivterm; q=0,5 ist bitgleich iMEM. Wirkpfad Slot 67. fac_tau-Buchung des Blenden-Austauschs erst mit B3 -- bis dahin sind fac_tau[1..5]/Reibungs-Cd im ELIBB-Arm Modell-Soll, kein Ist.");
 	// C1b: WFB und Facetten am selben Einfuegepunkt schliessen sich aus -- hart, kein stilles Nacheinander.
 	if(s_facetten&&s_wandfunktion) print_error("CFD_FACETTEN und CFD_WANDFUNKTION gleichzeitig ist nicht definiert -- genau einen Pfad waehlen.");
 	facetten_on = s_facetten;
@@ -587,7 +590,9 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// das Kugel-Gate "Upload-q gegen analytisches q" offline pruefbar ist. Die Leiter lief
 		// heute OHNE dieses Gate -- Prozessfehler, im Befundbuch. Nur bei CFD_FAC_QDUMP=1.
 		if(getenv("CFD_FAC_QDUMP")) {
-			FILE* fq = fopen((get_exe_path()+"../export/fac_q_dump.csv").c_str(), "w");
+			const string qdp = get_exe_path()+"../export/fac_q_dump_"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("lauf"))+"_D"+to_string((ulong)Nx)+".csv"; // ★ Host-Audit Befund 4: Run+Domaenen-Suffix statt Kollision
+			FILE* fq = fopen(qdp.c_str(), "w");
+			if(fq==nullptr) print_warning("fac_q-Dump: "+qdp+" nicht schreibbar.");
 			if(fq) {
 				fprintf(fq, "# fid,x,y,z,nx,ny,nz,yw,qb1..qb18 (qb/254 = q; 0 = kein Schnitt)\n");
 				ulong kq2=0ull;
@@ -598,7 +603,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 					for(uint d=1u; d<19u; d++) fprintf(fq, ",%u", (uint)fac_q[18ull*kq2+(ulong)(d-1u)]);
 					fprintf(fq, "\n"); kq2++;
 				}
-				fclose(fq); print_info("fac_q-Dump: export/fac_q_dump.csv ("+to_string((ulong)aktiv)+" Facetten).");
+				fclose(fq); print_info("fac_q-Dump: "+qdp+" ("+to_string((ulong)aktiv)+" Facetten).");
 			}
 		}
 		string hs=""; for(uint hb=0u; hb<15u; hb++) hs+=to_string(hist[hb])+(hb<14u?" ":"");

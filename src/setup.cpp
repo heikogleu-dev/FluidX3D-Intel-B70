@@ -984,7 +984,8 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 					if(q_link[i2]>0.0&&q_link[i2]<=1.0) { qb2=(uchar)fmin(fmax((double)(int)(q_link[i2]*254.0+0.5),1.0),254.0); any=true; }
 					enc[i2]=qb2;
 				}
-				if(any) (*qfill)[n]=enc;
+				(*qfill)[n]=enc; // ★ Host-Audit Befund 5: auch OHNE Schnitt eintragen (18x0 -> Konsument macht BB) -- sonst fiele die Zelle auf die auf Kruemmung widerlegte Ebenen-Quelle zurueck
+				(void)any;
 			}
 			// RESTSPALT je Zelle mit 1-Zellen-Spalt: q+ plus q- entlang der engsten Achse.
 			if(fw==1u) {
@@ -2488,7 +2489,7 @@ void main_setup_kugel() {
 		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
-			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
+			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -3494,7 +3495,7 @@ static void main_setup_fahrzeug_dd() {
 		FFn = baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdir, "dd-Nahfeld");
 		// ★ B1-Stufe 2: bei ELIBB ist das Remesh die PFLICHT-q-Quelle -- auch ohne CFD_FACETTEN_DIAG
 		// (der Diagnoseblock oben laeuft im Normalfall nicht; die erste Verdrahtung hing daran).
-		if(env_u("CFD_FAC_ELIBB",0u)>0u&&elibb_qmap_dd.empty()) {
+		if(env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&elibb_qmap_dd.empty()) { // ★ Host-Audit Befund 2: ohne >=3 lief der teure Remesh bei Paartausch ins Leere
 			print_info("ELIBB Stufe 2: Remesh der Nahfeld-Voxelaussenwand fuer fac_q ...");
 			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdir, nullptr, veh_f, &elibb_qmap_dd);
 		}
@@ -3536,7 +3537,7 @@ static void main_setup_fahrzeug_dd() {
 	else print_info("Geschwindigkeits-Einlass Fernfeld AUS (CFD_FERN_VI=0, gemessener Default): rho bleibt am Einlass festgenagelt, der Rand reflektiert -- bekannt und angesagt.");
 	lbm_f.finalize_sparse_tiles();
 	lbm_c.finalize_sparse_tiles();
-	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
+	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) lbm_c.alloc_facetten(FFc); // P8: alloc_facetten_domain nutzt die INSTANZ-F-BBox von lbm_c (Fahrzeug+4 in Grobzellen, oben gesetzt) -- der Wachhund "Facette ausserhalb der F-BBox" prueft die Deckung hart
 
 	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN
@@ -5332,7 +5333,7 @@ static void main_setup_fahrzeug_dd() {
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
-			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])):string("")));
+			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
 		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
 			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
 			else if((ulong)df->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");
@@ -5377,7 +5378,8 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FERN_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[10])+", Skalar "+to_string((ulong)dc->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)dc->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)dc->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[16])+", alpha>ut "+to_string((ulong)dc->rho_clamp_hits[18])+" (PEMA/APG im Fernfeld AUS)"):string("")));
-		if(wzc!=(sollc&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Fernfeld -- Lookup oder Bindung defekt (P8).");
+		if(LBM_Domain::s_fac_elibb_pur) { if(wzc!=0ull) print_error("Pur-Arm Fernfeld: Slot 7 muesste 0 sein."); else print_info("Pur-Arm (Fernfeld): Slot 7 = 0 (konstruktiv), ELIBB-Wirkpfad "+to_string((ulong)dc->rho_clamp_hits[67])+"."); }
+		else if(wzc!=(sollc&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Fernfeld -- Lookup oder Bindung defekt (P8).");
 		if(env_u("CFD_FERN_FACETTEN",0u)>=3u) { // iMEM-Erhaltung analog Nahfeld (Delta-m/Normal-Rest aus dem kumulativen Akkumulator)
 			dc->fac_tau.read_from_device(); dc->fac_tau_n.read_from_device();
 			double dmc=0.0, nkc=0.0; for(ulong i=0ull;i<dc->fac_N;i++){ dmc+=(double)dc->fac_tau[6ull*i+4ull]; nkc+=(double)dc->fac_tau[6ull*i+5ull]; }
