@@ -1771,7 +1771,10 @@ void main_setup_kanal() {
 			stau+=tw_i; ntau++; syp+=sqrt(fmax(0.0,tw_i))*(double)lbm.lbm_domain[0]->fac_geo[8ull*i+3ull]/(double)nu_lat;
 		}
 		if(ntau>0ull) { const double mtau=stau/(double)ntau, yp=syp/(double)ntau;
-			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)mtau,9u)+(gef?" (GEFENSTERT wie die Kraft)":" (VOLLLAUF -- kein Schnappschuss vorhanden)")+", y+ = "+to_string((float)yp,1u)); }
+			// ★ Pruefbefund C(b): mit 8 Dezimalen (to_string deckelt dort) blieben bei 4,4e-6 genau DREI
+			// signifikante Stellen, also +-0,11 % -- zu grob fuer die 0,1-bis-0,5-%-Frage, um die es geht.
+			// Deshalb zusaetzlich in 1e-6-Einheiten mit vier Nachkommastellen.
+			print_info("Facetten-tau-Akkumulator: "+to_string(ntau)+" Zellen, mittleres tau_w = "+to_string((float)(mtau*1e6),4u)+"e-6"+(gef?" (GEFENSTERT wie die Kraft)":" (VOLLLAUF -- kein Schnappschuss vorhanden)")+", y+ = "+to_string((float)yp,2u)); }
 		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
 		if(!fac_snap.empty()&&n_steps>fac_snap_step) {
 			const FacKraft FK = kraft_facetten(lbm, Nx, Ny, Nz, TYPE_S, n_steps-fac_snap_step, fac_snap, kipp>0u);

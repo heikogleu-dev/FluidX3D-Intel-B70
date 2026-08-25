@@ -2380,3 +2380,115 @@ Vorzeichen ist negativ.
   In-Order-Reihenfolge und Parameterbindung von `update_force_field` -- alle korrekt.
   Einschraenkung zur Commit-Meldung: `atomic_add_f` ist NICHT tot, `object_center_of_mass` und
   `object_torque` benutzen es weiter (werden aber von keinem Setup aufgerufen).
+
+## ELIBB-PLANUNGSAGENT (2026-08-25): ELIBB heilt 26 Grad, NICHT die 45-Grad-Klasse
+
+Zentrale, bewiesene Aussage: fuer die Slot-13-Klasse der 45-Grad-Treppe (ein Link, c || n)
+liefert JEDE Ein-Knoten-Interpolation der Marson-Familie nur eine Verschiebung der
+NORMALreflexion. Alle Operanden leben auf der Link-Achse {c, -c}; c.u_s = (c.n)(n.u_s),
+die Tangentialkomponente faellt exakt heraus -- fuer jedes a1/a2/a3. Der erreichbare
+Unterraum eines Links ist span{c}, und bei c || n enthaelt er keine Tangente. Deckt sich
+mit der V1-Vollextraktion ("ELIBB is purely geometric ... no wall shear stress") und mit
+der heute bewiesenen alpha-Identitaet.
+
+Scharfe Winkeltrennung:
+- 26,6 Grad (m2-Klasse): |c.t2| = 1/sqrt(5) != 0 -- ELIBB mit u_W=u_s erzeugt dort ECHTEN
+  Tangentialaustausch. Gleiches gilt fuer 97 % der ohneTang-Klasse am Fahrzeug, 94 % Kugel.
+- 45 Grad Lage 1: bleibt beweisbar BB. Fuer diese Klasse braucht es einen ZELL-Kraftterm
+  (tau_w*A/V als Guo-Volumenkraft) oder die Delegation an die Lage-0-Facetten (deren
+  faca = 1/|n_a| das tau-Integral der wahren Flaeche bereits deckt).
+
+WIDERSPRUCH IM WISSENSSPEICHER, benannt statt still entschieden: FACETTEN-ELIBB-PLAN.md
+sagt "Eq. 25e verdruckt, a2=(1-q)/q"; die V1-Unterlagen (knowledge/wall-models.md,
+recherche-archive.md, Stand 05.08.2026) sagen das Gegenteil (Sylvester-Lagrange, kein
+Druckfehler; (1-q)/q passt auf keinen gedruckten Zweig). Operativ entschaerft: die
+V1-Vorlage nutzt die eigene PoU-Blende (q=0,5 => exakt HWBB), und das Gate "q=0,5
+bitgleich, sonst Stopp" entscheidet die Koeffizientenfrage empirisch. Das Gate ist
+damit NICHT optional.
+
+Minimalpfad (B0..B4, je Baustein eigene Abnahme): B0 EsoPull-Harness (CPU, klaert
+Zeitindex und i<->ib-q-Indizierung); B1 fac_q-Hostpfad (18 x uchar je Facette, q-Boden
+mit Zaehler, Kugel-RMS-Gate 0,143, kipp0 alle q im 0,5-Bin); B2 Kernelblock
+FACETTEN_ELIBB (ersetzt q_i UND alpha, nie stapeln; aus = byte-identisch; q=0,5-Gate);
+B3 Kraftbuchhaltung (fac_tau_n muss auch ELIBB-Facetten zaehlen, sonst killt der
+K3-print_error jeden Kipp-Lauf); B4 Messleiter kipp0 -> Kugel -> kipp26 (ERSTES
+K2-Ziel, mit A/A-Rauschband) -> kipp45 (FALSIFIKATIONSARM: Vorhersage Lage-1 bleibt BB).
+
+Erwartung ehrlich: Geometriekorrektur, kein Cz-Hebel erster Ordnung (V1: Treppe trug
+2 von 20 Prozentpunkten). Erst-Erfolg ist kipp26-K2 ueber dem A/A-Band plus Kugel-Cd
+Richtung Achenbach-Band.
+
+## LITERATURAGENT (2026-08-25): das Problem ist publiziert -- in der iMEM-Originalarbeit selbst
+
+Asmuth et al. 2021 (Phys. Fluids 33, 105111 -- die Basis unseres Facettenpfads) nennen als
+Loesbarkeitsbedingung woertlich: das System fuer u_w bleibt nur bestimmt, "as long as F^(u_w)
+can be constructed as a linear combination of e_ijk, ijk in C" (C = wandschneidende Links).
+Unsere Messung (3,4 % / 0,7 % der Sollreibung bei 45/26 Grad) ist die quantitative Konsequenz
+dieser publizierten Bedingung -- KEIN Implementierungsfehler. Die explizite iMEM-Loesung ist
+im Paper nur fuer die EBENE, gitterparallele Wand angegeben (Gl. 28, Vorfaktoren 3/3/1 --
+genau die Querkopplung, die bei 26,57 Grad unloesbar wird).
+
+Die Literatur hat das Problem NIE linkbasiert geloest, sondern umgangen -- vier Wege:
+1. VOLLREKONSTRUKTION der Wandzell-Populationen (Malaspinas/Sagaut JCP 275 (2014);
+   Maeyama et al. CAMWA 93 (2021) + C&F 233 (2022): Image Point + Wandfunktion auf
+   non-body-fitted VOXELGITTERN, validiert bis 30P30N-Hochauftrieb -- die publizierte
+   Referenzloesung fuer exakt unseren Fall). Architektur-kompatibel (nur Makrofeld-Reads).
+2. EXPLIZITER KRAFTTERM in den Wandzellen (Kuwata & Suga JCP 433 (2021) IVW: Koerperkraft
+   = Soll- minus MEM-Ist-Scherkraft; Wang et al. PoF 36 (2024) IB-WMLES; Kummerlaender et
+   al. arXiv:2510.13726 homogenisierte LBM mit Spalding auf dem Geschwindigkeitsmoment).
+   Richtungsfrei, massenerhaltend, minimal-invasiv ueber das vorhandene Guo-Forcing --
+   BESTER FIT fuer Esoteric-Pull. Preis: erste Ordnung an der Grenzflaeche, dokumentierte
+   leichte u-Unterschaetzung (IVW).
+3. SURFEL-VOLUMETRIK (PowerFLOW-Schule, Chen PRE 58 (1998), NASA/CR-2000-210550):
+   C_f-gesteuerte Mischung Bounce-Back/Spiegelung an der WAHREN Facette, Impuls je Surfel
+   statt je Link. Loest das Problem per Konstruktion, passt aber NICHT auf unsere
+   Architektur (Gather/Scatter, Nachbar-Schreibzugriffe).
+4. WAHRE FLAECHENGEOMETRIE je Link (Bouzidi/ELI): vergroessert die Linkmenge, zweite
+   Ordnung -- aber kein Wandmodell; allein keine Loesung.
+
+KONVERGENZBEFUND (Einschaetzung des Agenten, konsistent mit unserer Messung): fuer rein
+linkbasierte Tangentialaufpraegung konvergiert die Treppenreibung NICHT gegen den glatten
+Grenzwert -- die Treppe ist selbstaehnlich, der Anteil degenerierter Zellklassen ist
+aufloesungsUNabhaengig, das Defizit ist O(1). Fuer das Fahrzeug heisst das: 3,5 mm statt
+4 mm aendert an diesem Fehleranteil NICHTS. Eine systematische Konvergenzstudie
+"WMLES-Reibung auf Voxeltreppe" existiert nicht (Literaturluecke).
+
+Diagnose-Nebenbefund (Stahl/Chopard/Latt C&F 39 (2010); Matyka et al. C&F 73 (2013)):
+WSS unmittelbar an der Treppe ist stark verfaelscht, wenige Knoten entfernt brauchbar --
+Auslese versetzt messen. Fehler winkelabhaengig, am kleinsten bei tan(a)=0 und tan(a)=1.
+
+KONVERGENZ DER BEIDEN AGENTEN: der ELIBB-Analyseagent (Beweis: Einzellink || n hat keinen
+tangentialen Unterraum) und die Literatur (Asmuths eigene Spann-Bedingung; alle Loesungen
+umgehen die Linkverteilung) sagen DASSELBE. Der Hybrid -- iMEM behalten, wo die Linkmenge
+traegt, plus Zell-Kraftterm (IVW-artig) nur fuer die degenerierten Klassen -- hat kein
+direktes Literaturvorbild, ist aber die architekturkonforme Synthese beider Berichte.
+Volltexte liegen unter tool-results/ (asmuth2021.txt, han_wfb.txt, matyka.txt, icase.txt).
+
+## GEOMETRIE-AGENT (2026-08-25): Kombinatorik EXAKT bestaetigt -- und die 45-Grad-Diagnose gedreht
+
+Alle Zaehlerstaende analytisch reproduziert (78.566.400 und 53.195.580 exakt; Skripte in
+scratchpad/teil1..4_*.py). Praezisierung: die Wand kippt in der y-z-Ebene, Stroemung x --
+STREAMWISE-Impuls quert die Wand NUR ueber Links mit c_x != 0, und die gehoeren zu 100 %
+den Stufenklassen. Klassen: 45 Grad m=4 (7 Links, voll loesbar) / m=5 (1 Link || n, Slot 13);
+26 Grad m=6 (8 Links, voll) / m=7 (4 Links, Rang-2: Gt22 = 0 EXAKT, Querrest = |P2|) /
+m=8 (1 Link, Slot 13).
+
+DIE WICHTIGE DREHUNG (45 Grad): die loesbare m=4-Klasse traegt die wahre Wandflaeche
+BEREITS EXAKT (Sum faca = 1,0000 * A_wahr; die tote Klasse ist flaechenREDUNDANT), und das
+noetige tau_w waere nur 1,08 * u_tau_ist^2 -- kein Autoritaets-, kein Flaechen-, kein
+Klemmproblem (tw_max hat Faktor 249 Spielraum). Das Defizit (Faktor 29,4 = 1/K2) sitzt im
+ZUSTAND: das wandnahe u_t liegt bei ~14 % des Log-Law-Gleichgewichts -- die Treppe wirkt
+trotz iMEM als RAUE Wand (Re_tau IST 7930 statt 5186), die Impulsbilanz schliesst ueber
+ungebuchte BB-Spitzen der SATGATE-Rueckfaelle (0,38 % der Gates mit |P| = 10-100 twe) am
+Buchungspfad vorbei. Spalding am zu langsamen u_t liefert tau/27.
+
+26 Grad, quantitativ: m6 allein muesste Faktor 2,00 der wahren Wandschubspannung melden --
+liefert kein Gleichgewichts-Wandmodell. Der STUFEN-CLUSTER m6+m7 stellt vollen Rang her
+(Gt22: 0 -> 1,11) UND traegt zusammen exakt A_wahr -- er adressiert beide Befunde zugleich.
+ELIBB heilt an der 26-Grad-Einzellinkklasse die t2-Behandlung; x-Autoritaet der toten
+Zellen braeuchte q = 1,2-1,5 (Zweitschale) = de facto wieder der Cluster. Solid-Facette:
+keine zusaetzliche Autoritaet, kostet Scatter -- verworfen.
+
+EMPFEHLUNG DES AGENTEN: tote, flaechenredundante Facetten (m5/m8) DEKLARIERT deaktivieren
+statt heilen; 26 Grad ueber den Cluster; 45 Grad ist danach ehrlich ein Zustands-/
+Buchungsproblem (Treppenrauigkeit), kein Loeserproblem.
