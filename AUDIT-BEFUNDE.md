@@ -2658,3 +2658,26 @@ KONSEQUENZ: B1-Stufe 2 wie im Entscheid vorgesehen -- q aus der GEGLAETTETEN
 REMESH-Flaeche (P1-Maschinerie, Ray-Triangle, validiert RMS 0,143 auf derselben Kugel).
 Der Voxelkoerper bleibt die einzige Geometriequelle (nie STL). Danach: Kugel-q-Gate
 ERST bestehen, dann Leiter.
+
+## g8/g9 (2026-08-25 abends): REIHENFOLGE-FIX HEILT DIE KUGEL -- der Kippkanal bleibt widerspenstig
+
+Nach dem Fix (Blende am Kopf, Wandmodell tastet den REKONSTRUIERTEN Zustand ab; Pur-Arm
+CFD_FAC_ELIBB=2):
+| Arm | Cd nominal | Delta-m |
+|---|---|---|
+| Kugel Kontrolle | +10,57 | +274 |
+| Kugel PUR (nur Blende) | **+1,78** | 0 (Pur bucht nicht) |
+| Kugel VOLL (Blende + iMEM) | **+3,33** | +158 |
+kipp0-Anker: FELD-HASH identisch. ERSTMALS ein voller ELIBB+iMEM-Arm ohne Injektion;
+die Blende nimmt der Treppenkugel massiv Scheinwiderstand (10,6 -> 3,3; Absolutbewertung
+braucht die Referenzkette). Der PUR-Arm wirft den Facetten-Wirkpfad-Ist!=Soll-Fehler
+(Return vor Slot 7) -- fuer den Isolationsarm dokumentiert-akzeptiert, nicht fixen.
+
+KIPPKANAL bleibt dagegen SCHLECHT (g9, eine Variable je Lauf): 26 Grad an 4,23 / pur 2,97
+(Kontrolle 1,94); 45 Grad an 1,562 / Kontrolle 1,529. Der Kanal-Sonderfall (Wand kippt in
+der PERIODIK, q<0,5-Klassen dominieren die Stufen) zieht die effektive Wand naeher --
+konsistent mit der Asymmetrie-Analyse. ENTSCHEID GEMAESS BROCKEN-LOGIK: der Kippkanal wird
+nicht weiter totoptimiert; er misst eine Pathologie, die am Fahrzeug 3 % der Klasse
+betrifft (97 % sind m2-artig). W5 (Deklaration) + ehrliches Gate sind sein Abschluss.
+FAHRPLAN-PRIORITAET verschoben auf den 3/2-ABTASTPUNKT (Faktor ~2 auf tau_w, deckt die
+c_f-Luecke -55 %) -- UTKORR-A/B laeuft (g10).

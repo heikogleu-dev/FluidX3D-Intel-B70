@@ -260,7 +260,8 @@ uint LBM_Domain::s_fac_alpha = 0u;
 bool LBM_Domain::s_fac_elibb = false;
 bool LBM_Domain::s_fac_elibb_pur = false; // Pur-Arm (Isolationsmessung) // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 float LBM_Domain::s_fac_qmin = 0.1f;
-float LBM_Domain::s_fac_kappa = 0.4f; // Grazing-Guard-Schwelle (K1'-Begleiter)
+float LBM_Domain::s_fac_kappa = 0.4f;
+float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm // Grazing-Guard-Schwelle (K1'-Begleiter)
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
@@ -1050,6 +1051,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// def_wf_Y -- der Aequivalenznachweis am Kanal (yw=0,5, fac_a=1) kollabiert dann bitgenau.
 	+((s_facetten) ? (string)"\n	#define FACETTEN"
 	"\n	#define def_fac_Y "+to_string(0.5f/nu,8u)+"f"
+	+"\n	#define def_fac_utkorr "+to_string(s_fac_utkorr, 6u)+"f" // ★ 3/2-Abtastpunkt-Messarm (CFD_FAC_UTKORR, Default 1,0 = bitgleich)
 	"\n	#define def_fac_tau "+to_string(s_fac_tau,4u)+"f"
 	"\n	#define def_fac_budget "+to_string(s_fac_budget,4u)+"f"
 	"\n	#define def_fac_budget_sn "+to_string(s_fac_budget_sn,4u)+"f"

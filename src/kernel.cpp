@@ -1855,9 +1855,19 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return; } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
 	{
-		const float Y  = ut*((2.0f*yw)*def_fac_Y);
+		// ★★ 3/2-ABTASTPUNKT-MESSARM (2026-08-25, CFD_FAC_UTKORR, Default 1,0 = bitgleich).
+		// GEMESSEN (Ebene-Wand-Agent, drei Aufloesungen): das hier abgetastete u_t betraegt
+		// 0,698-0,707 des wahren u der ersten Lage -- die BB-Theorie sagt exakt 2/3 (die
+		// Wandlinks tragen zum Abtastzeitpunkt noch die No-Slip-Reflexion, P1 ~ -u/3).
+		// Spalding macht daraus tau ~ u^2 -> Faktor ~2 zu wenig Wandschubspannung; das ist
+		// der Massstab der zentralen c_f-Luecke (0,00154 gegen Referenz 0,00344). Der Faktor
+		// wirkt NUR auf den Wandmodell-EINGANG (Y, u+, u_tau); die Tangentialbasis und die
+		// Stabilitaetsklemme tw_max laufen weiter auf dem rohen ut. Deklarierter Messarm,
+		// NICHT still eingebaut -- Soll-Faktor der Theorie: 3/2.
+		const float ut_wm = ut*def_fac_utkorr;
+		const float Y  = ut_wm*((2.0f*yw)*def_fac_Y);
 		const float up = wf_spalding_uplus(Y);
-		const float utau = ut/up;
+		const float utau = ut_wm/up;
 		tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut;
 		if(tw>tw_max) { tw = tw_max;
