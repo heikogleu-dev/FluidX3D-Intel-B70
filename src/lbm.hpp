@@ -195,7 +195,8 @@ public:
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_fac_alpha;
 	static bool s_fac_elibb;  // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
-	static float s_fac_qmin;  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
+	static float s_fac_qmin;
+	static uint s_fac_qdiag; // QDIAG-Diagnosearme  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 	static bool s_fac_quergate; // ★ 2026-08-25 Querimpuls-Gate im iMEM-Solve
 	static bool s_fac_lsq; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall im iMEM-Solve // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)
 	static float s_fac_apg; // APG-Messarm (Mozaffari-Klasse): kappa auf y_w*dp/ds im tw-Ziel; 0 = aus (bitgleich)

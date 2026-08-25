@@ -75,6 +75,7 @@ static double mass(const float* fi){ // Summe ueber Fluidzellen: je Zelle Summe 
     return m;
 }
 
+extern "C" int test_E();
 int main(){
     int fails=0;
     // ---------- A: Wandslot-Verzoegerung ----------
@@ -198,6 +199,89 @@ int main(){
         }
         printf("D  (Drift wird in B3 je Facette in fac_tau[4] GEBUCHT, nicht wegdefiniert)\n");
     }
+    fails += test_E();
     printf("\n%s (%d Fehler)\n", fails==0?"HARNESS BESTANDEN":"HARNESS VERLETZT", fails);
+    return fails;
+}
+
+// ==================== Test E (2026-08-25, nach Kugel-Falsifikation) ====================
+// Der Kugellauf g1_kugel_an lieferte Cd = -4,95 -- die Blende INJIZIERT Impuls. Dieser
+// Test misst, was der urspruengliche Harness nie gemessen hat: das VORZEICHEN des
+// tangentialen Impulsaustauschs der Blende. Aufbau: 1x1x8-Saeule, Fluid mit
+// Anfangsimpuls u_x = 0,05, Waende oben+unten. Eine NO-SLIP-Wand muss u_x abbauen
+// (Drag ueber die Diagonallinks), eine Spiegelwand laesst es konstant, eine
+// injizierende Wand baut es AUF. Referenz: reines HWBB. Varianten:
+//   P0 aktuelle Kernel-Form:  nebb = w(rho-1) + (f_ib - feq_ib(u))
+//   P1 Vorzeichen-Flip:       nebb = w(rho-1) - (f_ib - feq_ib(u))
+//   P2 feq gleicher Richtung: nebb = w(rho-1) + (f_ib - feq_i(u))
+//   P3 reine Gleichgewichtswand: nebb = w(rho-1)
+extern "C" int test_E();
+int test_E(){
+    auto blende=[](float q, float fs, float nebb)->float{
+        return (q<=0.5f) ? fmaf(2.0f*q, fs, (1.0f-2.0f*q)*nebb)
+                         : fmaf(0.5f/q, fs, (1.0f-0.5f/q)*nebb);
+    };
+    const float wrx=1.9f, U0=0.05f;
+    printf("\n=== TEST E: Vorzeichen des tangentialen Impulsaustauschs (U0=%.3f, 400 Schritte)\n", U0);
+    printf("%-8s", "Variante");
+    for(const char* qs : {"q=0.25","q=0.40","q=0.60","q=0.735"}) printf("  %10s", qs);
+    printf("  (Werte: Sum u_x nach 400 Schritten; HWBB-Referenz zuerst)\n");
+    // Referenz HWBB (Blende aus)
+    double ref=0.0;
+    {
+        std::vector<float> fi(NZ*Q);
+        for(int n=0;n<NZ;n++) for(int i=0;i<Q;i++){
+            float rho=1.f, cu=CX[i]*U0;
+            fi[IDXF(n,i)] = SOLID(n) ? 0.0f : W[i]*(rho*(1.f+3.f*cu+4.5f*cu*cu-1.5f*U0*U0)-1.f);
+        }
+        for(long t=0;t<400;t++) for(int n=1;n<NZ-1;n++){
+            float h[Q]; load_f(n,h,fi.data(),t); collide(h,wrx); store_f(n,h,fi.data(),t);
+        }
+        double su=0.0; for(int n=1;n<NZ-1;n++){ float h[Q]; load_f(n,h,fi.data(),400); float r,ux,uy,uz; macro(h,r,ux,uy,uz); su+=ux; }
+        ref=su; printf("%-8s", "HWBB"); printf("  %10.6f (alle q gleich)\n", ref);
+    }
+    int fails=0;
+    for(int var=0; var<4; var++){
+        printf("P%-7d", var);
+        for(float q : {0.25f,0.40f,0.60f,0.735f}){
+            std::vector<float> fi(NZ*Q);
+            for(int n=0;n<NZ;n++) for(int i=0;i<Q;i++){
+                float rho=1.f, cu=CX[i]*U0;
+                fi[IDXF(n,i)] = SOLID(n) ? 0.0f : W[i]*(rho*(1.f+3.f*cu+4.5f*cu*cu-1.5f*U0*U0)-1.f);
+            }
+            for(long t=0;t<400;t++) for(int n=1;n<NZ-1;n++){
+                float h[Q]; load_f(n,h,fi.data(),t);
+                float fpre[Q]; for(int i=0;i<Q;i++) fpre[i]=h[i];
+                float rho,ux,uy,uz; macro(h,rho,ux,uy,uz);
+                const float u2=ux*ux+uy*uy+uz*uz;
+                for(int i=1;i<Q;i++){
+                    const int ib=OPP(i);
+                    if(!SOLID(NB(n,ib))) continue;
+                    const float wi=W[i];
+                    const float cup=-(CX[i]*ux+CY[i]*uy+CZ[i]*uz);       // c_ib . u
+                    const float cui= (CX[i]*ux+CY[i]*uy+CZ[i]*uz);       // c_i . u
+                    const float feq_ib=wi*(rho*(1.f+3.f*cup+4.5f*cup*cup-1.5f*u2)-1.f);
+                    const float feq_i =wi*(rho*(1.f+3.f*cui+4.5f*cui*cui-1.5f*u2)-1.f);
+                    float nebb;
+                    switch(var){
+                        case 0: nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib); break;
+                        case 1: nebb=wi*(rho-1.f)-(fpre[ib]-feq_ib); break;
+                        case 2: nebb=wi*(rho-1.f)+(fpre[ib]-feq_i);  break;
+                        default: nebb=wi*(rho-1.f); break;
+                    }
+                    h[i]=blende(q,fpre[i],nebb);
+                }
+                collide(h,wrx); store_f(n,h,fi.data(),t);
+            }
+            double su=0.0; bool fin=true;
+            for(int n=1;n<NZ-1;n++){ float h[Q]; load_f(n,h,fi.data(),400); float r,ux,uy,uz; macro(h,r,ux,uy,uz); if(!std::isfinite(ux)) fin=false; su+=ux; }
+            printf("  %10.6f", fin?su:NAN);
+            // Abnahme je Variante/q: 0 < Su < HWBB-Referenz*1.05 und endlich (Drag vorhanden, keine Injektion)
+            if(!(fin && su>0.0 && su<ref*1.05)) fails++;
+        }
+        printf("\n");
+    }
+    printf("Kriterium je Zelle: endlich, >0, <= 1,05*HWBB (staerkerer Abbau ist ok -- q<0,5 rueckt die Wand naeher).\n");
+    printf("TEST E: %d Verletzungen ueber 16 Zellen\n", fails);
     return fails;
 }
