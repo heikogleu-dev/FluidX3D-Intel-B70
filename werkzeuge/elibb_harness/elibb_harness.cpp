@@ -76,6 +76,7 @@ static double mass(const float* fi){ // Summe ueber Fluidzellen: je Zelle Summe 
 }
 
 extern "C" int test_E();
+extern "C" int test_G();
 int main(){
     int fails=0;
     // ---------- A: Wandslot-Verzoegerung ----------
@@ -200,6 +201,7 @@ int main(){
         printf("D  (Drift wird in B3 je Facette in fac_tau[4] GEBUCHT, nicht wegdefiniert)\n");
     }
     fails += test_E();
+    fails += test_G();
     printf("\n%s (%d Fehler)\n", fails==0?"HARNESS BESTANDEN":"HARNESS VERLETZT", fails);
     return fails;
 }
@@ -283,5 +285,54 @@ int test_E(){
     }
     printf("Kriterium je Zelle: endlich, >0, <= 1,05*HWBB (staerkerer Abbau ist ok -- q<0,5 rueckt die Wand naeher).\n");
     printf("TEST E: %d Verletzungen ueber 16 Zellen\n", fails);
+    return fails;
+}
+
+// ==================== Test G (2026-08-25 nacht, Kernel-Audit Befund 1) ====================
+// KOHAERENTES-q-GATE: ebene Saeule, ALLE Wandlinks mit demselben q>0,5 -- exakt der Fall
+// (m2-Panel-Klasse), in dem der unprojizierte K1'-Zweig divergiert. Getestet werden beide
+// Varianten; Abnahme: projiziert bleibt ueber 30000 Schritte beschraenkt, unprojiziert
+// DARF divergieren (dokumentiert die Luecke).
+extern "C" int test_G();
+int test_G(){
+    printf("\n=== TEST G: kohaerentes q>0,5 (K1'-Stabilitaet, 30000 Schritte, tau=0,51)\n");
+    printf("%-12s %10s %10s %10s %10s %10s\n","Variante","q=0.504","q=0.52","q=0.60","q=0.75","q=1.00");
+    const float wrx=1.0f/0.51f;
+    int fails=0;
+    for(int var=0; var<2; var++){ // 0 = unprojiziert (alt), 1 = tangential projiziert (Fix)
+        printf("%-12s", var? "projiziert":"unprojiziert");
+        for(float q : {0.504f,0.52f,0.60f,0.75f,1.00f}){
+            std::vector<float> fi(NZ*Q);
+            for(int n=0;n<NZ;n++) for(int i=0;i<Q;i++)
+                fi[IDXF(n,i)] = SOLID(n)?0.f:1e-4f*std::sin(0.7f*n+1.3f*i);
+            bool kaputt=false; long tk=-1;
+            for(long t=0;t<30000&&!kaputt;t++){
+                for(int n=1;n<NZ-1;n++){
+                    float h[Q]; load_f(n,h,fi.data(),t);
+                    float fpre[Q]; for(int i=0;i<Q;i++) fpre[i]=h[i];
+                    float rho,ux,uy,uz; macro(h,rho,ux,uy,uz);
+                    // Wand -z/+z: Normale (0,0,+-1). Tangentialprojektion = (ux,uy,0).
+                    for(int i=1;i<Q;i++){
+                        const int ib=OPP(i);
+                        if(!SOLID(NB(n,ib))) continue;
+                        const float wi=W[i];
+                        const float bb=fpre[i];
+                        float px= (var? ux:ux), py=(var? uy:uy), pz=(var? 0.f:uz); // projiziert: uz=0
+                        const float p2=px*px+py*py+pz*pz;
+                        const float cupt=-(CX[i]*px+CY[i]*py+CZ[i]*pz);
+                        const float feq_ibt=wi*(rho*(1.f+3.f*cupt+4.5f*cupt*cupt-1.5f*p2)-1.f);
+                        h[i]=fmaf((2.f*q-1.f)/q, wi*(rho-1.f)-feq_ibt, bb);
+                    }
+                    collide(h,wrx); store_f(n,h,fi.data(),t);
+                    if(!std::isfinite(h[0])||std::fabs(h[0])>1.f){ kaputt=true; tk=t; }
+                }
+            }
+            if(kaputt) printf("  DIV@%-6ld", tk);
+            else       printf("  %8s","stabil");
+            if(var==1&&kaputt) fails++;              // Fix MUSS stabil sein
+        }
+        printf("\n");
+    }
+    printf("TEST G: %d Verletzungen (nur die projizierte Variante zaehlt)\n", fails);
     return fails;
 }

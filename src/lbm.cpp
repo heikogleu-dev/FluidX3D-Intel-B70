@@ -264,7 +264,8 @@ bool LBM_Domain::s_fac_elibb = false;
 bool LBM_Domain::s_fac_elibb_pur = false; // Pur-Arm (Isolationsmessung) // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 float LBM_Domain::s_fac_qmin = 0.1f;
 float LBM_Domain::s_fac_kappa = 0.4f;
-float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm // Grazing-Guard-Schwelle (K1'-Begleiter)
+float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm
+float LBM_Domain::s_fac_qkappe = 0.65f; // Stabilitaetskappe des q>0,5-Zweigs (Interim bis zur endgueltigen Formel) // Grazing-Guard-Schwelle (K1'-Begleiter)
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
@@ -550,7 +551,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// statt <=0,143; auch gefiltert 0,32-0,51). Sie bleibt RUECKFALL ohne Remesh (Kanal: exakt).
 		// Grazing-Guard und q-Boden gelten fuer BEIDE Quellen; die Guard-RICHTUNG kommt aus der
 		// PCA-Normale (die Richtung ist robust -- nur ihre Distanz war es nicht).
-		ulong nq_remesh=0ull, nq_ebene=0ull, nq_ohne_map=0ull;
+		ulong nq_remesh=0ull, nq_ebene=0ull, nq_ohne_map=0ull, nq_kappe=0ull;
 		std::vector<ulong> fac_zelle; fac_zelle.reserve(aktiv);
 		for(const Facette& f2 : F) if(f2.klasse==0u) fac_zelle.push_back(f2.n);
 		for(ulong kq=0ull; kq<aktiv; kq++) {
@@ -573,7 +574,13 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 					else if(sq>1.0f&&sq<=1.5f) { nq_klemme1++; } // Ebenen-q>1 -> BB (nur ohne Remesh relevant)
 					if(sqq>0.0f) {
 						float sqe = sqq;
-						if(sqe<(float)s_fac_qmin) { sqe=0.5f; nq_boden++; } // q-Boden (P1-Entscheid): zu nah an der Wand -> HWBB, gezaehlt
+						if(sqe<(float)s_fac_qmin) { sqe=0.5f; nq_boden++; } // q-Boden (P1-Entscheid)
+						// ★★ STABILITAETSKAPPE (Kernel-Audit Befund 1 + 3D-Panel-Schiedsrichter, 2026-08-25
+						// nacht): der projizierte K1'-Zweig ist bei KOHAERENTEM q >= 0,75 instabil (NaN im
+						// 24^3-Flachpanel), bei 0,6 stabil. Bis zur endgueltigen q>0,5-Formel gilt:
+						// q > CFD_FAC_QKAPPE (Default 0,65) -> BB. Positionsfehler dort max. 0,5 Zellen
+						// (Status quo ante), Stabilitaet konstruktiv. Gilt fuer BEIDE q-Quellen.
+						if(sqe>(float)s_fac_qkappe) { fac_q[18ull*kq+(ulong)(d-1u)]=0u; nq_kappe++; continue; }
 						if(qd==2u&&sqe>0.5f) sqe=0.5f; // Arm 2: q>0,5 -> Identitaet
 						if(qd==3u&&sqe<0.5f) sqe=0.5f; // Arm 3: q<0,5 -> Identitaet
 						qb=(uchar)fmin(fmax((float)(int)(sqe*254.0f+0.5f),1.0f),254.0f);
@@ -607,7 +614,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 			}
 		}
 		string hs=""; for(uint hb=0u; hb<15u; hb++) hs+=to_string(hist[hb])+(hb<14u?" ":"");
-		print_info("ELIBB fac_q: "+to_string(nq_schnitt)+" geschnittene Links auf "+to_string(aktiv)+" Facetten; QUELLE: Remesh "+to_string(nq_remesh)+", Ebenen-Rueckfall "+to_string(nq_ebene)+", ohne Map-Treffer "+to_string(nq_ohne_map)+" Facetten; q-Boden->0,5: "+to_string(nq_boden)+", Ebenen-q>1->BB: "+to_string(nq_klemme1));
+		print_info("ELIBB fac_q: "+to_string(nq_schnitt)+" geschnittene Links auf "+to_string(aktiv)+" Facetten; QUELLE: Remesh "+to_string(nq_remesh)+", Ebenen-Rueckfall "+to_string(nq_ebene)+", ohne Map-Treffer "+to_string(nq_ohne_map)+" Facetten; q-Boden->0,5: "+to_string(nq_boden)+", Ebenen-q>1->BB: "+to_string(nq_klemme1)+", q>Kappe->BB: "+to_string(nq_kappe)+" (CFD_FAC_QKAPPE "+to_string(s_fac_qkappe,2u)+")");
 		if(qmap!=nullptr&&nq_remesh==0ull) print_error("ELIBB Stufe 2: Remesh-Map uebergeben, aber NULL Remesh-q verwendet -- lautloser No-Op der Stufe 2.");
 		print_info("  q-Histogramm (Bins von 17/254, 0-basiert): "+hs+"  -- kipp0-Gate: ALLES muss im Bin 7 (q=0,5) liegen");
 	}

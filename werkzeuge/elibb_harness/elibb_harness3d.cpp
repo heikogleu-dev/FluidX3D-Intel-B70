@@ -31,9 +31,10 @@ static constexpr long NC=(long)NX*NY*NZ;
 static inline long IDX(int x,int y,int z){ return (long)x+((long)y+(long)z*NY)*NX; }
 static inline long IDXF(long n,int slot){ return (long)slot*NC+n; }
 // 45-Grad-Treppe: Solid, wenn ((z - y) mod NZ) < 4  (Doppelwand ueber die Periodik wie im Kanal)
-static bool MODUS_KUGEL=false;
+static bool MODUS_KUGEL=false; static bool MODUS_FLACH=false; static float FLACH_Q=0.6f;
 static const float KR=6.0f, KCX=NX*0.5f-0.5f, KCY=NY*0.5f-0.5f, KCZ=NZ*0.5f-0.5f;
 static inline bool SOLID(int x, int y, int z){
+    if(MODUS_FLACH){ return z<2||z>=NZ-2; }
     if(MODUS_KUGEL){ const float dx=x-KCX,dy=y-KCY,dz=z-KCZ; return dx*dx+dy*dy+dz*dz<KR*KR; }
     int m=((z-y)%NZ+NZ)%NZ; return m<4; }
 static inline void NB(int x,int y,int z,int i,int&nx,int&ny,int&nz){
@@ -81,6 +82,7 @@ static float q_of(int y,int z,int d){ // d = wandzeigende Richtung (vom Fluid au
 }
 int main(int argc,char**argv){
     if(argc>3&&argv[3][0]=='k') MODUS_KUGEL=true;
+    if(argc>3&&argv[3][0]=='f'){ MODUS_FLACH=true; if(argc>4) FLACH_Q=(float)atof(argv[4]); }
     const float FX=(argc>1)?(float)atof(argv[1]):4e-5f, wrx=1.9f; const long TMAX=(argc>2)?atol(argv[2]):12000;
     printf(MODUS_KUGEL?"Harness F: MINIKUGEL r=6 in %dx%dx%d":"Harness F: 45-Grad-Treppe %dx%dx%d, fx=%.1e, omega=%.2f, %ld Schritte\n",NX,NY,NZ,FX,wrx,TMAX);
     printf("%-22s %12s %12s %12s %10s\n","Schema","Sum u_x(T)","Drag/Kraft","max|u|","Urteil");
@@ -104,7 +106,9 @@ int main(int argc,char**argv){
                         const int ib=OPP(i);
                         int ax,ay,az; NB(x,y,z,ib,ax,ay,az);
                         if(!SOLID(ax,ay,az)) continue;
-                        float sq=MODUS_KUGEL?q_of_kugel(x,y,z,ib):q_of(y,z,ib);
+                        float sq;
+                        if(MODUS_FLACH){ const float ndc_=(z<NZ/2? -(float)CZ[ib] : (float)CZ[ib]); sq = ndc_>0.f ? FLACH_Q/ndc_ : -1.f; }
+                        else sq=MODUS_KUGEL?q_of_kugel(x,y,z,ib):q_of(y,z,ib);
                         if(sq<=0.f||sq>1.5f) continue;      // kein Schnitt -> BB
                         if(sq>1.f) sq=1.f;                   // q=1-Klemme wie B1
                         if(schema==2&&sq>0.5f) continue;     // nur q<0,5-Zweig
@@ -113,9 +117,17 @@ int main(int argc,char**argv){
                         const float cup=-(CX[i]*ux+CY[i]*uy+CZ[i]*uz);
                         const float feq_ib=wi*(rho*(1.f+3.f*cup+4.5f*cup*cup-1.5f*u2)-1.f);
                         if(schema==3){
-                            // K1' NUR fuer q>0,5 (R6-Auflage: der q<0,5-Zweig behaelt die heutige Form --
-                            // eine Variable je Schritt; meine erste Fassung aenderte beide und explodierte).
-                            if(sq>0.5f) h[i]=fmaf((2.f*sq-1.f)/sq, wi*(rho-1.f)-feq_ib, fpre[i]);
+                            // K1' PROJIZIERT (Kernel-Audit Befund 1): q>0,5 mit tangential projiziertem u.
+                            if(sq>0.5f){
+                                float px=ux,py=uy,pz=uz;
+                                if(MODUS_FLACH){ pz=0.f; }
+                                else if(MODUS_KUGEL){ const float gx=x-KCX,gy=y-KCY,gz=z-KCZ,gl=sqrtf(gx*gx+gy*gy+gz*gz)+1e-12f; const float un=(px*gx+py*gy+pz*gz)/gl; px-=un*gx/gl; py-=un*gy/gl; pz-=un*gz/gl; }
+                                else { const float un=(-py+pz)/1.41421356f; py+=un/1.41421356f; pz-=un/1.41421356f; }
+                                const float p2=px*px+py*py+pz*pz;
+                                const float cupt=-(CX[i]*px+CY[i]*py+CZ[i]*pz);
+                                const float feq_ibt=wi*(rho*(1.f+3.f*cupt+4.5f*cupt*cupt-1.5f*p2)-1.f);
+                                h[i]=fmaf((2.f*sq-1.f)/sq, wi*(rho-1.f)-feq_ibt, fpre[i]);
+                            }
                             else { const float nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib); h[i]=blende(sq,fpre[i],nebb); }
                         } else {
                             const float nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib);

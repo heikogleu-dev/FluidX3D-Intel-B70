@@ -1742,7 +1742,8 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 )+"#ifdef FACETTEN_IMEM"+R(
 )+"#ifdef FACETTEN_ELIBB"+R(
 void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, const global uchar* fac_q, const uint fid,
-                         const float rhon, const float upx, const float upy, const float upz, global uint* hits, const ulong t) {
+                         const float rhon, const float upx, const float upy, const float upz,
+                         const float fnx, const float fny, const float fnz, global uint* hits, const ulong t) {
 	// ★★ B2 REVISION nach Pruefbefund W2 (2026-08-25): die Blende ist REIN GEOMETRISCH (u_W = 0).
 	// Die erste Fassung trug u_W = u_s IN der Blende -- bei q = 0,5 ist die Blende aber die
 	// Identitaet, der Wandmodell-Impuls waere an JEDER ebenen Partie (q = 0,5: Kanalboden,
@@ -1758,6 +1759,15 @@ void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, co
 	float fpre[def_velocity_set];
 	for(uint i=0u; i<def_velocity_set; i++) fpre[i]=fhn[i];
 	const float up2 = upx*upx+upy*upy+upz*upz;
+	// ★★ KERNEL-AUDIT BEFUND 1 (2026-08-25 nacht, HOCH): fuer den K1'-Zweig wird u_pre TANGENTIAL
+	// PROJIZIERT. Der Couette-Fixpunkt-Harness des Pruefagenten zeigte: feq_ib mit der WANDNORMAL-
+	// Komponente von u_pre koppelt im kohaerenten Fall (ebene Panels, einheitliches q>0,5 -- exakt
+	// die m2-Klasse, 97 % am Fahrzeug) positiv zurueck und DIVERGIERT (qb=128: ~4200 Schritte,
+	// q=0,6: 88). Mit Projektion: stabil bis q=1,0 UND wandlagen-treu (-0,51->-0,510, -1,0->-0,875).
+	// Der q<0,5-Zweig behaelt das VOLLE u_pre (R6: unveraendert, als sauber vermessen).
+	const float upn_ = fnx*upx+fny*upy+fnz*upz;
+	const float uptx = upx-upn_*fnx, upty = upy-upn_*fny, uptz = upz-upn_*fnz;
+	const float upt2 = uptx*uptx+upty*upty+uptz*uptz;
 	bool beruehrt = false;
 	for(uint i=1u; i<def_velocity_set; i++) {
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;               // Streaming-Ursprung von fhn[i] ist j[ib]
@@ -1792,7 +1802,9 @@ void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, co
 			// bleibt zusaetzlich). fpre[ib] wird in diesem Zweig GAR NICHT mehr gelesen. CPU-3D-
 			// Harness (Treppe + Minikugel, analytisches q): stabil, beste Impulsbilanz-Schliessung
 			// aller Schemata (Drag/Kraft 0,9955). Stoerform exakt (w kuerzt sich im Klammerterm).
-			fhn[i] = fma((2.0f*q-1.0f)/q, wi*(rhon-1.0f)-feq_ib, bb);
+			const float cupt = -(cix*uptx+ciy*upty+ciz*uptz); // c_ib . u_pre_tangential
+			const float feq_ibt = wi*(rhon*(1.0f+3.0f*cupt+4.5f*cupt*cupt-1.5f*upt2)-1.0f);
+			fhn[i] = fma((2.0f*q-1.0f)/q, wi*(rhon-1.0f)-feq_ibt, bb);
 		}
 		beruehrt = true;
 	}
@@ -1840,7 +1852,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	{
 		float r0, u0x, u0y, u0z;
 		calculate_rho_u(fhn, &r0, &u0x, &u0y, &u0z);
-		elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, hits, t);
+		elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, nx, ny, nz, hits, t);
 	}
 )+"#ifdef FACETTEN_ELIBB_PUR"+R(
 	return; // ★ Pur-Arm (CFD_FAC_ELIBB=2): NUR die Geometrie-Blende, kein Wandmodell -- Isolationsmessung
@@ -2028,9 +2040,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		{
 			t1x=utxb/utb; t1y=utyb/utb; t1z=utzb/utb;
 			t2x=ny*t1z-nz*t1y; t2y=nz*t1x-nx*t1z; t2z=nx*t1y-ny*t1x;
-			const float Yb = utb*((2.0f*yw)*def_fac_Y);
+			const float utb_wm = utb*def_fac_utkorr; const float Yb = utb_wm*((2.0f*yw)*def_fac_Y); // ★ Kernel-Audit MITTEL: UTKORR auch auf der PEMA-Kette (war wirkungslos unter PEMA)
 			const float upb = wf_spalding_uplus(Yb);
-			const float utaub = utb/upb;
+			const float utaub = utb_wm/upb;
 			float twb = rhon*utaub*utaub;
 			const float twmb = 0.5f*rhon*utb;
 			if((twb>twmb||twb*faca>twmb)&&t%100ul==0ul) atomic_inc(&hits[8]); // Slot 8: Klemmen der ANGEWANDTEN Kette (Audit 1/3 -- vorher zaehlte die verworfene Kopf-Kette)
