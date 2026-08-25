@@ -2757,3 +2757,15 @@ OFFEN NOTIERT: Praezisionswaechter ist im Pur-Arm blind (fac_tau_n bleibt 0, B3 
 trotzdem) -- saturierender Additionszaehler als Folgearbeit; fac_csv-Header nennt zband
 nicht. Die laufende g13-Serie traegt noch die ALTE Buchung -- ihre kugel_b3-Reibungszahlen
 sind OBSOLET, nur die Hash-Anker zaehlen; Neustart nach Serienende.
+
+## TAGESABSCHLUSS-BEFUND (2026-08-25 spaetnacht): PERF-REGRESSION im ELIBB-Arm -- Serie gesichert beendet
+
+Der frische Kontrollanker (ELIBB=0, neues Binary c98cd88+) lief mit voller Geschwindigkeit
+durch (g13b_anker, Hash unten offen -- Lauf ok); der ELIBB=1-Kanalanker kriecht dagegen
+REPRODUZIERBAR bei ~2 MLUPS / 0 GB/s (g13-alt UND g13b-neu; frueher lief derselbe Arm in
+~3 min, z. B. g8/g10-Aera). KEIN Treiberdefekt (Kontrollarm schnell direkt danach).
+VERDACHT: Registerdruck/JIT-Spill durch die juengsten apply_facette_imem-Umbauten
+(K1'-Projektion + elibb_dp-Export + B3-Buchung). MORGEN ZUERST: Perf-Bisect der
+ELIBB-Emission (Kernelstand g11 gegen jetzt, CFD_DUMP_CL-Diff + Einzelschritt-Messung),
+DANN erst g13b-Wiederholung (Anker-ELIBB-Hash, Kugel-B3, kipp26-Doppelzaehlungs-Detektor).
+Beide Kriechserien wurden ueber den nachverfolgten Task-Stopp sauber beendet (Census 0).
