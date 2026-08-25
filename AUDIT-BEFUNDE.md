@@ -2072,3 +2072,114 @@ nicht, es faellt). **Trotzdem kein Befund**, aus zwei Gruenden:
 ### Nebenbefund zur Warmlaufsperre
 `CFD_SGS_DIAG_AB=126700` (20 ETT) aendert cf NICHT (0,00153685 mit und ohne). Die Sperre wirkt
 also nur auf die nu_t-Zaehler, nicht auf die Physik -- wie beabsichtigt.
+
+# =========================================================================
+# GROSSER CODE-AUDIT 2026-08-25, WELLE 1 (Funktionsebene) -- fuenf Agenten
+# Anlass: K2-Verletzung im EBENEN Kanal. Heiko: "einen Agenten auf wirklich
+# jede einzelne Funktion".
+# =========================================================================
+
+## K2 IST AUFGEKLAERT -- DREI GETRENNTE URSACHEN, NICHT EINE
+
+**(1) Ebene Wand, 2,5 %: KEIN Codefehler.** Der Kernel ist entlastet -- alle Ereigniszaehler
+exakt 0, Wirkpfad == Soll == fac_N(14160) x 5067, also jede Facette jeden Schritt genau einmal;
+faca = 1,0 exakt, alph = 0 exakt (S1 parallel n), Snn downdatet auf exakt 0, phi1 = -twe
+konstruktiv, phi2 = 0 => protokollierte Kraft IDENTISCH mit angewandter und mit dem wahren
+Austausch. ZWEI Agenten unabhaengig: der CFR-Regler schwingt im K2-Fenster mit +-30 %
+(f_lat 1,94e-7 bis 3,87e-7, Periode rund 20 ETT, export/k_kipp0/kanal_zeit.csv), K2 stellt ein
+FENSTERMITTEL (FK.rx) gegen einen MOMENTANWERT (FK.px/object_force), und `soll_rx = f*delta*A`
+unterschlaegt den instationaeren Term rho*V*dU_b/dt. **K2 misst dort Nichtstationaritaet.**
+
+**(2) Gekippte Wand: ein Drittel bis die Haelfte der Facetten ist TOT.** Beim ALPHA2-Downdate
+ist G' fuer Zellen mit nur EINEM Wandlink analytisch exakt 0 => Slot-13-Return, reiner BB.
+Slot 13 bestaetigt auf die Stelle: kipp45 = 78.566.400 = **exakt 50,0 %**, kipp26 =
+53.195.580 = **exakt 33,3 %**, kipp0 = 0. Deckt sich mit den Feuerraten (aktiv/feuernd:
+14160/14160 = 100 %, 31860/21240 = 66,7 %, 29760/14880 = 50,0 %).
+Gegenprobe 45 Grad: (y+_Akku/y+_utau)^2 = (38,3/208,7)^2 = **0,0337** gegen gemessenes
+Verhaeltnis **0,0336**. Der Akkumulator ist dort EHRLICH; falsch ist, was angewandt wird.
+`eigene_links` wird in baue_facetten erhoben (setup.cpp:1170), aber NIE als Kriterium benutzt.
+
+**(3) Vorzeichenkipp bei 26 Grad:** der gekoppelte Rang-2-Skalarpfad (kernel.cpp:1969, Slot 14
+= 33,3 %) schleppt phi2 = P2 + Gt12*s1 mit, Groessenordnung 10^2 bis 10^3 mal twe, Vorzeichen
+beliebig. Gegenprobe: bei 45 Grad folgt das Verhaeltnis der quadrierten y+-Ratio, bei 26 Grad
+NICHT ((69,2/265,2)^2 = 0,068 gegen |1,049|) -- genau dort, wo Slot 14 besetzt ist.
+
+## DER TIEFERE PHYSIKFEHLER DARUNTER (HOCH)
+**Der iMEM-Pfad ignoriert die Stoerungsform der Ablage.** FluidX3D speichert f^ = f - w
+(calculate_rho_u:1131 addiert rho += 1.0f; load_f:1403 entshiftet NICHT). `P1 = Sum_L 2*ct1*fhn[i]`
+summiert nur ueber die SOLID-Teilmenge L -- dort hebt sich der Offset nicht auf. Der wahre
+Austausch ist P + 2*(S1 . t^). FluidX3Ds eigenes MEA (update_force_field:3252) summiert ueber den
+VOLLEN Satz und ist deshalb verschiebungsfrei; iMEM ist es nicht.
+Ebene Wand: S1 = (0,0,1/6) parallel n => 2*(S1.t^) = 0 EXAKT -- deshalb ist kipp0 sauber.
+Treppe: |2*S1.t^| bis rund 0,4 gegen twe rund 2,5e-5 -- **vier Groessenordnungen**.
+Betroffen sind ZIEL und BUCHHALTUNG (angewandt wird twe - 2*B1, protokolliert wird twe).
+=> Am FAHRZEUG ist jede Wand eine Treppe. Das ist der Befund mit der groessten Reichweite.
+
+## DREI BEFUNDE, DIE UEBER K2 HINAUSGEHEN
+
+**A. HOCH, ZU VERIFIZIEREN: Randbedingung koennte FULLWAY statt HALFWAY sein.**
+Agent C hat die Slot-Arithmetik simuliert (nicht nur gelesen): an einer Fluidzelle neben Solid
+sei `fhn[i+1](t)` identisch mit dem eigenen post-Kollisions-`fhn[i](t-2)` -- ZWEI Schritte,
+waehrend Fluid-Fluid einen braucht. Der Kommentar kernel.cpp:1182 beruft sich auf Krueger S. 180
+(Halfway). Folge bei w = 1,9999: (1-w)^k = (-1)^k ist UNGEDAEMPFT, der reflektierte Anteil kommt
+nach genau 2 Schritten mit zweimal gekipptem Vorzeichen zurueck -> resonante Periode-2-Mode in
+der ersten Wandlage, gedaempft NUR durch nu_t.
+**STATUS: NICHT UEBERNOMMEN.** Das widerspricht dem Upstream-Entwurf und wuerde die halbe
+Wandposition verschieben. Vor jeder Konsequenz unabhaengig nachzurechnen -- die Iron Rule
+"Vorgaengerstand taugt fuer PORTIERFEHLER" ist hier der richtige Rahmen.
+
+**B. MITTEL: Smagorinsky-Pi_neq ohne Guo-Korrektur (kernel.cpp:2269-2277).**
+Richtig waere Pi_neq = Sum cc(f - f^eq) + 0,5*(u_a F_b + F_a u_b). Mit VOLUME_FORCE/FORCE_FIELD
+ist die Scherrate -- und damit die GESAMTE Viskositaet, weil nu_0 praktisch 0 ist -- ueberall
+dort verzerrt, wo die Volumenkraft nicht vernachlaessigbar ist.
+=> **Im KANAL ist die Volumenkraft der Antrieb.** Die Delta-Reihe vom 24.08. (nu_t-Verhaeltnis
+1,56/1,49/1,05) steht damit auf einer verzerrten Scherrate. Der TREND ist davon nicht
+zwingend betroffen (die Verzerrung wirkt in allen drei Punkten), die ABSOLUTWERTE schon.
+
+**C. MITTEL: die RHO_CLAMP-Zaehler wickeln.** Ungegatete `atomic_inc` auf uint
+(kernel.cpp:2160/2177); bei 2e8 Zellen nach rund 21 Schritten. **Jede grosse Klemmzahl, die ich
+in den letzten Tagen zitiert habe (5,4 Mio b8_kontrolle, 6,38 Mio w_anliegend), ist damit NICHT
+quantitativ.** Meine Rechnung "0,00039 % der Zellaktualisierungen" vom 23.08. ist hinfaellig.
+Zusaetzlich verletzt die Dichteklemme die MASSE (nicht den Impuls): Sum f_post = rho + w(rho_c - rho).
+
+## WEITERE BEFUNDE (Auswahl, vollstaendig in den Agentenberichten)
+- Fernfeld-Einlass im PRODUKTIONSFALL ueberbestimmt: `set_velocity_inlet_faces` steht nur in
+  main_setup_fernfeld, nie in main_setup_fahrzeug_dd (setup.cpp:5359). Der Fix haengt am
+  Diagnosezweig. Jeden Schritt eine Massendifferenz in die erste Fluidzelle dahinter.
+- Rueckkopplung erzeugt eine GEMESSENE Massenquelle: `mdot_netto_rel` stabil bei -2,0 bis
+  -2,2 % des Einstroms (export/b8_breit_n16/band_bilanz.csv), bis -6 % in export/r_hart_aus.
+  Steht seit Wochen in der CSV, nie ausgewertet.
+- Das NAHFELD hat ueberhaupt keine Massenbilanz -- alle fuenf Flaechen vorgeschrieben.
+- `update_force_field` laesst den Bewegtwand-Term aus: am ebenen mitbewegten Boden fehlen
+  u_lat/3 je Randzelle und Schritt. Betrifft jede Kraftbilanz mit TYPE_S und u != 0.
+- Geschwindigkeitsklemme (kernel.cpp:2244) ist die einzige UNBEOBACHTETE Klemme -- greift sie,
+  ist der Impuls nicht erhalten.
+- Zero-Copy-`read_from_device` ist ein No-Op ohne Queue-Drain; sicher nur ueber
+  `Memory_Container`. Auf der iGPU (lbm_c) nach run_async liest der Host unsynchronisiert.
+- `fac_tau` akkumuliert float32 ueber die ganze Laufzeit ohne Reset und ohne Praezisionswaechter.
+- SPONGE hat KEINEN feuernden Zaehler.
+- y+ im Kanal rechnet y_w hartkodiert 0,5 (setup.cpp:1680), der dd-Pfad warnt ausdruecklich
+  davor. Die gemeldeten 69,2 / 38,3 sind damit um Faktor 1,4 bzw. 2,1 zu klein.
+
+## HEIKOS FACETTENEBENE -- BEANTWORTET
+Die Stuetzpunkte sind Halfway-Punkte geschnittener Links (setup.cpp:1161), die Ebene ist die
+Ausgleichsebene durch deren Schwerpunkt. Nachgerechnet fuer 45 Grad: y_w = 0,369 (Randzelle) und
+1,040 (Zweitlage) -- die Logs melden genau diese Werte. **Die Ebene liegt also BEREITS auf der
+senkrechten Mittelebene zwischen den aeusseren Solidzellmitten und den ersten Fluidzellmitten**,
+mit unter 0,02 Zellweiten Restversatz. Heikos Lage (Ebene DURCH die Solidzellmitten) verschoebe
+die Wand um 0,354 (45 Grad) bis 0,5 Zellweiten (eben) ins Solid: der Kanal-Anker braeche (dort
+ist die BB-Wand beweisbar bei 0,5), Modellwand und reflektierende Wand laegen 0,5 Zellen
+auseinander, y_w stiege, tau_w fiele um rund 15 % -- **K2 wuerde schlechter**.
+=> Heutige Lage ist richtig. Die Aufdickung kommt aus der Treppenamplitude +-0,354 und den
+Zweitlagen-Facetten bei y_w rund 1,04. Der wirksame Hebel ist ein q-abhaengiger Wandabstand
+je Link, also ELIBB.
+
+## MEINE EIGENEN FEHLER IN DIESER RUNDE
+1. Vorzeichen-Hypothese zu `fac_paar` (kernel.cpp:1726-1733) -- GEGENSTANDSLOS: unter
+   CFD_FACETTEN=3 gilt FACETTEN_IMEM, und kernel.cpp:2130 kompiliert `fac_paar` WEG. Der Code,
+   auf den ich gezeigt habe, laeuft in diesen Laeufen nicht. Die gespiegelten Indexpaare sind
+   zudem nachgerechnet korrekt (alle 12 Aufrufe teilen dieselbe Invariante).
+2. Flaechen-Hypothese fuer den 45-Grad-Fall -- WIDERLEGT: `fq*delta*2*Nx*Ny` ist in Wahrheit
+   eine VOLUMENbilanz (f*V_fluid), die benetzte Flaeche geht gar nicht ein. Das Etikett
+   "Soll f*delta*Flaeche" ist irrefuehrend.
+3. Klemmzahlen als Argument benutzt, obwohl die Zaehler wickeln (siehe C).
