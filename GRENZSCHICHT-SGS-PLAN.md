@@ -1,3 +1,29 @@
+# STAND 2026-08-25 SPAETABEND (ersetzt den Abend-Stand unten)
+
+## Der Tag in einer Zeile
+Audit-Schleife (25+ Befunde, 4 Ruecknahmen) -> K2-Dreiteilung -> ELIBB-Kette gebaut,
+dreifach falsifiziert, dreifach korrigiert (K1'-Operand, Remesh-q, REIHENFOLGE) -> Kugel
+geheilt (Cd 10,57 -> 3,33, pur 1,78) -> und der RANG-1-BROCKEN bestaetigt: 3/2-Abtastpunkt.
+
+## UTKORR-Ergebnis (g10, der wichtigste Messwert des Tages)
+u_tau IST/Ziel: N=20 0,716->0,921; N=38 0,669->0,883.
+c_f (Kraftbilanz): 1,67e-3->2,90e-3 (N=20), 1,54e-3->2,61e-3 (N=38); Referenz 3,4424e-3.
+EIN Faktor schliesst 70-75 % der zentralen Luecke. Kontrollarm bitgleich (FELD-HASH).
+
+## Reihenfolge ab jetzt (Brocken-Logik, von Heiko bestaetigt)
+1. GROSSE AUDIT-SCHLEIFE ueber den Abend-Diff (laeuft, 3 Agenten) -- Befunde beheben.
+2. 8-mm-SCREENING-LEITER am Fahrzeug (FREIGABE ERTEILT: "8mm freigabe hast du immer"):
+   Arm 1 Standard-Kontrolle (frisches Binary), Arm 2 +UTKORR=1,5, Arm 3 +ELIBB=1.
+   Eine Variable je Arm. Messgroessen: Cd/Cz/Cz_rest, y+-Verteilung, Zaehler.
+3. Linkmengen-bewusste Abtastpunkt-Korrektur je Facette (ersetzt den globalen 1,5er;
+   Deflation aus den Wandlink-Gewichten, Theorie eben exakt 3/2).
+4. Restluecken-Zuordnung (~20 %): SGS-Selbsterhaltung vs. Faktorhoehe vs. Log-Layer.
+5. B3 (Blenden-Austausch buchen), W5 (tote Facetten deklarieren), K2-Gate-Redefinition
+   (FP32-Bulkquelle b~4,7e-9), Kippkanal ABGESCHLOSSEN per Deklaration.
+4-mm-Produktion weiterhin NUR mit explizitem Go.
+
+---
+
 # STAND 2026-08-25 ABEND (aktuellste Fassung, ersetzt die Tagesauftraege oben)
 
 ## Erledigt heute
