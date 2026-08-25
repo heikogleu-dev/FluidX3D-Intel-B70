@@ -523,7 +523,13 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		ulong mx=0ull; uint mxs=0u;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
 			for(uint sl=0u; sl<68u; sl++) { const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl]; if(v>mx) { mx=v; mxs=sl; } } }
-		if(mx>3865470566ull) print_error(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+", ueber 90 % des uint-Bereichs -- WICKELGEFAHR, alle daraus gerechneten Prozente sind wertlos.");
+		// ★ g12-Befund (2026-08-25 nacht): SAETTIGUNG ist der GEWOLLTE Endzustand der saettigenden
+		// Zaehler (Parken ab 0xF0000000) -- der Waechter hat sie als "Wickelgefahr" gemeldet und
+		// per exit(1) drei komplette 8-mm-Laeufe am BERICHT getoetet (die Physik-CSVs ueberlebten).
+		// Jetzt: >= 0xF0000000 = gesaettigt (Info, Zahl ist eine UNTERGRENZE); nur der Bereich
+		// dazwischen ist echte Wickelgefahr nicht-saettigender Zaehler.
+		if(mx>=4026531840ull) print_info(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" GESAETTIGT (>= 0xF0000000) -- Zahl ist eine Untergrenze, kein Wickel.");
+		else if(mx>3865470566ull) print_error(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+", ueber 90 % des uint-Bereichs -- WICKELGEFAHR, alle daraus gerechneten Prozente sind wertlos.");
 		else if(mx>2147483648ull) print_warning(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+" (ueber die Haelfte des uint-Bereichs) -- bei laengerem Lauf wickelt er.");
 	}
 	// ★ 2026-08-25: Ansage der beiden neuen Wirkpfad-Zaehler. Beide gegatet (t%100), also
