@@ -112,9 +112,15 @@ int main(int argc,char**argv){
                         const float wi=W[i];
                         const float cup=-(CX[i]*ux+CY[i]*uy+CZ[i]*uz);
                         const float feq_ib=wi*(rho*(1.f+3.f*cup+4.5f*cup*cup-1.5f*u2)-1.f);
-                        const float nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib);
-                        // Schema 3: KANDIDAT-Platzhalter (bis der Planungsagent liefert = Schema 1)
-                        h[i]=blende(sq,fpre[i],nebb);
+                        if(schema==3){
+                            // K1' NUR fuer q>0,5 (R6-Auflage: der q<0,5-Zweig behaelt die heutige Form --
+                            // eine Variable je Schritt; meine erste Fassung aenderte beide und explodierte).
+                            if(sq>0.5f) h[i]=fmaf((2.f*sq-1.f)/sq, wi*(rho-1.f)-feq_ib, fpre[i]);
+                            else { const float nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib); h[i]=blende(sq,fpre[i],nebb); }
+                        } else {
+                            const float nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib);
+                            h[i]=blende(sq,fpre[i],nebb);
+                        }
                     }
                 }
                 // --- Guo-lite Kollision mit Kraft fx ---
@@ -137,7 +143,7 @@ int main(int argc,char**argv){
         long nf=0; for(int z=0;z<NZ;z++)for(int y=0;y<NY;y++)for(int x=0;x<NX;x++) if(!SOLID(x,y,z)) nf++;
         const double dsu=(su-su_prev); const double antrieb=(double)FX*(double)nf; // je Schritt
         const double dragq=1.0-dsu/antrieb; // 1 = Wand schluckt alles (stationaer), >1 unmoeglich... <0 = Injektion
-        const char* nm[4]={"HWBB","Blende AKTUELL","nur q<0,5","KANDIDAT(=akt.)"};
+        const char* nm[4]={"HWBB","Blende AKTUELL","nur q<0,5","K1-Strich"};
         bool ok = std::isfinite((float)su) && !kaputt && su>0.0 && dragq>0.5 && dragq<1.5 && umax<0.35f;
         // Injektionskriterium: Sum u_x muss SAETTIGEN; waechst es am Ende noch deutlich schneller
         // als der Antrieb erklaert oder ist es negativ/instabil -> Verletzung.

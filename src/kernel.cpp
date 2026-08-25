@@ -1770,9 +1770,30 @@ void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, co
 		const float wi=w(i);
 		const float cup = -(cix*upx+ciy*upy+ciz*upz);            // c_ib . u_pre  (c_ib = -c_i)
 		const float feq_ib = wi*(rhon*(1.0f+3.0f*cup+4.5f*cup*cup-1.5f*up2)-1.0f); // feq_ib(rho,u_pre), Stoerform
-		const float nebb = wi*(rhon-1.0f) + (fpre[ib]-feq_ib);   // f~ = w(rho-1) + f_neq_ib -- u_W = 0
 		const float bb = fpre[i];
-		fhn[i] = (q<=0.5f) ? fma(2.0f*q, bb, (1.0f-2.0f*q)*nebb) : fma(0.5f/q, bb, (1.0f-0.5f/q)*nebb);
+		if(q<=0.5f) { // Zweig unveraendert (R6: eine Variable je Schritt; QDIAG=2 hat ihn als sauber vermessen)
+			const float nebb = wi*(rhon-1.0f) + (fpre[ib]-feq_ib); // f~ = w(rho-1) + f_neq_ib -- u_W = 0
+			fhn[i] = fma(2.0f*q, bb, (1.0f-2.0f*q)*nebb);
+		} else {
+			// ★★ K1' (Planungsagent 2026-08-25): der alte q>0,5-Zweig nutzte die Bouzidi-Gewichte
+			// mit dem FALSCHEN zweiten Operanden (Wandrekonstruktion statt eigener Gegenrichtungs-
+			// Population) UND einem neq-Schaetzer mit vollem Upstream-Scher-Bias -- an ebenen
+			// Waenden Ueberbremsung, an STREIFENDEN Links (kleiner Nenner in q = y_w/(-n.c), die
+			// groessten Tangentialtraeger) eine selbstverstaerkende Freigabe-Ratsche: die Kugel-
+			// Injektion (Cd -3,3 bis -4,95). Aufgeloest ist damit auch der Eq.-25-Streit: das
+			// gedruckte a2 = (2-2q)/q ist ein Faktor-2-Druckfehler, korrekt ist (1-q)/q (drei
+			// unabhaengige Beweise im Planungsbericht; die V1-Passage "kein Druckfehler" ist
+			// superseded, ihre Cd_v=-1,84-Messung war exakt diese Pathologie).
+			// K1' = korrigierte Marson-Koeffizienten + KNOTENVERANKERTER neq-Schaetzer (aus bb
+			// statt fpre[ib]; stationaer exakt (1-omega)*f_neq, kein Upstream-Bias). Algebraisch:
+			//   fhn[i] = (1-q)/q * bb + (2q-1)/q * [w(rho-1) + (bb - feq_ib)]
+			//          = bb + (2q-1)/q * (w(rho-1) - feq_ib)
+			// q=0,5: Koeffizient EXAKT 0 -> Identitaet (Bitanker; der qb==127-Kurzschluss oben
+			// bleibt zusaetzlich). fpre[ib] wird in diesem Zweig GAR NICHT mehr gelesen. CPU-3D-
+			// Harness (Treppe + Minikugel, analytisches q): stabil, beste Impulsbilanz-Schliessung
+			// aller Schemata (Drag/Kraft 0,9955). Stoerform exakt (w kuerzt sich im Klammerterm).
+			fhn[i] = fma((2.0f*q-1.0f)/q, wi*(rhon-1.0f)-feq_ib, bb);
+		}
 		beruehrt = true;
 	}
 	if(beruehrt&&t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend

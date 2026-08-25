@@ -259,6 +259,7 @@ float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der 
 uint LBM_Domain::s_fac_alpha = 0u;
 bool LBM_Domain::s_fac_elibb = false; // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 float LBM_Domain::s_fac_qmin = 0.1f;
+float LBM_Domain::s_fac_kappa = 0.4f; // Grazing-Guard-Schwelle (K1'-Begleiter)
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
@@ -544,7 +545,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 			for(uint d=1u; d<19u; d++) {
 				const float ndc = nx*(float)CX19[d]+ny*(float)CY19[d]+nz*(float)CZ19[d];
 				uchar qb=0u;
-				if(ndc<-1e-6f) { // wandzeigender Link
+				const float clen = sqrtf((float)(CX19[d]*CX19[d]+CY19[d]*CY19[d]+CZ19[d]*CZ19[d]));
+				if(ndc<-(float)s_fac_kappa*clen) { // ★ K1'-Begleiter GRAZING-GUARD: nur Links mit -n.c_hat >= kappa (Default 0,4) interpolieren -- streifende Links sind schlecht konditioniert (q = y_w/kleiner Nenner) UND die groessten Tangentialtraeger: die Injektions-Ratsche der Kugel. Darunter: BB (qb=0).
 					const float sq = yw/(-ndc); // Bruchteil der Linklaenge
 					// ★ QDIAG (2026-08-25, Kugel-Falsifikation): Hypothesen-Arme fuer die Injektionsjagd.
 					// 1 = q>1-Klemme AUS (sq>1 -> BB), 2 = nur q<0,5-Zweig (q>0,5 -> Identitaet),
@@ -557,7 +559,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 						if(qd==3u&&sqe<0.5f) sqe=0.5f; // Arm 3: q<0,5 -> Identitaet
 						qb=(uchar)fmin(fmax((float)(int)(sqe*254.0f+0.5f),1.0f),254.0f);
 						nq_schnitt++;
-					} else if(sq>1.0f&&sq<=1.5f) { if(qd==1u||qd==2u) { qb=0u; } else { qb=254u; } nq_klemme1++; nq_schnitt++; } // q=1-Klemme; Arm 1/2: stattdessen BB
+					} else if(sq>1.0f&&sq<=1.5f) { qb=0u; nq_klemme1++; } // ★ K1'-Begleiter: q>1 -> BB-RUECKFALL statt Klemme (QDIAG=1 mass das kostenneutral; K1' waere mit Muell-q bei q~1 gefaehrlich)
 					// sq>1,5: Ebene weit weg -- Link bleibt HWBB (qb=0), kein Zaehler (normaler Fall der Stufenrueckseite)
 				}
 				fac_q[18ull*kq+(ulong)(d-1u)] = qb;
