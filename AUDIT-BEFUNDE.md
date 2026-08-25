@@ -2691,3 +2691,32 @@ UTKORR-Antwortkurve 1,0/1,5/2,0 -> 0,716/0,921/1,069: LINEAR, keine Saettigung -
 wahre Faktor liegt bei ~1,7 (> Theorie 1,43-1,5): neben dem 2/3-Abtastpunkt steckt ein
 weiterer linearer Eingangsdefizit-Anteil; die Turbulenz-Selbsterhaltungs-These als
 Restluecken-TRAEGER ist damit gekippt (sie bleibt als Beitrag zweiter Ordnung).
+
+## 8-mm-LEITER g12 (2026-08-25 nacht): erste Fahrzeugmessung der neuen Kette
+
+Drei Arme (b8-Standard; +UTKORR=1,5; +ELIBB=1), 0,5 s, Fenster 0,35-0,5 s. Alle drei
+liefen physikalisch komplett durch; der Bericht starb am saettigungs-blinden
+Wickelwaechter (behoben: >=0xF0000000 = gewollter Endzustand, kein exit).
+
+PROJIZIERTER PFAD (cd_facetten.csv -- der einzig gueltige an behandelten Koerpern):
+| Arm | cd_druck | cz_druck | cd_reib | dm kum. |
+|---|---|---|---|---|
+| std | 1,6833 | -0,0541 | -0,0007 | -0,0010 |
+| +UTKORR | 1,6623 (-1,2 %) | -0,0432 | +0,0018 | -0,0014 |
+| +ELIBB | 1,6047 (-4,7 % ges.) | -0,0349 | +0,0084 | -0,0036 |
+
+object_force-Pfad (forces.csv/kraft_zband, PHANTOM-kontaminiert an behandelten Links):
+Cd 8,79/8,38/7,16; Cz_rest -0,144/-0,143/-0,250. WICHTIG: die Cz-RICHTUNG widerspricht
+zwischen den Pfaden (projiziert: ELIBB nimmt Abtrieb WEG; object_force: gibt stark dazu).
+Nach Doktrin zaehlt der projizierte Pfad; die Diskrepanz ist der Preis des offenen B3
+(Blenden-Austausch ungebucht) und JETZT die dringlichste Buchhaltungsfrage.
+
+STUFE 2 AM MASSSTAB BESTANDEN: 588.667 Facetten, 2.445.249 Remesh-Links, Ebenen-
+Rueckfall 0, ohne Map-Treffer 0; ELIBB-Arm am Fahrzeug STABIL (kein NaN, Cz_band als
+Kontrolle in allen Armen 0,60-0,61 deckungsgleich).
+
+SCREENING-FAZIT: (a) Treppenglaettung wirkt am Fahrzeug in Kugel-Richtung
+(cd_druck -4,7 %); (b) UTKORR ist am Fahrzeug Cd-mild (-1,2 %) -- der grosse c_f-Hebel
+des Kanals uebersetzt sich NICHT linear in Fahrzeug-Cd (druckdominiert, erwartbar);
+(c) NAECHSTER PFLICHTBAUSTEIN vor jeder Cz-Aussage: B3-Buchung, damit Reibungs- und
+object_force-Pfad wieder EIN konsistentes Bild geben. 4 mm weiterhin nur mit Go.
