@@ -87,6 +87,30 @@ Monitoring: `cat logs/queue_status.txt`; Kraftverlauf `export/f4_vollumfang_mls/
   Tangentialprojektion statt volles u_f. Grazing-kappa 0,4 / q-Boden 0,1 (aeltere Interims).
 - UTKORR=1,5 ist Interim (Abloesung: linkmengen-bewusster Abtastfaktor, Baustein 2).
 
+## Xe-Flat-CCS-VRAM-Bug (CC-Auftrag 26.08. nachts) — Stand + Vor-Go-Schritt
+
+BEFUND KERNEL (gemessen 26.08. nachts): Ubuntu 26.04, Kernel 7.0.0-30.30, GEBAUT
+31.07.2026 -- der Fix (Torvalds 818bebeb63dd, dri-devel 08/2026) kann darin nicht
+enthalten sein; im Archiv ist KEIN neuerer Kernel verfuegbar (Kandidat = installiert).
+=> potenziell betroffen, solange die Ausrichtungsfrage offen ist.
+AUSRICHTUNG (Kernfrage) OFFEN: das Journal druckt nur die (ggf. aufgerundete)
+nutzbare Grenze 0x7f9000000 -- die ist beweislos, WEIL der Fehler ja aufrundet.
+Die rohe CCS-Basis braucht Root: HEIKOS HANDGRIFF (Ausgabe an Claude geben):
+  sudo dmesg | grep -iE "ccs|gsm|flat"
+  sudo cat /sys/kernel/debug/dri/0/tile0/vram_mm   (und dasselbe fuer dri/1)
+  ls /sys/kernel/debug/dri/0/tile0/
+EMPIRISCHER DETEKTOR GEBAUT: werkzeuge/ccs_kanarie/ (Voll-VRAM-Muster-Fuelltest,
+on-device-Verify, Sofortkontrolle als Werkzeug-Selbsttest; Rauchtest sanfter Modus
+26.08.: 3 GB, 0 Fehler). VOR DEM 4mm-GO als Vollmodus laufen lassen:
+  pgrep -x FluidX3D   # muss leer sein
+  ./werkzeuge/ccs_kanarie/ccs_kanarie 1 300 0   # B70, 5 min, volle Fuellung
+  ACHTUNG: Desktop kann waehrenddessen stocken (VRAM voll) -- bewusst starten.
+  PASS => oberste Seite nachweislich sauber, 4mm-Lauf unbedenklich.
+  KORRUPTION => 4mm-Lauf VERSCHIEBEN, Befund an Heiko (Kernel-Entscheid noetig).
+EINORDNUNG fuers Risiko morgen: f4-Fussabdruck 29,3 von 32,7 GB -- ob die vergiftete
+Seite (falls vorhanden) in unseren Puffern liegt, haengt an der Allocator-Platzierung;
+genau das klaert der Kanarie-Volllauf ohne Root.
+
 ## TODO-Liste fuer NACH dem 4mm-Lauf
 
 1. **Physik-Baustein 2:** K2-Luecke 26-Grad-Klasse (Rekonstruktionsziel −Σct·Δp) +
