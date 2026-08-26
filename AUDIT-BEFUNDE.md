@@ -882,6 +882,34 @@ bei CD_EVERY=1 (4mm-Produktionskadenz, g19): Nahfeld-Phasenanteil 92,1 % (GPU) g
 (Host), Wanduhr 4:58 gegen 5:44 min = ~13 % schneller -- die ~12,5-%-Prognose des Audits
 bestaetigt. CFD_FAC_GPU=1 bleibt Default; Hebel ABGENOMMEN.
 
+## ABNAHME f4_wandfrei_v2 (4mm-Produktion, 26.08. 13:15-14:47, Commit f3b4a7c, SAUBER bis t=0,5s)
+
+Erster durchgelaufener gekoppelter 4mm-Lauf (Vorgaenger starb bei 0,405). 92 min inkl. Init
+(Index ~10.700-10.840, ~13 % schneller als Vorgaenger-Index 12.429 = FAC_GPU+Slice-Gather am
+Produktionspunkt). Profiler (V1-Workflow, fdinfo 180s): B70 CCS 97,2 %, iGPU 82,4 % (Zielband),
+CONCURRENT 99,4 %. VTK: 10 Dateien/56,4 GB inkl. Enddump; Census 0; GT-Reset-Waechter ohne
+Ausloesung; 0 Fehler.
+ZAHLEN (Fenster 0,2-0,5, n=300): cd_druck 0,8968+-0,0095 | cz_druck -0,658 | cd_reib -0,009 |
+cd_band 0,3588 | cd_rest 0,5380 | cz_band +0,2450 | cz_rest -0,9029.
+BEFUND 1 -- RADKONTAKT-BAND-SCHRUMPF BESTANDEN: Band-cd 8mm 0,692 -> 4mm 0,359 (-48 %).
+Die Deklaration "Artefakt grober Voxelraeder" ist damit BELEGT (Pflichtpunkt ext. Review).
+BEFUND 2 -- KRITERIUM cz_rest <= -0,92 IM VOLLEN FENSTER VERFEHLT: 0,2-0,405 sind beide
+Laeufe deckungsgleich (-0,929/-0,926), aber 0,4-0,5 (die der Vorgaenger nie erreichte) traegt
+nur -0,851 -> Vollfenster -0,903. Das "erstmals erfuellt" vom 22.08. stand auf dem
+abgeschnittenen Fenster. Kein Regressionsbefund, sondern niederfrequente Cz-Schwingung --
+Kriterium kuenftig NUR auf dem vollen Fenster bewerten (Cz-Bewertung Vollumfang-Lauf!).
+BEFUND 3 -- cd_druck-SCHAETZER-VERSATZ -0,05 ZWISCHEN CODESTAENDEN (faires Fenster: neu
+0,9114 vs alt 0,9610) bei identischen Gesamtkraeften (Fx 10.223 vs 10.209 N), Fx_far -1,2 %,
+Cz-Pfad identisch (0,001-0,003). FAC_GPU per g19-A/B ENTLASTET (gpu=host=1,6659 exakt).
+Hauptverdacht po_mean-Determinismus (24.08.). Regel: Arm-Vergleiche nur innerhalb EINES
+Codestands; Codestand-uebergreifend Versatz als Fassungs-Etikett fuehren.
+BRUECKE OF13: cd_rest+cd_reib = 0,529 gegen OF13-Gesamt 0,599 (hinkt: OF13 enthaelt Raeder).
+RAND-SLICES MIT RUECKKOPPLUNG (Nachholung Heiko-Morgenauftrag, export/vergleich_of13_2026-08-26/
+diff_wf_*.png): x- Mittel +0,34/RMS 1,08 | y- +0,54/2,54 | z+ +0,67/0,72 m/s. Gegen den
+ungekoppelten f4_std_diff2 (x- +0,28/1,19 | y- -0,10/2,06 | z+ +0,12/0,42): Raender aehnlich
+ruhig; der gekoppelte Arm traegt durchweg ein leichtes +0,3..0,7-m/s-Plus (Band-Injektion),
+Radnachlauf am y--Rand in beiden Armen dominant -- Domaenenbreiten-Punkt bestaetigt.
+
 ## TIEFER PERFORMANCE-CODE-AUDIT 26.08 (Heiko-Auftrag, waehrend f4_wandfrei_v2 laeuft)
 
 Drei Achsen + Beleg-Sweep, alles offline (ocloc) bzw. aus Bestandsmessungen; Artefakte in
