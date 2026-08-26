@@ -1775,6 +1775,12 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 	const float uptx = upx-upn_*fnx, upty = upy-upn_*fny, uptz = upz-upn_*fnz;
 	const float upt2 = uptx*uptx+upty*upty+uptz*uptz;
 	bool beruehrt = false;
+	// ★ PERF-FIX 2 (2026-08-26, offline per ocloc/zeinfo bewiesen): ohne Unroll-Hint rollt IGC diese
+	// gewachsene Schleife nicht mehr aus, die privaten Richtungs-Arrays hinter c()/w() plus fpre[]
+	// werden speicherheimisch -> private_size 4256 B/WI (iGPU) bzw. 8512 B (B70) = Scratch = 100x-Bremse
+	// (2 statt 240 MLUPs, g13-g15). MIT Hint: private_size 0 auf beiden Geraeten (Varianten H/H2, igc3).
+	// Bitgleich per Konstruktion (gleiche Operationen je Iteration); Anker-Beweis im JIT-Kurzlauf.
+	__attribute__((opencl_unroll_hint(18)))
 	for(uint i=1u; i<def_velocity_set; i++) {
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;               // Streaming-Ursprung von fhn[i] ist j[ib]
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;             // nur wandstaemmige Links
