@@ -88,6 +88,7 @@ int main(int argc,char**argv){
     printf("%-22s %12s %12s %12s %10s\n","Schema","Sum u_x(T)","Drag/Kraft","max|u|","Urteil");
     auto blende=[](float q,float fs,float nebb)->float{
         return (q<=0.5f)?fmaf(2.f*q,fs,(1.f-2.f*q)*nebb):fmaf(0.5f/q,fs,(1.f-0.5f/q)*nebb); };
+    const float chifak=1.f/(1.f/wrx+0.5f); // MLS: 1/(tau0+0,5), tau0=1/omega (hergeleitet, kein Handwert)
     int fails=0;
     for(int schema=0; schema<4; schema++){
         std::vector<float> fi(NC*Q,0.f);
@@ -117,16 +118,21 @@ int main(int argc,char**argv){
                         const float cup=-(CX[i]*ux+CY[i]*uy+CZ[i]*uz);
                         const float feq_ib=wi*(rho*(1.f+3.f*cup+4.5f*cup*cup-1.5f*u2)-1.f);
                         if(schema==3){
-                            // K1' PROJIZIERT (Kernel-Audit Befund 1): q>0,5 mit tangential projiziertem u.
+                            // MLS PROJIZIERT (Baustein 1, 26.08.): Kernel-Transkription des neuen q>0,5-
+                            // Zweigs (kernel.cpp MLS-Block; Zitat JCP 161 (2000) 680 / PRE 65 041203).
+                            // chi=(2q-1)/(tau0+0,5), u_bf=(1-3/(2q))u_t; quadratische Terme mit u_t
+                            // (Interim I2: tangential projiziert statt volles u_f -- wie im Kernel).
                             if(sq>0.5f){
                                 float px=ux,py=uy,pz=uz;
                                 if(MODUS_FLACH){ pz=0.f; }
                                 else if(MODUS_KUGEL){ const float gx=x-KCX,gy=y-KCY,gz=z-KCZ,gl=sqrtf(gx*gx+gy*gy+gz*gz)+1e-12f; const float un=(px*gx+py*gy+pz*gz)/gl; px-=un*gx/gl; py-=un*gy/gl; pz-=un*gz/gl; }
                                 else { const float un=(-py+pz)/1.41421356f; py+=un/1.41421356f; pz-=un/1.41421356f; }
                                 const float p2=px*px+py*py+pz*pz;
+                                const float chi=(2.f*sq-1.f)*chifak;   // chifak = 1/(tau0+0,5), tau0 = 1/wrx
                                 const float cupt=-(CX[i]*px+CY[i]*py+CZ[i]*pz);
-                                const float feq_ibt=wi*(rho*(1.f+3.f*cupt+4.5f*cupt*cupt-1.5f*p2)-1.f);
-                                h[i]=fmaf((2.f*sq-1.f)/sq, wi*(rho-1.f)-feq_ibt, fpre[i]);
+                                const float cub=(1.f-1.5f/sq)*cupt;    // c_ib . u_bf
+                                const float fst=wi*(rho*(1.f+3.f*cub+4.5f*cupt*cupt-1.5f*p2)-1.f);
+                                h[i]=fmaf(1.f-chi,fpre[i],chi*fst);    // q=0,5 => chi=0 => Identitaet
                             }
                             else { const float nebb=wi*(rho-1.f)+(fpre[ib]-feq_ib); h[i]=blende(sq,fpre[i],nebb); }
                         } else {
@@ -155,7 +161,7 @@ int main(int argc,char**argv){
         long nf=0; for(int z=0;z<NZ;z++)for(int y=0;y<NY;y++)for(int x=0;x<NX;x++) if(!SOLID(x,y,z)) nf++;
         const double dsu=(su-su_prev); const double antrieb=(double)FX*(double)nf; // je Schritt
         const double dragq=1.0-dsu/antrieb; // 1 = Wand schluckt alles (stationaer), >1 unmoeglich... <0 = Injektion
-        const char* nm[4]={"HWBB","Blende AKTUELL","nur q<0,5","K1-Strich"};
+        const char* nm[4]={"HWBB","Blende ALT 0,5/q","nur q<0,5","MLS"};
         bool ok = std::isfinite((float)su) && !kaputt && su>0.0 && dragq>0.5 && dragq<1.5 && umax<0.35f;
         // Injektionskriterium: Sum u_x muss SAETTIGEN; waechst es am Ende noch deutlich schneller
         // als der Antrieb erklaert oder ist es negativ/instabil -> Verletzung.

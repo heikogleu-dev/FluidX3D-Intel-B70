@@ -1765,11 +1765,12 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 	float fpre[def_velocity_set];
 	for(uint i=0u; i<def_velocity_set; i++) fpre[i]=fhn[i];
 	const float up2 = upx*upx+upy*upy+upz*upz;
-	// ★★ KERNEL-AUDIT BEFUND 1 (2026-08-25 nacht, HOCH): fuer den K1'-Zweig wird u_pre TANGENTIAL
-	// PROJIZIERT. Der Couette-Fixpunkt-Harness des Pruefagenten zeigte: feq_ib mit der WANDNORMAL-
-	// Komponente von u_pre koppelt im kohaerenten Fall (ebene Panels, einheitliches q>0,5 -- exakt
-	// die m2-Klasse, 97 % am Fahrzeug) positiv zurueck und DIVERGIERT (qb=128: ~4200 Schritte,
-	// q=0,6: 88). Mit Projektion: stabil bis q=1,0 UND wandlagen-treu (-0,51->-0,510, -1,0->-0,875).
+	// ★★ TANGENTIALPROJEKTION von u_pre (Kernel-Audit Befund 1, 2026-08-25 nacht; speist seit dem
+	// MLS-Umbau 26.08. den MLS-Zweig unten = dessen Interim I2). Der Couette-Fixpunkt-Harness des
+	// Pruefagenten zeigte damals am K1'-Zweig: feq_ib mit der WANDNORMAL-Komponente von u_pre
+	// koppelt im kohaerenten Fall (ebene Panels, einheitliches q>0,5 -- exakt die m2-Klasse, 97 %
+	// am Fahrzeug) positiv zurueck und DIVERGIERT (qb=128: ~4200 Schritte, q=0,6: 88). Mit
+	// Projektion: stabil UND wandlagen-treu (-0,51->-0,510, -1,0->-0,875).
 	// Der q<0,5-Zweig behaelt das VOLLE u_pre (R6: unveraendert, als sauber vermessen).
 	const float upn_ = fnx*upx+fny*upy+fnz*upz;
 	const float uptx = upx-upn_*fnx, upty = upy-upn_*fny, uptz = upz-upn_*fnz;
@@ -1800,26 +1801,39 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 			const float nebb = wi*(rhon-1.0f) + (fpre[ib]-feq_ib); // f~ = w(rho-1) + f_neq_ib -- u_W = 0
 			fhn[i] = fma(2.0f*q, bb, (1.0f-2.0f*q)*nebb);
 		} else {
-			// ★★ K1' (Planungsagent 2026-08-25): der alte q>0,5-Zweig nutzte die Bouzidi-Gewichte
-			// mit dem FALSCHEN zweiten Operanden (Wandrekonstruktion statt eigener Gegenrichtungs-
-			// Population) UND einem neq-Schaetzer mit vollem Upstream-Scher-Bias -- an ebenen
-			// Waenden Ueberbremsung, an STREIFENDEN Links (kleiner Nenner in q = y_w/(-n.c), die
-			// groessten Tangentialtraeger) eine selbstverstaerkende Freigabe-Ratsche: die Kugel-
-			// Injektion (Cd -3,3 bis -4,95). Aufgeloest ist damit auch der Eq.-25-Streit: das
-			// gedruckte a2 = (2-2q)/q ist ein Faktor-2-Druckfehler, korrekt ist (1-q)/q (drei
-			// unabhaengige Beweise im Planungsbericht; die V1-Passage "kein Druckfehler" ist
-			// superseded, ihre Cd_v=-1,84-Messung war exakt diese Pathologie).
-			// K1' = korrigierte Marson-Koeffizienten + KNOTENVERANKERTER neq-Schaetzer (aus bb
-			// statt fpre[ib]; stationaer exakt (1-omega)*f_neq, kein Upstream-Bias). Algebraisch:
-			//   fhn[i] = (1-q)/q * bb + (2q-1)/q * [w(rho-1) + (bb - feq_ib)]
-			//          = bb + (2q-1)/q * (w(rho-1) - feq_ib)
-			// q=0,5: Koeffizient EXAKT 0 -> Identitaet (Bitanker; der qb==127-Kurzschluss oben
-			// bleibt zusaetzlich). fpre[ib] wird in diesem Zweig GAR NICHT mehr gelesen. CPU-3D-
-			// Harness (Treppe + Minikugel, analytisches q): stabil, beste Impulsbilanz-Schliessung
-			// aller Schemata (Drag/Kraft 0,9955). Stoerform exakt (w kuerzt sich im Klammerterm).
-			const float cupt = -(cix*uptx+ciy*upty+ciz*uptz); // c_ib . u_pre_tangential
-			const float feq_ibt = wi*(rhon*(1.0f+3.0f*cupt+4.5f*cupt*cupt-1.5f*upt2)-1.0f);
-			fhn[i] = fma((2.0f*q-1.0f)/q, wi*(rhon-1.0f)-feq_ibt, bb);
+			// ★★ MLS-Blende (Physik-Kette Baustein 1, 2026-08-26): ersetzt den K1'-Zweig. K1' trug
+			// den wandlokalen Tangential-Geistmode lambda*3*w*rho*(c.u_t) mit lambda=(2q-1)/q und
+			// Neutralkurve lambda_krit=4(2-omega)/(omega-1) -- bei omega0~1,9999 ist q_krit~0,51,
+			// d.h. praktisch JEDES q>0,5 instabil; die QKAPPE=0,65-Kappe war selbst instabil
+			// (~25k Schritte) und nur durch Smagorinsky-nu_t maskiert (Herleitung/Historie inkl.
+			// Eq.-25-Aufloesung: Planungsbericht zu Commit 75aad52, Wissensspeicher k1instabilitaet).
+			// ERSATZ: chi-Blende nach Mei/Shyy/Yu/Luo. ZITAT-PRAEZISION (Literatur-Verifikation
+			// 26.08.2026, visuell an den NASA/ICASE-Drucken): die q>=1/2-Form chi=(2q-1)/(tau+1/2),
+			// u_bf=(1-3/(2q))*u_f steht NICHT in Mei-Luo-Shyy JCP 155 (1999) 307 (dort behaelt
+			// Abschn. 2.2 fuer q>=1/2 den FH-Zweig chi=(2q-1)/tau), sondern erst in JCP 161 (2000)
+			// 680, Gl. (2.4) der Reportfassung ICASE 2002-17, und PRE 65, 041203 (2002), Gl.
+			// (2.1)-(2.3b). Blend (Gl. 1.9, u_w=0 -- Facetten ruhen, kein u_w-Term):
+			//   fhn[i] = (1-chi)*bb + chi*f*,  f* = w*(rho*(1+3(c_ib.u_bf)+4,5(c_ib.u_f)^2-1,5|u_f|^2)-1)
+			// Stoerform exakt (linear in f). Quadratische Terme tragen u_f, NUR der lineare u_bf
+			// (drei Drucke einig). c_ib = -c_i = Richtung Fluid->Wand wie im Vorgaenger (die
+			// Minuszeichen in cupt/cub); ein Richtungsfehler zeigt sich NUR im linearen Term und
+			// tarnt sich bei u_w=0 als Fehlskalierung -> Wandlage-Test in der S0-Abnahme.
+			// q=0,5 => chi=0 => fhn[i]=bb BITGLEICH (Anker; qb==127-Kurzschluss oben bleibt).
+			// chi<=1 fuer q<=1 (Konvexblend), tau>=0,5 -- stabil im Harness bis omega=1,999, q=1.
+			// ZWEI DEKLARIERTE INTERIMS (Keine-Handwerte, je mit Abloesebedingung):
+			//  (I1) tau in chi ist tau0 (JIT-Konstante def_fac_chifak=1/(tau0+0,5), lbm.cpp), nicht
+			//       das lokale SUBGRID-tau_eff; Chapman-Enskog bindet chi ans Kollisions-tau.
+			//       Konservativ: tau_eff>=tau0 => chi_eff<=chi -> tiefer im Konvexbereich.
+			//       Abloesung: lokales tau_eff durchreichen, sobald der Facettenpfad es kennt.
+			//  (I2) u_f geht TANGENTIAL PROJIZIERT ein (upt statt up) -- Abweichung vom Druck
+			//       (dort volles u_f); Grund: Kernel-Audit Befund 1 (Couette-Fixpunkt: der
+			//       Wandnormalanteil koppelt im kohaerenten Panel-Fall positiv zurueck).
+			//       Abloesung: A/B upt vs. up auf der 8mm-Sprosse nach validierter MLS-Basis.
+			const float chi = (2.0f*q-1.0f)*def_fac_chifak;   // chi = (2q-1)/(tau0+0,5)
+			const float cupt = -(cix*uptx+ciy*upty+ciz*uptz); // c_ib . u_f (quadratischer Term)
+			const float cub = (1.0f-1.5f/q)*cupt;             // c_ib . u_bf, u_bf = (1-3/(2q))*u_f
+			const float fst = wi*(rhon*(1.0f+3.0f*cub+4.5f*cupt*cupt-1.5f*upt2)-1.0f); // f* (Stoerform)
+			fhn[i] = fma(1.0f-chi, bb, chi*fst);
 		}
 		beruehrt = true;
 	}

@@ -67,6 +67,7 @@ static string device_defines(const bool elibb) {
 	"\n#define def_fac_Y 86206.89844f"
 	"\n#define def_fac_utkorr 1.000000f"
 	"\n#define def_fac_tau 1.0000f"
+	"\n#define def_fac_chifak 0.99998259f" // MLS chi-Nenner 1/(tau0+0,5); hergeleitet aus def_w 1.99993038: tau0=1/w=0.50001741
 	"\n#define def_fac_budget 1.0000f"
 	"\n#define def_fac_budget_sn 1.0000f"
 	"\n#define def_wf_spalding_it 3u"

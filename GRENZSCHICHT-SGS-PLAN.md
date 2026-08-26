@@ -83,6 +83,30 @@ AUFLAGE: Koeffizienten-Literatur-Verifikation VOR Kernel-Edit (laeuft); Abnahmel
 S0 Harness -> S1 kipp0-iGPU -> S2 Kugel (5,2457-Referenz, nq_kappe=0) -> S3 Kippkanaele
 -> S4 8mm-LANGZEIT >=1s (Lehre: Instabilitaet erst ab ~25k Schritten sichtbar).
 
+BAUSTEIN 1 EINGEBAUT + S0 BESTANDEN, 26.08 ABENDS (dieser Commit). LITERATUR-VERDIKT
+(visuell an den NASA/ICASE-Drucken, PDFs im Sitzungs-Scratchpad): FORMEL BESTAETIGT,
+ATTRIBUTION KORRIGIERT -- chi=(2q-1)/(tau+1/2) steht NICHT in Mei-Luo-Shyy JCP 155
+(1999) 307 (dort behaelt Abschn. 2.2 fuer q>=1/2 den FH-Zweig chi=(2q-1)/tau), sondern
+erst in JCP 161 (2000) 680 (ICASE 2002-17, Gl. 2.4) und PRE 65, 041203 (2002), Gl.
+(2.1)-(2.3b); quadratische Terme tragen u_f, nur der lineare u_bf (drei Drucke einig).
+EINBAU: kernel.cpp MLS-Block (chi ueber JIT-Define def_fac_chifak=1/(tau0+0,5)=1/(3nu+1),
+lbm.cpp), QKAPPE-Default 0,65->1,0 an allen 9 Stellen (Kappe aus, Env-Hebel bleibt),
+gen_main-Paritaet, beide Harnesse als Kernel-Transkription. ZWEI DEKLARIERTE INTERIMS
+im Kernel-Kommentar: I1 tau0 statt SUBGRID-tau_eff, I2 Tangentialprojektion statt
+volles u_f (Grund: Audit-Befund 1; Abloesung: A/B auf der 8mm-Sprosse). S0-MESSWERTE
+(CPU, diese Maschine, 26.08.): Test G tau=0,51/30k Schritte: K1-alt DIV@572/200/118
+fuer q=0,60/0,75/1,00 (exakt die Neutralkurve, q_krit~0,58), MLS 5x stabil; 3D-Harness
+Drag/Kraft: Treppe 0,9557, Kugel (fx=1e-5) 0,8741, Flachpanel q=0,75 0,8658 / q=1,0
+0,8549 (das Panel, das K1' in NaN trieb, laeuft jetzt durch den echten Zweig);
+scratch_gate private 0 UND spill 0, beide Arme, beide Geraete. PRUEFAGENT-FREIGABE
+erteilt (kein HART-Befund; Transkription druckgetreu, c-Richtung selbst hergeleitet,
+qb-Quantisierung: nur qb=127 ergibt float-q exakt 0,5 -> Bitanker haelt konstruktiv).
+ALTBEFUND Test E (NICHT dieser Diff, byteidentisch am HEAD): 16/16 Verletzungen sind
+ein Paritaets-/Vorzeichenartefakt der Harness-Initialisierung (Esoteric-Pull-Slots),
+Kriterium su>0 kann nie bestehen; eigener Reparaturauftrag, kein Physik-Befund.
+NAECHSTE SPROSSEN: S1 kipp0-iGPU (Anker-Hash 4722579264326613690 MUSS bitgleich
+bleiben -- kipp0 ist reines q=0,5, der MLS-Zweig feuert dort nie) -> S2 -> S3 -> S4.
+
 HEIKO-ENTSCHEID 26.08 NACHMITTAG (nach den Rand-Slices beider Arme): "mit rueckkopplung
 sieht besser aus, aber die y interfaces fuer near muessen wir wirklich weiter nach aussen
 setzen." KONSEQUENZ mit Zahlen (VRAM-Rechnung, 57,5 B/Nahzelle effektiv aus Alloc-Print):

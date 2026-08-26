@@ -203,7 +203,7 @@ public:
 	static float s_fac_qmin;
 	static float s_fac_kappa; // Grazing-Guard
 	static float s_fac_utkorr; // 3/2-Abtastpunkt-Messarm (Wandmodell-Eingang)
-	static float s_fac_qkappe; // Stabilitaetskappe q>0,5 (Interim)
+	static float s_fac_qkappe; // Ex-Stabilitaetskappe q>0,5 -- seit MLS-Blende (26.08.) Default 1,0 = aus; Env-Hebel fuer A/Bs
 	static uint s_fac_qdiag; // QDIAG-Diagnosearme  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 	static bool s_fac_quergate; // ★ 2026-08-25 Querimpuls-Gate im iMEM-Solve
 	static bool s_fac_lsq; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall im iMEM-Solve // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)

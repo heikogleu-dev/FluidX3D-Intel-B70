@@ -272,7 +272,7 @@ bool LBM_Domain::s_fac_elibb_pur = false; // Pur-Arm (Isolationsmessung) // ★ 
 float LBM_Domain::s_fac_qmin = 0.1f;
 float LBM_Domain::s_fac_kappa = 0.4f;
 float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm
-float LBM_Domain::s_fac_qkappe = 0.65f; // Stabilitaetskappe des q>0,5-Zweigs (Interim bis zur endgueltigen Formel) // Grazing-Guard-Schwelle (K1'-Begleiter)
+float LBM_Domain::s_fac_qkappe = 1.0f; // Ex-Stabilitaetskappe des q>0,5-Zweigs: mit der MLS-Blende (Baustein 1, 26.08.) obsolet -- Default 1,0 = keine Kappung; Env-Hebel CFD_FAC_QKAPPE bleibt fuer A/Bs
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
@@ -578,7 +578,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 				const float ndc = nx*(float)CX19[d]+ny*(float)CY19[d]+nz*(float)CZ19[d];
 				uchar qb=0u;
 				const float clen = sqrtf((float)(CX19[d]*CX19[d]+CY19[d]*CY19[d]+CZ19[d]*CZ19[d]));
-				if(ndc<-(float)s_fac_kappa*clen) { // ★ K1'-Begleiter GRAZING-GUARD: nur Links mit -n.c_hat >= kappa (Default 0,4) interpolieren -- streifende Links sind schlecht konditioniert (q = y_w/kleiner Nenner) UND die groessten Tangentialtraeger: die Injektions-Ratsche der Kugel. Darunter: BB (qb=0).
+				if(ndc<-(float)s_fac_kappa*clen) { // ★ GRAZING-GUARD (EIGENES Interim mit offenem Abloese-Soll, eingefuehrt als K1'-Begleiter, gilt unter MLS weiter): nur Links mit -n.c_hat >= kappa (Default 0,4) interpolieren -- streifende Links sind schlecht konditioniert (q = y_w/kleiner Nenner) UND die groessten Tangentialtraeger: die Injektions-Ratsche der Kugel. Darunter: BB (qb=0).
 					const float sq = yw/(-ndc); // Bruchteil der Linklaenge
 					// ★ QDIAG (2026-08-25, Kugel-Falsifikation): Hypothesen-Arme fuer die Injektionsjagd.
 					// 1 = q>1-Klemme AUS (sq>1 -> BB), 2 = nur q<0,5-Zweig (q>0,5 -> Identitaet),
@@ -591,17 +591,19 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 					if(sqq>0.0f) {
 						float sqe = sqq;
 						if(sqe<(float)s_fac_qmin) { sqe=0.5f; nq_boden++; } // q-Boden (P1-Entscheid)
-						// ★★ STABILITAETSKAPPE (Kernel-Audit Befund 1 + 3D-Panel-Schiedsrichter, 2026-08-25
-						// nacht): der projizierte K1'-Zweig ist bei KOHAERENTEM q >= 0,75 instabil (NaN im
-						// 24^3-Flachpanel), bei 0,6 stabil. Bis zur endgueltigen q>0,5-Formel gilt:
-						// q > CFD_FAC_QKAPPE (Default 0,65) -> BB. Positionsfehler dort max. 0,5 Zellen
-						// (Status quo ante), Stabilitaet konstruktiv. Gilt fuer BEIDE q-Quellen.
+						// ★★ EX-STABILITAETSKAPPE (historisch: Kernel-Audit Befund 1, 25.08. -- der K1'-Zweig
+						// war bei kohaerentem q >= 0,75 instabil, die Kappe 0,65 selbst bei ~25k Schritten,
+						// s. Wissensspeicher k1instabilitaet). Mit der MLS-Blende (Baustein 1, 26.08.) ist
+						// der q>0,5-Zweig bis q=1 stabil -> Default 1,0 = KEINE Kappung: nq_kappe bleibt
+						// dann konstruktiv 0 (beide Quellen liefern hier sqe<=1; Ebenen-q>1 faengt die
+						// nq_klemme1-Stufe oben ab) -- nq_kappe>0 im Startprotokoll heisst also: Kappe
+						// per CFD_FAC_QKAPPE<1 aktiv gesetzt. Env-Hebel bleibt fuer A/Bs erhalten.
 						if(sqe>(float)s_fac_qkappe) { fac_q[18ull*kq+(ulong)(d-1u)]=0u; nq_kappe++; continue; }
 						if(qd==2u&&sqe>0.5f) sqe=0.5f; // Arm 2: q>0,5 -> Identitaet
 						if(qd==3u&&sqe<0.5f) sqe=0.5f; // Arm 3: q<0,5 -> Identitaet
 						qb=(uchar)fmin(fmax((float)(int)(sqe*254.0f+0.5f),1.0f),254.0f);
 						nq_schnitt++;
-					} // ★ K1'-Begleiter: q>1 -> BB-RUECKFALL statt Klemme (QDIAG=1 mass das kostenneutral; K1' waere mit Muell-q bei q~1 gefaehrlich)
+					} // ★ q>1 -> BB-RUECKFALL statt Klemme (QDIAG=1 mass das kostenneutral; eingefuehrt als K1'-Begleiter, gilt unter MLS weiter -- Muell-q bleibt Muell-q)
 					// sq>1,5: Ebene weit weg -- Link bleibt HWBB (qb=0), kein Zaehler (normaler Fall der Stufenrueckseite)
 				}
 				fac_q[18ull*kq+(ulong)(d-1u)] = qb;
@@ -1088,6 +1090,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_Y "+to_string(0.5f/nu,8u)+"f"
 	+"\n	#define def_fac_utkorr "+to_string(s_fac_utkorr, 6u)+"f" // ★ 3/2-Abtastpunkt-Messarm (CFD_FAC_UTKORR, Default 1,0 = bitgleich)
 	"\n	#define def_fac_tau "+to_string(s_fac_tau,4u)+"f"
+	// ★ MLS-Blende (Baustein 1, 26.08.): chi-Nenner 1/(tau0+0,5), tau0=3nu+0,5 (SRT, cs^2=1/3).
+	// INTERIM I1 (deklariert im kernel.cpp-MLS-Block): tau0 statt lokalem SUBGRID-tau_eff.
+	"\n	#define def_fac_chifak "+to_string(1.0f/(3.0f*nu+1.0f),8u)+"f"
 	"\n	#define def_fac_budget "+to_string(s_fac_budget,4u)+"f"
 	"\n	#define def_fac_budget_sn "+to_string(s_fac_budget_sn,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")

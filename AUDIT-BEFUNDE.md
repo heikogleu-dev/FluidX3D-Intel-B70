@@ -2933,3 +2933,32 @@ VERDACHT: Registerdruck/JIT-Spill durch die juengsten apply_facette_imem-Umbaute
 ELIBB-Emission (Kernelstand g11 gegen jetzt, CFD_DUMP_CL-Diff + Einzelschritt-Messung),
 DANN erst g13b-Wiederholung (Anker-ELIBB-Hash, Kugel-B3, kipp26-Doppelzaehlungs-Detektor).
 Beide Kriechserien wurden ueber den nachverfolgten Task-Stopp sauber beendet (Census 0).
+
+## ABNAHME-EINTRAG (2026-08-26 abends): MLS-Blende ersetzt K1'-q>0,5-Zweig (Physik-Kette Baustein 1)
+
+PRUEFKETTE VOLLSTAENDIG: Literatur-Verifikation (visuell an vier NASA/ICASE-Drucken;
+Verdikt FORMEL BESTAETIGT, Attribution korrigiert auf JCP 161 (2000) 680 / PRE 65,
+041203 (2002) -- NICHT MLS-1999, dort steht fuer q>=1/2 noch der FH-Zweig) -> Einbau
+(kernel.cpp MLS-Block, def_fac_chifak-JIT, QKAPPE-Default 1,0 an 9 Stellen, gen_main-
+Paritaet, 2 Harness-Transkriptionen) -> unabhaengiger Pruefagent gegen den Diff:
+FREIGABE, kein HART-Befund. Highlights der Pruefung: Stoerform-Algebra nachgerechnet
+(kein P1-Offset), c-Richtung selbst hergeleitet (3*cub = 3*e_alpha.u_bf), qb-Scan:
+NUR qb=127 ergibt float-q exakt 0,5 (Bitanker konstruktiv), chi_max=0,999983<=1
+(Konvexblend auch bei omega->2), def_fac_chifak-Roundtrip bitexakt, B3/slot67/dm-Block
+byte-unberuehrt, nq_kappe=0-Behauptung bei Kappe 1,0 verifiziert (beide q-Quellen
+liefern sqe<=1,0 bitexakt). MESSWERTE (CPU, diese Maschine): Test G (tau=0,51, 30k):
+K1-alt DIV@572/200/118 ab q=0,60 -- bestaetigt die hergeleitete Neutralkurve
+lambda_krit=4(2-omega)/(omega-1) rueckwirkend im Harness; MLS 5x stabil bis q=1,0.
+3D: Treppe 0,9557, Kugel 0,8741 (fx=1e-5; fx=4e-5 sprengt schon HWBB -- Arbeitspunkt
+dokumentiert), Flach q=0,75/1,0: 0,8658/0,8549. scratch_gate: private 0 + spill 0,
+beide Arme, beide Geraete. ZWEI DEKLARIERTE INTERIMS mit Abloesebedingung im Kernel-
+Kommentar: I1 tau0 statt SUBGRID-tau_eff; I2 Tangentialprojektion statt volles u_f.
+
+ALTBEFUND-TRIAGE Test E (1D-Harness, NICHT dieser Diff -- byteidentisch am HEAD):
+16/16 Verletzungen sind ein Vorzeichen-/Paritaetsartefakt: die Initialisierung schreibt
+feq in lineare Slots, load_f liest bei t=0 Esoteric-Pull-vertauscht -> Start bei
+Sum u_x = -0,29 statt +0,30; Kriterium su>0 kann fuer KEINEN Arm bestehen (auch HWBB
+endet bei -0,0907). Zusaetzlich nutzt Test Es Blende fuer q>0,5 noch die Vor-K1'-Form
+0,5/q ohne Kernel-Gegenstueck. REPARATURAUFTRAG OFFEN: Kriterium vorzeichenkonsistent
+machen (|su|<=1,05*|ref|) oder Initialisierung ueber store_f-Paritaet; Blenden-Lambda
+auf MLS nachziehen. Ein dauerhaft roter Harness maskiert Regressionen.

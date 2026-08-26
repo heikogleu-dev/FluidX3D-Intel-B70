@@ -288,19 +288,25 @@ int test_E(){
     return fails;
 }
 
-// ==================== Test G (2026-08-25 nacht, Kernel-Audit Befund 1) ====================
-// KOHAERENTES-q-GATE: ebene Saeule, ALLE Wandlinks mit demselben q>0,5 -- exakt der Fall
-// (m2-Panel-Klasse), in dem der unprojizierte K1'-Zweig divergiert. Getestet werden beide
-// Varianten; Abnahme: projiziert bleibt ueber 30000 Schritte beschraenkt, unprojiziert
-// DARF divergieren (dokumentiert die Luecke).
+// ==================== Test G (Umbau 2026-08-26, Physik-Kette Baustein 1) ====================
+// KOHAERENTES-q-GATE: ebene Saeule, ALLE Wandlinks mit demselben q>0,5 -- die m2-Panel-Klasse.
+// Umbau 26.08.: der projizierte K1'-Zweig ist nach der hergeleiteten Neutralkurve
+// lambda_krit=4(2-omega)/(omega-1) selbst instabil (bei tau=0,51: lambda_krit~0,163, d.h.
+// q>=0,58 DIV) -- er ist jetzt der DOKUMENTATIONS-Arm (var 0). Abnahme-Arm (var 1) ist die
+// MLS-Blende (Kernel-Transkription, Zitat JCP 161 (2000) 680 / PRE 65 041203 (2002)):
+// chi=(2q-1)/(tau0+0,5) ist fuer q<=1, tau>=0,5 ein Konvexblend -- MUSS bei allen fuenf q
+// ueber 30000 Schritte stabil sein. BEIDE Arme tangential projiziert (Interim I2 wie im
+// Kernel) -> die FORMEL ist die einzige Variable. Historie (unprojiziert vs. projiziert,
+// Kernel-Audit Befund 1, 25.08.): git-Stand vor diesem Umbau.
 extern "C" int test_G();
 int test_G(){
-    printf("\n=== TEST G: kohaerentes q>0,5 (K1'-Stabilitaet, 30000 Schritte, tau=0,51)\n");
+    printf("\n=== TEST G: kohaerentes q>0,5 (K1'-alt vs. MLS, 30000 Schritte, tau=0,51)\n");
     printf("%-12s %10s %10s %10s %10s %10s\n","Variante","q=0.504","q=0.52","q=0.60","q=0.75","q=1.00");
-    const float wrx=1.0f/0.51f;
+    const float tau0=0.51f; const float wrx=1.0f/tau0;
+    const float chifak=1.f/(tau0+0.5f); // MLS: 1/(tau0+0,5) -- hergeleitet, kein Handwert
     int fails=0;
-    for(int var=0; var<2; var++){ // 0 = unprojiziert (alt), 1 = tangential projiziert (Fix)
-        printf("%-12s", var? "projiziert":"unprojiziert");
+    for(int var=0; var<2; var++){ // 0 = K1' projiziert (alt, Doku), 1 = MLS projiziert (Abnahme)
+        printf("%-12s", var? "MLS":"K1-alt");
         for(float q : {0.504f,0.52f,0.60f,0.75f,1.00f}){
             std::vector<float> fi(NZ*Q);
             for(int n=0;n<NZ;n++) for(int i=0;i<Q;i++)
@@ -317,11 +323,18 @@ int test_G(){
                         if(!SOLID(NB(n,ib))) continue;
                         const float wi=W[i];
                         const float bb=fpre[i];
-                        float px= (var? ux:ux), py=(var? uy:uy), pz=(var? 0.f:uz); // projiziert: uz=0
+                        const float px=ux, py=uy, pz=0.f; // BEIDE Arme tangential projiziert (I2)
                         const float p2=px*px+py*py+pz*pz;
                         const float cupt=-(CX[i]*px+CY[i]*py+CZ[i]*pz);
-                        const float feq_ibt=wi*(rho*(1.f+3.f*cupt+4.5f*cupt*cupt-1.5f*p2)-1.f);
-                        h[i]=fmaf((2.f*q-1.f)/q, wi*(rho-1.f)-feq_ibt, bb);
+                        if(var){ // MLS (Kernel-Transkription)
+                            const float chi=(2.f*q-1.f)*chifak;
+                            const float cub=(1.f-1.5f/q)*cupt; // c_ib . u_bf, u_bf=(1-3/(2q))u_t
+                            const float fst=wi*(rho*(1.f+3.f*cub+4.5f*cupt*cupt-1.5f*p2)-1.f);
+                            h[i]=fmaf(1.f-chi,bb,chi*fst);
+                        } else { // K1' alt: Doku der hergeleiteten Instabilitaet
+                            const float feq_ibt=wi*(rho*(1.f+3.f*cupt+4.5f*cupt*cupt-1.5f*p2)-1.f);
+                            h[i]=fmaf((2.f*q-1.f)/q, wi*(rho-1.f)-feq_ibt, bb);
+                        }
                     }
                     collide(h,wrx); store_f(n,h,fi.data(),t);
                     if(!std::isfinite(h[0])||std::fabs(h[0])>1.f){ kaputt=true; tk=t; }
@@ -329,10 +342,10 @@ int test_G(){
             }
             if(kaputt) printf("  DIV@%-6ld", tk);
             else       printf("  %8s","stabil");
-            if(var==1&&kaputt) fails++;              // Fix MUSS stabil sein
+            if(var==1&&kaputt) fails++;              // MLS MUSS stabil sein
         }
         printf("\n");
     }
-    printf("TEST G: %d Verletzungen (nur die projizierte Variante zaehlt)\n", fails);
+    printf("TEST G: %d Verletzungen (nur der MLS-Arm zaehlt; K1-alt DARF divergieren)\n", fails);
     return fails;
 }
