@@ -1,7 +1,9 @@
 #include "lbm.hpp"
 #include <atomic> // C2: Zaehler fuer CFD_DUMP_CL-Dateinamen
 
-
+// ★ F-Null-Read-Gate (Perf-Audit Achse 1, Rang 3): EIN Praedikat fuer Emission, Ansage und
+// F-Waechter -- nie dreimal getrennt auswerten (Drift-Schutz). Default AN.
+static bool f_nur_solid_an() { const char* e = getenv("CFD_F_NUR_SOLID"); return e==nullptr||e[0]=='\0'||atoi(e)>0; } // leer gesetzt = Default AN (Pruefagent NIEDRIG-2)
 
 Units units; // for unit conversion
 
@@ -134,6 +136,11 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Produktionsbuild FUNKTIONAL TOT. Jetzt unbedingt. alpha-Sperre entfaellt (Revision W2:
 	// die Blende ist rein geometrisch, Additivterm+alpha bleiben und ihre Mathematik gilt exakt).
 	if(s_fac_elibb&&(s_fac_ema>0.0f||s_fac_pema>0.0f)) print_error("CFD_FAC_ELIBB mit EMA/PEMA ist nicht definiert (Filter mischen Blende und Additivpfad) -- Messarm rein halten.");
+#if defined(FORCE_FIELD)&&!defined(PARTICLES)
+	// ★ Ansage-Doktrin F-Null-Read-Gate (Auditor-B B-3-Muster: Default-AN-Verhalten muss im Log stehen).
+	if(f_nur_solid_an()) print_info("F-NUR-SOLID aktiv (Default): stream_collide liest F nicht -- F ist an Nicht-Solid-Zellen konstant 0 (F-Waechter prueft das bei initialize()). CFD_F_NUR_SOLID=0 stellt den Upstream-Read her.");
+	else print_warning("CFD_F_NUR_SOLID=0: stream_collide liest F an jeder Fluidzelle (Upstream-Pfad, 12 B/Zelle/Schritt in der F-BBox) -- nur fuer A/B-Kontrollarme gedacht.");
+#endif
 	if(s_fac_elibb&&s_fac_apg!=0.0f) print_error("CFD_FAC_ELIBB mit APG ist nicht gebaut -- Messarm rein halten.");
 	if(s_fac_utkorr!=1.0f) print_info("ABTASTPUNKT-MESSARM aktiv: CFD_FAC_UTKORR = "+to_string(s_fac_utkorr,3u)+" auf dem Wandmodell-Eingang (Theorie-Soll 3/2; Ansage-Doktrin).");
 	if(s_fac_kappa!=0.4f) print_info("Grazing-Guard geaendert: CFD_FAC_KAPPA = "+to_string(s_fac_kappa,2u)+" (Default 0,4).");
@@ -1176,6 +1183,11 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+"\n	#define def_FBNY "+to_string(fbny)+"u"
 	+"\n	#define def_FBNZ "+to_string(fbnz)+"u"
 	+"\n	#define def_FBN "+to_string((ulong)fbnx*(ulong)fbny*(ulong)fbnz)+"ul"
+#ifndef PARTICLES
+	// F-Null-Read-Gate: Default AN. PARTICLES-Guard hart im Praeprozessor -- spread_force
+	// schriebe F an Fluidzellen, das Gate waere still falsch (Wirkpfad-Absicherung Bein 2).
+	+(f_nur_solid_an() ? (string)"\n	#define F_NUR_SOLID" : (string)"")
+#endif // PARTICLES
 #endif // FORCE_FIELD
 
 	// FORK -- Block-Tiling. index_f() wird per Makro auf index_f_impl(..., tile_slot) umgeschrieben, damit
@@ -1676,6 +1688,28 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->u.enqueue_write_to_device();
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->flags.enqueue_write_to_device();
 #ifdef FORCE_FIELD
+#ifndef PARTICLES
+	// ★ F-Waechter (Wirkpfad-Absicherung des F-Null-Read-Gates, Bein 1): das Gate behauptet
+	// "F ist an Nicht-Solid-Zellen 0" -- hier wird die Behauptung am Host-Puffer HART geprueft,
+	// bevor F aufs Geraet geht. Faengt den einzigen realistischen kuenftigen Verletzer
+	// (host-seitiges Saeen von Fluid-Volumenkraeften a la Upstream-Doku). Bewusst STRENGER
+	// als die Lesemenge (prueft auch Gas-/Halozellen) -- fail-safe-Richtung (Pruefagent NIEDRIG-1).
+	if(f_nur_solid_an()) {
+		ulong geprueft = 0ull;
+		for(uint d=0u; d<get_D(); d++) {
+			LBM_Domain* dom = lbm_domain[d];
+			const uint Nx=dom->get_Nx(), Ny=dom->get_Ny();
+			for(uint zb=0u; zb<dom->fbnz; zb++) for(uint yb=0u; yb<dom->fbny; yb++) for(uint xb=0u; xb<dom->fbnx; xb++) {
+				const ulong fbi = (ulong)xb+((ulong)yb+(ulong)zb*(ulong)dom->fbny)*(ulong)dom->fbnx;
+				const ulong n   = (ulong)(dom->fbx0+xb)+((ulong)(dom->fby0+yb)+(ulong)(dom->fbz0+zb)*(ulong)Ny)*(ulong)Nx;
+				if((dom->flags[n]&(TYPE_S|TYPE_E))!=TYPE_S&&(dom->F(fbi,0u)!=0.0f||dom->F(fbi,1u)!=0.0f||dom->F(fbi,2u)!=0.0f)) // Host-Maske: TYPE_BO existiert nur device-seitig; (S|E)!=S = exakt die update_force_field-Schreibbedingung invertiert
+					print_error("F-NUR-SOLID aktiv, aber F != 0 an Nicht-Solid-Zelle n="+to_string(n)+" (Domaene "+to_string(d)+") -- dieses Setup nutzt Fluid-Volumenkraefte: CFD_F_NUR_SOLID=0 setzen.");
+				geprueft++;
+			}
+		}
+		print_info("F-Waechter: "+to_string(geprueft)+" F-BBox-Zellen geprueft, F an Nicht-Solid ueberall 0 -- F-NUR-SOLID-Praemisse haelt.");
+	}
+#endif // PARTICLES
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->F.enqueue_write_to_device();
 	communicate_F();
 #endif // FORCE_FIELD

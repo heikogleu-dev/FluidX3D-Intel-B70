@@ -2411,11 +2411,17 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	float fxn=fx, fyn=fy, fzn=fz; // force starts as constant volume force, can be modified before call of calculate_forcing_terms(...)
 	float Fin[def_velocity_set]; // forcing terms
 
+// ★ F-Null-Read-Gate (Perf-Audit Achse 1, Rang 3, 2026-08-26): F ist an Nicht-Solid-Zellen
+// konstant +0.0f (einziger aktiver Schreiber ist update_force_field, und der schreibt nur an
+// TYPE_S; PARTICLES ist im Praeprozessor ausgeschlossen, der F-Waechter in initialize() prueft
+// die Praemisse hart). Default AN via Emission; CFD_F_NUR_SOLID=0 stellt den Upstream-Read her.
 )+"#ifdef FORCE_FIELD"+R(
+)+"#ifndef F_NUR_SOLID"+R(
 	{ // separate block to avoid variable name conflicts
 		const float3 Fn = load3_F(F, n); // FORK: bbox-bewusst
 		fxn += Fn.x; fyn += Fn.y; fzn += Fn.z;
 	}
+)+"#endif"+R( // F_NUR_SOLID
 )+"#endif"+R( // FORCE_FIELD
 
 )+"#ifdef SURFACE"+R(
@@ -3042,11 +3048,15 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
 	float fxn=fx, fyn=fy, fzn=fz; // force starts as constant volume force, can be modified before call of calculate_forcing_terms(...)
 
+// ★ F-Null-Read-Gate: identisch zur stream_collide-Stelle gegated, damit F_NUR_SOLID genau
+// EINE Bedeutung hat (kein F-Read an Nicht-Solid-Zellen) -- Build-Varianten-Konsistenz.
 )+"#ifdef FORCE_FIELD"+R(
+)+"#ifndef F_NUR_SOLID"+R(
 	{ // separate block to avoid variable name conflicts
 		const float3 Fn = load3_F(F, n); // FORK: bbox-bewusst
 		fxn += Fn.x; fyn += Fn.y; fzn += Fn.z;
 	}
+)+"#endif"+R( // F_NUR_SOLID
 )+"#endif"+R( // FORCE_FIELD
 
 )+"#ifdef TEMPERATURE"+R(

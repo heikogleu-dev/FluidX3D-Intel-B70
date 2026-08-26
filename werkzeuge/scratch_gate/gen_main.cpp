@@ -92,6 +92,7 @@ static string device_defines(const bool elibb) {
 	"\n#define MOVING_BOUNDARIES"
 	"\n#define EQUILIBRIUM_BOUNDARIES"
 	"\n#define FORCE_FIELD"
+	"\n#define F_NUR_SOLID" // Gate-Paritaet: Produktions-Default seit F-Null-Read-Gate (26.08.)
 	"\n#define SUBGRID"
 	"\n#define def_FBX0 0u"
 	"\n#define def_FBY0 0u"

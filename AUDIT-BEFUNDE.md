@@ -938,8 +938,16 @@ RANG 2 (HOCH, physikaendernd, NUR mit Heiko-Ansage): FP16S statt FP16C.
   FP16C-Konverter = 40,7 % des Instruktionsstroms des Nicht-Facetten-Pfads (19 h2f + 19 f2h
   a ~23 Instr./Zelle, kein natives cvt fuer 1-4-11); FP16S nutzt native hf-Konversion:
   -20,5 % Instr. im Produktionskernel (COMPILER-BELEGT). A/B 8mm gegen 4mm-Anker + Bit-Folgen.
-RANG 3 (MITTEL, bitidentisch): FORCE_FIELD-F-Null-Read-Gate (~3 %; Achse 1-Neufund: F der
-  Fluidzellen ist im Produktionspunkt konstant 0, Read ohne Wirkpfad) + boden_eq-3D-Range
+RANG 3 (MITTEL, bitidentisch): FORCE_FIELD-F-Null-Read-Gate (~3 % GESCHAETZT; Achse 1-Neufund:
+  F der Fluidzellen ist im Produktionspunkt konstant 0, Read ohne Wirkpfad).
+  UMGESETZT+ABGENOMMEN 26.08. abends als F_NUR_SOLID (Emission, Default AN,
+  CFD_F_NUR_SOLID=0 = Upstream-Kontrollarm; PARTICLES-Praeprozessor-Ausschluss; F-Waechter
+  in initialize() prueft die Praemisse hart am Host mit Vollzugsmeldung). MESSWERT statt
+  Schaetzung: B70 8mm 1523 -> 1534 MLUPs (+0,7 % -- die ~3 % waren zu hoch, Reads waren
+  grossteils cache-gedeckt); CPU-Hash-Tripel AN=AUS=Remat-Referenz 1396757895076695;
+  iGPU kipp0-Anker exakt; 16/16 CSVs byte-identisch zu g24_remat_b70; Pruefagent GO
+  (0 HOCH/0 MITTEL, NIEDRIG 1+2 mit Commit erledigt). Verbleibende Rang-3-Posten:
+  boden_eq-3D-Range
   (Full-N-Dispatch fuer 2-Lagen-Band; ~250x weniger Threads, Kernel unveraendert) +
   VTK-Erstdump-Fix (vtk_next=0 -> Dump bei t=1ms, 11,5 GB Anfangszustand) + ABSTAND-
   Praedikat vorberechnen (statisch, wird je Schritt neu gerechnet).
