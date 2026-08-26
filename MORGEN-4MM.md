@@ -9,8 +9,11 @@ Basis f4_wandfrei_v2 (erster sauberer gekoppelter 4mm-Lauf, Abnahme ba35c52)
 Serie liegt fertig unter `logs/f4_vollumfang_serie.txt` (eine Zeile, ein Lauf).
 
 An Bord (alles Standard, nichts zu tun): VTK am Ende + Zwischendumps alle 0,15 s,
-Stop-Datei /tmp/cfd_stop, Rand-Slice-Satz nach Beendigung, CD_EVERY=1 fuer die
-100-ms-Statusmeldungen (korrigierte Cd/Cz), Kraft-Z-Band, Kopplungsglaettung.
+Stop-Datei /tmp/cfd_stop, CD_EVERY=1 fuer die 100-ms-Statusmeldungen (korrigierte
+Cd/Cz), Kraft-Z-Band, Kopplungsglaettung.
+Interface-Slices DEAKTIVIERT (CFD_SLICE_DT=0 in der Serie -- Heiko 26.08. abends:
+"erstmal deaktivieren, da kommen wir spaeter nochmal drauf zurueck"; der
+CFD_SLICE_GPU-Transportweg bleibt im Code, nur ohne Slice-Ereignisse wirkpfadlos).
 
 ## Erwartung (ehrlich, nur Gemessenes)
 
