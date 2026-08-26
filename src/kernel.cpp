@@ -3289,6 +3289,19 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[o+3ul] = u[2ul*def_N+(ulong)n];
 } // extract_plane_macros()
 
+)+R(kernel void extract_plane_flags(const global uchar* flags, global uchar* out,
+	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
+	const uint extent_a, const uint extent_b) {
+	// Zwilling von extract_plane_macros fuer das flags-Feld (Slice-Ebenen-Read 2026-08-26).
+	// Die CSV-Spalten (nah_solid, Sonden-Solid-Bit) haengen an den DEVICE-flags inklusive
+	// TYPE_MS-Saum aus dem initialize-Kernel (Pruefagent NIEDRIG-1: update_moving_boundaries
+	// laeuft im Fahrzeugfall nie) -- der Host-Voxelstand allein waere NICHT wertgleich.
+	const uint gid = get_global_id(0);
+	if(gid>=extent_a*extent_b) return;
+	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
+	out[gid] = (n>=(uxx)def_N) ? (uchar)TYPE_S : flags[n];
+} // extract_plane_flags()
+
 )+R(kernel void drive_boundary_cubic_lift(global float* rho, global float* u, const global uchar* flags,
 	const global float* coarse_plane,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,

@@ -132,6 +132,15 @@ static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 // Ebene zellweise mit BEIDEN Geschwindigkeitsvektoren. Sie wird bei jedem Schnitt neu geschrieben
 // und haelt damit immer den zuletzt gerechneten Zeitschritt (abbruchfest, und jede andere
 // Faerbung/Metrik ist daraus ohne neuen Lauf ableitbar).
+// ★ Gemeinsame j0-Konvention des Diff-Schnitts (Pruefagent MITTEL-1, 2026-08-26: die Formel
+// existiert nur EINMAL): yc = NF_OY + y_f/ratio, j0 = clamp(floor(yc), 0, cNy-2). Wird von
+// render_yslice_diff UND dem Slice-Ebenen-Read-Block benutzt -- ein Auseinanderlaufen der
+// beiden Stellen waere ein stiller Ebenen-Versatz.
+static uint diff_j0(const uint NF_OY, const uint y_f, const uint ratio, const uint cNy) {
+	const float yc = (float)NF_OY + (float)y_f/(float)ratio;
+	return (uint)fmin(fmax(floor(yc), 0.0f), (float)cNy-2.0f);
+}
+
 static void render_yslice_diff(LBM& F, LBM& C,
                                const uint fNx, const uint fNy, const uint fNz,
                                const uint cNx, const uint cNy, const uint cNz,
@@ -156,7 +165,7 @@ static void render_yslice_diff(LBM& F, LBM& C,
 		const float xc = (float)NF_OX + (float)x/(float)ratio;
 		const float zc = (float)NF_OZ + (float)z/(float)ratio;
 		const int i0 = (int)fmin(fmax(floor(xc), 0.0f), (float)cNx-2.0f);
-		const int j0 = (int)fmin(fmax(floor(yc), 0.0f), (float)cNy-2.0f);
+		const int j0 = (int)diff_j0(NF_OY, y_f, ratio, cNy); // gemeinsame Konvention, s. Helfer oben
 		const int k0 = (int)fmin(fmax(floor(zc), 0.0f), (float)cNz-2.0f);
 		const float tx=xc-(float)i0, ty=yc-(float)j0, tz=zc-(float)k0;
 		float wsum=0.0f, fx_=0.0f, fy_=0.0f, fz_=0.0f;
@@ -195,6 +204,29 @@ static void render_yslice_diff(LBM& F, LBM& C,
 		+to_string((float)(n_fluid>0ull?sqrt(sum2/(double)n_fluid):0.0),4u)+" m/s, max |d| = "+to_string((float)dmax,3u)
 		+" m/s (Skala +-"+to_string(d_span,1u)+"); Nahfeld-Solid "+to_string(n_nsolid)+", ohne gueltigen Fernwert "
 		+to_string(n_ungueltig)+" (grau). Echtdaten: "+dir+"schnitt_diff_letzter.csv");
+}
+
+// ★ CFD_SLICE_PRUEF (Muster CFD_FAC_GPU_PRUEF): vergleicht fuer EINE y-Ebene den Gather-Pfad
+// (lese_yslice_in_host) gegen den frisch VOLL gelesenen Host-Stand. Aufruf NACH vollen
+// u/rho/flags-Reads desselben Zeitschritts (kein Kernel dazwischen -> Soll: exakt 0).
+// Laesst die Host-Arrays im Gather-Zustand zurueck.
+static void pruefe_slice_ebene(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uint y, const string& tag) {
+	const ulong np = (ulong)Nx*(ulong)Nz;
+	std::vector<float> su(np*3ull), sr(np); std::vector<uchar> sf(np);
+	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
+		const ulong g=(ulong)x+(ulong)z*(ulong)Nx, n=(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+		su[g*3ull]=L.u.x[n]; su[g*3ull+1ull]=L.u.y[n]; su[g*3ull+2ull]=L.u.z[n]; sr[g]=L.rho[n]; sf[g]=L.flags[n];
+	}
+	L.lese_yslice_in_host(y);
+	float dmax=0.0f; ulong nfl=0ull;
+	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
+		const ulong g=(ulong)x+(ulong)z*(ulong)Nx, n=(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+		dmax = fmax(dmax, fabs(su[g*3ull]-L.u.x[n])); dmax = fmax(dmax, fabs(su[g*3ull+1ull]-L.u.y[n]));
+		dmax = fmax(dmax, fabs(su[g*3ull+2ull]-L.u.z[n])); dmax = fmax(dmax, fabs(sr[g]-L.rho[n]));
+		if(sf[g]!=L.flags[n]) nfl++;
+	}
+	print_info("SLICE-PRUEF "+tag+" y="+to_string(y)+": max |Delta| u/rho = "+to_string(dmax,9u)
+		+", flags-Differenzen "+to_string(nfl)+" von "+to_string(np)+" (Soll: 0 / 0).");
 }
 
 
@@ -2744,6 +2776,10 @@ static void main_setup_fahrzeug() {
 	print_info("Eine Durchspuelung = "+to_string(t_flush,4u)+" s; Default sind zwei davon.");
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 10u)); // 0 waere eine Endlosschleife -- hier klemmen, nicht im Helfer
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f); // 0 = keine Slices
+	const bool slice_gpu = env_u("CFD_SLICE_GPU", 1u)>0u; // ★ Slice-Ebenen-Read 2026-08-26 (PRUEF-Arm nur im dd-Fall)
+	// ★ Pruefagent NIEDRIG-2 (Hauskonvention "Schalter ohne Wirkpfad meldet sich"):
+	if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_warning("CFD_SLICE_PRUEF wirkt nur im dd-Fall -- im Einzelgitterfall ohne Wirkpfad.");
+	bool slice_cp_ok = false; // ★ Slice-Ebenen-Read: Kopplungspuffer wird lazy beim ersten Ereignis angelegt
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug"))+"/";
 	create_folder(out_dir);
@@ -2794,7 +2830,13 @@ static void main_setup_fahrzeug() {
 		}
 		if(slice_dt>0.0f && (float)t_si>=slice_next) {
 			slice_next = (float)t_si + slice_dt;
-			lbm.u.read_from_device(); lbm.flags.read_from_device();
+			// ★ Slice-Ebenen-Read 2026-08-26: Kopplungspuffer beim ERSTEN Ereignis anlegen (braucht die
+			// initialisierte Domaene; der Einzelgitterfall ruft alloc_coupling_planes sonst nirgends).
+			// Nur fuer D=1 gebaut -- Mehr-Domaenen-Läufe nehmen den wortgleichen Altpfad.
+			const bool gpu_ok = slice_gpu && lbm.get_D()==1u;
+			if(gpu_ok && !slice_cp_ok) { lbm.alloc_coupling_planes((ulong)Nx*(ulong)Nz); slice_cp_ok = true; }
+			if(gpu_ok) lbm.lese_yslice_in_host(y_mid);
+			else { lbm.u.read_from_device(); lbm.flags.read_from_device(); }
 			render_yslice(lbm, Nx, Ny, Nz, y_mid, si_u/u_lat, si_u, (int)((float)t_si*1000.0f+0.5f), out_dir, "einzel");
 			print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
 		}
@@ -4246,6 +4288,12 @@ static void main_setup_fahrzeug_dd() {
 	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f); // alle 10 ms (Heiko); 0 = aus
+	// ★ Slice-Ebenen-Read (Perf-Hebel 2026-08-26): CFD_SLICE_GPU=1 (Default) holt je Slice-Ereignis
+	// nur die konsumierten y-Ebenen per Device-Gather (~14 MB bei 4 mm) statt der vollen Felder
+	// (~8,65 GB); =0 ist der wortgleiche Altpfad. CFD_SLICE_PRUEF=1 rechnet BEIDE Wege und druckt
+	// die maximale Abweichung der Ebene (Muster CFD_FAC_GPU_PRUEF).
+	const bool slice_gpu   = env_u("CFD_SLICE_GPU", 1u)>0u;
+	const bool slice_pruef = env_u("CFD_SLICE_PRUEF", 0u)>0u;
 	// ★ KIPP-WAECHTER-SCHARFSCHALTUNG (Heiko 2026-08-21, Befund aus f4_std_diff): der Waechter stand
 	// fest auf t > 0,02 s. Diese Zahl ist auf der 8-mm-Sprosse geeicht. Der Impulsstart-Transient
 	// erreicht auf BEIDEN Sprossen ein Vielfaches der Schwelle (8 mm: |Cd| 41,25 / 4 mm: 49,24, je bei
@@ -4333,6 +4381,13 @@ static void main_setup_fahrzeug_dd() {
 		const ulong bmax = max(max(by*bz, bx*bz), bx*by);
 		if(bmax>max_cp) print_info("N2F-BAND BILANZ: groesste Kastenflaeche "+to_string(bmax)+" Zellen ueberschreitet die Kopplungsebenen ("+to_string(max_cp)+") -- Kopplungspuffer wird entsprechend groesser angelegt.");
 		max_cp = max(max_cp, bmax);
+	}
+	// ★ Slice-Ebenen-Read: die y-Ebenen beider Domaenen laufen ueber DENSELBEN Kopplungspuffer
+	// (Plan Variante b) -- ihre Groesse explizit einrechnen, exakt die Lektion der Bilanzebenen oben.
+	if(slice_dt>0.0f && (slice_gpu||slice_pruef)) {
+		const ulong smax = max((ulong)fNx*(ulong)fNz, (ulong)cNx*(ulong)cNz);
+		if(smax>max_cp) print_info("SLICE-EBENEN-READ: y-Ebene "+to_string(smax)+" Zellen ueberschreitet die Kopplungsebenen ("+to_string(max_cp)+") -- Kopplungspuffer wird entsprechend groesser angelegt.");
+		max_cp = max(max_cp, smax);
 	}
 	lbm_c.alloc_coupling_planes(max_cp); // entnimmt
 	lbm_f.alloc_coupling_planes(max_cp); // empfaengt dieselben Ebenen
@@ -5052,12 +5107,22 @@ static void main_setup_fahrzeug_dd() {
 			if(slice_dt>0.0f && (float)t_si>=slice_next) {
 				slice_next = (float)t_si + slice_dt;
 				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
-				lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
+				// ★ Slice-Ebenen-Read (Perf-Hebel 2026-08-26, Plan Variante b): nur die konsumierten
+				// y-Ebenen holen statt der vollen Felder (4 mm nah: ~14 MB statt ~8,65 GB je Ereignis).
+				// Altpfad wortgleich unter CFD_SLICE_GPU=0; CFD_SLICE_PRUEF rechnet beide Wege.
+				if(slice_pruef) {
+					lbm_f.u.read_from_device(); lbm_f.flags.read_from_device(); lbm_f.rho.read_from_device();
+					pruefe_slice_ebene(lbm_f, fNx, fNy, fNz, fNy/2u, "nah");
+				} else if(slice_gpu) {
+					lbm_f.lese_yslice_in_host(fNy/2u); // deckt Slice, Sonde UND Diff-Nahseite (alle auf y = fNy/2)
+				} else {
+					lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
+				}
 				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "nah");
-				// ★ SONDE einlass_saeule_nah (Iron Rule 5, Ansage beim CSV-Anlegen oben): u/flags liegen
-				// fuer render_yslice bereits auf dem Host, EINZIGER Zusatz-Read ist rho. Je Sample
-				// geflusht (Abbruch-fest).
-				lbm_f.rho.read_from_device();
+				// ★ SONDE einlass_saeule_nah (Iron Rule 5, Ansage beim CSV-Anlegen oben): die Sonde liegt
+				// auf der Ebene y = fNy/2 -- im Gather- und im Pruef-Pfad ist rho dort schon frisch,
+				// nur der Altpfad braucht den vollen rho-Read. Je Sample geflusht (Abbruch-fest).
+				if(!slice_gpu&&!slice_pruef) lbm_f.rho.read_from_device();
 				for(uint ci=0u; ci<2u; ci++) {
 					const uint sx = sonde_xf[ci], sy = fNy/2u;
 					for(uint sz2=0u; sz2<fNz; sz2++) {
@@ -5068,7 +5133,24 @@ static void main_setup_fahrzeug_dd() {
 					}
 				}
 				sonde_csv << std::flush;
-				lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
+				if(slice_pruef) {
+					lbm_c.u.read_from_device(); lbm_c.flags.read_from_device(); lbm_c.rho.read_from_device();
+					pruefe_slice_ebene(lbm_c, cNx, cNy, cNz, cNy/2u, "fern");
+					if(diff_an) { // ★ MITTEL-1 (Pruefagent): auch die Diff-Ebenen gegen den Vollpfad pruefen
+						const uint j0 = diff_j0(NF_OY, fNy/2u, ratio, cNy);
+						if(j0!=cNy/2u) pruefe_slice_ebene(lbm_c, cNx, cNy, cNz, j0, "fern-diff");
+						if(j0+1u!=cNy/2u) pruefe_slice_ebene(lbm_c, cNx, cNy, cNz, j0+1u, "fern-diff");
+					}
+				} else if(slice_gpu) {
+					lbm_c.lese_yslice_in_host(cNy/2u);
+					if(diff_an) { // die zwei Trilinear-Ebenen des Diff-Schnitts (gemeinsamer j0-Helfer)
+						const uint j0 = diff_j0(NF_OY, fNy/2u, ratio, cNy);
+						if(j0!=cNy/2u) lbm_c.lese_yslice_in_host(j0);
+						if(j0+1u!=cNy/2u) lbm_c.lese_yslice_in_host(j0+1u);
+					}
+				} else {
+					lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
+				}
 				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "fern");
 				// ★ DIFF-SCHNITT nah-fern (Heiko 2026-08-21): KEIN zusaetzlicher Device-Read -- lbm_f.u/flags
 				// und lbm_c.u/flags liegen fuer die beiden Schnitte oben ohnehin schon auf dem Host. Skala

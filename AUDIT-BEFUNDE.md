@@ -882,6 +882,25 @@ bei CD_EVERY=1 (4mm-Produktionskadenz, g19): Nahfeld-Phasenanteil 92,1 % (GPU) g
 (Host), Wanduhr 4:58 gegen 5:44 min = ~13 % schneller -- die ~12,5-%-Prognose des Audits
 bestaetigt. CFD_FAC_GPU=1 bleibt Default; Hebel ABGENOMMEN.
 
+## Perf-Baurunde 2, Baustein 2: Slice-Ebenen-Read (CFD_SLICE_GPU, Default AN) -- 2026-08-26
+
+Nach Planungsagenten-Plan (Variante b): extract_plane_macros wiederverwendet, Zwilling
+extract_plane_flags neu, LBM::lese_yslice_in_host (Gather + Host-Scatter, Renderer/Sonde/
+Diff lesen unveraenderte Indizes), Kopplungspuffer um die y-Ebenen erweitert, Einzelgitter
+lazy-alloc; CFD_SLICE_GPU=0 = wortgleicher Altpfad, CFD_SLICE_PRUEF = Beide-Wege-Vergleich.
+Je Slice-Ereignis auf der 4-mm-Nahdomaene: ~14 MB statt ~8,65 GB PCIe (Volumina am
+VTK-Layout nachgerechnet); auf 8 mm Wanduhr-neutral (Ereignisse dort zu billig).
+Vorab als eigener Commit d20bc61: Zero-Copy-finish-Fix der _1d/_2d/_3d-Wrapper (die
+Teilbereichs-Wrapper hatten den 25.08.-Fix nicht -- blockierend war dort kein blockierend).
+PRUEFAGENT (11 Punkte, u. a. Konsumenten-Sweep des dd-Loops, Indexketten zellgenau,
+Ebenengeometrie 4mm/8mm nachgerechnet): kein HOCH; MITTEL-1 (j0-Formel dupliziert +
+PRUEF-Luecke) -> gemeinsamer diff_j0-Helfer + PRUEF prueft jetzt auch die Diff-Ebenen;
+NIEDRIG-1 (Kommentar TYPE_MS-Quelle) und NIEDRIG-2 (PRUEF-No-Op-Warnung Einzelgitter)
+gefixt; NIEDRIG-3 (static-Vector, dokumentiert) / NIEDRIG-4 (uint-Guard, Bestandsmuster)
+belassen. ABNAHME g20+g21 (dd 8mm Kurzlaeufe): SLICE-PRUEF max |Delta| u/rho = 0.00000000
+und flags-Differenzen 0 auf nah, fern UND fern-diff an jedem Ereignis; schnitt_diff_letzter/
+einlass_saeule/forces/cd_facetten.csv und alle 18 PNGs BYTE-IDENTISCH alt gegen neu.
+
 ## Kraft-Zerlegung CFD_KRAFT_ZBAND (Heiko 2026-08-21: unterste 4 Zellen ab z0 vs Rest)
 
 Diagnose-Kernel object_force_zband (Anker-Pfad unangetastet, Schalter aus = bitidentisch per

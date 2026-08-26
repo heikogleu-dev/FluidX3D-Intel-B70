@@ -147,6 +147,8 @@ public:
 	Memory<float> coupling_plane;
 	ulong coupling_max_plane_cells = 0ull;
 	Kernel kernel_extract_plane_macros;
+	Memory<uchar> slice_flags; // ★ Slice-Ebenen-Read 2026-08-26: flags-Ebene (1 B/Zelle), Groesse = coupling_max_plane_cells
+	Kernel kernel_extract_plane_flags;
 	Kernel kernel_drive_boundary_cubic_lift;
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
 	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr); // C1b: Puffer bauen + binden; qmap = Remesh-q (B1-Stufe 2)
@@ -670,6 +672,7 @@ public:
 	bool plane_fits(const PlaneSpec& plane, const char* who) const; // prueft, dass die Ebene ganz in der Domaene liegt
 	void alloc_coupling_planes(const ulong max_plane_cells);
 	void extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf); // liest (rho,u) einer Ebene in host_buf (4 floats/Zelle)
+	void lese_yslice_in_host(const uint y); // ★ Slice-Ebenen-Read 2026-08-26: (rho,u,flags) EINER y-Ebene per Device-Gather in die Host-Arrays streuen (Transportweg-Optimierung, wertgleich)
 	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Reihenfolge: alloc_schale() auf
 	// BEIDEN Instanzen (fein: Deckungspunkt-Indizes + ratio; grob: Schalen-Indizes, ratio=1), danach

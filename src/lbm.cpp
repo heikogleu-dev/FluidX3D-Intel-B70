@@ -447,6 +447,11 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 		rho, u, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u);
 	kernel_drive_boundary_cubic_lift = Kernel(device, max_plane_cells, "drive_boundary_cubic_lift",
 		rho, u, flags, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 4u);
+	// ★ Slice-Ebenen-Read 2026-08-26 (Hausmuster: Puffer anlegen und Kernel MIT echten Puffern
+	// erzeugen -- kein Platzhalter-Bind-spaeter, die DIAGZ-Use-after-free-Klasse).
+	slice_flags = Memory<uchar>(device, max_plane_cells, 1u);
+	kernel_extract_plane_flags = Kernel(device, max_plane_cells, "extract_plane_flags",
+		flags, slice_flags, 0u, 0u, 0u, 0u, 1u, 1u);
 	print_info("Kopplungspuffer: "+to_string(max_plane_cells)+" Zellen a 4 floats = "
 		+to_string((float)(max_plane_cells*16ull)/1048576.0f,2u)+" MB auf "+device.info.name+".");
 }
@@ -2058,6 +2063,37 @@ void LBM::extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_
 	host_buf.resize(n_plane*4ull);
 	dom->coupling_plane.read_from_device(0ull, n_plane*4ull); // nur den belegten Anfang zurueckholen
 	for(ulong i=0ull; i<n_plane*4ull; i++) host_buf[i] = dom->coupling_plane[i];
+}
+
+// ★ Slice-Ebenen-Read (Perf-Hebel 2026-08-26, Plan "Variante b"): (rho,u,flags) EINER y-Ebene
+// per Device-Gather holen und in die Host-Arrays streuen. Renderer, Diff-Schnitt und Sonden
+// lesen unveraendert dieselben Host-Indizes -- es aendert sich NUR der Transportweg
+// (4-mm-Nahdomaene: ~14 MB statt ~8,65 GB je Slice-Ereignis). Wertgleichheit per Konstruktion:
+// identische floats, Indexkonvention exakt plane_cell_index (x + y*Nx + z*Nx*Ny).
+void LBM::lese_yslice_in_host(const uint y) {
+	LBM_Domain* dom = lbm_domain[0];
+#ifndef UPDATE_FIELDS
+	if(initialized) dom->enqueue_update_fields(); // wie Memory_Container::read_from_device(): u/rho erst aktualisieren
+#endif // UPDATE_FIELDS
+	PlaneSpec plane; plane.origin = uint3(0u, y, 0u); plane.extent_a = Nx; plane.extent_b = Nz; plane.axis = 1u;
+	static std::vector<float> ebene; // sequenzielle Nutzung im Hauptthread; vor jedem Aufruf geleert
+	ebene.clear();
+	extract_plane_macros(plane, ebene);
+	const ulong n_plane = (ulong)Nx*(ulong)Nz;
+	if(ebene.size()<n_plane*4ull) return; // Wrapper hat abgebrochen und die Fehlermeldung bereits gedruckt
+	dom->kernel_extract_plane_flags.set_ranges(n_plane);
+	dom->kernel_extract_plane_flags.set_parameters(2u, plane.axis,
+		plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b);
+	dom->kernel_extract_plane_flags.enqueue_run();
+	dom->finish_queue();
+	dom->slice_flags.read_from_device(0ull, n_plane);
+	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
+		const ulong g = (ulong)x + (ulong)z*(ulong)Nx;                                // Ebenen-Index (a=x, b=z)
+		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;         // Domaenen-Index
+		const ulong o = g*4ull;
+		rho[n] = ebene[o]; u.x[n] = ebene[o+1ull]; u.y[n] = ebene[o+2ull]; u.z[n] = ebene[o+3ull];
+		flags[n] = dom->slice_flags[g];
+	}
 }
 
 void LBM::drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio) {
