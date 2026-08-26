@@ -2962,3 +2962,17 @@ endet bei -0,0907). Zusaetzlich nutzt Test Es Blende fuer q>0,5 noch die Vor-K1'
 0,5/q ohne Kernel-Gegenstueck. REPARATURAUFTRAG OFFEN: Kriterium vorzeichenkonsistent
 machen (|su|<=1,05*|ref|) oder Initialisierung ueber store_f-Paritaet; Blenden-Lambda
 auf MLS nachziehen. Ein dauerhaft roter Harness maskiert Regressionen.
+
+## ABNAHME-EINTRAG (2026-08-26 spaetabends): MLS-Abnahmeleiter S1-S4 komplett -- Freigabe-Basis 4mm-Vollumfang
+
+S1 kipp0 bitgleich (4722579264326613690, beide Arme). S2 Kugel: Injektions-Pathologie
+beseitigt (QDIAG=3: Cd +1,64 statt -3,3..-4,95), Wirkpfad 26825=Soll. S3: K2-Luecke
+als Eigenschaft der 26-Grad-Treppenklasse attribuiert (Formel-Anteil ~0: -9,52 vs
+-9,49; 45 Grad +1,13), stehender Klassenbefund -> Baustein 2. S4 8mm identische
+g12-ENV: Cd/Cz-Verschiebung 1-2% (7,2655->7,4404 / +0,3235->+0,3206), Langlauf
+60000 feine Schritte stabil (zweite Haelfte ruhiger), Band drei Arme konsistent
+0,6734-0,6854 (2,7% unter g12-Band = Ketten-Verschiebung). Perf: 1534 MLUPs/189 GB/s
+final (= Remat+F-Gate-Stand; g12-Aera 939 -> +63%). Alle Serien ueber die gelockte
+Queue, Census vor/nach sauber, gt_reset_waechter aktiv waehrend der B70-Phase.
+Details und Fassungen: GRENZSCHICHT-SGS-PLAN.md (Leiter-Block), Wissensspeicher
+mlseinbau/mlsleiter. Morgen-Unterlage: MORGEN-4MM.md.

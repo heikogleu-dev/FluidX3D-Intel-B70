@@ -104,8 +104,31 @@ qb-Quantisierung: nur qb=127 ergibt float-q exakt 0,5 -> Bitanker haelt konstruk
 ALTBEFUND Test E (NICHT dieser Diff, byteidentisch am HEAD): 16/16 Verletzungen sind
 ein Paritaets-/Vorzeichenartefakt der Harness-Initialisierung (Esoteric-Pull-Slots),
 Kriterium su>0 kann nie bestehen; eigener Reparaturauftrag, kein Physik-Befund.
-NAECHSTE SPROSSEN: S1 kipp0-iGPU (Anker-Hash 4722579264326613690 MUSS bitgleich
-bleiben -- kipp0 ist reines q=0,5, der MLS-Zweig feuert dort nie) -> S2 -> S3 -> S4.
+LEITER S1-S4 KOMPLETT DURCHLAUFEN, 26.08 SPAETABENDS (Serien s1-s4_mls, Logs logs/,
+Fassung 99a766b):
+S1 kipp0-iGPU: BESTANDEN -- beide Arme (ELIBB 1/0) Anker-Hash 4722579264326613690
+bitgleich; nq_kappe=0 konstruktiv.
+S2 Kugel DX=40: BESTANDEN -- QDIAG=3-Arm (unter K1' die Injektions-Ratsche, Cd -3,3
+bis -4,95) jetzt Cd +1,64 POSITIV; Wirkpfad 26825=Soll in allen Armen. Nominale
+Flaeche: Anker 5,2457/1,0258 -> MLS+Kappe0,65 6,1438/1,2915 (Formel +17%) -> MLS
+ohne Kappe 4,1689/1,0604 (Kappe -32%, 2195->2541 Links). Delta-m-Band neu: +34,86.
+S3 Kippkanaele: K2 feuert weiter -- ATTRIBUTION: 26 Grad MLS+Kappe0,65 -9,4857 vs
+K1'-Anker -9,5194 (Formel aendert fast nichts), ohne Kappe -7,4189 (Kappenoeffnung),
+45 Grad +1,1267 (Vorzeichen RICHTIG, 12,7% Rest). Die Reibungspfad-Luecke ist eine
+Eigenschaft der 26-Grad-TREPPENKLASSE, nicht der Wandformel; Bestand ueber die
+gesamte g12/f4-Kette -> kein 4mm-Stopper, eigener Baustein danach.
+S4 8mm-Fahrzeug B70 (identische g12-ENV): BESTANDEN -- Fenstermittel t>=0,2s aus
+forces.csv: g12_std 8,9358/+0,4223, g12_elibb (K1') 7,2655/+0,3235, MLS 7,4404/
++0,3206, MLS+Kappe0,65 7,3922/+0,3418 -- Kette bleibt auf validiertem Niveau
+(1-2% Verschiebung), keine Injektion. LANGLAUF 1,2s = 60000 feine Schritte: rc=0,
+kein NaN, zweite Haelfte RUHIGER (Cd 7,34->7,16, Cd_max 8,05->7,33) -- die
+25k-Schritte-Instabilitaetsklasse ist nicht vorhanden. Band Cd 0,6734/0,6747/0,6854
+(drei Arme konsistent; 2,7% unter g12-Band 0,692 -- gemessene Ketten-Verschiebung,
+kein Ausreisser). PERF: finale 1534 MLUPs / 189 GB/s = exakt der Stand nach
+Remat+F-Gate; MLS und Kappenoeffnung kosten NICHTS (g12-Aera 939 -> heute 1534,
++63% auf identischer ENV).
+FREIGABE-VORLAGE + STARTREZEPT + NACH-4MM-TODOS: MORGEN-4MM.md. Serie liegt unter
+logs/f4_vollumfang_serie.txt (f4_wandfrei_v2-Basis + ELIBB/MLS + UTKORR 1,5).
 
 HEIKO-ENTSCHEID 26.08 NACHMITTAG (nach den Rand-Slices beider Arme): "mit rueckkopplung
 sieht besser aus, aber die y interfaces fuer near muessen wir wirklich weiter nach aussen
