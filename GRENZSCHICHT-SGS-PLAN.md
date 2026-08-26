@@ -48,6 +48,26 @@ Kugel-B3 (g15_kugel_b3, fertig): Wirkpfad 26825=Soll, Normal-Rest 6e-6, Cz nomin
 +1,0258 / effektiv +0,8427, Cd-Pfad 0,478+0,204=0,682 -- Cz-Pfad-Konsistenzbewertung
 gegen die korrigierte B3-Buchung steht noch aus.
 
+AUFLOESUNG 26.08 MITTAG (Agenten-Dreierteam + Offline-Bisektion, g16-validiert):
+Ursache war NICHT dp_out und NICHT der B3-Buchungsblock, sondern IGCs UNROLL-BUDGET:
+die durch K1'/B3 gewachsene Link-Schleife in elibb_rekonstruiere wird nicht mehr
+ausgerollt, damit werden fuenf laufzeitindizierte private Arrays speicherheimisch
+(fhn/fpre/j + c()/w()-Tabellen = exakt 532 B/Lane = 4256 B iGPU / 8512 B B70) -- und
+weil fhn/j dem AUFRUFER stream_collide gehoeren, laeuft danach jeder DDF-Zugriff des
+ganzen Kernels ueber Scratch. FIX: eine Zeile __attribute__((opencl_unroll_hint(18)))
+vor der Link-Schleife (kernel.cpp ~1784). g16-Beweis (frisches Binary, iGPU):
+an 219 MLUPs (vorher 2), aus 253, pur 297 (Datenluecke seit g11 geschlossen),
+Kugel 346 mit BITGENAU reproduzierter Physik (Cd 5.2457/Cz 1.0258/Wirkpfad 26825/
+dm -16.829210), Detektor-Lauf komplett in Minuten statt ~Tag; FELD-HASH beider
+Kanal-Arme = kipp0-Anker 4722579264326613690; Laufzeit-zeinfo private_size 0.
+NEUES WERKZEUG: werkzeuge/scratch_gate/scratch_gate.sh -- 2-s-Offline-Gate (ocloc,
+kein GPU-Lauf), schlaegt fehl sobald der ELIBB-Arm wieder private_size>0 traegt.
+NEBENBEFUNDE OFFEN: (a) nicht-atomares fac_tau_acc[]+= in der B3-Buchung (Race ueber
+Work-Items derselben Facette) -- eigener Korrektheits-Arm; (b) Queue baut NICHT selbst:
+nach kernel.cpp-Aenderung IMMER g++-Build mit RC-Pruefung VOR Serienstart (die erste
+g16-Serie lief mit stale Binary, aufgeflogen nur am Laufzeit-Dump-Hash); (c) Stufe-1-
+Restkosten der K1'-Projektion nach Fix nicht mehr auffaellig (Kugel 346 vs g8 363).
+
 NEUE HEIKO-VORGABEN (Chat 26.08 vormittags, dauerhaft):
 A. PRODUKTIONSLAEUFE SCHREIBEN IMMER EIN VTK und geben nach Laufende automatisch den
    Rand-Slice-Satz aus (x-/y-/z+ je 10 cm innerhalb der Nahdomaene, Abweichung zu OF13,
