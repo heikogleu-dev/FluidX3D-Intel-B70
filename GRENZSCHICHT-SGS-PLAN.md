@@ -68,6 +68,21 @@ nach kernel.cpp-Aenderung IMMER g++-Build mit RC-Pruefung VOR Serienstart (die e
 g16-Serie lief mit stale Binary, aufgeflogen nur am Laufzeit-Dump-Hash); (c) Stufe-1-
 Restkosten der K1'-Projektion nach Fix nicht mehr auffaellig (Kugel 346 vs g8 363).
 
+PHYSIK-KETTE BAUSTEIN 1, PLANUNGSERGEBNIS 26.08 ABENDS (q>0,5-Endformel; Harness-Beweis
+scratchpad/qform, Wissensspeicher-Tag k1instabilitaet): K1'-Zweig traegt eine LINEARE
+wandlokalisierte Geistmoden-Instabilitaet; hergeleitete Neutralkurve lambda_krit =
+4*(2-omega)/(omega-1) -> bei Produktions-omega0~2 ist q_krit~0,51: der Zweig war dort
+praktisch vollstaendig instabil, nur LES-nu_t maskierte. ZWEI BESTANDSKORREKTUREN:
+QKAPPE=0,65 liegt SELBST im instabilen Bereich (Divergenz ~25k Schritte; altes
+Schiedsrichter-Fenster 12k war blind); Python-Befund "projiziert stabil bis q=1"
+(25.08., couette2.py @ 0a9862f) ist SUPERSEDED (Massenrenormierung maskierte den Modus;
+C++-Harness Test G zeigt die Divergenz). ABLOESUNG EMPFOHLEN: MLS-Zweig (Mei-Luo-Shyy
+1999, chi=(2q-1)/(tau0+0,5), u_bf=(1-3/(2q))u_t, konvexes Blend) -- spektral stabil bis
+omega=1,999/q=1, parameterfrei, q=0,5-Bitanker haelt, QKAPPE ENTFAELLT ERSATZLOS.
+AUFLAGE: Koeffizienten-Literatur-Verifikation VOR Kernel-Edit (laeuft); Abnahmeleiter
+S0 Harness -> S1 kipp0-iGPU -> S2 Kugel (5,2457-Referenz, nq_kappe=0) -> S3 Kippkanaele
+-> S4 8mm-LANGZEIT >=1s (Lehre: Instabilitaet erst ab ~25k Schritten sichtbar).
+
 HEIKO-ENTSCHEID 26.08 NACHMITTAG (nach den Rand-Slices beider Arme): "mit rueckkopplung
 sieht besser aus, aber die y interfaces fuer near muessen wir wirklich weiter nach aussen
 setzen." KONSEQUENZ mit Zahlen (VRAM-Rechnung, 57,5 B/Nahzelle effektiv aus Alloc-Print):
