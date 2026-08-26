@@ -874,6 +874,14 @@ identisch; K4 rel 3,5e-7 (Soll 1e-5); Kanal-K3 parallel: GPU wie Host exakt 0, A
 AUSSTEHEND (GPU-Leiter): iGPU-PRUEF, dann B70-Index-A/B (Heiko: Perf-Optimierungen IMMER mit
 dem Performance-Index vermessen) -- Soll: Kraefte-Phase ~37 % -> ~1 % im Messfenster, Index ~-10 %.
 
+ERLEDIGT 2026-08-26 (g18/g19, Binary cb2675e+Slice-Baustelle): iGPU-PRUEF-Doppellauf an der
+Kugel BESTANDEN (max. Relativabweichung px/py/pz 3,9e-6 -> 2,7e-7 ueber die Fenster, Soll 1e-5;
+logs/g18_facgpu_pruef.log). B70-A/B am 8mm-Fahrzeug: bei CD_EVERY=4 KEIN messbarer Unterschied
+(beide Arme 1478 MLUPs -- Kraftfenster zu selten, gute Nachricht fuer die Screening-Sprosse);
+bei CD_EVERY=1 (4mm-Produktionskadenz, g19): Nahfeld-Phasenanteil 92,1 % (GPU) gegen 63,9 %
+(Host), Wanduhr 4:58 gegen 5:44 min = ~13 % schneller -- die ~12,5-%-Prognose des Audits
+bestaetigt. CFD_FAC_GPU=1 bleibt Default; Hebel ABGENOMMEN.
+
 ## Kraft-Zerlegung CFD_KRAFT_ZBAND (Heiko 2026-08-21: unterste 4 Zellen ab z0 vs Rest)
 
 Diagnose-Kernel object_force_zband (Anker-Pfad unangetastet, Schalter aus = bitidentisch per
