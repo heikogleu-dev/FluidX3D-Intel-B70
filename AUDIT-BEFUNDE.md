@@ -923,6 +923,17 @@ RANG 1 (HOCH, bitidentisch, COMPILER-BELEGT): store_f-Adress-Rematerialisierung.
   am Leben; ALLE 508,7 M Zellen zahlen ~145 B/Zelle Scratch-Roundtrip, auch die 99,3 %
   ohne Facette (ohne FACETTEN: Spill exakt 0). 7-Zeilen-Remat in store_f -> Spill 0/0,
   laufzeit-bitidentisch (identische Adressen); produktionsreif via garantiert-0-Kernelarg.
+  UMGESETZT 26.08. abends (ABI-neutral als t>>62-Variante an der AUFRUFSTELLE, nicht im
+  store_f-Body -- Planungsagent-Variantenvergleich; kein neues Kernelargument noetig):
+  nn = n+(uxx)(t>>62), j2 = neighbors(nn), store_f(nn,...,j2,...). ABNAHME KOMPLETT:
+  offline Spill 448/832 -> 0/0 beide Geraete/Arme (Gate jetzt spill-hart); CPU-Hash-Paar
+  Alt(HEAD)/Neu bitgleich (1396757895076695); iGPU kipp0-Anker exakt in an- UND aus-Arm,
+  219->249 MLUPs (+14 %) / 253->258 (+2 %); B70 8mm 1478->1523 MLUPs (+3,0 %) mit 15/16
+  CSVs byte-identisch (16. = nur juengere Header-Kommentarzeile). Pruefagent: GO, 0 HOCH/
+  0 MITTEL, 3 NIEDRIG (Doku + t<2^62-Hostwaechter) mit dem Commit erledigt. EINORDNUNG:
+  der Faktor-2,14-Abstand zur 572-GB/s-Kugelreferenz war NICHT der Spill allein -- die
+  Kugel faehrt einen leichteren Kernel; Restluecke = Arbeit pro Zelle (naechste Hebel:
+  F-Null-Read, FP16S). Auto-Large-GRF (Rang 4) ist mit Spill 0 voraussichtlich obsolet.
 RANG 2 (HOCH, physikaendernd, NUR mit Heiko-Ansage): FP16S statt FP16C.
   FP16C-Konverter = 40,7 % des Instruktionsstroms des Nicht-Facetten-Pfads (19 h2f + 19 f2h
   a ~23 Instr./Zelle, kein natives cvt fuer 1-4-11); FP16S nutzt native hf-Konversion:

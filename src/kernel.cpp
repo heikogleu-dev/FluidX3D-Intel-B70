@@ -2772,7 +2772,15 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#endif"+R( // TRT
 
-	store_f(n, fhn, fi, j, t TS_A); // perform streaming (part 1)
+	// ★ Rang-1-Remat (Perf-Audit Achse 2, 2026-08-26): zur Laufzeit ist t>>62 == 0 (t = monotoner
+	// Schrittzaehler < 2^62, lbm.hpp/lbm.cpp -- diese Semantik ist TRAGEND, nie Bits in t packen!),
+	// also nn == n und j2 == j BITGENAU. IGC kann das nicht beweisen und rechnet die 19 fi-Adressen
+	// hier neu, statt sie ueber den Facettenblock zu spillen (Spill 448/832 -> 0/0, offline bewiesen,
+	// FP-Instruktions-Multiset identisch; Belegkette: AUDIT-BEFUNDE Rang-1-Absatz + Abnahme g24).
+	const uxx nn = n+(uxx)(t>>62);
+	uxx j2[def_velocity_set]; // rematerialisierte Nachbarindizes, identische Werte wie j
+	neighbors(nn, j2);
+	store_f(nn, fhn, fi, j2, t TS_A); // perform streaming (part 1)
 } // stream_collide()
 
 )+"#ifdef SURFACE"+R(
