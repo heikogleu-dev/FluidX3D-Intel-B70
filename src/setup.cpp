@@ -136,8 +136,9 @@ static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 // existiert nur EINMAL): yc = NF_OY + y_f/ratio, j0 = clamp(floor(yc), 0, cNy-2). Wird von
 // render_yslice_diff UND dem Slice-Ebenen-Read-Block benutzt -- ein Auseinanderlaufen der
 // beiden Stellen waere ein stiller Ebenen-Versatz.
-static uint diff_j0(const uint NF_OY, const uint y_f, const uint ratio, const uint cNy) {
+static uint diff_j0(const uint NF_OY, const uint y_f, const uint ratio, const uint cNy, float* yc_out=nullptr) {
 	const float yc = (float)NF_OY + (float)y_f/(float)ratio;
+	if(yc_out) *yc_out = yc; // Auditor-A NIEDRIG-3: yc und j0 aus EINER Quelle, damit ty nie gegen j0 laufen kann
 	return (uint)fmin(fmax(floor(yc), 0.0f), (float)cNy-2.0f);
 }
 
@@ -149,7 +150,7 @@ static void render_yslice_diff(LBM& F, LBM& C,
                                const float near_x0, const float near_z0, const float dx_f,
                                const int t_ms, const string& dir) {
 	const uint y_f = fNy/2u;
-	const float yc  = (float)NF_OY + (float)y_f/(float)ratio;
+	float yc; const int j0 = (int)diff_j0(NF_OY, y_f, ratio, cNy, &yc); // gemeinsame Quelle fuer yc UND j0 (schleifeninvariant)
 	Image img(fNx, fNz);
 	string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
 	std::ofstream csv(dir+"schnitt_diff_letzter.csv"); csv.precision(6);
@@ -165,7 +166,6 @@ static void render_yslice_diff(LBM& F, LBM& C,
 		const float xc = (float)NF_OX + (float)x/(float)ratio;
 		const float zc = (float)NF_OZ + (float)z/(float)ratio;
 		const int i0 = (int)fmin(fmax(floor(xc), 0.0f), (float)cNx-2.0f);
-		const int j0 = (int)diff_j0(NF_OY, y_f, ratio, cNy); // gemeinsame Konvention, s. Helfer oben
 		const int k0 = (int)fmin(fmax(floor(zc), 0.0f), (float)cNz-2.0f);
 		const float tx=xc-(float)i0, ty=yc-(float)j0, tz=zc-(float)k0;
 		float wsum=0.0f, fx_=0.0f, fy_=0.0f, fz_=0.0f;
@@ -218,15 +218,18 @@ static void pruefe_slice_ebene(LBM& L, const uint Nx, const uint Ny, const uint 
 		su[g*3ull]=L.u.x[n]; su[g*3ull+1ull]=L.u.y[n]; su[g*3ull+2ull]=L.u.z[n]; sr[g]=L.rho[n]; sf[g]=L.flags[n];
 	}
 	L.lese_yslice_in_host(y);
-	float dmax=0.0f; ulong nfl=0ull;
+	float dmax=0.0f; ulong nfl=0ull, nnan=0ull; // nnan: NaN-Zustandswechsel -- fmax ist NaN-blind (Auditor-A NIEDRIG-4)
 	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
 		const ulong g=(ulong)x+(ulong)z*(ulong)Nx, n=(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
 		dmax = fmax(dmax, fabs(su[g*3ull]-L.u.x[n])); dmax = fmax(dmax, fabs(su[g*3ull+1ull]-L.u.y[n]));
 		dmax = fmax(dmax, fabs(su[g*3ull+2ull]-L.u.z[n])); dmax = fmax(dmax, fabs(sr[g]-L.rho[n]));
+		nnan += (ulong)(std::isnan(su[g*3ull])!=std::isnan(L.u.x[n])) + (ulong)(std::isnan(su[g*3ull+1ull])!=std::isnan(L.u.y[n]))
+		      + (ulong)(std::isnan(su[g*3ull+2ull])!=std::isnan(L.u.z[n])) + (ulong)(std::isnan(sr[g])!=std::isnan(L.rho[n]));
 		if(sf[g]!=L.flags[n]) nfl++;
 	}
 	print_info("SLICE-PRUEF "+tag+" y="+to_string(y)+": max |Delta| u/rho = "+to_string(dmax,9u)
-		+", flags-Differenzen "+to_string(nfl)+" von "+to_string(np)+" (Soll: 0 / 0).");
+		+", flags-Differenzen "+to_string(nfl)+" von "+to_string(np)
+		+(nnan>0ull?", NaN-WECHSEL "+to_string(nnan)+" (FEHLER!)":"")+" (Soll: 0 / 0).");
 }
 
 
@@ -2777,6 +2780,7 @@ static void main_setup_fahrzeug() {
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 10u)); // 0 waere eine Endlosschleife -- hier klemmen, nicht im Helfer
 	const float slice_dt = env_f("CFD_SLICE_DT", 0.0f); // 0 = keine Slices
 	const bool slice_gpu = env_u("CFD_SLICE_GPU", 1u)>0u; // ★ Slice-Ebenen-Read 2026-08-26 (PRUEF-Arm nur im dd-Fall)
+	if(slice_dt>0.0f) print_info(string("Slice-Transportweg (einzel): ")+(slice_gpu?"Ebenen-Gather (CFD_SLICE_GPU=1)":"Voll-Read-Altpfad (CFD_SLICE_GPU=0)")+"."); // Auditor-B B-3
 	// ★ Pruefagent NIEDRIG-2 (Hauskonvention "Schalter ohne Wirkpfad meldet sich"):
 	if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_warning("CFD_SLICE_PRUEF wirkt nur im dd-Fall -- im Einzelgitterfall ohne Wirkpfad.");
 	bool slice_cp_ok = false; // ★ Slice-Ebenen-Read: Kopplungspuffer wird lazy beim ersten Ereignis angelegt
@@ -4294,6 +4298,9 @@ static void main_setup_fahrzeug_dd() {
 	// die maximale Abweichung der Ebene (Muster CFD_FAC_GPU_PRUEF).
 	const bool slice_gpu   = env_u("CFD_SLICE_GPU", 1u)>0u;
 	const bool slice_pruef = env_u("CFD_SLICE_PRUEF", 0u)>0u;
+	// ★ Auditor-B B-3 (Ansage-Doktrin): der Transportweg ist Default AN und muss im Log stehen.
+	if(slice_dt>0.0f) print_info(string("Slice-Transportweg: ")+(slice_pruef?"PRUEF-Arm (beide Wege, Vergleich je Ebene)":(slice_gpu?"Ebenen-Gather (CFD_SLICE_GPU=1)":"Voll-Read-Altpfad (CFD_SLICE_GPU=0)"))+".");
+	else if(slice_pruef) print_warning("CFD_SLICE_PRUEF=1 ohne CFD_SLICE_DT>0 -- keine Slice-Ereignisse, kein Wirkpfad."); // Auditor-B B-4
 	// ★ KIPP-WAECHTER-SCHARFSCHALTUNG (Heiko 2026-08-21, Befund aus f4_std_diff): der Waechter stand
 	// fest auf t > 0,02 s. Diese Zahl ist auf der 8-mm-Sprosse geeicht. Der Impulsstart-Transient
 	// erreicht auf BEIDEN Sprossen ein Vielfaches der Schwelle (8 mm: |Cd| 41,25 / 4 mm: 49,24, je bei
@@ -4540,6 +4547,7 @@ static void main_setup_fahrzeug_dd() {
 		zcsv.open(out_dir+"kraft_zband.csv"); zcsv.precision(8);
 		zcsv << "# zband_zellen=" << zb << " dx_mm=" << dx_f*1000.0f << " band_mm=" << (float)zb*dx_f*1000.0f
 		     << " -- GITTERBAND, zwischen DX-Sprossen nicht direkt vergleichbar\n";
+		zcsv << "# ACHTUNG: Fx/Fz aus object_force -- an facettenbehandelten Links PHANTOM-Reibung; fuer A/B nur die VERSCHIEBUNG zwischen Armen werten\n";
 		zcsv << "time_s,Fx_band_N,Fz_band_N,Fx_rest_N,Fz_rest_N,Cz_band,Cz_rest,selbsttest_rel,cz_druck_band,cz_druck_rest\n" << std::flush;
 	}
 	if(env_u("CFD_KOPPLUNG_BODENBAND", 0u)>0u) print_info("BODENBAND-Messarm aktiv: unterste "+to_string(env_u("CFD_KOPPLUNG_BODENBAND",0u))+" Grobzeilen der x--Einlasskopplung: DEFIZIT-ANHEBUNG fmax(u_far, w*u_inf), Rampe bis 2N (B4-Korrektur: keine Ersetzung) -- OF13-Befund.");

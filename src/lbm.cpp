@@ -918,6 +918,10 @@ void LBM_Domain::enqueue_unvoxelize_mesh_on_device(const Mesh* mesh, const uchar
 	kernel_unvoxelize_mesh.run();
 }
 
+// ★ Auditor-B B-1 (26.08.): werkzeuge/scratch_gate/gen_main.cpp FRIERT diese Define-Liste fuer
+// das Offline-Scratch-Gate ein (Kanal-Referenzpunkt). Wer hier Defines aendert/ergaenzt, zieht
+// den Zwilling nach -- sonst prueft das Gate still eine Quelle, die niemand mehr faehrt.
+// Voller Drift-Anker (Gate difft gegen frischen CFD_DUMP_DEFINES-Dump): Folgepunkt im Plan.
 string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_Nx "+to_string(Nx)+"u"
 	"\n	#define def_Ny "+to_string(Ny)+"u"
@@ -2084,7 +2088,7 @@ void LBM::lese_yslice_in_host(const uint y) {
 	ebene.clear();
 	extract_plane_macros(plane, ebene);
 	const ulong n_plane = (ulong)Nx*(ulong)Nz;
-	if(ebene.size()<n_plane*4ull) return; // Wrapper hat abgebrochen und die Fehlermeldung bereits gedruckt
+	if(ebene.size()<n_plane*4ull) return; // Verteidigung: heute unerreichbar (jeder Wrapper-Abbruch endet in print_error/exit), bleibt fuer den Fall, dass print_error je nicht-fatal wird (Auditor-A NIEDRIG-1)
 	dom->kernel_extract_plane_flags.set_ranges(n_plane);
 	dom->kernel_extract_plane_flags.set_parameters(2u, plane.axis,
 		plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b);

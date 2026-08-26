@@ -882,6 +882,52 @@ bei CD_EVERY=1 (4mm-Produktionskadenz, g19): Nahfeld-Phasenanteil 92,1 % (GPU) g
 (Host), Wanduhr 4:58 gegen 5:44 min = ~13 % schneller -- die ~12,5-%-Prognose des Audits
 bestaetigt. CFD_FAC_GPU=1 bleibt Default; Hebel ABGENOMMEN.
 
+## Code-Audit-Korrektur-Loop 26.08 nachmittags: GESCHLOSSEN (Startbedingung 4mm erfuellt)
+
+Vier unabhaengige Pruefer ueber git diff bfa3cec..7876490 + Altbestand. Ergebnis: 0 HOCH.
+- Slice-Pruefagent (11 Punkte): MITTEL-1 (j0-Formel-Duplikat + PRUEF-Luecke) -> diff_j0-Helfer
+  + PRUEF prueft Diff-Ebenen; 2 NIEDRIG gefixt. Abnahme g21.
+- Auditor A (Kernel/Funktionen, frisches Auge): MITTEL-1 Zero-Copy-Zweig fehlte in den
+  Voll-/Offset-WRITE-Wrappern -> gefixt; NIEDRIG 1-5 (Guard-Kommentar, yc/j0-Einquellen-
+  Refactor mit yc_out, NaN-harte PRUEF-Metrik, Bitgleich-Formulierung praezisiert; NIEDRIG-2
+  = Notiz toter Wrapper-Fixes). Unroll-Wirkpfad unabhaengig reproduziert (ohne Hint 4256 B).
+- Auditor B (Host/Pipeline, frisches Auge): Guard-Falle/Reihenfolgen/Schalter-Matrix/LAUF.txt
+  SAUBER (empirisch, Offline-Compile ohne FACETTEN-Defines); B-3 Ansage-Doktrin ->
+  Slice-Transportweg meldet sich jetzt in dd UND einzel; B-4 PRUEF-ohne-Kadenz-Warnung;
+  B-2 igc_offline-Workdir-Override; B-1 Gate-Drift -> Querverweis in device_defines,
+  VOLLER Drift-Anker (Gate difft gegen CFD_DUMP_DEFINES-Dump) = FOLGEPUNKT nach 4mm.
+- fac_tau-Race: ENTWARNT mit Beweiskette (s. u.), Haertungs-Waechter b7474db.
+- Eq.25-Passage: im Wissensspeicher als superseded abgeloest (Tag eq25superseded).
+- kraft_zband.csv: Phantom-Reibungs-Hinweis jetzt im CSV-Header selbst.
+- ZURUECKGESTELLT hinter den 4mm-Lauf (begruendet): W5-Totfacetten-Deklaration und
+  Pur-Praezisionswaechter -- beide dienen der K2-Messguete, die per Heiko-Reihenfolge
+  hinter dem Lauf liegt; UPDATE_FIELDS-Abloesung und FP16S-A/B (grosse gepruefte A/Bs).
+Nachabnahmen: g22 (PRUEF 0/0 alle Ebenen inkl. NaN-Metrik, alle CSVs+18 PNGs byte-identisch,
+Refactor-Wertgleichheit g21<->g22 byte-bewiesen), g23 (Ansagen feuern, PRUEF 18x exakt 0).
+Build-RC 0, scratch_gate gruen (iGPU+B70 private_size 0).
+
+## f4_wandfrei_prod-Absturz AUFGEKLAERT: kein OOM, sondern GPU-Engine-Reset (Forensik 26.08.)
+
+CL_OUT_OF_RESOURCES (-5) an drive_boundary_cubic_lift war die FOLGEMELDUNG eines toten
+OpenCL-Kontexts. Kernel-Journal (Boot -6): 20:38:47 Start snap.drawing (Desktop haengt an
+der B70 -- card0-DP-5 ist der einzige connected-Anschluss!) -> 20:39:21 GuC-Engine-Reset
+engine_class=ccs, Timedout job "in FluidX3D [57532]", Coredump -> 20:39:48 der -5 + exit(1).
+Loupe (2x) und Firefox ueberlebte der Lauf, drawing nicht. VRAM war NICHT die Ursache:
+Alloc-Bilanz 29 274+64 MB von 32 655 MB, byte-gleich zu f4_std_diff2 bis auf 63,85 MB
+N2F-Schale; Host-RAM 24,8/91,5 GB; kein Leistungsabfall ueber 73 min (405 LEISTUNG-Samples
+flach); keine Re-Allokation in der Zeitschleife (verifiziert). Transportlast des Laufs
+~0,75 TB Copy-Engine (41 Slices a 8,65 GB + ~205 Kraftfenster a ~2 GB) -- exakt die Klasse
+der bcs-Teardown-Resets aus Boot -4; beide Quellen sind seit heute per Default entschaerft
+(CFD_SLICE_GPU: 14 MB statt 8,65 GB; CFD_FAC_GPU: kein F-Voll-Read).
+KONSEQUENZEN STARTAUFSTELLUNG: (1) waehrend des Laufs KEINE GPU-Programme am Desktop
+(gemessene Bruchstelle), besser Monitor an die iGPU (card1 hat freie Ausgaenge) -- Heikos
+Handgriff/Entscheid; (2) CFD_VTK_DT grob setzen (Zwischen-Dumps; war beim Absturz NICHT
+gesetzt, deshalb Totalverlust) + CFD_STOP_DATEI-Betriebsregel; (3) neuer
+werkzeuge/gt_reset_waechter.sh: ueberwacht journalctl -k auf Engine reset/Timedout job und
+loest die Stopp-Datei aus -- der ccs-Reset lag 27 s VOR dem Prozessende, der Dump waere
+rettbar gewesen; (4) scratch_gate vor Start. i915-GEM-Leck-Klasse: durch intel_iommu=igfx_off
+erledigt, Messung heute sauber (-32 MB).
+
 ## Perf-Baurunde 2, Baustein 2: Slice-Ebenen-Read (CFD_SLICE_GPU, Default AN) -- 2026-08-26
 
 Nach Planungsagenten-Plan (Variante b): extract_plane_macros wiederverwendet, Zwilling

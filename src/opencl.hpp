@@ -556,6 +556,8 @@ public:
 	inline void write_to_device(const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			cl_queue.enqueueWriteBuffer(device_buffer, blocking, 0ull, capacity(), (void*)host_buffer, event_waitlist, event_returned);
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 (Auditor-A MITTEL-1): letzte zwei Wrapper derselben Zero-Copy-Klasse geschlossen
 		}
 	}
 	inline void read_from_device(const ulong offset, const ulong length, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
@@ -570,6 +572,8 @@ public:
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			const ulong safe_offset=min(offset, range()), safe_length=min(length, range()-safe_offset);
 			if(safe_length>0ull) cl_queue.enqueueWriteBuffer(device_buffer, blocking, safe_offset*sizeof(T), safe_length*sizeof(T), (void*)(host_buffer+safe_offset), event_waitlist, event_returned);
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 (Auditor-A MITTEL-1) wie oben
 		}
 	}
 	inline void read_from_device_1d(const ulong x0, const ulong x1, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // read 1D domain from device, either for all vector dimensions (-1) or for a specified dimension

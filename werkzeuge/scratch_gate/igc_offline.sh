@@ -18,9 +18,11 @@ CL="${1:?Aufruf: igc_offline.sh <kernel.cl> [device] [kernelname]}"
 DEV="${2:-0x7d67}"
 KERNEL="${3:-stream_collide}"
 
-# --- Schritt 0: Arbeitsverzeichnis neben der Quelle anlegen (Dump + ocloc-Ausgabe) ---
+# --- Schritt 0: Arbeitsverzeichnis anlegen (Dump + ocloc-Ausgabe) ---
+# Auditor-B NIEDRIG B-2: Default neben der Quelle; bei Aufruf auf eine REPO-Datei wuerde das
+# ins Repo schreiben -- dann IGC_WORKDIR setzen (z. B. IGC_WORKDIR=$(mktemp -d)).
 BASE="$(basename "$CL" .cl)"
-WORK="$(dirname "$(readlink -f "$CL")")/zeinfo_${BASE}_${DEV}"
+WORK="${IGC_WORKDIR:-$(dirname "$(readlink -f "$CL")")}/zeinfo_${BASE}_${DEV}"
 rm -rf "$WORK"; mkdir -p "$WORK/dump"
 
 # --- Schritt 1: Quelle vorbereiten -----------------------------------------------------
