@@ -580,6 +580,8 @@ public:
 				if(safe_length>0ull) cl_queue.enqueueReadBuffer(device_buffer, false, safe_offset*sizeof(T), safe_length*sizeof(T), (void*)(host_buffer+safe_offset), event_waitlist, event_returned);
 			}
 			if(blocking) cl_queue.finish();
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 wie der 25.08.-Fix der Vollvarianten: Zero-Copy hatte KEINE Synchronisierung (Befund Slice-Read-Plan)
 		}
 	}
 	inline void write_to_device_1d(const ulong x0, const ulong x1, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // write 1D domain to device, either for all vector dimensions (-1) or for a specified dimension
@@ -590,6 +592,8 @@ public:
 				if(safe_length>0ull) cl_queue.enqueueWriteBuffer(device_buffer, false, safe_offset*sizeof(T), safe_length*sizeof(T), (void*)(host_buffer+safe_offset), event_waitlist, event_returned);
 			}
 			if(blocking) cl_queue.finish();
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 wie oben
 		}
 	}
 	inline void read_from_device_2d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong Nx, const ulong Ny, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // read 2D domain from device, either for all vector dimensions (-1) or for a specified dimension
@@ -603,6 +607,8 @@ public:
 				}
 			}
 			if(blocking) cl_queue.finish();
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 wie oben
 		}
 	}
 	inline void write_to_device_2d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong Nx, const ulong Ny, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // write 2D domain to device, either for all vector dimensions (-1) or for a specified dimension
@@ -616,6 +622,8 @@ public:
 				}
 			}
 			if(blocking) cl_queue.finish();
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 wie oben
 		}
 	}
 	inline void read_from_device_3d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong z0, const ulong z1, const ulong Nx, const ulong Ny, const ulong Nz, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // read 3D domain from device, either for all vector dimensions (-1) or for a specified dimension
@@ -631,6 +639,8 @@ public:
 				}
 			}
 			if(blocking) cl_queue.finish();
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 wie oben
 		}
 	}
 	inline void write_to_device_3d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong z0, const ulong z1, const ulong Nx, const ulong Ny, const ulong Nz, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // write 3D domain to device, either for all vector dimensions (-1) or for a specified dimension
@@ -646,6 +656,8 @@ public:
 				}
 			}
 			if(blocking) cl_queue.finish();
+		} else if(is_zero_copy&&blocking) {
+			cl_queue.finish(); // ★ 2026-08-26 wie oben
 		}
 	}
 	inline void enqueue_read_from_device(const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { read_from_device(false, event_waitlist, event_returned); }
