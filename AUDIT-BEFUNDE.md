@@ -882,6 +882,50 @@ bei CD_EVERY=1 (4mm-Produktionskadenz, g19): Nahfeld-Phasenanteil 92,1 % (GPU) g
 (Host), Wanduhr 4:58 gegen 5:44 min = ~13 % schneller -- die ~12,5-%-Prognose des Audits
 bestaetigt. CFD_FAC_GPU=1 bleibt Default; Hebel ABGENOMMEN.
 
+## TIEFER PERFORMANCE-CODE-AUDIT 26.08 (Heiko-Auftrag, waehrend f4_wandfrei_v2 laeuft)
+
+Drei Achsen + Beleg-Sweep, alles offline (ocloc) bzw. aus Bestandsmessungen; Artefakte in
+scratchpad/ax3(g). Rahmen: Produktionskernel 2169 MLUPs/267 GB/s auf dem Pfad mit 96 %
+Wanduhr -- dieselbe B70 lieferte am Kugelfall 4648 MLUPs/572 GB/s (LEISTUNG.md, 08.08.).
+FAKTOR 2,14 LUFT. Konsolidierte Baurunden-Liste (nach Lauf, uebliche Kette, je EIN Arm):
+
+RANG 1 (HOCH, bitidentisch, COMPILER-BELEGT): store_f-Adress-Rematerialisierung.
+  Der GESAMTE stream_collide-Spill (iGPU 672 B / B70 1408 B im Testgitter) ist Adress-CSE:
+  IGC haelt die 64-Bit-fi-Adressen aus load_f ueber den ~2170-Instruktionen-Facettenblock
+  am Leben; ALLE 508,7 M Zellen zahlen ~145 B/Zelle Scratch-Roundtrip, auch die 99,3 %
+  ohne Facette (ohne FACETTEN: Spill exakt 0). 7-Zeilen-Remat in store_f -> Spill 0/0,
+  laufzeit-bitidentisch (identische Adressen); produktionsreif via garantiert-0-Kernelarg.
+RANG 2 (HOCH, physikaendernd, NUR mit Heiko-Ansage): FP16S statt FP16C.
+  FP16C-Konverter = 40,7 % des Instruktionsstroms des Nicht-Facetten-Pfads (19 h2f + 19 f2h
+  a ~23 Instr./Zelle, kein natives cvt fuer 1-4-11); FP16S nutzt native hf-Konversion:
+  -20,5 % Instr. im Produktionskernel (COMPILER-BELEGT). A/B 8mm gegen 4mm-Anker + Bit-Folgen.
+RANG 3 (MITTEL, bitidentisch): FORCE_FIELD-F-Null-Read-Gate (~3 %; Achse 1-Neufund: F der
+  Fluidzellen ist im Produktionspunkt konstant 0, Read ohne Wirkpfad) + boden_eq-3D-Range
+  (Full-N-Dispatch fuer 2-Lagen-Band; ~250x weniger Threads, Kernel unveraendert) +
+  VTK-Erstdump-Fix (vtk_next=0 -> Dump bei t=1ms, 11,5 GB Anfangszustand) + ABSTAND-
+  Praedikat vorberechnen (statisch, wird je Schritt neu gerechnet).
+RANG 4 (A/Bs mit offener Richtung): B70 Auto-Large-GRF (-cl-intel-enable-auto-large-GRF-mode:
+  Spill 832->0 nur fuer die 4 grossen Kernel, FP-Multiset identisch; Occupancy-Abwaegung nur
+  per GPU-A/B) -- NACH Rang 1 neu bewerten (Remat macht ihn evtl. obsolet); stream_collide-
+  only WGS 128/256 (bit-sicher, billig, Wirkung klein); UPDATE_FIELDS-Abloesung (~10-15 %,
+  TYPE_E-Klobber-Falle, po-Kernel noetig -- grosser Bauschritt).
+ENTWARNT/BELEGT SAUBER: SIMD-Wahl des Compilers (simd8/16 einzig spillfrei bei 128 GRF;
+  Xe2 kann kein simd8 -- Compilerfehler als Beleg; 532 B/Lane ist der ALLGEMEINE
+  stream_collide-Arbeitssatz), fast-relaxed-math (bewusst abwesend, wuerde K2 kontaminieren),
+  uniform-work-group-size (byte-identisch = No-Op), >4GB-Flag (an Puffergroessen alternativlos),
+  Zero-Copy-Weg, Events-statt-finish (Deckel ~1,5 %), Verzweigungen im Innersten (Divergenz
+  auf 0,67 % der Zellen), keine widerlegten Mechanismen aktiv (13/13 sauber AUS), keine
+  Kategorie-d-Faelle, Zaehler sauber gegatet.
+BELEG-SWEEP-NEBENBEFUNDE: (a) setup.cpp:3257-Kommentar erklaert PROFIL=3 zum "STANDARD ab
+  23.08" -- Lauf und gesamte validierte Kette fahren PROFIL=2, zu 3 existiert kein A/B und
+  keine Doku-Zeile -> Kommentar mutmasslich falsch, mit Heiko klaeren, dann korrigieren;
+  (b) N2F-Verbot vom 21.08. ("Schale UND Volumen AUS") ist durch Fx_far-Metrik-Befund
+  (:1482-1484) + Heiko-Freigaben 22.08./26.08. (Slice-Nachholung) SUPERSEDED -- hiermit
+  schriftlich abgeloest; (c) wandprofil_nah/fern.csv wird jeden dd-Lauf geschrieben und
+  wurde NIE konsumiert (geplant: delta99) -> nutzen oder abschalten; (d) NEAR_VOR-Boxfrage:
+  Wandrueckzugs-Sieger b8_sp_* liefen auf 352/LY 2.992, die f4-Linie auf 96/Standard --
+  gehoert zur Domaenenbreiten-Frage (y-Rand-Befund) der naechsten 4mm-Layout-Runde.
+
 ## Code-Audit-Korrektur-Loop 26.08 nachmittags: GESCHLOSSEN (Startbedingung 4mm erfuellt)
 
 Vier unabhaengige Pruefer ueber git diff bfa3cec..7876490 + Altbestand. Ergebnis: 0 HOCH.
