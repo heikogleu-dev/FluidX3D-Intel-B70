@@ -101,15 +101,16 @@ Die rohe CCS-Basis braucht Root: HEIKOS HANDGRIFF (Ausgabe an Claude geben):
   ls /sys/kernel/debug/dri/0/tile0/
 EMPIRISCHER DETEKTOR GEBAUT: werkzeuge/ccs_kanarie/ (Voll-VRAM-Muster-Fuelltest,
 on-device-Verify, Sofortkontrolle als Werkzeug-Selbsttest; Rauchtest sanfter Modus
-26.08.: 3 GB, 0 Fehler). VOR DEM 4mm-GO als Vollmodus laufen lassen:
+26.08.: 3 GB, 0 Fehler).
+HEIKO-ENTSCHEID 26.08. nachts: Kanarie-Volllauf + Root-Handgriffe NACH dem 4mm-Lauf
+und den anderen Punkten -- NICHT als Vor-Go-Schritt. Der 4mm-Lauf startet morgen
+wie geplant zuerst. Kommando dann:
   pgrep -x FluidX3D   # muss leer sein
   ./werkzeuge/ccs_kanarie/ccs_kanarie 1 300 0   # B70, 5 min, volle Fuellung
-  ACHTUNG: Desktop kann waehrenddessen stocken (VRAM voll) -- bewusst starten.
-  PASS => oberste Seite nachweislich sauber, 4mm-Lauf unbedenklich.
-  KORRUPTION => 4mm-Lauf VERSCHIEBEN, Befund an Heiko (Kernel-Entscheid noetig).
-EINORDNUNG fuers Risiko morgen: f4-Fussabdruck 29,3 von 32,7 GB -- ob die vergiftete
-Seite (falls vorhanden) in unseren Puffern liegt, haengt an der Allocator-Platzierung;
-genau das klaert der Kanarie-Volllauf ohne Root.
+  (Desktop kann waehrenddessen stocken -- bewusst starten.)
+RISIKO-EINORDNUNG dokumentiert: f4-Fussabdruck 29,3/32,7 GB, Deckung der obersten
+Seite haengt an der Allocator-Platzierung; ein etwaiger Befund waere rueckwirkend
+gegen die 4mm-Ergebnisse zu halten (2 KiB still falsche Zellen als Fehlerklasse).
 
 ## TODO-Liste fuer NACH dem 4mm-Lauf
 
