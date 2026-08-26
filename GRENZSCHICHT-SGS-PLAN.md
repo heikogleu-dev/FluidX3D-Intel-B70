@@ -68,6 +68,17 @@ nach kernel.cpp-Aenderung IMMER g++-Build mit RC-Pruefung VOR Serienstart (die e
 g16-Serie lief mit stale Binary, aufgeflogen nur am Laufzeit-Dump-Hash); (c) Stufe-1-
 Restkosten der K1'-Projektion nach Fix nicht mehr auffaellig (Kugel 346 vs g8 363).
 
+HEIKO-ENTSCHEID 26.08 NACHMITTAG (nach den Rand-Slices beider Arme): "mit rueckkopplung
+sieht besser aus, aber die y interfaces fuer near muessen wir wirklich weiter nach aussen
+setzen." KONSEQUENZ mit Zahlen (VRAM-Rechnung, 57,5 B/Nahzelle effektiv aus Alloc-Print):
+Die validierte Siegerbox-Breite LY=2,992 braucht bei 4 mm ~35,3 GB Nahfeld -- passt NICHT
+auf eine B70 (32,7 GB, minus ~1,2 GB Desktop). Machbar auf einer B70 sind nur ~+130 mm
+gesamt (~2 GB Restluft) -- zu wenig gegen den Radnachlauf (+26..28 m/s am y--Rand).
+WEG: (a) y-Breiten-Arm in die 8mm-Leiter der Gewinnerkette aufnehmen (LY=2,992 existiert
+validiert bei 8 mm -- quantifiziert den Rand-Gewinn, selbststaendig); (b) fuer 4 mm ist die
+y-Verbreiterung DER konkrete Anwendungsfall Nr. 1 des Dual-B70-Halo+iGPU-Plans (Bauplan
+Paragraph 7b) -- dort einplanen, nicht auf einer Karte erzwingen.
+
 HEIKO-FREIGABE 26.08 MITTAG (konditional, fuer den naechsten 4-mm-Lauf): Vorbereitung
 jetzt; SELBSTSTAENDIGER Start + Monitoring, SOBALD der Code-Audit-Korrektur-Loop durch
 und abgearbeitet ist. Direkt nach dem Start: TIEFER PERFORMANCE-CODE-AUDIT (unnoetige
