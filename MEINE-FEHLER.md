@@ -12,3 +12,9 @@ sich erst als OpenCL-JIT-Fehler im Lauf. Der kaputte Stand war schon committet. 
 (1) In kernel.cpp NUR exakte Ein-Block-Strings ersetzen, NIE mehrzeilige Regex ueber
 R()-Grenzen. (2) Nach jeder kernel.cpp-Aenderung laeuft VOR dem Commit ein JIT-Kurzlauf
 (kanal N=20, 1 Serie) -- der C++-Build beweist bei String-Kerneln nichts.
+
+## 2026-08-26, VIERTES timeout-Versehen -- Regel wird mechanisch
+Die IGC-Dump-Serie im Vordergrund gestartet ("sind ja nur JIT-Kurzlaeufe") -- die
+Dump-Schreiberei macht auch Kurzlaeufe langsam, Timeout nach 10 min, Serie tot (Schaden
+diesmal null: Dumps lagen schon auf Platte, Census sauber). AB JETZT MECHANISCH: JEDE
+lauf_queue.sh-Serie laeuft run_in_background, ohne Ausnahme und ohne Laufzeitschaetzung.

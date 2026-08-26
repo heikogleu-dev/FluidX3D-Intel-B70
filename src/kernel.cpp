@@ -1741,10 +1741,15 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 )+"#endif"+R( // FACETTEN
 )+"#ifdef FACETTEN_IMEM"+R(
 )+"#ifdef FACETTEN_ELIBB"+R(
-void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, const global uchar* fac_q, const uint fid,
+float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, const global uchar* fac_q, const uint fid,
                          const float rhon, const float upx, const float upy, const float upz,
                          const float fnx, const float fny, const float fnz,
-                         global float* fac_tau_acc, float* dp_out, global uint* hits, const ulong t) {
+                         global float* fac_tau_acc, global uint* hits, const ulong t) {
+	// ★ PERF-FIX 2026-08-26 (IGC-Dump-Diagnose): der fruehere dp_out-Pointer machte das
+	// Caller-Array elibb_dp[3] adressierbar -- IGC legte den ELIBB-Pfad mit private_size=4256 B
+	// je Work-Item in den Speicher (Scratch-Signatur: Faktor ~100, 0 GB/s). Rueckgabe jetzt
+	// PER WERT als float3 (registerfaehig, keine Adresse). Diagnose: externes Review sagte
+	// die Klasse exakt voraus; zeinfo-Beleg im Scratchpad igc0/igc1.
 	// ★★ B2 REVISION nach Pruefbefund W2 (2026-08-25): die Blende ist REIN GEOMETRISCH (u_W = 0).
 	// Die erste Fassung trug u_W = u_s IN der Blende -- bei q = 0,5 ist die Blende aber die
 	// Identitaet, der Wandmodell-Impuls waere an JEDER ebenen Partie (q = 0,5: Kanalboden,
@@ -1827,9 +1832,11 @@ void elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, co
 		const uxx a3 = 6ul*(uxx)fid;
 		fac_tau_acc[a3+1ul] += -dpx; fac_tau_acc[a3+2ul] += -dpy; fac_tau_acc[a3+3ul] += -dpz;
 		fac_tau_acc[a3+4ul] += dm_;
-		dp_out[0]=dpx; dp_out[1]=dpy; dp_out[2]=dpz; // ★ B3-Pruefbefund 1b: fuer die +2*Dp_t-Korrektur an der phi-Buchung
+		// dp geht per Wert zurueck (B3-Pruefbefund 1b: +2*Dp_t-Korrektur an der phi-Buchung)
 		if(t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
+		return (float3)(dpx, dpy, dpz);
 	}
+	return (float3)(0.0f, 0.0f, 0.0f);
 } // elibb_rekonstruiere()
 )+"#endif"+R( // FACETTEN_ELIBB
 // ★★ iMEM-Facettenpfad (FACETTEN-IMEM.md, an Asmuth et al. 2021 Gl. 20-28 verankert, Revision
@@ -1870,11 +1877,11 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// OHNE iMEM war sauber, jeder GPU-Arm MIT iMEM brach (Kugel-Cd -3,3/-4,95/-7,1 quer durch alle
 	// Operanden- und q-Quellen-Arme). Die Blende ist GEOMETRIE (Randbedingung), keine Korrektur.
 	// kipp0: qb=127 ueberall -> Blende ist Identitaet -> bitgleich (Anker haelt konstruktiv).
-	float elibb_dp[3] = {0.0f, 0.0f, 0.0f};
+	float3 elibb_dp = (float3)(0.0f, 0.0f, 0.0f);
 	{
 		float r0, u0x, u0y, u0z;
 		calculate_rho_u(fhn, &r0, &u0x, &u0y, &u0z);
-		elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, nx, ny, nz, fac_tau_acc, elibb_dp, hits, t);
+		elibb_dp = elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, nx, ny, nz, fac_tau_acc, hits, t);
 	}
 )+"#ifdef FACETTEN_ELIBB_PUR"+R(
 	return; // ★ Pur-Arm (CFD_FAC_ELIBB=2): NUR die Geometrie-Blende, kein Wandmodell -- Isolationsmessung
@@ -2225,8 +2232,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// +2*Dp_tangential HIER. Der Normalanteil der Kopfbuchung bleibt die korrekte Einfachzaehlung;
 	// an den Rueckfall-/Pur-Pfaden (phi bucht nichts) ist die Kopfbuchung allein exakt.
 	{
-		const float edn_ = elibb_dp[0]*nx+elibb_dp[1]*ny+elibb_dp[2]*nz;
-		fwx += 2.0f*(elibb_dp[0]-edn_*nx); fwy += 2.0f*(elibb_dp[1]-edn_*ny); fwz += 2.0f*(elibb_dp[2]-edn_*nz);
+		const float edn_ = elibb_dp.x*nx+elibb_dp.y*ny+elibb_dp.z*nz;
+		fwx += 2.0f*(elibb_dp.x-edn_*nx); fwy += 2.0f*(elibb_dp.y-edn_*ny); fwz += 2.0f*(elibb_dp.z-edn_*nz);
 	}
 )+"#endif"+R( // FACETTEN_ELIBB
 )+R(
