@@ -15,6 +15,43 @@ Interface-Slices DEAKTIVIERT (CFD_SLICE_DT=0 in der Serie -- Heiko 26.08. abends
 "erstmal deaktivieren, da kommen wir spaeter nochmal drauf zurueck"; der
 CFD_SLICE_GPU-Transportweg bleibt im Code, nur ohne Slice-Ereignisse wirkpfadlos).
 
+## Startaufstellungs-Audit 26.08. nachts: STARTKLAR (Bericht: Audit-Agent, @ 57d1aa0)
+
+32/32 Serien-Variablen haben Konsument + Wirkpfad-Beweis (kein stiller No-Op);
+ELIBB x Wandfrei-Band kollisionsfrei (getrennte Domaenen/Puffer/Zellen; Band beginnt
+erst >=2 Grobzellen von der Wand); Geraete-Default fein=B70/grob=iGPU bestaetigt,
+Queue-Argument wirkungslos im dd-Fall; alle Waechter aktiv (Stop-Datei raeumt sich
+selbst, KIPP ab 0,05s, Dm-Waechter ELIBB-bewusst, F-Waechter erstmals im 4mm);
+Binary byte-identisch zum Nachbau aus 57d1aa0 (RC=0, cmp clean).
+VRAM-HERLEITUNG: 29.321 MB von 32.655 MB (~3,3 GB Luft) -- Basis ist der GEMESSENE
+f4_wandfrei_v2-Fussabdruck 29.274 MB, ELIBB-Zusatz ist allein fac_q = 18 B x
+2.620.462 Facetten (gemessen im f4-Log) = 47,2 MB; MLS ist pufferfrei. KEINE
+Trockenprobe noetig. ELIBB-Remesh verlaengert das Setup vor run(0) um Minuten
+(Host-RAM, unkritisch bei 87,6 GB) -- nicht als Haenger fehldeuten.
+
+ZWEI PUNKTE ZUM GO:
+1. NEBENWIRKUNG der Slice-Abschaltung: die Einlass-Saeulen-SONDE
+   (einlass_saeule_nah.csv) schreibt nur im Slice-Block -> bleibt morgen leer.
+   Bewusst bestaetigen lassen (oder Slices doch an) -- kein Code-Eingriff heute
+   Nacht vor dem Produktionstag.
+2. NACH Laufende manuell pruefen: im Endreport ELIBB[67] > 0 UND MLS[68] > 0
+   (Slot 68 = eigener Zaehler des q>0,5-MLS-Zweigs, eingebaut im Audit-Korrektur-
+   Loop 26.08. nachts; Feuerbeweis Kugel: ELIBB[67]=26825=Soll, MLS[68]=41736;
+   kipp0-Bitanker haelt mit dem Zaehler: 4722579264326613690. Kein Auto-Abbruch
+   im Nicht-Pur-Arm -- manuell lesen).
+
+## Frische-Augen-Codeaudit 26.08. nachts: SAUBER MIT NOTIZEN, Korrekturen eingebaut
+
+Kein HART-Befund; alle 14 Doku-Stichproben exakt, alle 4 MLS-Grenzfaelle nachgerechnet
+(RHO_CLAMP-Kante, upt2=0, qb-Quantisierung: kein Denormal moeglich, fma-Rundung),
+Harness-Binaries byte-identisch, cup/feq_ib-Platzierung per IGC-Opcode-Vergleich
+beweisbar kostenlos. KORRIGIERT im Loop: (1) Slot-68-Wirkpfadzaehler fuer den
+MLS-Zweig (Iron Rule Diagnostik; Slot 67 zaehlt beide Zweige), (2) stale
+Laufzeit-Ansage "Reibungs-Cd kein Ist" entfernt (B3-Buchung existiert laengst --
+haette morgen falsches Misstrauen gesaet), (3) lbm.hpp-Slotzahl 66->69.
+NEU IN TODO NACH 4MM: dritter scratch_gate-Arm ohne F_NUR_SOLID (Gate-Blindstelle);
+Datei "0.5" im Repo-Root aufraeumen.
+
 ## Erwartung (ehrlich, nur Gemessenes)
 
 - **Laufzeit:** f4_wandfrei_v2 brauchte 92 min (0,7 s phys.) bei 2004 MLUPs —

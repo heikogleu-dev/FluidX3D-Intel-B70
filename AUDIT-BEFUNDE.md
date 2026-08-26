@@ -2976,3 +2976,26 @@ final (= Remat+F-Gate-Stand; g12-Aera 939 -> +63%). Alle Serien ueber die gelock
 Queue, Census vor/nach sauber, gt_reset_waechter aktiv waehrend der B70-Phase.
 Details und Fassungen: GRENZSCHICHT-SGS-PLAN.md (Leiter-Block), Wissensspeicher
 mlseinbau/mlsleiter. Morgen-Unterlage: MORGEN-4MM.md.
+
+## ABNAHME-EINTRAG (2026-08-26 nachts): Komplettes Vor-Produktions-Audit + Korrektur-Loop geschlossen
+
+ZWEI unabhaengige Straenge auf Heikos Anforderung, beide @ 57d1aa0:
+STRANG 1 (Startaufstellung f4_vollumfang): STARTKLAR -- 32/32 Serien-Variablen mit
+Konsument+Wirkpfad-Beweis; ELIBB x Wandfrei-Band kollisionsfrei; VRAM 29.321/32.655 MB
+hergeleitet aus dem GEMESSENEN f4_wandfrei_v2-Fussabdruck + fac_q 47,2 MB (2.620.462
+gemessene 4mm-Facetten) -- keine Trockenprobe noetig; Geraete-Default bestaetigt;
+Binary byte-identisch zum Commit-Nachbau. Nebenwirkung gefunden: Einlass-Saeulen-Sonde
+haengt am Slice-Block -> mit SLICE_DT=0 leer (Heiko beim Go ansagen).
+STRANG 2 (Frische-Augen ueber 369c543..HEAD): SAUBER MIT NOTIZEN, kein HART-Befund;
+alle 14 Doku-Zahlen-Stichproben exakt; 4 MLS-Grenzfaelle nachgerechnet; Harness
+byte-identisch reproduziert; cup/feq_ib-Platzierung per IGC-Opcode-Multiset-Vergleich
+als kostenlos bewiesen (7769 Instruktionen identisch).
+KORREKTUR-LOOP (im selben Zug behoben + verifiziert): (1) Slot 68 = eigener
+Wirkpfadzaehler des MLS-q>0,5-Zweigs (kernel.cpp, Muster Slot 67; Endreport-Zeilen
+an 3 Stellen; Puffer 68->69). BEWEIS: Build RC=0, scratch_gate private 0/spill 0
+unveraendert, kipp0-Bitanker HAELT (4722579264326613690, s68_kipp0_anker), Kugel-
+Feuerbeweis ELIBB[67]=26825=Soll und MLS[68]=41736>0 (s68_kugel_feuer). kipp0 zeigt
+konstruktiv 67=68=0 (qb=127-Kurzschluss VOR beruehrt -- konsistent zur Bitgleichheit).
+(2) Stale Ansage lbm.cpp ("Reibungs-Cd kein Ist") auf B3/MLS-Stand korrigiert.
+(3) lbm.hpp Slotzahl-Kommentar 66->69. OFFEN als NOTIZ (Nach-4mm-Liste): dritter
+scratch_gate-Arm ohne F_NUR_SOLID; Repo-Root-Datei "0.5" aufraeumen.

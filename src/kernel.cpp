@@ -1834,6 +1834,10 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 			const float cub = (1.0f-1.5f/q)*cupt;             // c_ib . u_bf, u_bf = (1-3/(2q))*u_f
 			const float fst = wi*(rhon*(1.0f+3.0f*cub+4.5f*cupt*cupt-1.5f*upt2)-1.0f); // f* (Stoerform)
 			fhn[i] = fma(1.0f-chi, bb, chi*fst);
+			// Eigener Wirkpfad des MLS-Zweigs (Frische-Augen-Audit 26.08., Befund 1): Slot 67
+			// zaehlt BEIDE Zweige (beruehrt), erst dieser Zaehler beweist im Binary, dass der
+			// q>0,5-Zweig Zellen anfasst. Muster Slot 67: saettigend, t%100-gegatet.
+			if(t%100ul==0ul&&hits[68]<0xF0000000u) atomic_inc(&hits[68]);
 		}
 		beruehrt = true;
 	}
