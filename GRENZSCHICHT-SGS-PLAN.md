@@ -35,6 +35,35 @@ QKAPPE 0,65, kappa 0,4, q-Boden 0,1).
 6. 8-mm-Abnahmeleiter der Gewinnerkette -> 4-mm-Go-Frage an Heiko (Band-Schrumpf-Check
    gehoert in den 4-mm-Lauf selbst).
 
+## NACHTRAG 2026-08-26 VORMITTAG (g15-Ergebnis + neue Heiko-Vorgaben)
+g15-STAND: (a) float3-Umbau NUMERISCH BITGLEICH bewiesen (FELD-HASH an=aus=kipp0-Anker
+4722579264326613690), ABER PERF NICHT GEHEILT -- ELIBB-Arm weiter 2 MLUPs/0 GB/s gegen
+256/31 im Kontrollarm (logs/g15_fix_an|aus.log). Die dp_out-These war unzureichend; die
+Scratch-Quelle sitzt woanders (Kandidaten: fpre[19]-Schnappschuss mit Laufzeitindex,
+Buchungsschleife, Aufrufgraph-Registerdruck). (b) Die Serie hat KEINE .zeinfo-Dumps
+erzeugt (igc2 enthaelt nur NEO-Binaerdumps) -- Dump-Env pruefen, Dump-JIT-Kurzlauf
+WIEDERHOLEN, sobald die Queue frei ist (g15_26_detektor laeuft noch). Punkt 1 der
+Tagesordnung ist damit WIEDER OFFEN und bleibt Blocker vor Punkt 4-6.
+Kugel-B3 (g15_kugel_b3, fertig): Wirkpfad 26825=Soll, Normal-Rest 6e-6, Cz nominal
++1,0258 / effektiv +0,8427, Cd-Pfad 0,478+0,204=0,682 -- Cz-Pfad-Konsistenzbewertung
+gegen die korrigierte B3-Buchung steht noch aus.
+
+NEUE HEIKO-VORGABEN (Chat 26.08 vormittags, dauerhaft):
+A. PRODUKTIONSLAEUFE SCHREIBEN IMMER EIN VTK und geben nach Laufende automatisch den
+   Rand-Slice-Satz aus (x-/y-/z+ je 10 cm innerhalb der Nahdomaene, Abweichung zu OF13,
+   +-15 m/s) -- damit die Far->Near-Randbedingung gegen OF13 sichtbar ist. Dazu
+   CFD_STOP_DATEI-Stopp als Absturzschutz (f4_wandfrei_prod verlor seinen Dump an
+   CL_OUT_OF_RESOURCES bei t=0,405 s). Werkzeugbasis liegt in
+   export/vergleich_of13_2026-08-26/ (fx_ebenen.py, vergleich_render.py; OF13-Ebenen
+   via postProcess sampleVergleich2608) -- als werkzeuge/vergleich_of13.py buendeln.
+B. SLICE-NACHHOLUNG GEKOPPELT: der naechste 4-mm-Lauf (nach Go) liefert die drei
+   Randebenen fuer den Rueckkopplungs-Arm nach.
+C. y-RAND-BEFUND bestaetigt enge Nahbox: Vorderrad-Nachlauf trifft die y-Ebene 10 cm
+   vor dem Seitenrand (lokal bis +26 m/s gegen OF13) -- Domaenenbreite ist eine
+   4-mm-Layout-Frage (deckt sich mit 0,17-Fahrzeugbreiten-Diagnose vom 25.08.).
+Heikos Einschaetzung aus den y0-Slices: Rueckkopplung hilft gegen OF13 sichtbar
+(Mittelabweichung -0,27 gegen -0,99 m/s ohne; Vorsicht: verschiedene Zeitpunkte).
+
 ---
 
 # STAND 2026-08-25 SPAETABEND (ersetzt den Abend-Stand unten)

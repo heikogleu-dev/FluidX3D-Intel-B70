@@ -18,3 +18,9 @@ Die IGC-Dump-Serie im Vordergrund gestartet ("sind ja nur JIT-Kurzlaeufe") -- di
 Dump-Schreiberei macht auch Kurzlaeufe langsam, Timeout nach 10 min, Serie tot (Schaden
 diesmal null: Dumps lagen schon auf Platte, Census sauber). AB JETZT MECHANISCH: JEDE
 lauf_queue.sh-Serie laeuft run_in_background, ohne Ausnahme und ohne Laufzeitschaetzung.
+
+Nachtrag 2026-08-26 vormittags: Die Regel ist jetzt HART erzwungen -- ein
+PreToolUse-Hook in .claude/settings.json (FluidX3D und FluidX3D-v2) blockiert jeden
+Bash-Aufruf, der "lauf_queue" enthaelt und nicht run_in_background:true traegt, BEVOR
+er ausgefuehrt wird. Erinnerung (Middleware/Doku) hat viermal nicht gereicht; diese
+Fehlerklasse faengt man nur mechanisch am Werkzeugaufruf ab, nicht durch Kontext.
