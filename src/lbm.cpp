@@ -522,6 +522,10 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		const uint x=(uint)(f.n%(ulong)Nx), y=(uint)((f.n/(ulong)Nx)%(ulong)Ny), z=(uint)(f.n/((ulong)Nx*(ulong)Ny));
 		if(x<fbx0||y<fby0||z<fbz0||x>=fbx0+fbnx||y>=fby0+fbny||z>=fbz0+fbnz) { print_error("Facette ausserhalb der F-BBox -- set_force_bbox deckt die Wandzellen nicht."); return; }
 		const ulong fbi=(ulong)(x-fbx0)+((ulong)(y-fby0)+(ulong)(z-fbz0)*(ulong)fbny)*(ulong)fbnx;
+		// ★ Invarianten-Waechter (Audit-Entwarnung 2026-08-26): ALLE fac_tau-Buchungen sind
+		// nicht-atomare += und racefrei NUR wegen 1 Zelle = 1 Facette. Wuerde eine spaetere
+		// Aenderung zwei Facetten auf eine Zelle legen, kaeme das Race STILL -- hier hart abfangen.
+		if(fac_idx[fbi]!=0xFFFFFFFFu) { print_error("alloc_facetten_domain: Zelle traegt zwei Facetten -- die racefrei-Invariante (1 Zelle = 1 Facette) waere verletzt."); return; }
 		fac_idx[fbi]=(uint)k;
 		k++;
 	}

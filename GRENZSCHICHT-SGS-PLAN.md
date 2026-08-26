@@ -68,6 +68,28 @@ nach kernel.cpp-Aenderung IMMER g++-Build mit RC-Pruefung VOR Serienstart (die e
 g16-Serie lief mit stale Binary, aufgeflogen nur am Laufzeit-Dump-Hash); (c) Stufe-1-
 Restkosten der K1'-Projektion nach Fix nicht mehr auffaellig (Kugel 346 vs g8 363).
 
+HEIKO-FREIGABE 26.08 MITTAG (konditional, fuer den naechsten 4-mm-Lauf): Vorbereitung
+jetzt; SELBSTSTAENDIGER Start + Monitoring, SOBALD der Code-Audit-Korrektur-Loop durch
+und abgearbeitet ist. Direkt nach dem Start: TIEFER PERFORMANCE-CODE-AUDIT (unnoetige
+aktive Funktionen ohne nachgewiesenen Hebel; Funktionen, die durch ihre Codegestalt
+Rechenleistung belegen; Intel-Architektur-Nutzung -- SIMD/Subgroups, Speicherpfade,
+Occupancy aus zeinfo, Zero-Copy-Semantik, Queue-Overlap). Reihenfolge davor:
+g21-Slice-Abnahme -> Commit -> Code-Audit-Loop (fac_tau-Race zuerst, dazu W5-Totfacetten,
+ENTWARNUNG fac_tau-Race (Planungsagent 26.08 mittags, Fassung 7876490): das Race existiert
+NICHT -- 1 Zelle = 1 Facette ist bijektiv (setup.cpp baue_facetten: ein push je Zelle;
+lbm.cpp alloc_facetten_domain: ein fbi je fid; kernel.cpp: ein Work-Item je Zelle), im
+Kernel doppelt dokumentiert, und der g15/g16-Kugel-Doppellauf (zwei VERSCHIEDENE Binaries,
+gleiche Konfiguration) liefert BYTE-IDENTISCHE cd_facetten/forces.csv (MD5 47eb5fd9../
+72fce019..). Die "3720 Akkumulator-Zellen"-Zahl des Archaeologie-Agenten existiert in
+keinem Log (konfabuliert). Atomics waeren eine VERSCHLECHTERUNG (Reihenfolge-Randomisierung
+zerstoert das Doppellauf-Bitgleichheits-Abnahmekriterium; Hausstil kernel.cpp:3639).
+Umgesetzt statt Fix: Invarianten-Waechter in alloc_facetten_domain (zwei Facetten auf einer
+Zelle -> harter Fehler) + racefrei-Kommentar am B3-Block. Wissensspeicher korrigiert.
+Pur-Praezisionswaechter, Eq.25-Markierung, zband-Header, Remesh-Kosten-4mm, volle
+unabhaengige Pruefrunde ueber alle Diffs seit bfa3cec) -> 4-mm-Startaufstellung
+(wandfrei-Konfiguration + VTK_ENDE + CFD_STOP_DATEI + Rand-Slice-Satz nach Laufende +
+Radkontakt-Band-Check; OOM-Ursache von f4_wandfrei_prod VOR Start klaeren!) -> Start.
+
 NEUE HEIKO-VORGABEN (Chat 26.08 vormittags, dauerhaft):
 A. PRODUKTIONSLAEUFE SCHREIBEN IMMER EIN VTK und geben nach Laufende automatisch den
    Rand-Slice-Satz aus (x-/y-/z+ je 10 cm innerhalb der Nahdomaene, Abweichung zu OF13,

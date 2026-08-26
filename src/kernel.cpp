@@ -1836,6 +1836,8 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 			dm_ += d_;
 		}
 		const uxx a3 = 6ul*(uxx)fid;
+		// racefrei OHNE Atomics: 1 Zelle = 1 Facette (bijektiv, s. Paararm-Kommentar oben und den
+		// Invarianten-Waechter in alloc_facetten_domain) -- Audit-Entwarnung 2026-08-26.
 		fac_tau_acc[a3+1ul] += -dpx; fac_tau_acc[a3+2ul] += -dpy; fac_tau_acc[a3+3ul] += -dpz;
 		fac_tau_acc[a3+4ul] += dm_;
 		// dp geht per Wert zurueck (B3-Pruefbefund 1b: +2*Dp_t-Korrektur an der phi-Buchung)
