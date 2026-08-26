@@ -1,3 +1,42 @@
+# STAND 2026-08-26 MORGEN (ersetzt Spaetabend unten; externes Claude-Review eingearbeitet)
+
+## Uebernommene Kurskorrekturen (Chat-Review, von Heiko bestaetigt)
+1. PERF-DIAGNOSE VOR BISECT: IGC-Shader-Dumps (IGC_ShaderDumpEnable=1, NEOReadDebugKeys=1,
+   IGC_DumpToCustomDir) -- nach spill/scratch greppen. Signatur 100x + 0 GB/s = SCRATCH
+   (privates Array mit laufzeit-variablem Index), nicht Divergenz/Denormals (2-30x).
+   Verdachtsreihenfolge NEU: elibb_dp-Export-Array ZUERST, dann Buchungsschleife, dann
+   Projektion. Fix-Kandidat falls Array: +2*Dp_t-Korrektur DIREKT in elibb buchen
+   (Funktion hat fnx/ny/nz) -> netto bucht elibb tangential +dp_t, normal -dp_n,
+   dp_out-Array ENTFAELLT ganz (algebraisch identisch).
+2. REIHENFOLGE INVERTIERT (Abhaengigkeitsrichtung): q>0,5-ENDFORMEL VOR dem
+   linkmengen-bewussten Abtastfaktor -- der Faktor ist Funktion der Wandlage, die Wandlage
+   Funktion von q; Eichung gegen die Interim-Kappe 0,65 wuerde fuer alle q>0,65-Links
+   doppelt gemacht. Globaler 1,5er bleibt solange deklariertes Interim.
+3. K2-GATE DIFFERENZIELL statt Soll-Korrektur/Schwellenanhebung/Flagwechsel:
+   |(FK.rx-soll)_test - (FK.rx-soll)_kontrolle| < Schwelle -- die konstante FP32-Quelle b
+   kuerzt sich exakt; Gate prueft, ob die AENDERUNG das Ungleichgewicht bewegt.
+   EINMALIG zusaetzlich: -cl-mad-enable-freier Charakterisierungslauf (bestaetigt b als
+   Compiler-Arithmetik, beziffert den Boden; Schwelle = Vielfaches des Bodens).
+4. RADKONTAKT-BAND AUF DIE 4MM-PFLICHTLISTE: Band-Cd 0,69 > OF13-GESAMTWERT 0,599
+   (Referenz laut Heiko/Chat -- gegen KB/OF13-Postprocessing verifizieren!). Deklaration
+   "Artefakt grober Voxelraeder" braucht den Beleg: schrumpft es bei 4 mm messbar?
+   Wenn nicht, dominiert ein Artefakt die Gesamtbuchhaltung.
+HEIKO-REGEL (dauerhaft): KEINE HANDWERTE -- Konstanten herleiten oder als deklariertes
+Interim mit Abloesebedingung fuehren; nie Interim als Eichbasis (betrifft UTKORR 1,5,
+QKAPPE 0,65, kappa 0,4, q-Boden 0,1).
+
+## Tagesordnung 2026-08-26
+1. IGC-Dump-Messung ELIBB=0 gegen ELIBB=1 (JIT-Kurzlauf, Kanal N=20) -> Spill-Zahl.
+2. Fix nach Befund (Kandidat: dp_out-Eliminierung, s. o.), JIT + Bitanker.
+3. Validierung nachholen: ELIBB-Hash-Anker, Kugel-B3-Buchung (Cz-Pfad-Konsistenz),
+   kipp26-Detektor (Solve-Zielfehler -Sum ct*Dp).
+4. K2-Gate differenziell implementieren + einmaliger mad-freier Charakterisierungsarm.
+5. q>0,5-ENDFORMEL (Planungsschritt zuerst; ersetzt Kappe; DANACH Abtastfaktor je Facette).
+6. 8-mm-Abnahmeleiter der Gewinnerkette -> 4-mm-Go-Frage an Heiko (Band-Schrumpf-Check
+   gehoert in den 4-mm-Lauf selbst).
+
+---
+
 # STAND 2026-08-25 SPAETABEND (ersetzt den Abend-Stand unten)
 
 ## Der Tag in einer Zeile
