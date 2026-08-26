@@ -4449,7 +4449,10 @@ static void main_setup_fahrzeug_dd() {
 	// die Stroemung 1,2 mm, weniger als eine feine Zelle --, aber die Richtung war falsch beschrieben.
 	// Als Praediktor-Halteschema ist ein Vorlauf gegenueber einem Nachlauf eher guenstiger.
 	std::vector<double> ts, fx, fz, fx_c; // fx_c war write-only (Hygiene E6b) -- wird jetzt unten ausgewiesen
-	float slice_next = 0.0f, vtk_next = 0.0f;
+	// ★ VTK-Erstdump-Fix (Perf-Audit Achse 1, Rang 3): vtk_next=0 liess den ersten Zwischendump
+	// bei t=1 ms feuern -- 11,5 GB Anfangszustands-Muell je 4mm-Lauf (f4_wandfrei_v2 belegt).
+	// Erste Marke jetzt bei vtk_dt; der Enddump (CFD_VTK_ENDE) ist davon unabhaengig.
+	float slice_next = 0.0f, vtk_next = vtk_dt;
 	double t_si_letzt = 0.0; bool stop_angefordert = false; // gesetzt je Aussenschritt bzw. beim sauberen Stopp
 	// ★ 2026-08-22, Befund aus dem Stopp-Rauchtest: die Wirkpfad-Sollwerte unten rechneten mit
 	// n_outer, also der GEPLANTEN Schrittzahl. Nach einem sauberen Stopp ist die tatsaechliche
