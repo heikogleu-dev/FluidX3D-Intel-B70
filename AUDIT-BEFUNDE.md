@@ -3703,3 +3703,57 @@ Zellzahlen). p1 gegen p2/p3 beantwortet x, p1 gegen p4/p5 beantwortet y. Kosten:
 bei T_END 0,02 s (500 Schritte a 271 Mio Zellen bei 4648 MLUPs), also gut zwei Minuten fuer alles.
 EIN NULLBEFUND IST HIER GENAUSO WERTVOLL wie ein Treffer: er schliesst einen teuren Layout-Umbau
 aus, der sonst als "muesste man mal machen" stehen bliebe.
+
+### B21 -- BUCHUNGSSCHLUSS ABGENOMMEN: A1-A4 bestanden (27.08. abends, nach dem Middleware-Fix)
+Middleware entsperrt (harte Falle jetzt weich; der Repo-jq-Guard uebernimmt die Erzwingung und
+lehnte prompt einen Aufruf ohne run_in_background ab -- genau die gewuenschte Arbeitsteilung).
+Serie logs/b2s1_abnahme_serie.txt (5 Arme, iGPU) + logs/b2s1_a4_serie.txt (8 mm, B70), Binary
+aus Commit 2a50a7d, Census vor und nach beiden Serien sauber.
+
+A1 BITANKER -- BESTANDEN. Beide kipp0-Arme (ELIBB 1 und 0): FELD-HASH(u) = 4722579264326613690
+  identisch, Reibung x = 0,01639657 ziffernidentisch (Verhaeltnis 1,0043), Slot 69 = 0 == Soll.
+  Der Buchungsschluss ist am ungekippten Kanal ein exakter No-Op.
+
+A2 K2 -- BESTANDEN, mit einer Einschraenkung beim 45-Grad-Arm:
+    26 Grad:  K2 -7,4189 -> 1,0004   Slot 69 = 118.657.473 == Soll (13+15+64+10+16)
+    45 Grad:  K2 +1,1267 -> 1,0109   Slot 69 =  78.719.996 == Soll
+  Der 45-Grad-Lauf meldet rc=1: der EINGEBAUTE Waechter verlangt <1 % Abweichung, 1,0109 sind
+  1,09 %. Kein Absturz, kein Rechenfehler -- der Arm ist als Abnahmelauf disqualifiziert, die Zahl
+  gilt. Die Buchungsidentitaet haelt in ALLEN Armen exakt.
+
+A3 KUGEL -- BESTANDEN. ELIBB[67] = 26825 == Soll, Slot 69 = 10.746 == Soll (exakt der erwartete
+  Wert), n_voll 500 / projiziert 545 / unklar 0, und Cd_reibung = +0,4148 -- POSITIV.
+
+A4 FAHRZEUG 8 mm (B70) -- BESTANDEN, das ist der eigentliche Gewinn:
+                          cd_druck   cd_rest   cz_rest   cd_reib
+    vorher (s4_mls_g17)    +1,6628   +1,0234   -0,6598   -0,0684   (Schub, physikalisch unmoeglich)
+    A4 (b2s1_8mm_g17)      +1,6868   +1,0472   -0,6613   +0,0791   (Widerstand)
+  Der Druckpfad bewegt sich um 1,4 bis 2,3 %, die REIBUNG kippt das Vorzeichen. Slot 69 =
+  62.189.922 == Soll.
+
+DAMIT IST AUFTRAG 3A ERSTMALS AUSWERTBAR (die Vorbedingung aus R3 ist erfuellt):
+    FX 8 mm   Druck 1,0472 + Reibung 0,0791 = 1,1263   Reibungsanteil 7,02 %
+    OF13      Druck 0,5590 + Reibung 0,0420 = 0,6010   Reibungsanteil 6,99 %
+  Der ANTEIL stimmt auf 0,02 Prozentpunkte. Die Frage des Auftrags -- "liegt die FX-Reibung
+  deutlich ueber 7 %, dann rueckt der 26-Grad-Pfad hoch" -- ist damit beantwortet: NEIN. Druck und
+  Reibung sind mit 1,87x bzw. 1,88x im GLEICHEN Verhaeltnis zu hoch; die Druckseite bleibt der
+  Hauptposten. (8-mm-Sprosse, nicht mit den 4-mm-Zahlen vergleichbar.)
+
+DER BEFUND, DER ZAEHLT -- die Physik hat sich NICHT bewegt:
+    u_tau IST/Ziel   Ebene 0,716 | 26 Grad 2,382 | 45 Grad 1,633
+  Das sind exakt die Werte von vor dem Buchungsschluss. K2 misst seither nur noch
+  Buchungsvollstaendigkeit -- genau die Selbsttaeuschung, vor der der Planungsagent gewarnt hat,
+  bestaetigt auf drei Nachkommastellen. Der Buchungsschluss hat das INSTRUMENT repariert, nicht die
+  Wand: die 26-Grad-Klasse meldet unveraendert 2,4-fache Schubspannung. Gewonnen ist Messbarkeit --
+  die frueheren -7,4189 waren zu 100 % Buchungsartefakt und haben jeden Physikbefund darunter
+  verdeckt.
+  => Stuetzt die Empfehlung, Schritt 2 NICHT als m6+m7-Cluster zu bauen (Deckel u_tau 1,5-1,7),
+     sondern den linkmengen-bewussten Abtastfaktor vorzuziehen.
+
+WIRKPFAD-ABNAHME DER ZENSUS-DIAGNOSTIK (B8) -- BESTANDEN, die Zeile feuert:
+  "FACETTEN-ZELLKLASSEN der Kraftschleife: 8.096.527 Markerzellen -- unbehandelt (voll) 7.506.074
+   (92,71 %), projiziert 583.875 (7,21 %), UNKLAR 6.578 (0,08 %)."
+  GATE-VORZEICHEN fuer Auftrag 2 (Mehrfachfacetten): geometrisch sind es 0,08 %, also Promille.
+  Das KRAFTGEWICHT fehlt noch -- der Lauf lief im GPU-Pfad, und dort weist der Report das
+  ehrlich aus. Ein Lauf mit CFD_FAC_GPU=0 liefert es nach. Der Vorbehalt aus B3 gilt: eine kleine
+  Zellzahl kann viel Kraft tragen (das z-Band traegt mit 0,25 % der Zellen 30 % des Druck-Cd).
