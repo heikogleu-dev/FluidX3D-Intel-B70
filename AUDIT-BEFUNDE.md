@@ -3304,3 +3304,52 @@ DEUTUNG, ehrlich getrennt:
   URSACHE OFFEN. Was als naechstes zu messen waere: derselbe Lauf zweimal (Determinismus auf
   Langlauf-Laenge), und ein Lauf mit CFD_FERN_VI=1 -- Log Z. 291 sagt, dass der Einlassrand
   heute reflektiert, weil der Geschwindigkeits-Einlass im Fernfeld AUS ist.
+
+### B13 -- BOX-UMSCHICHTUNG bei konstantem VRAM durchgerechnet (27.08. abends, Heiko-Idee)
+Heiko: "z+ um 70 mm verringern und es lieber in y-/y+ geben; x- koennte naeher, aber die
+Vorwaerts- und Rueckwaertskopplungsbaender brauchen Abstand zueinander." Nachgerechnet auf
+dem heutigen Nahfeldgitter 1689 x 621 x 485 @ 4 mm = 508,7 Mio Zellen.
+
+TAUSCHKURS (der Grund, warum z+ ein schlechter Geber ist):
+  eine z-Zelle kostet 1,05 Mio Zellen, eine y-Zelle 0,82 Mio, eine x-Zelle nur 0,30 Mio.
+  => 1 mm aus z kauft 0,64 mm je y-Seite; 1 mm aus x kauft 0,18 mm je y-Seite.
+  z+ 72 mm abgeben bringt also nur +44 mm je y-Seite (y 316/320 -> 360/364 mm) -- der
+  1-m/s-Bedarf ist 384 (y-) bis 512 mm (y+). Heikos Idee zeigt in die richtige Richtung,
+  deckt aber nur etwa ein Drittel bis zwei Drittel der Luecke, und y+ gar nicht.
+
+KOPPLUNGSBAND-ABSTAND, Heikos Sorge (Log Z. 407, eingebauter Waechter): heute x- 13, y+- 13,
+z+ 39 Grobzellen, Soll >= 2, komfortabel >= 4.
+  x- um 144 mm naeher ziehen => Abstand faellt auf exakt 4,0 GZ = die Komfortgrenze.
+  144 mm ist damit der HARTE Spielraum in x-; er kauft nur +24 mm je y-Seite.
+  z+ um 72 mm senken => 34,5 GZ, voellig unkritisch.
+
+SZENARIEN bei konstanter Zellzahl (jeweils <= 0,3 % Abweichung):
+  nur z+ 72 mm                 1689 x 643 x 467   y +44 mm/Seite -> 360/364 mm
+  nur x- 144 mm                1653 x 633 x 485   y +24 mm/Seite -> 340/344 mm
+  nur x+ 512 mm                1561 x 671 x 485   y +100 mm/Seite -> 416/420 mm
+  z+ 72 + x- 144               1653 x 657 x 467   y +72 mm/Seite -> 388/392 mm
+  z+ 72 + x- 144 + x+ 512      1525 x 713 x 467   y +184 mm/Seite -> 500/504 mm  <- deckt beide
+  z+ 92 + x- 144 + x+ 768      1461 x 753 x 462   y +264 mm/Seite -> 580/584 mm
+
+DER EIGENTLICHE HEBEL IST x+, MIT EINEM ERNSTEN VORBEHALT: x+ hat heute 1988 mm hinter dem
+Fahrzeug, und das 1-m/s-Kriterium ist dort schon bei 0 mm erfuellt. Aber das Kriterium misst
+die UEBEREINSTIMMUNG MIT OF13 in der Ebene, nicht ob die Physik dort aufgeloest gehoert.
+Hinter dem Fahrzeug liegt der Nachlauf; OF13 ist RANS und mittelt ihn glatt, FX loest ihn auf.
+Dass beide dort "uebereinstimmen", heisst NICHT, dass man den Nachlauf ins 16-mm-Gitter
+schieben darf -- er bestimmt ueber den Basisdruck direkt Cd. x+ kuerzen braucht deshalb einen
+eigenen A/B (Cd/Cz gegen die Baseline), nicht nur diese Kennzahl.
+
+ZWEITER VORBEHALT -- die Bedarfszahlen stehen auf n=2, und die beiden Laeufe widersprechen sich:
+  wandfrei_v2 (mit Rueckkopplung, wie Produktion): y- 384, y+ 512, z+ 640 mm
+  std_diff2   (ohne Rueckkopplung):                y- 640, y+ 640, z+ 1152 mm
+  heute gebaut:                                    y- 316, y+ 320, z+ 732 mm
+Nach std_diff2 waere z+ heute ZU KLEIN (732 gegen 1152) -- dann waere Kuerzen falsch herum.
+wandfrei_v2 ist der relevantere Lauf (gleiche Kopplung wie die Produktion), aber ein einzelner
+Lauf traegt keine Geometrieentscheidung. Die y-Asymmetrie 384/512 ist ausserdem genau EINE
+Rasterstufe (128 mm) an einem symmetrischen Fahrzeug -- also Rauschen, nicht Physik.
+
+EMPFEHLUNG: die Umschichtung NICHT jetzt bauen. Sie bringt Faktor < 2, waehrend der gestoerte
+Produktionslauf Faktor 5,6 kostet (B11). Reihenfolge: (1) Einlassstoerung klaeren, (2) zwei
+saubere Langlaeufe mit Rueckkopplung als Basis fuer die Bedarfszahlen, (3) dann umschichten --
+und x+ nur mit eigenem Cd-A/B. Bis dahin ist die belastbare Aussage: z+ hat vermutlich Reserve,
+y ist zu knapp, x- hat 144 mm Spielraum bis zur Band-Komfortgrenze.
