@@ -3530,3 +3530,53 @@ EINORDNUNG GEGEN DEN GEMESSENEN BEDARF (1-m/s-Kriterium aus f4_wandfrei_v2, B11)
 
 Vorbehalte (1) bis (4) aus B16 gelten unveraendert: die Kosten der Nahfeld-Aufteilung auf zwei B70
 sind auf dieser Maschine NICHT gemessen, der Halo-Speicher steckt nicht in den 55 B/Zelle.
+
+### B17 -- NACHLAUF: was er kostet, was er bringt, und die Fassungsfrage zu den Graphen (27.08. abends)
+
+FASSUNG DER GRAPHEN -- Heiko fragt zurecht nach:
+  Das ZUERST gezeigte verlauf.png (16:13) stammt aus f4_vollumfang_mls, also aus dem Lauf MIT der
+  Einlassstoerung. Das zweite (16:42) aus f4_wandfrei_v2, sauber. Der Unterschied ist gewaltig,
+  gerade im Nachlauf: |Mittel| der x+-Serie
+     f4_wandfrei_v2    0,10 m/s (min 0,03, max 0,20)
+     f4_std_diff2      0,25 m/s (min 0,00, max 0,57)
+     f4_vollumfang_mls 3,75 m/s (min 3,10, max 4,44)   <- Faktor 37
+  ALLE Bedarfszahlen, auf denen B13/B15/B16/B16b beruhen (y 384/512, z+ 640 mm), stammen aus
+  f4_wandfrei_v2 -- die Box-Entscheidung steht also auf den sauberen Daten. Die einzige Aussage
+  aus dem gestoerten Lauf war "x- braucht 640-770 mm"; sie wurde bereits zurueckgenommen.
+
+NACHLAUFLAENGEN, in Fahrzeuglaengen (L = 4,448 m):
+  Nahfeld heute (x+ 1988 mm)   0,45 L
+  Zielbox B (x+ 2800 mm)       0,63 L
+  Zielbox A (x+ 3000 mm)       0,67 L
+  FERNFELD (bis x 9,610 m)     1,16 L
+  OF13 (bis x 17 m)            3,32 L
+  => Der Nachlauf lebt schon heute UEBERWIEGEND im Fernfeld. Keine der diskutierten Nahfeldboxen
+     aendert daran etwas -- sie verschieben die Uebergabestelle zwischen 0,45 und 0,67 L.
+
+3,75 mm IST ERREICHBAR, ABER NUR UEBER DEN NACHLAUF (Budget 58.636 MB, Variante B waere mit
+99,8 % am Limit):
+  Variante                          Gitter            Zellen    VRAM    Ausl. | Ist x-/y/z+/x+   Nachlauf
+  B unveraendert (2800)             2069x973x617     1242,1M  65.151MB  99,8 % | 500/898/1102/2807  0,63 L  zu gross
+  x+ auf 2000                       1853x973x617     1112,4M  58.349MB  89,3 % | 500/898/1102/1997  0,45 L  PASST
+  y 750 + x+ 2400                   1961x893x617     1080,5M  56.673MB  86,8 % | 500/748/1102/2402  0,54 L  PASST
+  y 800 + z+ 950 + x+ 2400          1961x925x577     1046,6M  54.898MB  84,1 % | 500/808/952/2402   0,54 L  PASST
+  Alle drei erfuellen den gemessenen 1-m/s-Bedarf (y 384/512, z+ 640) weiterhin mit Reserve.
+  x+ hat AUS DEM KRITERIUM keinen Bedarf -- dort ist |d| schon bei 0 mm Abstand erfuellt. Der
+  Nachlauf ist damit rechnerisch die billigste Schrumpfrichtung; ob er physikalisch billig ist,
+  ist NICHT gemessen.
+
+WAS ZUR NACHLAUFWIRKUNG BELEGT IST UND WAS NICHT:
+  BELEGT: die GESCHWINDIGKEIT im Nachlauf stimmt im sauberen Lauf sehr gut mit OF13 ueberein
+  (|Mittel| 0,10 m/s ueber die gesamte x+-Serie bis 2,4 m hinter dem Heck). Ein Feingitter-Nachlauf
+  ueber 0,45 L hinaus kauft dort messbar nichts.
+  NICHT BELEGT: die Geschwindigkeit ist nicht die Groesse, die Cd bestimmt -- das ist der
+  BASISDRUCK auf der Heckflaeche. Dass |u| uebereinstimmt, heisst nicht, dass p es tut; ein
+  gemitteltes RANS-Feld und ein aufgeloester LES-Nachlauf koennen dieselbe mittlere Geschwindigkeit
+  und verschiedene Druckniveaus haben. Es gibt in diesem Projekt KEINEN A/B, der die
+  Nahfeld-Nachlauflaenge gegen Cd/Cz stellt.
+  ZU MESSEN, billig: zwei 8-mm-Laeufe, eine Variable CFD_NEAR_LX (das Heck-Ende ist weltfest,
+  setup.cpp:3047 f., NEAR_LX verlaengert nur den Nachlauf). Vorbereitet in
+  logs/f5_box_serie.txt.4mm als n1_wake_kurz (6,6560) gegen n2_wake_lang (7,4560) -- 0,45 gegen
+  0,63 L bei 8 mm. Kriterium: bewegt sich cd_druck_rest um mehr als die Block-SEM, ist der
+  Nachlauf im Feingitter relevant und darf NICHT fuer 3,75 mm geopfert werden; bleibt er darunter,
+  ist der Weg zu 3,75 mm frei.
