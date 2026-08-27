@@ -3152,3 +3152,39 @@ Kanal-Endreport gedruckt (Z. 1895 f.), nicht im dd-Report -- eine print_info-Zei
 an der GPU-Abnahme A4 des Buchungsschlusses (cd_reib muss erst positiv sein); Auftrag 1 ist
 ein 10-Minuten-Kill-Test bei 8 mm; Auftrag 2 braucht zuerst die eine Zaehlerzeile.
 Details in AUFTRAEGE-NACHGELAGERT.md (Revision 2, lokal, gitignored).
+
+### B7 -- OF13 traegt im Latschband fast nichts: der FX-Abzug ist gerechtfertigt (27.08. nachmittags)
+Die in B3 offengelassene Frage ist gemessen. Werkzeug: werkzeuge/of13_kraft_zband.py (neu),
+rein lesend auf ~/CFD-Cases/mr2v40H, Zeit 1200, vehicle-Patch (2.648.253 Randflaechen,
+44,63 m2). p ist dort zeroGradient -> Druck der Owner-Zelle; wallShearStress liegt als
+calculated-Randfeld vor; Sf aus faces+points per Fan-Triangulierung.
+ABNAHME BESTANDEN, beide Kraftarten exakt: Druck Fx +565,444 / Fz -1337,296 und Reibung
+Fx +42,811 / Fz +6,609 reproduzieren forces.dat auf 0,00 %. (Der erste Durchlauf lieferte die
+Reibung mit exakt umgekehrtem Vorzeichen -- OpenFOAMs wallShearStress traegt das Minus bereits;
+ohne die Kontrollsumme waere das unbemerkt geblieben. Beleg dafuer, dass eine Zerlegung ohne
+Gesamtabnahme wertlos ist.)
+ERGEBNIS (Cd/Cz auf A_ref 1,85 m2, q_inf 551,2 Pa):
+  GESAMT      Cd_p +0,5545  Cd_v +0,0420  Cd 0,5964 | Cz_p -1,3113  Cz_v +0,0065  Cz -1,3048
+  z <  16 mm  7.054 Flaechen (0,27 %), 0,1355 m2 (0,30 %): Cd_p +0,0071 = 1,28 % von Cd_p,
+              Cz_p -0,0044 = 0,33 %
+  z <  32 mm  Cd_p +0,0147 (2,64 %)   |  z < 64 mm  Cd_p +0,0290 (5,24 %)
+  z < 120 mm  Cd_p +0,0612 (11,04 %), Cz_p -0,8881 = 67,72 % des Abtriebs
+VERDIKT: im GLEICHEN geometrischen Band (unterste 16 mm) traegt OF13 1,28 % seines Druck-Cd,
+FX dagegen 30,3 % (0,3500 von 1,1552) -- Faktor 24 im Anteil, Faktor 49 im Absolutbetrag
+(0,0071 gegen 0,3500). Der FX-Bandabzug entfernt damit fast ausschliesslich Artefakt und ist
+gerechtfertigt. Er nimmt aber ~0,007 ECHTE Kraft mit: der faire Vergleich lautet
+  FX Rest 0,8052 gegen OF13 (Cd_p minus Band) 0,5474  ->  Luecke +0,2578
+statt der bisher genannten +0,246. Die Luecke wird durch die saubere Rechnung also GROESSER,
+nicht kleiner. Ab jetzt gilt 0,5474 als Druck-Messlatte fuer den bandkorrigierten FX-Cd.
+NEBENBEFUND mit eigenem Wert: 67,7 % des OF13-Abtriebs sitzen unter 120 mm Hoehe (Unterboden/
+Diffusor) bei nur 15 % der Wandflaeche. Wer Cz bewegen will, bewegt den Unterboden.
+
+### B8 -- Zensus-Diagnostik fuer Auftrag 2 eingebaut (setup.cpp, uncommittet zum Zeitpunkt der Notiz)
+FacKraft traegt jetzt ux/uy/uz + ukraft_ok; die Host-Kraftschleife summiert den Beitrag der
+"unklaren" Zellen getrennt mit (|Summe der Nachbar-Facettennormalen| < 0,5 = gegenlaeufige
+Wandseiten in EINER Nachbarschaft). Der dd-Endreport druckt Zellklassen und -- im Host-Pfad --
+das Kraftgewicht. Damit liefert JEDER kuenftige Lauf den Gate-Wert, ohne den ein Cluster-Umbau
+nicht zu rechtfertigen ist. Physik unveraendert (nur eine zusaetzliche Summe); im reinen
+GPU-Pfad bleibt ukraft_ok false, damit keine 0 als Messwert gelesen wird.
+ABNAHME OFFEN (GPU blockiert): ein 8-mm-Zensuslauf mit CFD_FAC_GPU_PRUEF=1 muss zeigen, dass
+der Report feuert und die Host-Zaehler mit den GPU-Zaehlern uebereinstimmen.
