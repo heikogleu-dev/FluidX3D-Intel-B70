@@ -3246,3 +3246,61 @@ Vorbehalt, bis der A/B gegen einen sauberen Arm vorliegt.
 FOLGE fuer den Auftrag: die Box-Dimensionierung ist aus diesem Lauf NUR fuer x- ableitbar
 (640-770 mm). Fuer y und z muss zuerst die Anstroemung sauber sein -- sonst misst man den
 Einlassdefekt und nennt es Boxgroesse.
+
+### B11 -- VERGLEICH gegen die Laeufe vom 21./26.08. + Heikos 3-m/s-Kriterium (27.08. abends)
+Heiko: "die Bilder waren damals generell nicht so rot" -- nachgemessen, er hat recht, und zwar
+um Faktor 5. Dieselbe Serie (werkzeuge/interface_serie.py, gleiche Abnahme bestanden:
+|u|_OF13 = 29,695 +- 0,182 bei x = -2,0 m) fuer drei Laeufe:
+  mittleres |d| ueber ALLE Ebenen aller fuenf Richtungen:
+    f4_std_diff2 (21.08., ohne N2F-Rueckkopplung)  0,65 m/s
+    f4_wandfrei_v2 (26.08., mit Rueckkopplung)     0,48 m/s   <- der beste Stand
+    f4_vollumfang_mls (27.08., Produktion)         2,68 m/s   <- Faktor 5,6 schlechter
+  je Richtung (std_diff2 / wandfrei_v2 / vollumfang):
+    x- 0,30 / 0,35 / 0,51 | x+ 0,25 / 0,10 / 3,75 | y- 0,86 / 0,62 / 2,60
+    y+ 0,86 / 0,64 / 2,55 | z+ 0,95 / 0,67 / 4,00
+
+HEIKOS KRITERIUM (|Mittel von d| < 3 m/s, auf den im Slice angezeigten Durchschnitt bezogen):
+beide alten Laeufe erfuellen es in ALLEN Richtungen schon AN der Fahrzeughuelle (0 mm). Das
+Kriterium taugt damit als Freigabe-Schwelle, nicht zur Box-Dimensionierung -- es ist erfuellt,
+bevor Abstand ueberhaupt eine Rolle spielt. Der heutige Lauf reisst es in x+ und z+ dauerhaft.
+
+BOX-DIMENSIONIERUNG aus dem besten sauberen Lauf (f4_wandfrei_v2), Abstand ab Fahrzeughuelle,
+ab dem |Mittel| DAUERHAFT unter der Schwelle bleibt -- gegen die heute gebaute Grenze:
+  Richtung      heute gebaut    < 3 m/s   < 1 m/s   < 0,5 m/s
+  x- vorne          320 mm         0 mm      0 mm       0 mm
+  x+ hinten        1988 mm         0 mm      0 mm       0 mm
+  y- seitlich       316 mm         0 mm    384 mm    2048 mm
+  y+ seitlich       320 mm         0 mm    512 mm    2048 mm
+  z+ oben           732 mm         0 mm    640 mm    1792 mm
+=> Bei 1-m/s-Anspruch ist die Box OBEN richtig (732 gegen 640 noetig, etwas Reserve) und
+SEITLICH knapp zu klein (316/320 gegen 384/512 noetig). Bei 0,5-m/s-Anspruch muesste sie
+seitlich auf rund 2 m wachsen -- das ist genau der VRAM-Deckel aus dem y-Interface-Entscheid
+(Near-y breiter nur ueber Dual-B70). Die Reihenfolge der Hebel ist damit belegt:
+zuerst den Lauf sauber bekommen (Faktor 5), danach lohnt seitliche Box-Erweiterung (Faktor <2).
+
+### B12 -- KORREKTUR meiner eigenen Ursachen-Vermutung zur Einlassstoerung
+Ich hatte B10 mit "laufspezifisch" geschlossen und ELIBB=1 / UTKORR=1,5 als einzigen
+Konfigurationsunterschied zwischen f4_wandfrei_v2 (sauber) und f4_vollumfang_mls (gestoert)
+genannt. Heiko hat widersprochen: er hat die Stoerung schon frueher bei Testlaeufen gesehen.
+NACHGEMESSEN ueber ALLE 115 Laeufe mit einlass_saeule.csv -- er hat recht, meine Vermutung faellt:
+  13 Laeufe zeigen eine Stoerung oberhalb der Fahrzeughoehe. Zehn davon sind Kurzlaeufe
+  (T_END < 0,4 s) vom 19.-23.08., die meisten OHNE ELIBB und ohne UTKORR. Die
+  ELIBB-Korrelation ist 2/25 gegen 11/89 ohne -- sie traegt nicht.
+  Der beste Praediktor ist die LAUFZEIT: von 74 Kurzlaeufen sind 10 gestoert (schwaechstes
+  ux_rel 0,955), von 41 Langlaeufen (>= 0,4 s) nur DREI:
+    f4_w3ff_prod (22.08.)   142 Zellen, min ux_rel 0,943, z 3,38..8,78 (breit, bis zur Decke)
+    f4_vollumfang_mls       60 Zellen,  min ux_rel 0,405, z 4,62..5,58 (schmal, sehr stark)
+    baseline_2026-08-27     dieselbe Datei wie oben (Kopie)
+  Belegt nicht-deterministisch: q_det_1 und q_det_2 sind ZWEI LAEUFE DERSELBEN Konfiguration
+  (Determinismustest, 23.08. 14:46) -- beide gestoert, aber mit 28 bzw. 29 Zellen. Zwei Laeufe,
+  gleiche Env, unterschiedliche Zellzahl.
+DEUTUNG, ehrlich getrennt:
+  (a) Die schwachen Faelle (ux_rel 0,94..0,97) in Kurzlaeufen sind plausibel ein Anlauf-
+      transient -- bei 40 ms hat die Ferndomaene (12,3 m bei 30 m/s = 0,41 s) nicht einmal
+      einen Durchlauf hinter sich.
+  (b) Der heutige Fall ist damit NICHT erklaert: ux_rel 0,405 ist um Groessenordnungen
+      staerker, und er klingt ueber 500 ms nicht ab (150/300/450/500 ms liefern 38,04/38,17/
+      38,16/38,17 m/s am selben Ort z = 5,07 m). Ein Transient tut das nicht.
+  URSACHE OFFEN. Was als naechstes zu messen waere: derselbe Lauf zweimal (Determinismus auf
+  Langlauf-Laenge), und ein Lauf mit CFD_FERN_VI=1 -- Log Z. 291 sagt, dass der Einlassrand
+  heute reflektiert, weil der Geschwindigkeits-Einlass im Fernfeld AUS ist.
