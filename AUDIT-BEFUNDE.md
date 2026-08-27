@@ -3086,3 +3086,69 @@ Druck-gegen-Druck +0,247, Reibung-gegen-Reibung -0,158 (Vorzeichen) -- beide Lue
 ABNAHME A1-A4 VORBEREITET (logs/b2s1_abnahme_serie.txt, b2s1_a4_serie.txt), START BLOCKIERT:
 der globale Middleware-Hook (hook_werkzeug.py) verweigert seit heute jeden lauf_queue-Aufruf hart --
 auch mit run_in_background=true, weil der Hook nur den Kommandotext sieht. Heikos Entscheid.
+
+## 2026-08-27 nachmittags -- PLAUSIBILITAETSPRUEFUNG der drei nachgelagerten CC-Auftraege
+
+Anlass: Heiko bat um Pruefung + Anpassung der drei Auftraege, bevor sie abgearbeitet werden.
+Alle Zahlen aus export/baseline_2026-08-27_f4vollumfang (4 mm) bzw. export/s4_mls_g17 (8 mm),
+Fenster 0,2-0,5 s. Vier Praemissen halten nicht; zwei neue Befunde sind dazugekommen.
+
+### B1 -- Void-Fill-Hauptverdacht gilt auf dem 4-mm-Gitter NICHT
+"116.651 von 131.322 (89 %)" ist die 8-mm-Zahl (logs/s4_mls_g17.log Z. 139-144). Der
+4-mm-Produktionslauf meldet 46 von 69.370 Zellen (0,066 %), X[1116,1144] Y[182,438]
+Z[271,273] = Heck oben; das Grobgitter meldet "6er- und 18er-Flutung erreichen dieselben
+Zellen". 46 Zellen tragen keine 0,16 Cd. Zusammen mit dem Abrat-Befund vom 23.08.
+(Topologie 18/6, Kopplungsrisiko) ist Auftrag 1 vom Hauptverdacht zum 8-mm-Kill-Test degradiert.
+
+### B2 -- die "Artefaktkorrektur -0,601" war eine Schaetzermischung
+object_force (forces.csv, im Facetten-Arm phantombehaftet: Cd 9,8717 / Cz -0,5789) gegen den
+Facetten-Druckpfad (cd_facetten.csv). Gemessen, Fenster 0,2-0,5 s:
+  Facetten-Druck gesamt Cd 1,1552 / Cz -0,9345; z-Band Cd 0,3500 / Cz +0,2455;
+  Rest (Headline) Cd 0,8052 / Cz -1,1800; Facetten-Reibung Cd -0,1180 (Vorzeichen defekt).
+ECHTE Band-Korrektur innerhalb eines Instruments: Cd -0,3500 / Cz -0,2455. Der im Auftrag
+verlangte "Vorzeichenwechsel" existiert nicht. Dieselbe Fehlerklasse wie R2-Korrektur H1
+(Z. 749) -- zum zweiten Mal, deshalb hier ausdruecklich protokolliert.
+
+### B3 -- z-Band trifft geometrisch genau den Latsch, mit extremem Kraftgewicht
+8098 wandnahe Zellen = 0,25 % aller 3.275.381 liegen unter 16 mm, in genau zwei x-Clustern
+(x 280-400 Vorderachse, x 880-1000 Hinterachse) und zwei y-Randgruppen -- dazwischen nichts.
+Diese 0,25 % tragen 0,3500 von 1,1552 = 30,3 % des Druck-Cd. Das ist der Artefaktbeleg.
+Skalierung 8 -> 4 mm: Band 0,6394 -> 0,3500 (Faktor 0,547, Erwartung 0,5 bei ~linear in dx =
+erfuellt); Rest 1,0234 -> 0,8052 (0,787), cz_rest -0,6598 -> -1,1800 (1,79). Der alte
+Falsifikator "Rest muss stabil bleiben" ist untauglich -- Artefaktabbau und echte
+Gitterkonvergenz fallen zwischen zwei Sprossen zusammen.
+
+### B4 -- Restfehler ist NICHT gleichverteilt (Diff-Zerlegung, neu gemessen)
+Aus feld_nah/fern_000500ms.vtk gegen OF13 y0.xy (t=1200), XOFF 2,2063, y = 0,025 m,
+dU = |u|_OF13 - |u|_FX, 670.217 auswertbare Nahfeldzellen (Gesamt-RMS 5,147 / Median -2,19
+= Kontrolle gegen die Headline bestanden):
+  Wandabstand <=32 mm: +4,79 m/s -- FX zu LANGSAM (zu dickes numerisches Grenzschichtprofil)
+  Wandabstand >100 mm: -2,72 m/s -- FX zu SCHNELL
+  stromab wandfern: vor Fahrzeug -0,64 | Front -1,61 | Mitte -2,69 | Heck -2,47 | Nachlauf -3,66
+  in der Hoehe: z > 1,3 m durchweg am staerksten (Front -1,88, Mitte -2,88, Heck -4,09);
+  im 16-mm-Fernfeld dasselbe Muster ueber dem Nahfeld-Deckel (z 1,3-3,0 m: -3,3 bis -4,7).
+Deutung: ein mit der Lauflaenge wachsender Kanal-/Deckeleffekt, kein Verdraengungsbild eines
+versiegelten Kuehlers (das saesse vorne unten). Die wandnahe Umkehr ist der direkte Nachbar
+des 26-Grad-Themas und gehoert als Vorher-Wert in die Abnahme von Baustein 2.
+
+### B5 -- Versperrung: neuer, nie bilanzierter Beitrag
+FX-Fernfeld 7,68 x 8,83 m = 67,57 m2 -> A_ref/A_quer 2,74 % (Log Z. 38). OF13-Kanal laut
+checkMesh (-7,-6,0)..(17,6,8) = 12 x 8 m = 96 m2 -> 1,93 %. FX ist um Faktor 1,42 staerker
+versperrt. Erste Ordnung (dCd/Cd ~ 2*dB): ~1,6 % von 0,805 = ~0,013 Cd. Klein, aber
+systematisch und mit genau der Signatur aus B4.
+
+### B6 -- Auftrag 2 hatte keine Datenbasis, hat aber einen besseren Zaehler
+elibb_qmap_dd (setup.cpp:3579) ist eine Host-Map und wird nie geschrieben;
+facetten_histogramme.csv enthaelt keine Normalen. Ersatz: klasse-Bit 16 (Orientierungskipp,
+setup.cpp:1348) = 121.793 Zellen / 3,72 % und r21 > 0,5 = 104.157 / 3,18 %; beide sitzen zu
+50-56 % im ERSTEN x-Zehntel, 30-36 % im zweiten, z 32-96 Zellen = Frontschuerze/Splitter --
+nicht Gurney/Canards/Endplatten am Heck (0,5-2 %). Die Motivation des Auftrags war falsch
+verortet. Der kraftgewichtete Gate-Wert existiert bereits als n_unklar (setup.cpp:1512,
+|Summe der 18er-Nachbarnormalen| < 0,5, geht konservativ voll in die Kraft), wird aber nur im
+Kanal-Endreport gedruckt (Z. 1895 f.), nicht im dd-Report -- eine print_info-Zeile fehlt.
+
+### FOLGE fuer die Reihenfolge
+3B (Artefaktabnahme, korrigiert) und 3D (Bias/Versperrung) sind ohne Lauf machbar; 3A haengt
+an der GPU-Abnahme A4 des Buchungsschlusses (cd_reib muss erst positiv sein); Auftrag 1 ist
+ein 10-Minuten-Kill-Test bei 8 mm; Auftrag 2 braucht zuerst die eine Zaehlerzeile.
+Details in AUFTRAEGE-NACHGELAGERT.md (Revision 2, lokal, gitignored).
