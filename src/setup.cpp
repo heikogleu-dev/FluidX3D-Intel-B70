@@ -1433,7 +1433,16 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 // austauschs bleibt an getauschten Links erster Ordnung gueltig), REIBUNG fluid-seitig exakt aus
 // dem komponentenweisen Akkumulator (Fenster-Delta / Schritte). Solidzellen ohne tauschenden
 // Facettennachbarn: voller F (dort gilt reiner BB). fbi-Formel WOERTLICH wie messe_yplus.
-struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; double pbx,pby,pbz; }; // pb* = Band-Druckanteil (z<zband; 0 bei zband==0)
+struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; double pbx,pby,pbz;
+                  double ux,uy,uz; bool ukraft_ok; }; // pb* = Band-Druckanteil (z<zband; 0 bei zband==0)
+// ★ u* = KRAFTANTEIL DER "UNKLAREN" ZELLEN (2026-08-27, Zensus-Auftrag Mehrfachfacetten).
+// Unklar heisst: |Summe der Facettennormalen der 18er-Nachbarschaft| < 0,5 -- die Normalen heben
+// sich weg, weil in der Nachbarschaft GEGENLAEUFIGE Wandseiten liegen (duenne Platte, Spalt,
+// Kante). Genau diesen Fall kann EIN TLS-Fit je Wandzelle nicht trennen; die Zellen gehen
+// konservativ VOLL (unprojiziert) in die Kraft ein. Der ZAEHLER n_unklar lief immer mit, sein
+// KRAFTGEWICHT war nie sichtbar -- und nur das entscheidet, ob ein Cluster-Umbau lohnt.
+// Gefuellt wird u* NUR im Host-Pfad (CFD_FAC_GPU=0 oder CFD_FAC_GPU_PRUEF=1); im reinen
+// GPU-Pfad bleibt ukraft_ok false, damit niemand eine 0 als Messwert liest (stiller No-Op).
 // ★ FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): zband>0 zerlegt NUR den Druckanteil zusaetzlich in
 // Band (z<zband) und Rest (Rest = Gesamt - Band, double). fac_tau (Reibung) traegt keine z-Position --
 // die Reibungszerlegung ist Folgearbeit (fac_geo[6] als z-Traeger). zband==0 ist ausdrucksgleich alt.
@@ -1454,6 +1463,7 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 	// Schleifen lesen EINMAL nach run(0) und uebergeben flags_aktuell=true.
 	if(host_rechnen&&!flags_aktuell) L.flags.read_from_device();
 	FacKraft K; K.px=K.py=K.pz=K.rx=K.ry=K.rz=0.0; K.n_voll=K.n_proj=K.n_unklar=0ull; K.pbx=K.pby=K.pbz=0.0;
+	K.ux=K.uy=K.uz=0.0; K.ukraft_ok=host_rechnen; // u* nur im Host-Pfad belastbar (siehe FacKraft)
 	double hbx=0.0, hby=0.0, hbz=0.0; // Host-Band-Druck (nur zband>0 && host_rechnen befuellt)
 	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
 	const bool fac = D->facetten_on;
@@ -1509,7 +1519,7 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		}
 		if(!kontaminiert) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_voll++; if(zband>0u&&z<zband) { hbx+=Fx; hby+=Fy; hbz+=Fz; } continue; } // Band-Mitschrift NUR bei zband>0 (Kraft-Zerlegung)
 		const double l = sqrt(nxm*nxm+nym*nym+nzm*nzm);
-		if(l<0.5) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_unklar++; if(zband>0u&&z<zband) { hbx+=Fx; hby+=Fy; hbz+=Fz; } continue; } // Gegennormalen (Spalt): konservativ voll
+		if(l<0.5) { K.px+=Fx; K.py+=Fy; K.pz+=Fz; K.n_unklar++; K.ux+=Fx; K.uy+=Fy; K.uz+=Fz; if(zband>0u&&z<zband) { hbx+=Fx; hby+=Fy; hbz+=Fz; } continue; } // Gegennormalen (Spalt): konservativ voll -- u* zaehlt DENSELBEN Beitrag getrennt mit (Zensus, keine Physikaenderung)
 		const double nx2=nxm/l, ny2=nym/l, nz2=nzm/l;
 		const double fn = Fx*nx2+Fy*ny2+Fz*nz2;
 		K.px+=fn*nx2; K.py+=fn*ny2; K.pz+=fn*nz2; K.n_proj++;
@@ -1531,6 +1541,7 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 		double gpx=0.0, gpy=0.0, gpz=0.0; ulong gv=0ull, gq=0ull, gu=0ull;
 		D->kraft_facetten_gpu(gpx, gpy, gpz, gv, gq, gu);
 		K.px=gpx; K.py=gpy; K.pz=gpz; K.n_voll=gv; K.n_proj=gq; K.n_unklar=gu;
+		if(!pruef) { K.ux=K.uy=K.uz=0.0; K.ukraft_ok=false; } // reiner GPU-Pfad: Zaehler ja, Kraftanteil nein
 		if(pruef) {
 			auto rel=[](const double a, const double b){ const double s=fmax(fabs(a),fabs(b)); return s>1e-12?fabs(a-b)/s:0.0; }; // R1-N3: symmetrisch wie relb -- sonst Scheinalarm 1,0 bei py~0
 			const double rmax = fmax(rel(K.px,KH.px), fmax(rel(K.py,KH.py), rel(K.pz,KH.pz)));
@@ -4577,6 +4588,11 @@ static void main_setup_fahrzeug_dd() {
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
 	const bool fac_an_zs = env_u("CFD_FACETTEN", 0u)>0u; // env-Read VOR der Zeitschleife (Doktrin; stand im Sample-Block)
 	double kad_cd_rest=0.0, kad_cz_rest=0.0; bool kad_cdcz_da=false; // letzte korrigierte Werte fuer Bild-Einblendung + [KADENZ]-Status (27.08.)
+	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
+	// "unklaren" Zellen. Die Zaehler sind geometrisch und ueber alle Samples konstant -- der
+	// letzte Stand genuegt; das Kraftgewicht ist nur im Host-Pfad belastbar (FacKraft.ukraft_ok).
+	ulong zen_voll=0ull, zen_proj=0ull, zen_unklar=0ull; double zen_ux=0.0, zen_uz=0.0, zen_px=0.0, zen_pz=0.0;
+	bool zen_da=false, zen_ukraft=false;
 	// ★ P8/P9 Schritt 0: INTERFACE-DRUCK-INSTRUMENT (reine AUSGABE, keine Physik, kein Schalter --
 	// Muster unterboden_sonde). Die face[p]-Puffer der 4 getriebenen Ebenen liegen nach
 	// extract_plane_macros jeden Outer ohnehin auf dem Host (rho an Index 4*i+0); an der
@@ -5169,6 +5185,8 @@ static void main_setup_fahrzeug_dd() {
 				} else {
 					const FacKraft FK = kraft_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (outer+1ull-fac_snap_outer)*(ulong)ratio, fac_snap, false, true, zb);
 					fac_px += FK.px; fac_pz += FK.pz; fac_pn++;
+					zen_voll=FK.n_voll; zen_proj=FK.n_proj; zen_unklar=FK.n_unklar; zen_da=true; // ★ ZENSUS: Zellklassen (geometrisch konstant)
+					zen_px=FK.px; zen_pz=FK.pz; zen_ukraft=FK.ukraft_ok; if(FK.ukraft_ok) { zen_ux=FK.ux; zen_uz=FK.uz; }
 					if(zb>0u) { // ★ KRAFT-ZBAND: NUR der Druckanteil ist zerlegt -- fac_tau (Reibung) traegt keine z-Position (Folgearbeit fac_geo[6]); Rest = Gesamt - Band (double)
 						const double qA_zb=(double)q_inf*A_ref;
 						zb_czdb = (double)units_fine.si_F((float)FK.pbz)/qA_zb;
@@ -5379,6 +5397,29 @@ static void main_setup_fahrzeug_dd() {
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
 	mcd/=(double)cd.size(); mcz/=(double)cz.size();
 	} // stat_ok
+	if(zen_da) { // ★ ZENSUS Mehrfachfacetten (27.08.): Gate-Wert fuer den Cluster-Umbau.
+	// AUSSERHALB stat_ok (Pruefagent-Befund B4, Muster von Zeile 5584): stat_ok verlangt >= 16
+	// Kraftsamples -- genau ein kurzer Zensuslauf haette sonst NICHTS gedruckt.
+		const ulong zges = zen_voll+zen_proj+zen_unklar;
+		print_info("FACETTEN-ZELLKLASSEN der Kraftschleife: "+to_string(zges)+" Markerzellen -- unbehandelt (voll) "
+			+to_string(zen_voll)+" ("+to_string(100.0f*(float)zen_voll/(float)max(1ull,zges),2u)+" %), projiziert "
+			+to_string(zen_proj)+" ("+to_string(100.0f*(float)zen_proj/(float)max(1ull,zges),2u)+" %), UNKLAR "
+			+to_string(zen_unklar)+" ("+to_string(100.0f*(float)zen_unklar/(float)max(1ull,zges),2u)+" %).");
+		print_info("  unklar = |Summe der Nachbar-Facettennormalen| < 0,5, also gegenlaeufige Wandseiten in EINER"
+			" Nachbarschaft (duenne Platte, Spalt, Kante). Diese Zellen gehen konservativ VOLL in die Kraft.");
+		if(zen_ukraft) {
+			const bool nenner_ok = fabs(zen_px)>1e-12&&fabs(zen_pz)>1e-12; // 1e-30 lag weit unter der Arbeitsskala (px ist O(1e-3..1e-1))
+			const double axl = nenner_ok ? 100.0*zen_ux/zen_px : 0.0;
+			const double azl = nenner_ok ? 100.0*zen_uz/zen_pz : 0.0;
+			print_info("  KRAFTGEWICHT der unklaren Zellen (Host-Pfad, letztes Sample) am FACETTEN-DRUCKANTEIL"
+				" (Reibung NICHT enthalten -- als Cd-Anteil zitiert waere die Zahl zu gross): Fx "+to_string((float)axl,2u)
+				+" %, Fz "+to_string((float)azl,2u)+" % (Gittereinheiten: Fx_unklar "+to_string((float)zen_ux,6u)+" von "+to_string((float)zen_px,6u)
+				+", Fz_unklar "+to_string((float)zen_uz,6u)+" von "+to_string((float)zen_pz,6u)+"). Vorzeichenbehaftet -- fuer das Gate den BETRAG lesen.");
+			print_info("  GATE Cluster-Umbau: erst ein RELEVANTER Kraftanteil rechtfertigt ihn -- Promille ohne Kraft = Akte zu.");
+		} else print_info("  Kraftgewicht NICHT gemessen: der reine GPU-Pfad reduziert nur die Zaehler. Fuer den Gate-Wert"
+			" einen Zensuslauf mit CFD_FAC_GPU=0 (Host allein, sauber) fahren -- CFD_FAC_GPU_PRUEF=1 ginge auch,\n"
+			" mischt aber GPU-Nenner mit Host-Zaehler (Pruefagent-Befund B6, praktisch 3e-8..5e-5).");
+	}
 	print_info("---------------------------------------------------------------");
 		{	// ★ Hygiene E6b: fx_c wurde den ganzen Lauf befuellt und nie gelesen. Jetzt als EIN Anker
 		// ausgewiesen: das Mittel der Fernfeld-Fahrzeugkraft AB WARMLAUF (derselbe Filter wie Cd/Cz --
