@@ -186,7 +186,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // FEST 69 Slots. Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
+	Memory<uint> rho_clamp_hits; // FEST 70 Slots. Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.

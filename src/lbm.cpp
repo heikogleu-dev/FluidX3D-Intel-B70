@@ -145,7 +145,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fac_utkorr!=1.0f) print_info("ABTASTPUNKT-MESSARM aktiv: CFD_FAC_UTKORR = "+to_string(s_fac_utkorr,3u)+" auf dem Wandmodell-Eingang (Theorie-Soll 3/2; Ansage-Doktrin).");
 	if(s_fac_kappa!=0.4f) print_info("Grazing-Guard geaendert: CFD_FAC_KAPPA = "+to_string(s_fac_kappa,2u)+" (Default 0,4).");
 	if(s_fac_qdiag!=0u) print_warning("CFD_FAC_QDIAG = "+to_string((ulong)s_fac_qdiag)+" -- DIAGNOSEARM (2 = nur q<0,5, 3 = nur q>0,5; Arm 1 ist seit K1' ohne Funktion). Kein Messarm fuer Abnahmen.");
-	if(s_fac_elibb&&s_fac_imem) print_info("ELIBB 18-Link AKTIV (B2/B3, q>0,5 seit 26.08. als MLS-Blende chi=(2q-1)/(tau0+0,5)): rein geometrische q-Blende (u_W=0) + bestehender Additivterm; q=0,5 ist bitgleich iMEM. Wirkpfad Slot 67 (Blende gesamt), Slot 68 (MLS-q>0,5-Zweig). Blenden-Austausch wird seit B3 in fac_tau[1..5] GEBUCHT -- Reibungspfad und object_force sind EIN Bild (Frische-Augen-Audit 26.08.: alte 'kein Ist'-Ansage war stale).");
+	if(s_fac_elibb&&s_fac_imem) print_info("ELIBB 18-Link AKTIV (B2/B3, q>0,5 seit 26.08. als MLS-Blende chi=(2q-1)/(tau0+0,5)): rein geometrische q-Blende (u_W=0) + bestehender Additivterm; q=0,5 ist bitgleich iMEM. Wirkpfad Slot 67 (Blende gesamt), Slot 68 (MLS-q>0,5-Zweig). Blenden-Austausch wird seit B3 in fac_tau[1..5] GEBUCHT; seit dem Buchungsschluss (27.08.) buchen auch die Gate-Rueckfaelle (Slot 69, P-only) -- Reibungspfad und object_force sind damit an ALLEN Facettenzellen EIN Bild.");
 	// C1b: WFB und Facetten am selben Einfuegepunkt schliessen sich aus -- hart, kein stilles Nacheinander.
 	if(s_facetten&&s_wandfunktion) print_error("CFD_FACETTEN und CFD_WANDFUNKTION gleichzeitig ist nicht definiert -- genau einen Pfad waehlen.");
 	facetten_on = s_facetten;
@@ -321,7 +321,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 69ull); // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) // ★ LEGENDE, Stand 2026-08-26 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	rho_clamp_hits = Memory<uint>(device, 70ull); // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-26 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
 	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
 	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
 	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden

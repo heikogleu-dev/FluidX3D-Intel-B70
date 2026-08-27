@@ -2136,6 +2136,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#endif"+R( // FACETTEN_PEMA
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
 	float s1=0.0f, s2=0.0f, sn=0.0f;
+	bool rueckfall=false; // ★ BUCHUNGSSCHLUSS (Baustein 2/1, 27.08.): Rueckfaelle steigen nicht mehr per return aus, sondern buchen mit s=0 (P-only)
 	float res2=0.0f; // ★ 2026-08-25 Restfehler in QUERrichtung t2 (Ziel dort ist 0); nur die Rueckfaelle fuellen ihn
 	// ★ 3x3-Iteration (FACETTEN-IMEM-3X3.md): Entkopplungs-Gate (Gl. 20). Entkoppelt laeuft
 	// WOERTLICH der bisherige 2x2-Pfad (Bitgleichheit der ebenen Waende); gekoppelt wird die
@@ -2159,7 +2160,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
 	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
 )+"#endif"+R( // FACETTEN_LSQ
-	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } return; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten (Einzellink-diagonal -- die ELIBB-heilbare Klasse)
+	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } rueckfall=true; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten (Einzellink-diagonal -- die ELIBB-heilbare Klasse)
 	} else {
 	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
 	const float Gt11 = G11 - Sn1*Sn1/Snn, Gt22 = G22 - Sn2*Sn2/Snn, Gt12 = G12 - Sn1*Sn2/Snn;
@@ -2176,7 +2177,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
 	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); }
 )+"#endif"+R( // FACETTEN_LSQ
-	else { if(t%100ul==0ul) atomic_inc(&hits[15]); return; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
+	else { if(t%100ul==0ul) atomic_inc(&hits[15]); rueckfall=true; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
 	// ★★ 2026-08-25 QUERGATE (CFD_FAC_QUERGATE, Default AUS), Antwort auf Pruefbefund 4-A.
 	// Die Skalar-Rueckfaelle treffen ihr Ziel in Stroemungsrichtung exakt und lassen die zweite
@@ -2186,14 +2187,14 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// die ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen,
 	// den niemand bestellt hat. Ein exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
 )+"#ifdef FACETTEN_QUERGATE"+R(
-	if(res2>def_fac_tau*twe) { if(t%100ul==0ul) atomic_inc(&hits[64]); return; } // Slot 64
+	if(!rueckfall&&res2>def_fac_tau*twe) { if(t%100ul==0ul) atomic_inc(&hits[64]); rueckfall=true; } // Slot 64
 )+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
 	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
 	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
-	if(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut) { if(t%100ul==0ul) atomic_inc(&hits[10]); return; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
+	if(!rueckfall&&(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut)) { if(t%100ul==0ul) atomic_inc(&hits[10]); rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
 )+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
 	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
@@ -2201,16 +2202,22 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#endif"+R( // FACETTEN_SATGATE
 	// 3x3: sn aus den GEKLEMMTEN s1/s2 (Normal-Nullung haelt auch bei Tangentialklemme, Gl. 23);
 	// im entkoppelten Pfad ist sn=0 und Snn ggf. ~0 -- Guard haelt die Division sicher.
-	if(Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
+	if(!rueckfall&&Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
 		sn = -(Sn1*s1+Sn2*s2)/Snn;
 )+"#ifdef FACETTEN_SATGATE"+R(
-		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); return; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
+		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); rueckfall=true; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
 )+"#else"+R(
 		const float snc = clamp(sn, -def_fac_budget_sn*ut, def_fac_budget_sn*ut); // Budget-Skalar (1a-Bsn)
 		if(snc!=sn&&t%100ul==0ul) atomic_inc(&hits[16]); // Slot 16: s_n-Klemme
 		sn = snc;
 )+"#endif"+R( // FACETTEN_SATGATE
 	}
+	// ★ BUCHUNGSSCHLUSS: an Rueckfallzellen bleibt das FELD reines BB (s=0, Pass 2 uebersprungen), aber die
+	// phi-Buchung unten laeuft mit phi = P -> fw = -P_t (+2Dp_t unter ELIBB); zusammen mit der B3-
+	// Kopfbuchung -dp ist das exakt der wahre Tangentialaustausch -(2*Sum c_t fpre + d_t) -- die
+	// ~40 % Facettenbesuche, die bisher per return NICHTS buchten (K2 -7,4 am 26-Grad-Kanal =
+	// Blenden-Korrektur ohne den BB-Anteil, den sie korrigiert). Explizit +0.0f, kein signed-zero-Anker.
+	if(rueckfall) { s1=0.0f; s2=0.0f; sn=0.0f; }
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
 )+"#ifdef FACETTEN_EMA"+R(
 	// LATENT (Audit 1/3): unter EMA x SATGATE prueft das Gate die GELOESTEN s, angewandt wird die
@@ -2219,7 +2226,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// ★ Asmuth Gl. 29/30 / A6-Plan: EMA von u_s im xyz-Rahmen (frame-stabil) -- das instantane
 	// Nullziel jagte P-Fluktuationen und pumpte mit +-2ut-Oszillation selbst Turbulenz (J0-Befund
 	// 45 Grad: Klemmquote 8 %, Ist-Reibung 84 % der Wandreibung trotz Nullziel).
-	{
+	if(!rueckfall) { // Legacy-EMA: Rueckfall verliess frueher vor dem Filter
 		const uxx e = 3ul*(uxx)fid;
 		const float ax = def_fac_ema;
 		usx = fma(ax, usx-fac_us[e], fac_us[e]); usy = fma(ax, usy-fac_us[e+1ul], fac_us[e+1ul]); usz = fma(ax, usz-fac_us[e+2ul], fac_us[e+2ul]);
@@ -2237,7 +2244,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	const float alph = -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0;
 	if(fabs(alph)>ut&&t%100ul==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
 )+"#endif"+R( // FACETTEN_ALPHA
-	for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3)
+	if(!rueckfall) for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3); Rueckfall: Feld bleibt BITGLEICH BB
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;
 		fhn[i] = fma(6.0f*w(i), c(i)*usx+c(def_velocity_set+i)*usy+c(2u*def_velocity_set+i)*usz, fhn[i]);
@@ -2259,7 +2266,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// damit bereits MIT FAKTOR 2 in der phi-Buchung; die B3-Kopfbuchung (-Dp) machte die Summe
 	// tangential vorzeichenverkehrt. Korrektur (numerisch verifiziert, schliesst auf ~1e-18):
 	// +2*Dp_tangential HIER. Der Normalanteil der Kopfbuchung bleibt die korrekte Einfachzaehlung;
-	// an den Rueckfall-/Pur-Pfaden (phi bucht nichts) ist die Kopfbuchung allein exakt.
+	// am Pur-Pfad (phi bucht nichts) ist die Kopfbuchung allein exakt; an RUECKFALLZELLEN bucht phi
+	// seit dem Buchungsschluss (27.08.) P-only + 2Dp_t -- zusammen mit -dp exakt -(2 Sum c_t fpre + d_t).
 	{
 		const float edn_ = elibb_dp.x*nx+elibb_dp.y*ny+elibb_dp.z*nz;
 		fwx += 2.0f*(elibb_dp.x-edn_*nx); fwy += 2.0f*(elibb_dp.y-edn_*ny); fwz += 2.0f*(elibb_dp.z-edn_*nz);
@@ -2285,6 +2293,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // 3x3: REST-Normalinjektion (Soll ~0 bei Vollrang; N1 |Summe|<=5 je Torus-Lauf)
 )+"#endif"+R( // FACETTEN_ALPHA-Weiche
 	fac_tau_cnt[fid] += 1u;
+	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
 )+"#ifdef FACETTEN_DIAGZ"+R(
 	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
 	// Facette schreibt ihre komplette Kette jeden Schritt in einen 18er-Puffer; der Host sampelt

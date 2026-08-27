@@ -120,6 +120,16 @@ static void zeichne_text(Image* img, const uint x0, const uint y0, const string&
 		}
 	}
 }
+// ★ BUCHUNGSSCHLUSS-DETEKTOR (Baustein 2/1, 27.08.): jeder Gate-Rueckfall bucht GENAU EINMAL (Slot 69).
+// Alle beteiligten Zaehler sind t%100-gegatet am selben t und je Besuch exklusiv -> Identitaet
+// 69 == 13+15+64 (+10+16 unter SATGATE; ohne SATGATE sind 10/16 Klemmen, die angewandt buchen).
+static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const bool satgate, const string& ort) {
+	const ulong soll = h13+h15+h64+(satgate?h10+h16:0ull);
+	const string formel = string("13+15+64")+(satgate?"+10+16":"");
+	if(h69>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung Slot 69 saettigt ("+to_string(h69)+", Soll "+to_string(soll)+") -- Identitaet nicht pruefbar.");
+	else if(h69!=soll) print_error("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" != Soll "+to_string(soll)+" ("+formel+") -- Rueckfall bucht NICHT genau einmal (Doppelzaehlungs-Detektor).");
+	else print_info("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" == Soll ("+formel+") -- jeder Gate-Rueckfall bucht genau einmal (P-only).");
+}
 static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uint y_slice,
                           const float u2si, const float u_ref_si, const int t_ms, const string& dir, const string& tag, const string& info="") {
 	Image img(Nx, Nz);
@@ -1612,7 +1622,7 @@ void main_setup_kanal() {
 	  LBM_Domain::s_fac_pema = (fc>=3u) ? env_f("CFD_FAC_PEMA", 0.0f) : 0.0f;
 	  LBM_Domain::s_fac_diagz = (fc>=3u&&getenv("CFD_FAC_DIAGZ")!=nullptr) ? (long)atoll(getenv("CFD_FAC_DIAGZ")) : -1l;
 	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u;
-	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle).");
+	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle; seit Buchungsschluss 27.08. buchen Rueckfaelle P-only, Slot 69).");
 	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
@@ -1820,8 +1830,9 @@ void main_setup_kanal() {
 		const ulong s12=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[12], s13=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[13], s10=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[10];
 		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"; Ereignis-Slots t%100-gesampelt seit 405be0f), tau-Klemme "+to_string(kl)
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
-			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
+			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // ★ 2026-08-25 Stoerform-Groessenmessung (49..58)
 			const uint* h = &lbm.lbm_domain[0]->rho_clamp_hits[0];
 			ulong so=0ull, sp=0ull; for(uint k=0u; k<5u; k++) { so+=(ulong)h[49u+k]; sp+=(ulong)h[54u+k]; }
@@ -2249,7 +2260,7 @@ void main_setup_kugel() {
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im Kugelfall noch NICHT verdrahtet (IR3-Audit) -- Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u; LBM_Domain::s_fac_elibb = false; LBM_Domain::s_fac_qmin = 0.1f; LBM_Domain::s_fac_lsq = false; LBM_Domain::s_fac_quergate = false; // Statik-Symmetrie (H1)
 	  LBM_Domain::s_fac_diagz = -1l; // ★ Audit 2/3: 9. Statik an dieser Stelle -- DIAGZ ist an der Kugel (noch) nicht verdrahtet, Warnung oben
-	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle)."); // Audit 3/3 N2: Ansage-Doktrin auch an der Kugel
+	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle; seit Buchungsschluss 27.08. buchen Rueckfaelle P-only, Slot 69)."); // Audit 3/3 N2: Ansage-Doktrin auch an der Kugel
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
@@ -2570,7 +2581,8 @@ void main_setup_kugel() {
 		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
-			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
+			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -3168,7 +3180,7 @@ static void main_setup_fahrzeug_dd() {
 	  LBM_Domain::s_fac_diagz = -1l;
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im dd-Fall NICHT verdrahtet -- Ketten-Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u; LBM_Domain::s_fac_elibb = false; LBM_Domain::s_fac_qmin = 0.1f; LBM_Domain::s_fac_lsq = false; LBM_Domain::s_fac_quergate = false; // Statik-Symmetrie (H1)
-	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle).");
+	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle; seit Buchungsschluss 27.08. buchen Rueckfaelle P-only, Slot 69).");
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: als Messarm wertlos (IR3-Audit).");
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A): alpha = "+to_string(LBM_Domain::s_fac_pema,5u));
@@ -5540,7 +5552,8 @@ static void main_setup_fahrzeug_dd() {
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
-			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
+			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Nahfeld"); }
 		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
 			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
 			else if((ulong)df->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");
