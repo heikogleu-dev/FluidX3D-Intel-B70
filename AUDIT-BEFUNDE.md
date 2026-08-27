@@ -3496,3 +3496,37 @@ VORBEHALTE:
   (4) dx_c 17 mm ist kein glatter Wert; setup.cpp:3036 f. warnt ausdruecklich, dass die V1-Masse nur
       bei 16 mm aufgehen. auf_grobe_zelle faengt das ab, die Ist-Abstaende oben sind bereits die
       GESCHNAPPTEN Werte -- aber jede Box-Aenderung muss danach erneut gegen das Log geprueft werden.
+
+### B16b -- ZWEITE ZIELBOX (Heiko, 27.08. abends): 500 / 900 / 1100 / 2800 mm
+Gleiche Rechnung wie B16, kleinere Box: x- 500, y+- 900, z+ 1100, x+ 2800 mm ab Fahrzeughuelle.
+  Box 7,748 x 3,648 x 2,308 m = 65,23 m3 (heute 32,50 -> Faktor 2,01; Variante A war 82,32 = 2,53).
+
+  dx_f    dx_c  |  Gitter              Zellen   VRAM ges.  je GPU   Auslastung | Ist x-/y/z+/x+
+  3,75mm  15,0  |  2069 x  973 x 617   1242,1M   65.151MB  32.576MB    99,8 %  | 500/898/1102/2807  am Limit
+  4,00mm  16,0  |  1937 x  917 x 577   1024,9M   53.757MB  26.879MB    82,3 %  | 500/908/1096/2796  <- PASST
+  4,25mm  17,0  |  1825 x  861 x 545    856,4M   44.919MB  22.459MB    68,8 %  | 500/904/1104/2804
+  4,50mm  18,0  |  1721 x  817 x 513    721,3M   37.834MB  18.917MB    57,9 %  | 500/912/1096/2792
+
+=> ANTWORT: 4,00 mm -- die HEUTIGE Aufloesung bleibt erhalten, bei doppeltem Boxvolumen.
+   Auslastung 82,3 % je Karte gegen heute 89,8 %, also sogar etwas entspannter. Heikos Abstaende
+   werden auf +-8 mm getroffen. 3,75 mm waere mit 99,8 % rechnerisch gerade noch darstellbar, hat
+   aber keinen Puffer -- nicht zu empfehlen, solange der Halo-Speicher der Domaenenzerlegung nicht
+   gemessen ist.
+
+DER ENTSCHEIDENDE UNTERSCHIED ZU VARIANTE A -- die Balance bleibt erhalten:
+  heute        Nah 508,7M (0,438 ms), Fern 203,5M (0,343 ms)  -> 1,28x, Profiler 96,1 % concurrent
+  A @ 4,25mm   Nah 1082,5M (0,466 ms), Fern 169,9M (0,286 ms) -> 1,63x, iGPU 39 % Leerlauf
+  B @ 4,00mm   Nah 1024,9M (0,441 ms), Fern 203,5M (0,343 ms) -> 1,29x, iGPU 22 % Leerlauf
+  Variante B haelt dx_c bei 16 mm, also bleibt das Fernfeld unveraendert -- gleiche Kadenz, gleiche
+  Zeitschrittzahl (dt haengt an dx_f), gleiche Kopplungsqualitaet. Variante A wuerde das Fernfeld
+  auf 17 mm vergroebern UND die Balance kippen.
+
+EINORDNUNG GEGEN DEN GEMESSENEN BEDARF (1-m/s-Kriterium aus f4_wandfrei_v2, B11):
+  noetig y- 384 / y+ 512 / z+ 640 mm  --  Variante B liefert 908 / 908 / 1096 mm.
+  Das ist rund das 2,4-fache in y und das 1,7-fache in z+. Selbst am strengeren 0,5-m/s-Massstab
+  (y 2048, z+ 1792 mm) ist z+ zu drei Vierteln und y zu 44 % gedeckt.
+  x+ 2796 mm ist nicht durch das Kriterium begruendet (dort ist es schon bei 0 mm erfuellt),
+  sondern durch die Nachlaufaufloesung -- siehe den Vorbehalt in B13.
+
+Vorbehalte (1) bis (4) aus B16 gelten unveraendert: die Kosten der Nahfeld-Aufteilung auf zwei B70
+sind auf dieser Maschine NICHT gemessen, der Halo-Speicher steckt nicht in den 55 B/Zelle.
