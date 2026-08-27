@@ -3059,3 +3059,30 @@ korrigiert, roh 9,8717 / -0,5789, Index 10.958, 8mm-ELIBB-Arm 1534 MLUPs, OF13-D
 NAECHSTE REIHENFOLGE (Heiko): Baustein 2 (26-Grad) -> Perf-Restliste -> drei nachgelagerte
 Auftraege (Void-Fill-Konnektivitaet, Facetten-Zensus, Cd-Luecke messen vor bauen; Volltext intern
 in AUFTRAEGE-NACHGELAGERT.md, Wissensspeicher-Tag arbeitsplan).
+
+
+## BAUSTEIN 2 / SCHRITT 1 -- BUCHUNGSSCHLUSS eingebaut, Pruefagent bestanden, Abnahme WARTET (27.08. mittags, Commits 7e24b88 + a18f48b)
+
+PLANUNGSBEFUND (Planungsagent 27.08., @1f297f1): die Buchungsluecke ist real und erklaert den
+26-Grad-K2-Befund VOLLSTAENDIG -- 40,2 % aller Facettenbesuche (s3_mls_26: Slot 10 = 64,1 Mio von
+159,6 Mio) sind SATGATE-Rueckfaelle, weitere 33 % Einzellink (Slot 13); alle verliessen
+apply_facette_imem per return VOR der phi-Buchung, gebucht wurde nur die Blenden-Korrektur -dp.
+K2 = -7,4 ist die Korrektur ohne den BB-Anteil, den sie korrigiert; die Bilanz erzwingt einen
+ungebuchten BB-Anteil ~ +8,4 Soll. Am 4mm-Fahrzeug dasselbe Symptom: cd_reib = -0,116 (SCHUB statt
+Widerstand; OF13 +0,042). K2-Definition selbst ist konsistent (V_fluid exakt, Speicherterm ~8e-6).
+NACH dem Schluss misst K2 nur noch Buchungsvollstaendigkeit (=1 per Bilanzidentitaet) -- der
+Physik-Detektor fuer Schritt 2/3 ist u_tau IST/Ziel (26 Grad 2,38; 45 Grad 1,63).
+EINBAU: rueckfall-Flag statt 5 returns, s=+0 explizit, Pass 2/EMA uebersprungen (Feld bitgleich
+BB), bestehende phi-Buchung laeuft mit phi=P; mit Kopfbuchung -dp exakt -(2 Sum c_t fpre + d_t).
+Slot 69 + Host-Detektor 69 == 13+15+64(+10+16 SATGATE) an drei Endreports. scratch_gate 4/4 sauber.
+PRUEFAGENT: Kernmechanik PASS; HART 5a (Nahfeld-Detektor las das fuer lbm_c ueberschriebene
+Static s_fac_satgate -> falscher exit(1)) behoben; 4a/8a/PEMA-Kommentar behoben; deklarierte
+Semantikwechsel: fac_tau_n zaehlt jeden gebuchten Besuch (tau_w/y+/Tauschzellen nicht mehr
+like-for-like), Markerzellen dauerhaft gegateter Facetten jetzt 'projiziert' statt 'voll'.
+FX-Cd-SPLIT (Auftrag 3 Stufe A vorgezogen, cd_facetten f4_vollumfang_mls): cd_druck 1,1552 (Band
+0,3500, Rest 0,8052), cd_reib -0,1163, cz_druck_rest -1,1800, cz_reib -0,0465. OF13 reproduziert
+(forces.dat t>=1000, A_ref 1,85): Cd_p 0,559 + Cd_v 0,042 = 0,601 (Reibung 7,0 %), Cz_p -1,307.
+Druck-gegen-Druck +0,247, Reibung-gegen-Reibung -0,158 (Vorzeichen) -- beide Luecken real.
+ABNAHME A1-A4 VORBEREITET (logs/b2s1_abnahme_serie.txt, b2s1_a4_serie.txt), START BLOCKIERT:
+der globale Middleware-Hook (hook_werkzeug.py) verweigert seit heute jeden lauf_queue-Aufruf hart --
+auch mit run_in_background=true, weil der Hook nur den Kommandotext sieht. Heikos Entscheid.
