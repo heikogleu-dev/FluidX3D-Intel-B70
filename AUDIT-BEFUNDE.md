@@ -3188,3 +3188,61 @@ nicht zu rechtfertigen ist. Physik unveraendert (nur eine zusaetzliche Summe); i
 GPU-Pfad bleibt ukraft_ok false, damit keine 0 als Messwert gelesen wird.
 ABNAHME OFFEN (GPU blockiert): ein 8-mm-Zensuslauf mit CFD_FAC_GPU_PRUEF=1 muss zeigen, dass
 der Report feuert und die Host-Zaehler mit den GPU-Zaehlern uebereinstimmen.
+
+### B9 -- INTERFACE-SERIE (Heiko-Auftrag 27.08. nachmittags) und ein Fund, der wichtiger ist
+Auftrag: Schnittebenen durch die FERNdomaene gegen OF13, zugeschnitten aufs Nahfeld-Format,
+in 8-Grobzellen-Schritten (128 mm) ab der Fahrzeughuelle -- "ab wo ist der Abdruck klein genug".
+Werkzeug: werkzeuge/interface_serie.py (neu), Konvention wie export/vergleich_of13_2026-08-26
+(d = |u|_FX - |u|_OF13, +-15 m/s). OF13 kommt NICHT mehr aus den vier festen sample-Ebenen,
+sondern aus einem Cache der 33,5 Mio. Zellzentren -- damit ist jede Ebene ziehbar.
+ABNAHME des Werkzeugs: |u|_OF13 = 29,695 +- 0,182 m/s bei x = -2,0 m (Soll 30,0) -- bestanden.
+Vorher gab es zwei Fehlversuche, beide durch die Abnahme gefangen: (1) Slab +-80 mm ist duenner
+als die groebsten OF13-Zellen (~250 mm) -> Ebenen fielen komplett aus (z = 3,000 m) und die
+Zellzahl sprang zwischen 20.304 und 51.606; Fix: Slab 150 mm und "naechste Zelle gewinnt"
+statt Mittelung ueber Verfeinerungsstufen. (2) Ein vermeintlicher Vorzeichenwiderspruch zu B4
+war meine eigene Verwechslung der beiden Diff-Konventionen -- beide Werkzeuge tragen die
+Konvention jetzt im Kopfkommentar.
+
+ERGEBNIS je Richtung (Abstand ab Fahrzeughuelle; heutige Nahfeld-Grenze in Klammern):
+  x- vor dem Fahrzeug (320 mm): KLINGT SAUBER AB. RMS 2,01 -> 0,15 m/s ueber 2,4 m;
+     Anteil |d| > 1 m/s faellt 90,8 % -> 9,2 % bei 640 mm -> 3,1 % bei 1024 mm.
+     An der HEUTIGEN Grenze stehen noch 71 % ueber 1 m/s. Die Box ist vorne zu knapp;
+     640-770 mm waeren der belegte Richtwert.
+  y- / y+ seitlich (316/320 mm): KLINGEN NICHT AB. Bei 2,4 m Abstand immer noch +2,0 m/s
+     Mittel, 78 % ueber 1 m/s. |u|_FX 32,5-34,4 gegen OF13 30,5-31,3.
+  z+ ueber dem Fahrzeug (732 mm): WIRD MIT DEM ABSTAND SCHLECHTER, +2,97 -> +6,58 m/s;
+     |u|_FX steigt von 31,75 auf 37,01 waehrend OF13 bei 30,4 bleibt.
+  x+ hinter dem Fahrzeug (1988 mm): bleibt bei +3,1..+4,4 m/s, RMS ~5,4 (Nachlauf, LES gegen
+     RANS -- hier ist ein Teil erwartbar).
+
+### B10 -- HARTER BEFUND: defekte Anstroemung im Fernfeld des Produktionslaufs
+Die z+-Serie war physikalisch unmoeglich (37 m/s bei 2,74 % Versperrung), also Kontrolltest am
+ROHEN Fernfeld, 2,4 m VOR dem Fahrzeug, wo nichts stoeren kann: dort steht die Anstroemung auf
+allen Hoehen bei 29,8 m/s -- AUSSER in einer Schicht z = 4,56..5,63 m.
+  ux steigt dort auf 35,5 m/s, bricht dann auf 10,8 m/s ein; uz erreicht -14,7 m/s (Abwaerts).
+  Die ganze xy-Ebene bei k = 285 hat Kern-Mittel 40,26 m/s, max 53,60 m/s.
+ZEITLICH EXAKT STATIONAER: 150/300/450/500 ms liefern 38,04 / 38,17 / 38,16 / 38,17 m/s am
+selben Ort z = 5,07 m. Kein Transient, sondern etwas kontinuierlich Eingespeistes.
+DIE EINGEBAUTE SONDE HATTE ES: export/f4_vollumfang_mls/einlass_saeule.csv weist 60 von 552
+Zellen mit mehr als 2 % Abweichung aus, z = 4,624..5,584 m, min ux_rel = 0,405. Die Datei liegt
+seit dem Lauf vor; es hat nur niemand hingesehen. Iron Rule 5 hat funktioniert -- die Sichtung
+nicht.
+ENTSTEHUNGSORT: die Einlassebene selbst (i = 0) ist mit 30,00 m/s und uz = 0 exakt richtig; die
+Stoerung waechst ueber die ersten ~20 Grobzellen (0,32 m) auf ihr Maximum 39,6 m/s und sinkt
+stromab schraeg ab (z = 5,63 m bei i = 1 -> 3,97 m bei i = 760). Log Z. 291 nennt den
+Verdaechtigen: "Geschwindigkeits-Einlass Fernfeld AUS (CFD_FERN_VI=0, gemessener Default): rho
+bleibt am Einlass festgenagelt, der Rand reflektiert".
+LAUFSPEZIFISCH, NICHT GEOMETRISCH -- der entscheidende Vergleich ueber alle Laeufe mit 552
+Fernfeld-Zellen: f4_std_diff2, f4_wandfrei_v2, f4_kopplung_prod, f4_kopplung_plateau sind oben
+SAUBER; f4_vollumfang_mls (und sein Baseline-Abzug) tragen die Stoerung; f4_w3ff_prod hat eine
+schwaechere Variante (142 Zellen, min 0,943). Es haengt also an der Konfiguration des heutigen
+Produktionslaufs, nicht am Fernfeld-Aufbau.
+TRAGWEITE: an der Nahfeld-Deckelkopplung z+ (z = 1,94 m) misst die Serie |u|_FX 34,03 gegen
+OF13 30,79 -- 10,5 % zu schnell; seitlich +10 %. Diese Werte werden JEDEN groben Schritt ins
+Nahfeld eingespeist (Log Z. 333: "Im Nahfeld werden x-, y+-, z+ jeden groben Schritt aus dem
+Fernfeld uebernommen"). Ob und wieviel davon in Cd/Cz landet, ist NICHT gemessen -- aber die
+Headline-Zahlen Cd 0,8052 / Cz -1,1800 stammen aus genau diesem Lauf und stehen damit unter
+Vorbehalt, bis der A/B gegen einen sauberen Arm vorliegt.
+FOLGE fuer den Auftrag: die Box-Dimensionierung ist aus diesem Lauf NUR fuer x- ableitbar
+(640-770 mm). Fuer y und z muss zuerst die Anstroemung sauber sein -- sonst misst man den
+Einlassdefekt und nennt es Boxgroesse.
