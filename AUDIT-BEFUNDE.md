@@ -3757,3 +3757,61 @@ WIRKPFAD-ABNAHME DER ZENSUS-DIAGNOSTIK (B8) -- BESTANDEN, die Zeile feuert:
   Das KRAFTGEWICHT fehlt noch -- der Lauf lief im GPU-Pfad, und dort weist der Report das
   ehrlich aus. Ein Lauf mit CFD_FAC_GPU=0 liefert es nach. Der Vorbehalt aus B3 gilt: eine kleine
   Zellzahl kann viel Kraft tragen (das z-Band traegt mit 0,25 % der Zellen 30 % des Druck-Cd).
+
+### B22 -- ENV-TOR ENTSCHIEDEN: der Abtastfaktor ist tot, ELIBB ist der Hebel (27.08. spaetabends)
+Serie logs/t2_tor_serie.txt, 5 Arme am 26-Grad-Kanal (N=20, iGPU), Basis woertlich aus
+logs/b2s1_abnahme_serie.txt Zeile 5, je EINE Variable. Binary mit dem Nullziel-Fix (siehe unten).
+Census vor und nach der Serie sauber.
+
+  Arm            u_tau IST/Ziel   Gate/Klemme (Slot 10)   Wirkpfad
+  t2_26_u10          2,382            64.144.958          159.586.740
+  t2_26_u15          2,222            64.125.980          159.586.740
+  t2_26_u30          2,269            63.825.129          159.586.740
+  t2_26_elibb0       1,943            21.128.937          159.586.740
+  t2_26_null         0,741            74.656.440          159.586.740
+
+KONTROLLE BESTANDEN: t2_26_u10 reproduziert b2s1_kipp26 ziffernidentisch (2,382 / K2 1,0004 /
+Gate 64.144.958). Der Default von CFD_FAC_UTKORR ist damit belegt 1,0, die Basislinie stimmt,
+und der Kernel-Fix hat an diesem Arm nichts veraendert.
+
+BEFUND 1 -- DER ABTASTFAKTOR IST TOT. Die Antwort auf UTKORR ist WEDER monoton steigend (Prognose
+des Planungsagenten: 2,9 bis 3,7) NOCH fallend Richtung 1,0, sondern FLACH mit flachem Minimum:
+eine Verdreifachung bewegt u_tau um 6,7 %, ein Teil davon zurueck in die falsche Richtung.
+Die Gate-Rueckfaelle bleiben dabei bei 64,14 / 64,13 / 63,83 Mio -- der Anwendungsanteil aendert
+sich um 0,5 %. Der Faktor kommt schlicht nicht durch: was das Modell an den 40 % anwendenden
+Besuchen mehr einspeist, schneidet das SATGATE sofort wieder ab.
+Der Sweep 1,0/1,5/3,0 klammert den GESAMTEN Mechanismus ein, weil die Formel k = 1/(1-G11) je
+Klasse genau 1,00 (m2) / 1,50 (m1) / 3,00 (m0) liefert. Innerhalb dieser Klammer passiert nichts.
+=> KILL-KRITERIUM GEZOGEN: fuer den linkmengen-bewussten Abtastfaktor wird KEIN Code geschrieben.
+
+BEFUND 2 -- ELIBB IST DER GROESSTE EINZELHEBEL, DEN DIE MESSUNG KENNT:
+  ELIBB=1 (heute):  u_tau 2,382, Gate 64.144.958 (40,2 % der Besuche)
+  ELIBB=0:          u_tau 1,943, Gate 21.128.937 (13,2 % der Besuche)
+  ELIBB verdreifacht die Gate-Rueckfaelle und verschlechtert u_tau um 23 %. Der Wert 1,943
+  reproduziert die aeltere g9-Messung (1,94) exakt -- der Effekt ist reproduzierbar und alt.
+  Das ist ein echter ZIELKONFLIKT: ELIBB ist die q-abhaengige Wandbehandlung, die an der
+  gekruemmten Wand (Kugel) gebraucht wird; an der TREPPE kostet sie Wandtreue. Der
+  4-mm-Produktionslauf f4_vollumfang_mls faehrt ELIBB=1, obwohl der Default AUS ist.
+
+BEFUND 3 -- DAS ZIEL-INTERVALL GILT AUCH AUF HEUTIGEM CODE: Nullziel liefert 0,741 (frueher
+0,706 auf altem Stand). [0,741 ... 2,382] enthaelt 1,0 -- die 26-Grad-Klasse ist ziel- und
+zustandsbegrenzt, nicht durch die Geometrie festgenagelt. Die These des vorigen Planungsagenten
+traegt also, nur ist der Abtastfaktor nicht der Weg dorthin.
+
+FOLGE -- der naechste Hebel ist der ANWENDUNGSANTEIL, nicht die Zielhoehe:
+  bei 40 % anwendend (ELIBB=1) -> 2,382 | bei 87 % (ELIBB=0) -> 1,943 | Nullziel 53 % -> 0,741
+  Zu messen, wieder Env-only: CFD_FAC_BUDGET (0,25...4, setup.cpp:1647) greift DIREKT an Slot 10
+  und ist laut eigener Codeansage "Design, nie geeicht" (setup.cpp:1649). Dazu die
+  ELIBB-Wechselwirkung: BUDGET-Sweep je einmal mit ELIBB 1 und 0.
+
+### B23 -- KERNEL-FIX: Nullziel-Arme sprangen aus der Funktion (27.08. spaetabends)
+kernel.cpp:2027 trug "const float zi_ = def_fac_tau*twe; if(zi_<=0.0f) return;". Das return
+verliess die GANZE Funktion apply_facette_imem, nicht nur den Histogrammblock, in dem es steht.
+In einem Nullziel-Arm (def_fac_tau = 0) wurden dadurch fuer jede 64. Facette auf jedem 100.
+Schritt Solve, Pass 2 UND die phi-Buchung uebersprungen -- obwohl der Wirkpfadzaehler oben bereits
+gezaehlt hatte. Also eine stille Feldaenderung PLUS ein Ist!=Soll in der Buchung, ausgerechnet in
+dem Arm, der die Untergrenze des Ziel-Intervalls messen soll. Gefunden vom Planungsagenten.
+FIX: zwei exakte Ein-Block-Ersetzungen, "if(zi_<=0.0f) return;" -> "if(zi_>0.0f) { ... }". Fuer
+alle Arme mit def_fac_tau > 0 ist der Zweig unveraendert -- t2_26_u10 belegt das ziffernidentisch
+gegen b2s1_kipp26. JIT-Kurzlauf bestanden (der Arm lief sauber durch, rc-Fehler stammt vom
+K2-Waechter, nicht vom Kernel).

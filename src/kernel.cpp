@@ -2024,7 +2024,15 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		// ★ Pruefbefund 3-B (2026-08-25): fac_N ~ 1e6 mal 5000 Abtastungen sprengt uint. Hash-Stichprobe
 		// ueber die Facetten-Nummer (jede 64.), damit die Bins nicht wickeln.
 		if(t%100ul==0ul&&((fid*2654435761u)&4227858432u)==0u) {
-			const float zi_ = def_fac_tau*twe; if(zi_<=0.0f) return; // ★ Pruefbefund B(b): bei Nullziel-Armen (def_fac_tau=0) waere jeder Wert im obersten Bin
+			const float zi_ = def_fac_tau*twe; if(zi_>0.0f) { // ★ Pruefbefund B(b): bei Nullziel-Armen (def_fac_tau=0) waere jeder Wert im obersten Bin
+			// ★ FIX 2026-08-27 (Planungsagent Schritt 2, Befund 2.1): hier stand "if(zi_<=0.0f) return;".
+			// Das return verliess die GANZE Funktion, nicht nur diesen Histogrammblock -- in einem
+			// Nullziel-Arm (def_fac_tau=0, setup.cpp:1646) wurden dadurch fuer jede 64. Facette auf
+			// jedem 100. Schritt Solve, Pass 2 UND die Buchung uebersprungen, obwohl Slot 7 oben schon
+			// gezaehlt hatte: eine stille Feldaenderung und ein Ist!=Soll in der Buchung, ausgerechnet
+			// in dem Arm, der die Untergrenze des Ziel-Intervalls messen soll. Bei def_fac_tau>0 ist
+			// der Zweig unveraendert (zi_>0 lief vorher durch und laeuft jetzt durch) -- alle
+			// bestehenden Arme bleiben bitgleich, korrigiert wird ausschliesslich das Nullziel.
 			const float ro_ = sqrt(fma(2.0f*B1o,2.0f*B1o,4.0f*B2o*B2o))/zi_;
 			const float rp_ = sqrt(fma(P1,P1,P2*P2))/zi_;
 			atomic_inc(&hits[49u+(ro_<0.01f?0u:(ro_<0.1f?1u:(ro_<1.0f?2u:(ro_<10.0f?3u:4u))))]);
@@ -2032,6 +2040,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 			// offenen obersten Bin -- null Information, und die als "bimodal" gelesene 45-Grad-Verteilung
 			// war ein Saettigungsartefakt. Grenzen dorthin, wo die Daten liegen.
 			atomic_inc(&hits[54u+(rp_<1.0f?0u:(rp_<10.0f?1u:(rp_<100.0f?2u:(rp_<1000.0f?3u:4u))))]);
+			} // zi_>0
 		}
 	}
 	// ★ 2026-08-25 ZURUECKGENOMMEN: hier standen Rohkopien fuer einen "A2-Rueckfall", der die
