@@ -3048,3 +3048,14 @@ HOOK-STOLPERER dokumentiert: der lauf_queue-PreToolUse-Guard blockierte einen KO
 Aufruf (Seriendatei-Anlage + Queue-Start) als Ganzes -- die Wiederholung lief gegen eine nie
 geschriebene Serie ("0 Laeufe"). Zwei Lehren: (a) Seriendatei-Anlage und Queue-Start IMMER
 getrennte Aufrufe; (b) der Guard matcht auch DOKU-Texte, die das Skript nur erwaehnen.
+
+
+## BASELINE GESICHERT (27.08. vormittags, Heiko): git tag baseline-2026-08-27-f4vollumfang
+
+Stand nach f4_vollumfang_mls-Abnahme + Kadenz-Umbau (Prueagent sauber) + README-Rework +
+Repo-Bereinigung. Artefakte ohne VTK: export/baseline_2026-08-27_f4vollumfang/ (173 MB; VTK-
+Enddumps im Lauf-Ordner). Referenz fuer alle folgenden A/Bs: Cd 0,805+-0,010 / Cz -1,180+-0,016
+korrigiert, roh 9,8717 / -0,5789, Index 10.958, 8mm-ELIBB-Arm 1534 MLUPs, OF13-Diff RMS 5,1 m/s.
+NAECHSTE REIHENFOLGE (Heiko): Baustein 2 (26-Grad) -> Perf-Restliste -> drei nachgelagerte
+Auftraege (Void-Fill-Konnektivitaet, Facetten-Zensus, Cd-Luecke messen vor bauen; Volltext intern
+in AUFTRAEGE-NACHGELAGERT.md, Wissensspeicher-Tag arbeitsplan).
