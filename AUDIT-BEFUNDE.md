@@ -3353,3 +3353,49 @@ Produktionslauf Faktor 5,6 kostet (B11). Reihenfolge: (1) Einlassstoerung klaere
 saubere Langlaeufe mit Rueckkopplung als Basis fuer die Bedarfszahlen, (3) dann umschichten --
 und x+ nur mit eigenem Cd-A/B. Bis dahin ist die belastbare Aussage: z+ hat vermutlich Reserve,
 y ist zu knapp, x- hat 144 mm Spielraum bis zur Band-Komfortgrenze.
+
+### B14 -- HEIKOS BLOCKAGE-DEUTUNG GEPRUEFT: beim Widerstand bestaetigt, beim Abtrieb offen
+Heiko: "das Artefakt im Fernfeld ist bestimmt auch fuer die generell zu hohe Luftgeschwindigkeit
+aufgrund von Blockage verantwortlich -- das verringert meist Abtrieb und erhoeht den Widerstand,
+soweit ich mich an die Versuche mit verschiedenen Boxgroessen erinnere."
+
+GEMESSEN (mittleres |u|_FX / |u|_OF13 ueber alle Ebenen aller fuenf Richtungen der Serie):
+  f4_std_diff2   (21.08., sauber)    +1,83 %
+  f4_wandfrei_v2 (26.08., sauber)    +1,59 %
+  f4_vollumfang_mls (27.08., gestoert) +9,20 %
+Die beiden sauberen Laeufe liegen damit in der Groessenordnung der reinen GEOMETRIE-Versperrung
+(FX 2,74 % gegen OF13 1,93 %, B5) -- der Ueberschuss ist dort erklaert. Der gestoerte Lauf traegt
+rund 7,5 Prozentpunkte ZUSAETZLICH. Heikos Deutung ist damit belegt: das Artefakt wirkt wie eine
+zusaetzliche Versperrung.
+
+VERTEILUNG des Ueberschusses (gestoert / sauber / Differenz in Prozentpunkten):
+  vor dem Fahrzeug     +1,78 / +1,23 / +0,55 pp
+  seitlich y-          +8,44 / +2,01 / +6,43 pp
+  seitlich y+          +8,26 / +1,99 / +6,27 pp
+  UEBER dem Fahrzeug  +13,12 / +2,20 / +10,92 pp
+  hinter dem Fahrzeug +15,07 / +0,21 / +14,86 pp
+Die Anstroemung ist praktisch unberuehrt, der Ueberschuss sitzt dort, wo die Stroemung um den
+Koerper herum muss -- das klassische Versperrungsmuster.
+
+WIDERSTAND -- Heikos Aussage bestaetigt, mit Betrag: Kraefte skalieren erster Ordnung mit u^2,
+also Faktor ((1+0,0159)/(1+0,0920))^2 = 0,8655, um den gestoerten Lauf auf das Blockage-Niveau
+des sauberen zu bringen:
+  Cd gemessen 0,8052 -> blockage-bereinigt 0,6969; Luecke zu OF13 (0,5474, B7) faellt von
+  +0,2578 auf +0,1495. DIE ZUSATZ-BLOCKAGE ERKLAERT DAMIT 42 % DER Cd-LUECKE.
+  Das ist eine Abschaetzung erster Ordnung, keine Messung -- eine echte Windkanalkorrektur
+  (Mercker/Wiedemann) ist nichtlinear und braucht Nachlauf- und Verdraengungsanteile getrennt.
+
+ABTRIEB -- NICHT entscheidbar aus diesen Laeufen, zwei Effekte wirken gegeneinander:
+  (a) reine u^2-Skalierung: Cz -1,1800 -> -1,0213, also weiter WEG von OF13 -1,3113.
+  (b) Heikos Verteilungsargument: der Ueberschuss ist OBEN am groessten (+13,1 % gegen +2,2 %),
+      und mehr Unterdruck ueber dem Dach kostet Abtrieb. Das wirkt (a) entgegen.
+  Dazu kommt eine harte Konfundierung: f4_vollumfang_mls hat zusaetzlich ELIBB=1, MLS und
+  UTKORR=1,5 -- genau die Kette, die den Abtrieb heute Morgen erst auf -1,18 gebracht hat.
+  Das Cz-Signal traegt beide Ursachen und ist nicht trennbar.
+  ZU MESSEN: derselbe Code, ein Lauf mit und einer ohne Stoerung (eine Variable). Erst dann
+  ist Heikos Abtriebs-Aussage an diesem Aufbau pruefbar.
+
+FOLGE FUER DIE HEADLINE-ZAHLEN: Cd 0,8052 steht unter Vorbehalt -- rund 0,11 davon sind
+plausibel Artefakt-Blockage, nicht Modellfehler. Cz -1,1800 ebenfalls, mit unklarem Vorzeichen
+der Korrektur. Beide bleiben als GEMESSENE Werte des Laufs gueltig; was sie ueber die Physik
+sagen, haengt an der Klaerung der Einlassstoerung (B10/B12).
