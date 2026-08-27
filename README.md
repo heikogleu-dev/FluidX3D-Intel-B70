@@ -102,6 +102,80 @@ rules ("Iron Rules"):
   and an F-buffer null-read gate (+3.7 % kernel); an offline ocloc **scratch/spill gate**
   (`werkzeuge/scratch_gate/`) fails any commit that regresses private/spill memory to zero-cost.
 
+## The facet wall-model chain — methodology
+
+Upstream FluidX3D has no wall model; the entire WMLES layer is this fork's own build. The chain,
+stage by stage, each with its in-binary proof mechanism:
+
+1. **Geometry → facets.** The SAT voxelizer (below) gives a conservative solid. A **Surface-Nets
+   remesh** of the voxel staircase (one vertex per boundary cell, Taubin-smoothed, vertices
+   clamped to ±½ cell) recovers the smooth wall; exact ray–triangle intersection then yields a
+   **per-link wall distance q** for every lattice link that crosses the surface. At 4 mm:
+   10.87 M cut links on 2.62 M facets, 100 % from the remesh, zero fallbacks.
+2. **Facet fit.** Per wall cell a TLS/PCA plane fit across the staircase provides the facet
+   normal and wall distance; a guarded q-floor and a grazing-link guard (κ = 0.4) keep
+   ill-conditioned links on plain bounce-back (both declared interims with replacement duty).
+3. **iMEM momentum exchange** (after Asmuth et al. 2021, Eq. 20–28): Spalding-target wall
+   stress, a 2×2 tangential solve per facet, saturation gate with BB fallback, α mass
+   correction. Proof: 1.3 G events is=should exact each run, Δm within its band.
+4. **ELIBB link-wise reconstruction** replaces stair-step bounce-back using the per-link q:
+   below q = ½ a Bouzidi/NEBB blend; **exactly q = ½ collapses bit-identically to plain iMEM**
+   (the standing bit anchor of the whole chain); above q = ½ the **MLS chi-blend**
+   χ = (2q−1)/(τ₀+½), u_bf = (1−3/(2q))·u — the predecessor scheme's wall-ghost-mode
+   instability was first derived analytically (neutral curve λ_krit = 4(2−ω)/(ω−1): at
+   production ω practically every q > ½ was unstable, masked only by SGS viscosity), then the
+   replacement was verified term-by-term against the NASA/ICASE prints before a single kernel
+   line changed. Both branches carry separate action-path counters.
+5. **Momentum booking (B3).** Whatever the blend changes in the incoming populations is booked
+   into the friction-path accumulator — friction path and object force stay one picture.
+6. **Acceptance ladder** for every wall-model change: CPU harness (bit anchors, stability
+   sweeps) → channel bit anchor on the iGPU (field hash must not move — the change must be
+   provably inert outside its branch) → sphere detector (the historic injection pathology:
+   a sign flip here killed the predecessor scheme) → tilted-channel K2 friction-path detector
+   → 8 mm vehicle A/B on identical env → only then 4 mm production. One variable per run.
+
+## Performance engineering on Battlemage — what actually moved the needle
+
+All deltas measured on this rig, same-env A/B unless noted; chain result on the 8 mm vehicle
+rung: **939 → 1 534 MLUPs (+63 %)**, and the 4 mm production index went 12 429 → **10 958** with
+strictly more physics on board.
+
+| Lever | Measured effect |
+|---|---|
+| **IGC unroll budget** — a grown kernel loop silently exceeded IGC's unroll budget; runtime-indexed private arrays went memory-resident (`private_size` 4 256 B/WI) | **~100×** on the affected arm (2 → ~240 MLUPs class); fix is one `opencl_unroll_hint`, found **offline** via ocloc/zeinfo |
+| **store_f rematerialisation** — a register spill from address CSE across the facet block | +3.0 % B70 kernel (1 478 → 1 523), spill 448/832 B → 0 |
+| **F-buffer null-read gate** — skip reading a force field that is provably +0 at non-solid cells | +0.7 % (1 523 → 1 534), guarded by a host-side invariant scan at init |
+| **GPU-side force reduction** (FAC_GPU) instead of 2.5 GB PCIe transfers per force window | force-window share 36 % → 1.3 %; at production cadence ~13 % wall clock |
+| **Slice plane-gather** — read one y-plane instead of full fields at slice events | 11.3 GB → plane-sized PCIe per slice event |
+| **Zero-copy blocking-read fix** (iGPU) — all 8 read/write wrappers finish the queue correctly | correctness + removes silent stalls on the far domain |
+| **Scratch/spill gate** (`werkzeuge/scratch_gate/`) — offline ocloc compile of the real kernel for both GPUs on every change | regression protection: `private_size = 0 AND spill_size = 0` or the gate fails — the 100× class can never return silently |
+
+The remaining big levers (FP16S memory compression, UPDATE_FIELDS retirement, dual-B70 halo
++ iGPU three-device layout) are deliberately parked behind physics work — documented with their
+expected mechanics in the project markdowns.
+
+## The validated production configuration
+
+What `f4_vollumfang_mls` actually ran (every switch audited: 32/32 env vars traced to their
+consumer **and** a runtime action-path proof — a switch without a firing counter is treated as a
+hard error in this project):
+
+- **Domains:** fine 1689×621×485 @ 4 mm (508.7 M cells, B70) inside coarse @ 16 mm (203 M cells,
+  iGPU zero-copy), one-way far→near TYPE_E coupling plus **near→far feedback bands** (wall-free
+  band variant: profile/plateau shaping, wake band, band starts ≥2 coarse cells off the body).
+- **Boundary physics:** moving-floor equilibrium reset (near + far, its own reset counters),
+  far-inlet equilibrium reset, sponge layer (far), pressure outlet.
+- **Wall chain:** facet model level 3 + saturation gate + α=2 mass correction + ELIBB with the
+  MLS q>½ branch (chain above), sampling-factor 1.5 (declared interim).
+- **Instrumentation on board:** per-sample force CSVs with wheel-contact z-band split (the
+  corrected `cd/cz_druck_rest` headline numbers), facet-path Cd decomposition at every sample,
+  displacement census, block-SEM statistics, timed VTK field dumps + end dump, stop-file
+  graceful shutdown, a GuC-engine-reset watchdog on the kernel journal, and a locked run queue
+  with process census before and after every series.
+
+Reproduce: the exact env line ships in `logs/f4_vollumfang_serie.txt` and — like every run — a
+full copy of the sources plus commit hash lands in `export/<run>/code/` (`LAUF.txt`).
+
 ## Where we stand (2026-08-27, run `f4_vollumfang_mls`)
 
 First 4 mm production run with the **full validated chain** (iMEM + ELIBB/MLS + near→far feedback
