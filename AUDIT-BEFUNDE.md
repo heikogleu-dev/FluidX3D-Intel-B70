@@ -3450,3 +3450,49 @@ ZWEI VORBEHALTE, die bei der Auswertung gelten:
   (2) Solange die Einlassstoerung (B10/B12) nicht geklaert ist, misst ein Vergleich gegen die
       Baseline BOX UND STOERUNG gemischt. Ein sauberes Box-A/B verlangt zwei Laeufe mit
       demselben Stoerungszustand.
+
+### B16 -- DUAL-B70-KAPAZITAETSRECHNUNG fuer Heikos Zielbox (27.08. abends)
+Heiko gibt als Zielabstaende ab Fahrzeughuelle vor: x- 600, y-/y+ 1200, z+ 1200, x+ 3000 mm.
+Frage: welche Aufloesung bei GLEICHER GPU-Auslastung wie heute?
+
+ZIELBOX: x -0,606 .. +7,442 (8,048 m), y +-2,124 (4,248 m), z 0 .. 2,408 m = 82,32 m3.
+Heute 32,50 m3 -- Faktor 2,53.
+
+AUSLASTUNGSVORGABE: heute 29.318 MB von 32.655 MB auf EINER B70 = 89,8 %. Auf zwei B70 sind das
+58.636 MB Nahfeld-Budget (physisch 65.310). Marginal 55 B/Zelle (FP16C).
+
+ERGEBNIS (Rasterung gegen setup.cpp:3011/3034/3044/3087 gerechnet, ratio 4, Paritaet cey beachtet):
+  dx_f    dx_c  |  Gitter              Zellen   VRAM ges.  je GPU   Auslastung | Ist-Abstaende x-/y/z+/x+
+  4,00mm  16,0  |  2013 x 1069 x 605   1301,9M   68.287MB  34.144MB   104,6 %  | 600/1212/1208/3000  ZU GROSS
+  4,25mm  17,0  |  1893 x 1005 x 569   1082,5M   56.780MB  28.390MB    86,9 %  | 600/1210/1206/2993  <- PASST
+  4,50mm  18,0  |  1789 x  945 x 537    907,9M   47.619MB  23.809MB    72,9 %  | 600/1200/1204/2998
+  5,00mm  20,0  |  1609 x  853 x 481    660,2M   34.627MB  17.313MB    53,0 %  | 600/1206/1192/2992
+=> ANTWORT: 4,25 mm. 4,00 mm ist auch mit dem VOLLEN VRAM beider Karten nicht darstellbar
+   (104,6 % je GPU). Bei 4,25 mm werden Heikos Abstaende auf +-13 mm getroffen.
+   Arbeitsvolumen gegen heute: Zeitschritte fuer 0,5 s -5,9 % (dt skaliert mit dx), Zellen je GPU
+   +6,4 % -- das hebt sich naeherungsweise auf.
+
+NEBENBEFUND, der einen eigenen Hebel oeffnet: DIE BALANCE KIPPT.
+  Mit den gemessenen Einzel-GPU-Werten (setup.cpp:3005: B70 4648 MLUPs, iGPU 594 MLUPs) kostet je
+  grobem Schritt heute das Nahfeld 0,438 ms und das Fernfeld 0,343 ms -- Verhaeltnis 1,28, und der
+  Profiler des f4-Laufs bestaetigt das (B70 93,9 %, iGPU 91,0 %, CONCURRENT 96,1 %).
+  Bei dx_f 4,25 auf zwei B70 sind es 0,466 gegen 0,286 ms = 1,63 -- die iGPU haette 39 % LEERLAUF.
+  Dieser Leerlauf ist Budget fuer eine GROESSERE FERNBOX, und das trifft direkt B14 (Versperrung):
+    Fernbox 7,66 x 8,82 m (heute)  169,9M  Versperrung 2,74 %  Balance 1,63
+    Fernbox 9,50 x 8,82 m          210,5M              2,21 %          1,31
+    Fernbox 11,00 x 8,82 m         243,6M              1,91 %          1,14   <- unter OF13 (1,93 %)
+    Fernbox 11,00 x 10,00 m        275,9M              1,68 %          1,00
+  Eine Verbreiterung des FERNFELDS auf 11 m brächte die Versperrung erstmals unter das
+  OF13-Niveau und kostet nach dieser Rechnung keine Kadenz -- sie fuellt nur den Leerlauf.
+
+VORBEHALTE:
+  (1) Die MLUPs sind EINZEL-GPU-Messungen. Was die Aufteilung des Nahfelds auf zwei B70 kostet
+      (Halo-Austausch je Schritt, Transfer zwischen den Karten), ist auf dieser Maschine NICHT
+      gemessen. Die Tabellen sind Kapazitaet und ideale Skalierung, KEINE Laufzeitprognose.
+  (2) Der Halo-Speicher der Domaenenzerlegung ist in den 55 B/Zelle nicht enthalten.
+  (3) Die iGPU hat 87.628 MB gemeinsamen Speicher, aber "Buffer Limits 4095 MB global" (Log Z. 142).
+      Schon heute liegt der DDF-Block bei rund 7,7 GB, die Aufteilung funktioniert also -- an einer
+      groesseren Fernbox wurde sie aber nie geprueft.
+  (4) dx_c 17 mm ist kein glatter Wert; setup.cpp:3036 f. warnt ausdruecklich, dass die V1-Masse nur
+      bei 16 mm aufgehen. auf_grobe_zelle faengt das ab, die Ist-Abstaende oben sind bereits die
+      GESCHNAPPTEN Werte -- aber jede Box-Aenderung muss danach erneut gegen das Log geprueft werden.
