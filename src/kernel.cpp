@@ -2075,9 +2075,10 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	{
 		const uxx e = 6ul*(uxx)fid;
 		if(fac_tau_cnt[fid]==0u) { // Warmstart: erster Besuch uebernimmt Momentanwerte statt 0
-			// LATENT (Audit 1/3): cnt zaehlt nur VOLLE Anwendungen -- gatet eine Facette anfangs
-			// dauerhaft (PEMA x SATGATE), re-seedet der Warmstart jeden Schritt und der Filter baut
-			// keine Historie auf, bis das erste Gate besteht. Nach dem ersten Erfolg korrekt.
+			// LATENT (Audit 1/3, revidiert 27.08. Buchungsschluss): cnt zaehlt seit dem Schluss JEDEN
+			// gebuchten Besuch (auch Rueckfall) -- der Warmstart re-seedet damit nur noch beim ersten
+			// Besuch; unter PEMA x SATGATE baut der Filter jetzt ab dem ersten Rueckfall Historie auf
+			// (Feld im PEMA-Arm NICHT bitgleich zum Vor-Schluss-Stand; PEMA ist widerlegter Legacy-Arm).
 			fac_pu[e]=Pvx; fac_pu[e+1ul]=Pvy; fac_pu[e+2ul]=Pvz;
 			fac_pu[e+3ul]=uxn; fac_pu[e+4ul]=uyn; fac_pu[e+5ul]=uzn;
 		} else {
@@ -2197,7 +2198,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	if(!rueckfall&&(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut)) { if(t%100ul==0ul) atomic_inc(&hits[10]); rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
 )+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
-	if((s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme
+	if(!rueckfall&&(s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme (nicht an Rueckfallzellen zaehlen -- Pruefbefund 4a)
 	s1=s1c; s2=s2c;
 )+"#endif"+R( // FACETTEN_SATGATE
 	// 3x3: sn aus den GEKLEMMTEN s1/s2 (Normal-Nullung haelt auch bei Tangentialklemme, Gl. 23);

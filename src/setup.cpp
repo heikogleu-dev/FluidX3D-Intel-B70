@@ -2974,6 +2974,7 @@ static void main_setup_fahrzeug() {
 // Fehler im Aufbau. [selbst nachgelesen 2026-08-08]
 // =============================================================================================
 static void main_setup_fahrzeug_dd() {
+	bool nahfeld_satgate = false; // SATGATE-Zustand der NAHFELD-Domaene (Funktionsscope; gesetzt im Fein-Block, gelesen vom Rueckfall-Detektor am Ende)
 	// ---------------------------------------------------------------- Physik
 	const float si_u      = 30.0f;
 	const float si_rho    = 1.225f;
@@ -3180,6 +3181,7 @@ static void main_setup_fahrzeug_dd() {
 	  LBM_Domain::s_fac_diagz = -1l;
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im dd-Fall NICHT verdrahtet -- Ketten-Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u; LBM_Domain::s_fac_elibb = false; LBM_Domain::s_fac_qmin = 0.1f; LBM_Domain::s_fac_lsq = false; LBM_Domain::s_fac_quergate = false; // Statik-Symmetrie (H1)
+	nahfeld_satgate = LBM_Domain::s_fac_satgate; // ★ Pruefbefund 5a (27.08.): das Static wird unten fuer lbm_c ueberschrieben -- der Nahfeld-Detektor braucht DIESEN Zustand
 	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle; seit Buchungsschluss 27.08. buchen Rueckfaelle P-only, Slot 69).");
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: als Messarm wertlos (IR3-Audit).");
@@ -5553,7 +5555,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Nahfeld"); }
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); }
 		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
 			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
 			else if((ulong)df->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");
