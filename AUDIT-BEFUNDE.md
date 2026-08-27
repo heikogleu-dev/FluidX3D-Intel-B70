@@ -3580,3 +3580,40 @@ WAS ZUR NACHLAUFWIRKUNG BELEGT IST UND WAS NICHT:
   0,63 L bei 8 mm. Kriterium: bewegt sich cd_druck_rest um mehr als die Block-SEM, ist der
   Nachlauf im Feingitter relevant und darf NICHT fuer 3,75 mm geopfert werden; bleibt er darunter,
   ist der Weg zu 3,75 mm frei.
+
+### B18 -- ZIELBOX MIT 0,5-L-NACHLAUF: 3,75 mm geht NICHT ganz auf (27.08. abends)
+Heiko: Nachlauf auf 0,5 L kuerzen (der Wake lebt ohnehin im Fernfeld), dafuer y auf 1000 und
+z+ auf 1200 mm. "Waere dann doch fuer 3,75 mm das Optimum auf Dual-B70 oder?"
+
+WUNSCHBOX x- 500 / y+- 1000 / z+ 1200 / x+ 0,5 L = 2224 mm:
+  3,75 mm  1913 x 1029 x 645 = 1269,7M  66.597 MB  102,0 % je Karte  -> ZU GROSS, auch physisch
+  4,00 mm  1793 x  965 x 605 = 1046,8M  54.907 MB   84,1 % je Karte  -> PASST, Ist 500/1004/1208/2220
+=> Die Antwort auf die Frage ist NEIN: bei 3,75 mm passt die Wunschbox nicht. Die groesste
+   3,75-mm-Box im Budget hat y 958 und z+ 952 mm (1913 x 1005 x 577 = 1109,3M, 58.186 MB, 89,1 %).
+
+DIE EIGENTLICHE WAHL, beide mit x- 500 und x+ 0,5 L:
+  4,00 mm: y 1004, z+ 1208 mm | 1046,8M | 84,1 % Auslastung | Zeitschritte wie heute
+  3,75 mm: y  958, z+  952 mm | 1109,3M | 89,1 % Auslastung | +6,7 % Zeitschritte
+  Der Unterschied ist also NICHT "mehr Details gegen nichts", sondern 6,7 % feineres Gitter gegen
+  256 mm weniger z+ und 5 Prozentpunkte weniger VRAM-Puffer.
+
+WAS 3,75 mm AN DER WAND WIRKLICH BRINGT -- gemessen, nicht geschaetzt:
+  yplus_facetten.csv des 4-mm-Laufs (2.110.775 Facetten): y+ Median 59,4, q10 25,1, q90 137,0.
+  y+ skaliert linear mit dx, also Median 59,4 -> 55,7 bei 3,75 mm. BEIDE liegen mitten im
+  Wandfunktionsbereich (30 < y+ < 300) -- kein Regimewechsel, keine Aufloesung der viskosen
+  Unterschicht. Der Gewinn von 3,75 mm liegt in der GEOMETRIEAUFLOESUNG (Kanten, Spalte,
+  Anbauteile), nicht in der Wandbehandlung.
+
+EINORDNUNG gegen den gemessenen Bedarf (1 m/s, f4_wandfrei_v2): y 384/512, z+ 640 mm.
+  Beide Varianten liegen weit darueber -- 4,00 mm mit z+ 1208 = 1,9-fach, 3,75 mm mit 952 = 1,5-fach.
+  Die z+-Kuerzung ist also nach dem Kriterium unbedenklich; sie kostet Reserve, nicht Substanz.
+
+EMPFEHLUNG: 4,00 mm mit der vollen Wunschbox. Gruende: (1) die Box passt komplett, (2) 84,1 %
+lassen Puffer fuer den NICHT gemessenen Halo-Speicher der Domaenenzerlegung -- bei 89,1 % ist der
+Puffer duenn, (3) y+ aendert sich kaum, (4) 6,7 % lineare Verfeinerung ist wenig gegen 21 % weniger
+z+. Das ist eine Empfehlung, keine Feststellung -- wer die Geometrieaufloesung hoeher gewichtet als
+den Rand, entscheidet anders, und beide Varianten sind durchgerechnet.
+
+VORAUSSETZUNG FUER BEIDE: der 0,5-L-Nachlauf ist bisher NUR ueber die Geschwindigkeit belegt.
+Der 8-mm-A/B dazu liegt in logs/n_wake_serie.txt (drei Arme 0,45 / 0,63 / 0,81 L, eine Variable
+CFD_NEAR_LX). Heiko hat ihn ausdruecklich als 8-mm-Test bestellt -- 4 mm waere zu teuer.
