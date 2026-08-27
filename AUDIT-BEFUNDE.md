@@ -3399,3 +3399,47 @@ FOLGE FUER DIE HEADLINE-ZAHLEN: Cd 0,8052 steht unter Vorbehalt -- rund 0,11 dav
 plausibel Artefakt-Blockage, nicht Modellfehler. Cz -1,1800 ebenfalls, mit unklarem Vorzeichen
 der Korrektur. Beide bleiben als GEMESSENE Werte des Laufs gueltig; was sie ueber die Physik
 sagen, haengt an der Klaerung der Einlassstoerung (B10/B12).
+
+### B15 -- BOX-UMSCHICHTUNG festgelegt (Heiko-Entscheid 27.08. abends): z+ -64 mm, y +64 mm je Seite
+Heiko: "nur z+ 72 mm herabsetzen und entsprechend y-/y+ verbreitern; wir haben noch VRAM-Reserve,
+nimm 0,5 GB davon und gib die auch an y."
+
+RASTERBEDINGUNGEN (setup.cpp:3055-3096, Fassung ce9c6a3) -- der Grund, warum 72 mm nicht geht:
+  Die Nahfeld-Masse sind ans Grobgitter gebunden: fN = (ce-1)*ratio+1, ratio 4, dx_c 16 mm.
+  z ist damit nur in 16-mm-Schritten aenderbar; 72 mm sind 4,5 Grobzellen. Gewaehlt: 64 mm (4 GZ),
+  weil es z+ mehr Reserve laesst als 80 mm (668 gegen 652 mm bei Bedarf 640).
+  In y verlangt setup.cpp:3088 zusaetzlich GERADE cey (Symmetrie um die Mittelebene, sonst waere
+  die Box unsymmetrisch -- "ein stiller Fehler in genau der Groesse, die hier am empfindlichsten
+  ist"). y aendert sich daher in Schritten von 2 GZ = 16 mm je Seite.
+
+VRAM (aus dem Lauf-Log, nicht geschaetzt): B70 hat 32.655 MB, belegt waren 29.318 MB fuer
+508.701.465 Zellen = 60,4 B/Zelle im Mittel (inkl. Facetten 610,8 MB Index + 80 MB Geometrie und
+gesparter F-BBox). Marginal fuer neue FLUID-Zellen unter FP16C: 19 DDF x 2 + flags 1 + u 12 +
+rho 4 = 55 B. Heikos 512 MB erlauben damit +9,76 Mio Zellen, Obergrenze 518,5 Mio.
+
+FESTGELEGT:
+  CFD_NEAR_LZ 1.9360 -> 1.8720   cez 122 -> 118, fNz 485 -> 469, z+ 732 -> 668 mm
+  CFD_NEAR_LY 2.4800 -> 2.6080   cey 156 -> 164, fNy 621 -> 653, y  316/320 -> 380/384 mm
+  Gitter 1689 x 653 x 469 = 517,3 Mio Zellen (+1,68 %), VRAM ~29.767 MB (+449 MB von 512 erlaubt).
+  Damit ist y- (Bedarf 384 mm) getroffen, y+ (Bedarf 512 mm) nicht -- der Rest braucht Dual-B70.
+  Alternative, falls mehr y gewuenscht: cez 117 + cey 166 -> y 396/400 mm, z+ 652 mm,
+  29.865 MB (12 MB ueber Heikos Budget, aber 2,8 GB unter dem physischen Limit).
+
+NEBENBEDINGUNGEN geprueft:
+  - N2F-Band-Abstand z+ faellt 39 -> 35 Grobzellen (Soll >= 2, komfortabel >= 4) -- unkritisch;
+    y+- steigt von 13 GZ, weil die Entnahmeebene weiter vom Koerper wegrueckt.
+  - Fernfeld umschliesst die neue Box: NF_OY + cey = 158 + 164 = 322 <= cNy 480.
+  - Laufzeit steigt mit der Zellzahl um rund 1,7 % (Index 10,958 -> ~11,14 s-Wand je s-Phys).
+  - x bleibt unveraendert (die 144 mm Spielraum in x- wurden NICHT genommen).
+
+VORBEREITET, NICHT GESTARTET: logs/f5_box_serie.txt enthaelt einen 8-mm-FORMTEST (Minuten statt
+90 min). Er beweist, dass Kopplungspruefung ("Deckungspunkte, Fahrzeugfreiheit und Weltlage aller
+fuenf Ebenen in Ordnung") und Symmetriebedingung mit den neuen Massen durchgehen, bevor 4 mm
+laeuft. Die 4-mm-Zeile liegt daneben in logs/f5_box_serie.txt.4mm und braucht Heikos Go.
+
+ZWEI VORBEHALTE, die bei der Auswertung gelten:
+  (1) Die Bedarfszahlen stehen auf EINEM sauberen Lauf; f4_std_diff2 verlangt z+ 1152 mm, danach
+      waere schon 732 zu klein. Heiko hat das entschieden -- der Vorbehalt bleibt protokolliert.
+  (2) Solange die Einlassstoerung (B10/B12) nicht geklaert ist, misst ein Vergleich gegen die
+      Baseline BOX UND STOERUNG gemischt. Ein sauberes Box-A/B verlangt zwei Laeufe mit
+      demselben Stoerungszustand.
