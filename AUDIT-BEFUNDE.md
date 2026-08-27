@@ -2999,3 +2999,29 @@ konstruktiv 67=68=0 (qb=127-Kurzschluss VOR beruehrt -- konsistent zur Bitgleich
 (2) Stale Ansage lbm.cpp ("Reibungs-Cd kein Ist") auf B3/MLS-Stand korrigiert.
 (3) lbm.hpp Slotzahl-Kommentar 66->69. OFFEN als NOTIZ (Nach-4mm-Liste): dritter
 scratch_gate-Arm ohne F_NUR_SOLID; Repo-Root-Datei "0.5" aufraeumen.
+
+## ABNAHME f4_vollumfang_mls (4mm-VOLLUMFANG, 27.08. 06:38-08:10, Commit 94a802c, SAUBER bis t=0,5s)
+
+ERSTER 4mm-Lauf mit der kompletten validierten Kette (iMEM + ELIBB/MLS + Rueckkopplungsbaender).
+KERNERGEBNIS (cd_facetten.csv, Fenster 0,2-0,5s, n=300, Block-SEM 8):
+  cd_druck_rest = 0,8052 +- 0,0101   (OF13 0,599 -> +34,4 %)
+  cz_druck_rest = -1,1800 +- 0,0159  (OF13 -1,301 -> -9,3 % = 91 % des Referenz-Abtriebs)
+ERSTMALS ECHTER ABTRIEB IM FORK. Ketten-Beitrag eindeutig: forces.csv-Roh-Cz -0,5789 gegen
+f4_wandfrei_v2 (identisch ohne Kette) -0,1341 = 15 Block-SEM; Roh-Cd unveraendert (9,8717 vs
+9,8678). KOSTEN DER KETTE: NULL -- Wanduhr 91,3 min vs 92 min, Index 10.958 s-Wand/s-Physik
+(Gesamtwanduhr/T_END; steady aus Schrittspalte 10.638), VRAM 29.318 MB (+44 MB, Audit-Prognose
+29.321 auf 3 MB getroffen). WIRKPFADE: ELIBB[67] 894.120.500, MLS[68] 1.681.557.000, Facetten
+Ist=Soll exakt, fac_q 10.869.730 Links auf 2.620.462 Facetten (100 % Remesh, 0 Rueckfaelle).
+WAECHTER: Kipp still, 0 Error, GT-Reset-Waechter ohne Ausloesung, Census 0. Profiler (fdinfo
+180s): B70 93,9 % @ 2512 MHz, iGPU 91,0 %, CONCURRENT 96,1 %. VTK 8 Felddateien (150/300/450/
+500 ms nah+fern); y-Slice-Satz nachtraeglich aus den Dumps erzeugt (werkzeuge/vtk_yslice.py,
+Format pixelgleich render_yslice) -- Anlass: CFD_SLICE_DT=0 hatte MEHR abgeschaltet als die
+Interface-Slices (Sonde + normale y-Slices mit) -> Kadenzumbau (naechster Eintrag).
+KORREKTUR EIGENER MELDUNGEN WAEHREND DES LAUFS: dt_grob ist 40 us (Log: "Laufzeit 0.500 s =
+12500 grobe x 4 feine Schritte"), NICHT 56 us -- die zwischenzeitlich gemeldete Schritt-Tabelle
+(0,7s/12501) und der "Index 7.601" waren falsch (Basis war die unbelegte 0,7s-Annahme);
+korrekt: 500 ms = 12.500 grobe = 50.000 feine Schritte, Index wie oben. forces.csv/cd_facetten
+werden GEPUFFERT geschrieben -- Live-Fortschritt NUR aus der Log-Schrittspalte lesen
+(Werkzeugfalle, in v2-werkzeugfallen notiert).
+OFFEN danach: Cd +34 % (26-Grad-Klassen-Reibungspfad = Baustein 2), 5 deklarierte Interims,
+y-Interface-Verbreiterung nur via Dual-B70.

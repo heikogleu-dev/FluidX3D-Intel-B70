@@ -1,5 +1,36 @@
 # FluidX3D — Intel Arc Pro B70: Vehicle Aerodynamics (LBM-WMLES vs. OpenFOAM)
 
+**Performance & results at a glance** *(all numbers measured on this rig; production run
+`f4_vollumfang_mls`, 2026-08-27, commit 94a802c — 508.7 M fine cells @ 4 mm on the B70 +
+203 M coarse cells @ 16 mm on the iGPU, 50 000 fine steps = 0.5 s physical, wall clock 91 min)*
+
+| Metric | Value | Context |
+|---|---|---|
+| **Cd (artefact-corrected, window mean)** | **0.805 ± 0.010** | OpenFOAM 13 reference: 0.599 |
+| **Cz (artefact-corrected, window mean)** | **−1.180 ± 0.016** | OF13: −1.301 → **91 % of the reference downforce** |
+| **Performance index** | **10 958 s_wall/s_phys** | the full wall-model chain costs **zero** (91.3 min vs. 92 min without it) |
+| **B70 kernel (8 mm screening rung)** | **1 534 MLUPs / 189 GB/s** | **+63 %** vs. the pre-optimisation era (939 MLUPs) |
+| **Dual-GPU overlap** | **CONCURRENT 96.1 %** | B70 93.9 % busy @ 2.5 GHz mean, iGPU 91.0 % (fdinfo profiler, 180 s) |
+| **VRAM (4 mm production)** | 29 318 / 32 655 MB | predicted by the pre-flight audit to within 3 MB |
+| Single-domain B70 baseline | ≈ 5 464 MLUPS | 96–100 % of peak bandwidth (upstream solver quality) |
+
+![f4_vollumfang_mls — near field at 500 ms](docs/f4_vollumfang_nah_500ms.png)
+*First full-configuration 4 mm production run (`f4_vollumfang_mls`): Toyota MR2 at 30 m/s
+(Re ≈ 9 M), near-field |u| at t = 500 ms (15→45 m/s blue→white→red, black = solid). Engine bay
+with radiator fins resolved, rear wing attached, full turbulent wake — and the corrected force
+window of this run is the table above: **the first time this fork produces real downforce.***
+
+![f4_vollumfang_mls vs OpenFOAM 13 — velocity difference](docs/f4_vollumfang_diff_of13_500ms.png)
+***Today's run against the OpenFOAM 13 reference** on the Y = 0.025 m slice — same convention as
+the V1 header image below: ΔU = |u|_OF13 − |u|_FX, red = OF13 faster, blue = OF13 slower / FX
+over-accelerated, ±15 m/s, black = solid. The over-roof over-acceleration that defined V1 is
+reduced to a pale shadow; the red rim hugging the body is the boundary layer (the wall model
+brakes slightly harder than the RANS reference), and the mottled wake is the snapshot-vs-mean
+caveat (FX is an instantaneous LES field, OF13 a RANS mean — resolved eddies against a smooth
+average; the mean-flow regions are the meaningful comparison). Field statistics of this diff
+(670 217 cells, alignment per the established frame mapping x_v2 = x_OF13 + 2.2063):
+**RMS 5.1 m/s, median −2.2 m/s, only 1.8 % of cells clip the ±15 scale.***
+
 A fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D) tuned for **vehicle
 aerodynamics on a single Intel Arc Pro B70 (Battlemage) + Arrow-Lake iGPU**. The base solver runs
 at **96–100 % of peak memory bandwidth (≈ 5 464 MLUPS)** on the B70 via OpenCL. On top of that this
@@ -40,50 +71,71 @@ rules ("Iron Rules"):
 5. **Measure on data, never on pictures** — field CSVs and probes, never rendered images. A picture
    shows what the renderer made of it, not what was computed.
 
-## What is implemented (2026-08-21)
+## What is implemented (2026-08-27)
 
 - **Dual-domain coupling fine↔coarse** (B70 + iGPU, real parallel scheduling, coupling share ~1 %),
   cubic boundary lift, bit-exact coverage-point verification chain, interface instrumentation.
 - **Cell-based facet wall model (iMEM)** — TLS surface fit across the voxel staircase, Spalding
   target, 3×3 momentum coupling, saturation gate, mass correction. Fully action-path proven
   (1.3 billion events is=should exact, Δm within band).
+- **ELIBB link-wise geometric boundary (q-blende)** on top of iMEM: a Surface-Nets remesh of the
+  voxel staircase supplies per-link wall distances q (10.9 M cut links on 2.62 M facets at 4 mm,
+  zero fallbacks); sub-cell wall placement replaces stair-step bounce-back. The q > ½ branch is the
+  **MLS chi-blend** — χ = (2q−1)/(τ₀+½), u_bf = (1−3/(2q))·u — verified term-by-term against the
+  NASA/ICASE prints (the form is from *J. Comput. Phys. 161 (2000) 680* / *Phys. Rev. E 65, 041203
+  (2002)*, **not** the 1999 paper everyone cites), spectrally stable to ω → 2, q = 1; the
+  predecessor branch's wall-ghost-mode instability was derived analytically
+  (λ_krit = 4(2−ω)/(ω−1)) and is documented in `GRENZSCHICHT-SGS-PLAN.md`. Both branches carry
+  their own action-path counters (this run: 894 M / 1.68 G firings, is=should exact).
 - **Floor / inlet physics** — moving-floor equilibrium reset (cures the measured staggered mode of
   the far-field floor), inlet reset + damping zone (freestream streaks −99 %), tyre-guard force
   measure (the floor imprint produced ~−0.7 of **artificial** downforce — quantified and eliminated).
-- **Measurement instruments in the code** — force decomposition wheel-contact/body, underbody /
+- **Measurement instruments in the code** — force decomposition wheel-contact/body with a moving
+  z-band artefact split (the corrected `cd/cz_druck_rest` in the headline table), underbody /
   floor / inlet column probes, interface pressure, displacement census, block-SEM statistics,
   near-vs-far difference slice (`CFD_DIFF_SCHNITT`) and a world-positioned VTK field export of both
-  domains (`CFD_VTK_ENDE`).
+  domains (`CFD_VTK_ENDE` + timed dumps `CFD_VTK_DT`); post-hoc y-slice rendering from the VTK
+  dumps (`werkzeuge/vtk_yslice.py`, pixel-identical to the in-run renderer).
 - **Performance** — GPU-side force reduction instead of 2.5 GB PCIe transfers (force window
-  36 % → 1.3 %), ~24 % faster than V1 at considerably more physics; measured phase profiles per run.
+  36 % → 1.3 %); IGC unroll-budget fix (a grown kernel loop had silently gone memory-resident:
+  private_size 4 256 B → 0, a measured **100×** on the affected arm), store_f rematerialisation
+  and an F-buffer null-read gate (+3.7 % kernel); an offline ocloc **scratch/spill gate**
+  (`werkzeuge/scratch_gate/`) fails any commit that regresses private/spill memory to zero-cost.
 
-## Where we stand
+## Where we stand (2026-08-27, run `f4_vollumfang_mls`)
 
-On the honest (artefact-corrected) 4 mm base: **Cd 0.84 / Cz −0.58** against OF13 0.599 / −1.301.
-The wall model contributes −0.11 Cd; the floor fix brought the underbody from "dead" onto the OF13
-velocity profile. The remaining Cz gap is localised: **boundary-layer separation too early at the
-roof and at the diffuser kick** (resolution/SGS dominated — the OF13 reference barely separates
-there and draws ⅔ of its downforce from the underbody, ⅓ from the rear wing, which in our solution
-sits in the separated dead water).
+First 4 mm production run with the **full validated chain** (iMEM + ELIBB/MLS + near→far feedback
+bands): artefact-corrected window means **Cd 0.805 ± 0.010 / Cz −1.180 ± 0.016** against
+OF13 0.599 / −1.301. The chain's Cz contribution is unambiguous — the identical run without it
+(previous day, `f4_wandfrei_v2`) measured a raw window Cz of −0.134 vs. −0.579 with the chain,
+a 15-block-SEM separation; the corrected Cz reaches **91 % of the reference downforce**. And it is
+free: 91.3 min wall clock vs. 92 min without the chain, VRAM +47 MB.
 
-Next levers, planned and documented ready-to-build: van-Driest SGS wall damping (ν_t/ν ≈ 290
-laminarises the near-wall region), a roof-line separation probe, closing the facet coverage gaps.
-Still open: residual streaks at the near-field inlet (an eigen-response of the coupling boundary)
-and the right form of a **near→far feedback** — first volume and shell variants were built and
-proven correct, but rejected on physics: they distorted the near flow.
+What remains, in order of size:
+- **Cd is +34 % over the reference** (0.805 vs. 0.599), trending down within the run. The
+  dominant known contributor is the friction path of coherent shallow-staircase surfaces
+  (the "26° class"): its momentum bookkeeping misses its target by design of the staircase, a
+  standing finding across the whole comparison chain, attributed — not caused by the wall formula
+  (at 45° the path closes to within 13 %). The fix chain (booking closure → m6+m7 stair cluster →
+  link-count-aware sampling factor) is derived and queued in `GRENZSCHICHT-SGS-PLAN.md`.
+- **Declared interims** in the wall chain (each with its replacement condition documented in-code):
+  τ₀ instead of local τ_eff in the MLS blend, tangential projection of the boundary velocity,
+  grazing-link guard κ = 0.4, q-floor 0.1, sampling factor 1.5.
+- **Near-field y-interfaces sit too close** for the wheel wake (decided 2026-08-26): widening is
+  the first use case for the dual-B70 halo + iGPU plan — a single 32 GB card cannot hold the wider
+  near box at 4 mm (35.3 GB needed).
 
-Measured 2026-08-21 on the 4 mm production run, from the near-vs-far difference field
-(`schnitt_diff_letzter.csv`, 661,281 evaluable cells at t = 495 ms): the **forward coupling is
-sound** — RMS |Δu| is 0.36–0.95 m/s in the inlet band ahead of the nose, 1–3 % of the freestream.
-The deviation is generated **at the body** (the boundary-layer rim the 16 mm far field cannot
-resolve) and grows monotonically downstream to RMS 8.56 m/s behind the tail. The next build step
-is planned in `BAUPLAN-KOPPLUNG.md`.
+The coupling itself is sound and measured (forward RMS |Δu| 1–3 % of freestream ahead of the nose;
+deviation is generated at the body rim the 16 mm far field cannot resolve). Full evidence:
+`AUDIT-BEFUNDE.md` (leading record), `GRENZSCHICHT-SGS-PLAN.md` (wall-model chain incl. the
+K1'-instability derivation and MLS acceptance ladder S0–S4).
 
 ## The evidence chain
 
 | File | Purpose |
 |---|---|
 | **AUDIT-BEFUNDE.md** | Chronological findings/acceptance record of all audits and runs — **leading** |
+| **GRENZSCHICHT-SGS-PLAN.md** | Wall-model chain: K1' instability derivation, MLS replacement + acceptance ladder S0–S4, 26°-class friction-path finding |
 | **FACETTEN.md** | Entry point for the facet wall model: architecture, full switch reference, acceptances |
 | **WANDMODELL.md** | Wall-model / channel state of knowledge: rough-wall finding chain, WFB result |
 | **DOPPEL-DOMAENE.md** | Two-domain case: geometry, coupling, deliberate limits |
@@ -248,16 +300,19 @@ it out and watch `journalctl -k --since "1 min ago" | grep xe`.
 
 - **Single-domain B70:** ≈ 5 464 MLUPS at 96–100 % of peak bandwidth (FluidX3D's class-leading
   efficiency; ~4× an RTX 3060 Ti).
-- **Dual-domain (V2, measured 2026-08-21 over 384 phase reports of a 4 mm production run):**
-  **B70-bound.** The coarse far step runs asynchronously on the iGPU and hides completely beneath
-  the fine step — waiting for it plus extracting the coupling planes costs **0.3 %** of the outer
-  step (~1.3 ms of 424 ms). The split is fine step **97.7 %**, forces 1.1 %, coarse→fine coupling
-  0.9 %, far wait+extract 0.3 %, slices 0.0 %. Performance index 10 609 s_wall/s_phys (median).
+- **Dual-domain (V2, measured 2026-08-27 on the full-chain 4 mm production run):**
+  **Performance index 10 958 s_wall/s_phys** (total wall / T_END; steady-state from the step
+  counter: 10 638) — parity with the same run **without** the wall-model chain (92 min, index
+  ~10.7–10.8 k): iMEM + ELIBB/MLS + remesh q-map cost **zero** at the production point.
+  fdinfo profiler (180 s window mid-run): B70 CCS-busy **93.9 %** @ 2 512 MHz mean, iGPU
+  compute-busy **91.0 %**, **CONCURRENT 96.1 %** — both GPUs genuinely overlap; the far step hides
+  beneath the fine step. Phase split (previous-day run, same architecture): fine step 97.7 %,
+  forces 1.1 %, coupling 0.9 %, far wait+extract 0.3 %.
   *This reverses V1's profile, where the iGPU coarse step was the saturated bottleneck at
-  ~720 ms/outer. Both generations run the same far grid size (~203 M cells at 16 mm), so the change
-  is in what the far domain computes, not how much — in V2 it is deliberately plain bounce-back
-  while the facet wall model runs only in the near field. The share of that difference has not been
-  measured; only the resulting profile above has.* Measured index and phase profile per run: [LEISTUNG.md](LEISTUNG.md).
+  ~720 ms/outer.* Measured index and phase profile per run: [LEISTUNG.md](LEISTUNG.md).
+- **8 mm screening rung (B70 kernel, identical env A/B chain):** 939 MLUPs (pre-optimisation era)
+  → 1 478 (IGC unroll fix) → **1 534** (store_f remat +3.0 %, F-gate +0.7 %) = **+63 %**. The
+  ELIBB arm and the standard arm are within 1 % of each other — the geometric boundary is free.
 - **Slice cost at 4 mm:** each slice hook transfers ~11.3 GB over PCIe (u + rho + flags of the fine
   domain, u + flags of the coarse one). In the 38 of 384 report windows that contain a slice the
   outer step rises from 422.6 to 474.4 ms (+12 %); across the whole run that is ~1 %. Worth knowing
