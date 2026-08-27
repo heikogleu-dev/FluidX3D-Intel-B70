@@ -3648,3 +3648,58 @@ GEGENRECHNUNG 4,00 mm mit DERSELBEN Box: 1769 x 917 x 577 = 936,0M, 49.095 MB, 7
   75 % und einer groesseren. Beide sind durchgerechnet; die Entscheidung haengt daran, ob
   Geometrieaufloesung oder Randabstand hoeher gewichtet wird -- und am Nachlauf-A/B, der die
   0,5 L ueberhaupt erst rechtfertigen muss (logs/n_wake_serie.txt).
+
+### B20 -- WOHER DIE 64er-REGEL KOMMT, und warum sie fuer die B70 NIE geprueft wurde (27.08. abends)
+Heiko: "fuer die iGPU mussten wir x gesamt immer durch 64 teilbar machen. Hat das etwas mit der
+Speichernutzung zu tun, profitiert die B70 vielleicht auch davon? Und was ist mit y und z?"
+
+HERKUNFT, nachgelesen. FASSUNG BEACHTEN: die Messung stammt aus dem V1-Projekt
+/home/heiko/CFD/FluidX3D, knowledge/hardware.md, Eintrag 2026-06-15 -- ANDERES Projekt, aber
+DIESELBE Hardware. In V2 ist sie nachgetragen in BAUPLAN-KOPPLUNG.md:299.
+  A/B mit EINER Variablen, gleiche Sitzung, auf der Xe-iGPU:
+    Nx  937 (prim) = 3,79 ns je Zelle, effektive Bandbreite ~40 GB/s
+    Nx 1024 (2^10) = 3,20 ns je Zelle, ~48 GB/s
+    -> 1024 ist 8 % SCHNELLER, obwohl es 9 % MEHR Zellen sind.
+  Deutung dort: 937 erzeugt Partition-Camping auf den System-RAM-Kanaelen der iGPU; 1024 ist
+  memory-aligned. Regel seither: Coarse-Nx immer durch 64 teilbar, nie prim oder ungerade.
+  Heute erfuellt: cNx = 768 = 12 x 64.
+
+WAS DIE V1-NOTIZ AUSSERDEM SAGT -- und was heute nicht mehr gilt:
+  Woertlich: "Die Fine-X-Laenge (1789/1873) ist perf-irrelevant (versteckt)" und "Lever sitzt auf
+  der iGPU, NICHT auf der Fine". Der Grund steht daneben: die iGPU war damals mit 100 % Duty-Cycle
+  der saturierte Engpass, die B70-Fine verschwand darunter. Deshalb wurde das Nahfeld-Alignment
+  NIE gemessen -- es war schlicht egal.
+  HEUTE IST DAS ANDERS: der Profiler des f4-Laufs meldet B70 93,9 % / iGPU 91,0 % / concurrent
+  96,1 % -- beide nahe an der Saettigung. Und in der Dual-B70-Rechnung (B16) kippt es vollends:
+  Nahfeld 0,466 ms gegen Fernfeld 0,286 ms je grobem Schritt. Das Nahfeld wird der Engpass, und
+  damit wird sein Alignment zum ersten Mal relevant.
+
+DER STRUKTURELLE HAKEN (setup.cpp:3096): fNx = (cex-1)*ratio+1 ist bei geradem ratio IMMER
+UNGERADE. 1689 heute, 1885 in der 3,75-mm-Planung, 1793 / 1913 in den anderen Varianten -- keine
+davon ist durch 64 teilbar, keine kann es sein. Das Nahfeld kann die Regel nicht erfuellen,
+solange die Deckungspunkt-Konvention gilt (und die ist physikalisch begruendet, setup.cpp:3079).
+Waere der Effekt auf der B70 so gross wie auf der iGPU, laege dort ein zweistelliger Perf-Hebel
+brach -- er braeuchte aber einen Layout-Umbau (Padding des Speicher-Nx gegen das Gitter-Nx),
+keine Env-Aenderung.
+
+ZU y UND z, theoretisch: die Threads laufen in x (n = x + Nx*(y + Ny*z)), also entscheidet Nx
+ueber Coalescing und Workgroup-Ausrichtung. Ny und Nz beeinflussen das nicht direkt; sie gehen
+nur in die Strides Nx und Nx*Ny ein. Ist Nx durch 64 teilbar, ist Nx*Ny es automatisch auch.
+Erwartung daher: y/z zweitrangig. GEMESSEN IST DAS NICHT -- und die Gegenthese ist nicht absurd,
+denn beim klassischen Partition-Camping ist ein ungerader Stride sogar erwuenscht. Genau deshalb
+gehoert y in den Test.
+
+VORBEREITET: logs/p_align_serie.txt, fuenf Arme, je eine Variable. Pruefstand ist
+CFD_CASE=fernfeld -- ein EINZELGITTER (setup.cpp:5669 ff.) ohne Deckungskonvention, Nx frei ueber
+CFD_FAR_LX, und es laeuft ueber den Standard-Konstruktor (Zeile 5735, kein dev-Argument) auf der
+B70. Der einzige Fall im Projekt, in dem sich Nx unabhaengig variieren laesst.
+  p1_align_x1024  1024 x 480 x 552  271,3M   x aligned (16x64), Basis
+  p2_align_x1025  1025 x 480 x 552  271,6M   x +1, ungerade
+  p3_align_x1021  1021 x 480 x 552  270,5M   x prim -- der V1-Fall
+  p4_align_y512   1024 x 512 x 552  289,4M   y aligned (8x64)
+  p5_align_y481   1024 x 481 x 552  271,9M   y ungerade
+ABNAHME: ns je Zelle aus den MLUPs im Log, NICHT die Gesamtlaufzeit (die Arme haben verschiedene
+Zellzahlen). p1 gegen p2/p3 beantwortet x, p1 gegen p4/p5 beantwortet y. Kosten: rund 30 s je Arm
+bei T_END 0,02 s (500 Schritte a 271 Mio Zellen bei 4648 MLUPs), also gut zwei Minuten fuer alles.
+EIN NULLBEFUND IST HIER GENAUSO WERTVOLL wie ein Treffer: er schliesst einen teuren Layout-Umbau
+aus, der sonst als "muesste man mal machen" stehen bliebe.
