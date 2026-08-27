@@ -3025,3 +3025,26 @@ werden GEPUFFERT geschrieben -- Live-Fortschritt NUR aus der Log-Schrittspalte l
 (Werkzeugfalle, in v2-werkzeugfallen notiert).
 OFFEN danach: Cd +34 % (26-Grad-Klassen-Reibungspfad = Baustein 2), 5 deklarierte Interims,
 y-Interface-Verbreiterung nur via Dual-B70.
+
+
+## ABNAHME-EINTRAG (27.08. vormittags): Kadenz-Umbau der fahrzeug_dd-Ausgaben (Commit d0cb0b8 + Stil-Fix)
+
+AUFTRAG (Heiko): Slices+Kraft+VTK alle 5000 Near-Steps mit t + korrigierten cd/cz im Bild;
+Interface-DIFF-Slices bleiben aus (entkoppelt); VTK an derselben Kadenz mit Behalte-2-Rotation
+("nur die letzten zwei VTKs"). Plan: Planungsagent 27.08. (Befunde B1: 12,1 GB je Doppeldump
+statt 8,5; B2: CSVs flushen bereits zeilenweise -- Heikos "Minuten hinterher" war die spaete
+cd_facetten-Erstanlage + puffernde Leser, nicht der Schreiber; B3: Serienzeile trug noch
+CFD_SLICE_DT=0 und haette den naechsten Lauf wieder blind gemacht -- im selben Commit bereinigt).
+UMSETZUNG: CFD_SLICE_NEAR_STEPS (Default 5000; Legacy-Sekunden-Uhr nur bei explizitem
+CFD_SLICE_DT), Einblendung ueber den graphics.cpp-6x11-Font (Kopie, da hinter #ifdef GRAPHICS),
+CFD_VTK_JEDE + CFD_VTK_BEHALTE=2 (Enddump-Dedup, rotiert nie), Kadenz-Wirkpfadzaehler,
+Guertel-Flush, Ansagen in allen Nicht-dd-Faellen.
+HAERTEBEWEIS (8mm-Kurzlaeufe kadenz_arm_a/b, B70+iGPU, 27.08.): forces.csv UND cd_facetten.csv
+BITGLEICH zwischen Kadenz-aus und Kadenz-an (cmp) -- Physik-Nullwirkung bewiesen; Wirkpfad
+5/5 Kadenzpunkte (Ist=Soll); Slices 20..100 ms nah+fern mit Einblendung; VTK-Rotation
+verifiziert: von 5 Doppeldumps liegen exakt die letzten zwei (80/100 ms) auf Platte.
+STIL-FIX auf Heikos Sichtung: schlichte SCHWARZE Zeichen statt Balken (Sichtlauf kadenz_stil).
+HOOK-STOLPERER dokumentiert: der lauf_queue-PreToolUse-Guard blockierte einen KOMBINIERTEN
+Aufruf (Seriendatei-Anlage + Queue-Start) als Ganzes -- die Wiederholung lief gegen eine nie
+geschriebene Serie ("0 Laeufe"). Zwei Lehren: (a) Seriendatei-Anlage und Queue-Start IMMER
+getrennte Aufrufe; (b) der Guard matcht auch DOKU-Texte, die das Skript nur erwaehnen.

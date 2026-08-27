@@ -107,19 +107,15 @@ static const ulong slice_font[96] = {
 	0x000000F84210F800ull, 0x0841042041040800ull, 0x2082082082082000ull, 0x8104102104108000ull, 0x000010A840000000ull, 0x0000000000000000ull
 };
 static void zeichne_text(Image* img, const uint x0, const uint y0, const string& s, const uint skal) {
-	const uint w = (uint)s.length()*6u*skal+2u*skal, h = 11u*skal+2u*skal; // schwarzer Balken hinter dem Text
-	for(uint dy=0u; dy<h; dy++) for(uint dx=0u; dx<w; dx++) {
-		const uint px=x0+dx, py=y0+dy;
-		if(px<img->width()&&py<img->height()) img->set_color((int)px, (int)py, 0x000000);
-	}
+	// Heiko 27.08.: schlichte SCHWARZE Zeichen direkt aufs Feld, kein Balken (oben links ist Freistrom).
 	for(uint i=0u; i<(uint)s.length(); i++) {
 		const int c = (int)s[i];
 		const ulong bits = slice_font[c>=32&&c<128 ? c-32 : 0];
 		for(uint k=0u; k<64u; k++) if((bits>>(63u-k))&1ull) {
-			const uint bx = x0+skal+(i*6u+k%6u+(c=='q'?1u:0u))*skal, by = y0+skal+(k/6u)*skal;
+			const uint bx = x0+(i*6u+k%6u+(c=='q'?1u:0u))*skal, by = y0+(k/6u)*skal;
 			for(uint a=0u; a<skal; a++) for(uint b=0u; b<skal; b++) {
 				const uint px=bx+b, py=by+a;
-				if(px<img->width()&&py<img->height()) img->set_color((int)px, (int)py, 0xFFFFFF);
+				if(px<img->width()&&py<img->height()) img->set_color((int)px, (int)py, 0x000000);
 			}
 		}
 	}
@@ -5337,7 +5333,10 @@ static void main_setup_fahrzeug_dd() {
 		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben (Rotation loescht nachtraeglich, der Zaehler zaehlt GESCHRIEBENE).");
 	}
 	if(slice_ns>0ull) { // Wirkpfad der Near-Step-Kadenz (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler)
-		const ulong kad_soll = (n_outer_ist*(ulong)ratio)/slice_ns;
+		// ★ Pruefagent M1 (27.08.): Soll auf den LETZTEN GESAMPELTEN Punkt beziehen -- Kadenzpunkte
+		// feuern nur an Sample-Punkten; sonst falsch-exit(1) bei krummem slice_ns + Ende vor dem
+		// naechsten Sample-Punkt (gueltiger Kurzlauf verlor die komplette Auswertung).
+		const ulong kad_soll = ((n_outer_ist/(ulong)sample_every)*(ulong)sample_every*(ulong)ratio)/slice_ns;
 		if(kad_punkt==0ull&&kad_soll>0ull) print_error("SLICE-KADENZ war aktiv (CFD_SLICE_NEAR_STEPS="+to_string(slice_ns)+"), aber KEIN Kadenzpunkt gefeuert -- stiller No-Op.");
 		else print_info("[KADENZ] Wirkpfad: "+to_string(kad_punkt)+" Kadenzpunkte (Soll "+to_string(kad_soll)+").");
 	}
