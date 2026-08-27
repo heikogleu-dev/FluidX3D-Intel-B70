@@ -84,6 +84,48 @@ Fernfeld kostet ∝ 1/ratio⁴, und bei ratio = 4 mit den V1-Maßen braucht ein 
 0,343 s gegen 0,432 s für vier feine — das Fernfeld verschwindet also gerade noch hinter dem
 Nahfeld (79 % Auslastung). Ein größeres Fernfeld wäre der Flaschenhals.
 
+### Nachtrag 2026-08-27: iGPU über die Fallgröße und über die Gitterform vermessen
+
+Zwei Serien auf der iGPU, `CFD_CASE=fernfeld` (Einzelgitter, feste Box, nur `CFD_DX` bzw.
+`CFD_FAR_L*` variiert), je eine Variable, Census vor und nach jeder Serie.
+
+**Skalierung** (`logs/s_igpu_skala_serie.txt`, 12 Arme, `logs/s_igpu_dx*.log`):
+
+| Zellen | ns/Zelle | | Zellen | ns/Zelle |
+|---:|---:|---|---:|---:|
+| 25,6 M | 1,828 | | 117,8 M | 1,821 |
+| 47,6 M | 1,832 | | 134,0 M | 1,821 |
+| 74,4 M | 1,845 | | 175,7 M | 1,821 |
+| 92,7 M | 1,845 | | 203,5 M | 1,815 |
+| 104,4 M | 1,835 | | 278,7 M | 1,818 |
+| 110,8 M | 1,842 | | 397,4 M | 1,828 |
+
+Faktor 15,5 in der Zellzahl, **Spannweite 1,7 %** — kein Trend, kein Sprung. Insbesondere kein
+Sprung am Buffer-Limit: die iGPU meldet „Buffer Limits 4095 MB global", der DDF-Block ist unter
+FP16C 38 B je Zelle und erreicht das bei 113,0 M Zellen. Die Punkte 110,8 M (4017 MB) und
+117,8 M (4268 MB) klammern die Grenze ein und liefern 1,842 gegen 1,821 — der größere Fall ist
+minimal schneller.
+
+**Gitterform** (`logs/p_align_serie.txt`, 5 Arme): x = 1024 (aligned) 1,818 · x = 1025 1,818 ·
+x = 1021 (prim) 1,825 · y = 512 1,795 · y = 481 1,815 ns/Zelle. Spannweite 1,7 %.
+Die Regel „Coarse-Nx immer ÷64" (BAUPLAN-KOPPLUNG.md:299, aus einer V1-Messung vom 15.06.2026)
+ist damit auf dem heutigen Stack **nicht mehr messbar**.
+
+**Einordnung — und was NICHT verglichen werden darf:**
+* Gegen die V1-Coarse-Step-Messung (V1-Projekt, `knowledge/hardware.md`, 15.06.2026, **andere
+  Fassung**, gleiche Hardware, vergleichbarer Fall und Größenordnung ~207 M Zellen): dort
+  **3,20 ns/Zelle** im besten Fall gegen **1,815** heute — Faktor 1,76. Zwischen beiden liegen
+  Treiber-, Kernel- **und** Codestände; welcher Anteil woher kommt, sagt die Messung nicht.
+* Gegen den Bezugswert oben (594 MLUPs = 1,68 ns/Zelle): **nicht vergleichbar.** Der stammt vom
+  Kugelfall mit 14,26 M Zellen und TRT, diese Serie vom Fernfeldfall mit 25–397 M und SRT.
+  Der Fernfeldfall liegt durchweg bei 542–551 MLUPs; ob die Differenz an Fallgröße, Kollisions-
+  operator oder Randbedingungen liegt, ist **nicht gemessen**. Wer die 594 als Zielwert für
+  Fernfeldläufe nimmt, vergleicht zwei verschiedene Fälle.
+
+**Folge für die Box-Planung:** zwei Nebenbedingungen, die bisher als gesetzt galten — Nx-Vielfache
+und das Meiden großer Fälle auf der iGPU — kosten heute nichts und bringen nichts. Für die
+Fernfeld-Dimensionierung zählen nur noch Rechenzeit und Versperrung.
+
 ---
 
 ## Was V1 an Profiler hatte, das hier noch fehlt
