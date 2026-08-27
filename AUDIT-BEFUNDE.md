@@ -3617,3 +3617,34 @@ den Rand, entscheidet anders, und beide Varianten sind durchgerechnet.
 VORAUSSETZUNG FUER BEIDE: der 0,5-L-Nachlauf ist bisher NUR ueber die Geschwindigkeit belegt.
 Der 8-mm-A/B dazu liegt in logs/n_wake_serie.txt (drei Arme 0,45 / 0,63 / 0,81 L, eine Variable
 CFD_NEAR_LX). Heiko hat ihn ausdruecklich als 8-mm-Test bestellt -- 4 mm waere zu teuer.
+
+### B19 -- 3,75 mm bei x- 400 / y 900 / z+ 1100 / x+ 0,5 L: JA, knapp (27.08. abends)
+  Rohbox 7,072 x 3,648 x 2,308 = 59,54 m3; Grobzellen 472 x 244 x 155 @ 15 mm (cey 244 gerade,
+  Paritaet gegen cNy erfuellt); Gitter 1885 x 973 x 617 = 1.131,6 Mio Zellen.
+  Ist-Abstaende: x- 400 / y 898 / z+ 1102 / x+ 2217 mm (0,50 L) -- trifft die Vorgabe auf +-7 mm.
+  SPEICHER, mit Index-Zuschlag statt nur 55 B/Zelle:
+    Zellfelder (55 B, FP16C)                          59.355 MB
+    Index-Puffer waechst mit der F-BBox (4,00 B/Zelle,
+      Faktor (4/3,75)^3 = 1,214 gegen die 610,8 MB heute)  +130 MB
+    Facetten-Geometrie 80 MB -- wandflaechenabhaengig, unveraendert
+    SUMME 59.485 MB, je Karte 29.743 MB = 91,1 %
+  Heute sind es 29.318 MB = 89,8 %. Der Unterschied ist also 1,3 Prozentpunkte -- gemessen an
+  Heikos Vorgabe "genauso auslasten wie der aktuelle Fall" ist das erfuellt. Gegen mein
+  rechnerisches Budget (2 x 29.318 = 58.636 MB) liegt es 849 MB darueber; gegen das physische
+  Limit 65.310 MB bleiben 2.912 MB je Karte als Puffer.
+  DIESER PUFFER IST DIE OFFENE FRAGE: der Halo-Speicher der Domaenenzerlegung ist auf dieser
+  Maschine nicht gemessen. 2,9 GB je Karte klingen reichlich, sind aber ungeprueft.
+
+WER GANZ SICHER GEHEN WILL -- drei Varianten, die exakt ins Budget fallen, je 50 mm Verzicht:
+  z+ 1050 statt 1100   1885 x 973 x 605  1109,6M  58.203 MB  89,1 %  | y 898  z+ 1057  x+ 2217
+  y   850 statt 900    1885 x 949 x 617  1103,7M  57.893 MB  88,6 %  | y 853  z+ 1102  x+ 2217
+  x+ 0,45 L statt 0,5  1829 x 973 x 617  1098,0M  57.594 MB  88,2 %  | y 898  z+ 1102  x+ 2007
+  Der billigste davon ist z+ 1050: er kostet 45 mm an einem Rand, der mit 1057 mm ohnehin das
+  1,65-fache des gemessenen Bedarfs (640 mm) haelt.
+
+GEGENRECHNUNG 4,00 mm mit DERSELBEN Box: 1769 x 917 x 577 = 936,0M, 49.095 MB, 75,2 % je Karte.
+  Bei 4 mm bliebe also so viel Luft, dass man die Box noch deutlich vergroessern koennte -- das
+  ist die eigentliche Abwaegung: 3,75 mm bei 91 % Auslastung und dieser Box, oder 4,00 mm bei
+  75 % und einer groesseren. Beide sind durchgerechnet; die Entscheidung haengt daran, ob
+  Geometrieaufloesung oder Randabstand hoeher gewichtet wird -- und am Nachlauf-A/B, der die
+  0,5 L ueberhaupt erst rechtfertigen muss (logs/n_wake_serie.txt).
