@@ -85,7 +85,7 @@ rules ("Iron Rules"):
   NASA/ICASE prints (the form is from *J. Comput. Phys. 161 (2000) 680* / *Phys. Rev. E 65, 041203
   (2002)*, **not** the 1999 paper everyone cites), spectrally stable to ω → 2, q = 1; the
   predecessor branch's wall-ghost-mode instability was derived analytically
-  (λ_krit = 4(2−ω)/(ω−1)) and is documented in `GRENZSCHICHT-SGS-PLAN.md`. Both branches carry
+  (λ_krit = 4(2−ω)/(ω−1)) and recorded in the internal working notes. Both branches carry
   their own action-path counters (this run: 894 M / 1.68 G firings, is=should exact).
 - **Floor / inlet physics** — moving-floor equilibrium reset (cures the measured staggered mode of
   the far-field floor), inlet reset + damping zone (freestream streaks −99 %), tyre-guard force
@@ -191,7 +191,7 @@ What remains, in order of size:
   (the "26° class"): its momentum bookkeeping misses its target by design of the staircase, a
   standing finding across the whole comparison chain, attributed — not caused by the wall formula
   (at 45° the path closes to within 13 %). The fix chain (booking closure → m6+m7 stair cluster →
-  link-count-aware sampling factor) is derived and queued in `GRENZSCHICHT-SGS-PLAN.md`.
+  link-count-aware sampling factor) is derived and queued in the project's internal working records.
 - **Declared interims** in the wall chain (each with its replacement condition documented in-code):
   τ₀ instead of local τ_eff in the MLS blend, tangential projection of the boundary velocity,
   grazing-link guard κ = 0.4, q-floor 0.1, sampling factor 1.5.
@@ -201,23 +201,20 @@ What remains, in order of size:
 
 The coupling itself is sound and measured (forward RMS |Δu| 1–3 % of freestream ahead of the nose;
 deviation is generated at the body rim the 16 mm far field cannot resolve). Full evidence:
-`AUDIT-BEFUNDE.md` (leading record), `GRENZSCHICHT-SGS-PLAN.md` (wall-model chain incl. the
-K1'-instability derivation and MLS acceptance ladder S0–S4).
+`AUDIT-BEFUNDE.md` (leading record; the wall-model chain incl. the K1'-instability derivation
+and the MLS acceptance ladder S0–S4 is recorded there and in the internal working notes).
 
 ## The evidence chain
 
 | File | Purpose |
 |---|---|
 | **AUDIT-BEFUNDE.md** | Chronological findings/acceptance record of all audits and runs — **leading** |
-| **GRENZSCHICHT-SGS-PLAN.md** | Wall-model chain: K1' instability derivation, MLS replacement + acceptance ladder S0–S4, 26°-class friction-path finding |
 | **FACETTEN.md** | Entry point for the facet wall model: architecture, full switch reference, acceptances |
 | **WANDMODELL.md** | Wall-model / channel state of knowledge: rough-wall finding chain, WFB result |
 | **DOPPEL-DOMAENE.md** | Two-domain case: geometry, coupling, deliberate limits |
 | **EINLASS-AUSLASS.md** | Boundary-condition analysis: ringing, damping zone, SRT/TRT decision |
 | **LEISTUNG.md** | Performance index, phase profile, hardware reference values (B70 + iGPU) |
-| **OFFENE-PUNKTE.md** | Iron Rules + handover protocols (historical, with correction notes) |
 | **V1-GEGEN-V2.md** | Audit report: what the V1 fork actually did — the justification for V2 |
-| ARBEITSLISTE.md, HYGIENE-BEFUNDE.md, FACETTEN-ARCHIV.md + FACETTEN-*.md | Work lists and archive evidence chain |
 
 ---
 
