@@ -84,8 +84,48 @@ static double block_sem(const std::vector<double>& v, const uint nblocks) {
 // Ein y-Schnitt als PNG. Blau = langsam, weiss = Anstroemung, rot = schnell; Solid schwarz.
 // u und flags muessen vorher vom Device gelesen sein -- der Aufrufer entscheidet, wie oft das passiert,
 // denn es kostet einen vollen Transfer.
+// ★ KADENZ-UMBAU (Heiko 27.08.2026): Zeit + korrigierte Cd/Cz als Text im Slice-Bild.
+// Font = die 96 Druck-ASCII-Glyphen (32..127) des 6x11-Monospace-Fonts aus graphics.cpp
+// (dort hinter #ifdef GRAPHICS und damit hier nicht linkbar -- Kopie; gleiche Bitlogik
+// inkl. q-Sonderfall aus draw_text, graphics.cpp:307ff).
+static const ulong slice_font[96] = {
+	0x0000000000000000ull, 0x2082082080082000ull, 0x5145000000000000ull, 0x514F94514F945000ull, 0x21CAA870AA9C2000ull, 0x4AA50421052A9000ull,
+	0x2145085628A27400ull, 0x2082000000000000ull, 0x0842082082040800ull, 0x4081041041084000ull, 0xA9C72A0000000000ull, 0x000208F882000000ull,
+	0x0000000000041080ull, 0x000000F800000000ull, 0x00000000000C3000ull, 0x0821042104208000ull, 0x7228A28A28A27000ull, 0x0862928820820800ull,
+	0x722882108420F800ull, 0x7228823028A27000ull, 0x10C51493E1041000ull, 0xFA083C082082F000ull, 0x722820F228A27000ull, 0xF821042084104000ull,
+	0x7228A27228A27000ull, 0x7228A27820A27000ull, 0x00030C00030C0000ull, 0x00030C00030C1080ull, 0x0021084081020000ull, 0x00003E03E0000000ull,
+	0x0204081084200000ull, 0x7228842080082000ull, 0x7A1B75D75D6E81E0ull, 0x20851453E8A28800ull, 0xF228A2F228A2F000ull, 0x7228208208227000ull,
+	0xF228A28A28A2F000ull, 0xFA0820F20820F800ull, 0xFA0820F208208000ull, 0x722820B228A27000ull, 0x8A28A2FA28A28800ull, 0xF88208208208F800ull,
+	0xF820820820A27000ull, 0x8A4928C289248800ull, 0x820820820820F800ull, 0x8B6DAAAA28A28800ull, 0x8B2CAAAAA9A68800ull, 0xFA28A28A28A2F800ull,
+	0xF228A2F208208000ull, 0x7228A28A28A46800ull, 0xF228A2F289228800ull, 0x7228207020A27000ull, 0xF882082082082000ull, 0x8A28A28A28A27000ull,
+	0x8A28A25145082000ull, 0x8A28A28AAA945000ull, 0x8A25142145228800ull, 0x8A25142082082000ull, 0xF82104210420F800ull, 0x3882082082083800ull,
+	0x8204102041020800ull, 0xE08208208208E000ull, 0x2148800000000000ull, 0x000000000000F800ull, 0x2040000000000000ull, 0x0000007027A27000ull,
+	0x820820F228A2F000ull, 0x0000007A08207800ull, 0x0820827A28A27800ull, 0x000000722FA07000ull, 0x1882087082082000ull, 0x0000007A28A27827ull,
+	0x820820F228A28800ull, 0x0002002082082000ull, 0x0002002082082284ull, 0x4104104946144800ull, 0x4104104104103000ull, 0x000000F2AAAAA800ull,
+	0x000000F228A28800ull, 0x0000007228A27000ull, 0x0000007124927104ull, 0x0000007249247041ull, 0x0000007124104000ull, 0x0000003907827000ull,
+	0x2082087082081800ull, 0x0000008A28A27800ull, 0x0000008A25142000ull, 0x0000008AA7145000ull, 0x0000008942148800ull, 0x0000008A25142084ull,
+	0x000000F84210F800ull, 0x0841042041040800ull, 0x2082082082082000ull, 0x8104102104108000ull, 0x000010A840000000ull, 0x0000000000000000ull
+};
+static void zeichne_text(Image* img, const uint x0, const uint y0, const string& s, const uint skal) {
+	const uint w = (uint)s.length()*6u*skal+2u*skal, h = 11u*skal+2u*skal; // schwarzer Balken hinter dem Text
+	for(uint dy=0u; dy<h; dy++) for(uint dx=0u; dx<w; dx++) {
+		const uint px=x0+dx, py=y0+dy;
+		if(px<img->width()&&py<img->height()) img->set_color((int)px, (int)py, 0x000000);
+	}
+	for(uint i=0u; i<(uint)s.length(); i++) {
+		const int c = (int)s[i];
+		const ulong bits = slice_font[c>=32&&c<128 ? c-32 : 0];
+		for(uint k=0u; k<64u; k++) if((bits>>(63u-k))&1ull) {
+			const uint bx = x0+skal+(i*6u+k%6u+(c=='q'?1u:0u))*skal, by = y0+skal+(k/6u)*skal;
+			for(uint a=0u; a<skal; a++) for(uint b=0u; b<skal; b++) {
+				const uint px=bx+b, py=by+a;
+				if(px<img->width()&&py<img->height()) img->set_color((int)px, (int)py, 0xFFFFFF);
+			}
+		}
+	}
+}
 static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uint y_slice,
-                          const float u2si, const float u_ref_si, const int t_ms, const string& dir, const string& tag) {
+                          const float u2si, const float u_ref_si, const int t_ms, const string& dir, const string& tag, const string& info="") {
 	Image img(Nx, Nz);
 	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + (ulong)Nx*((ulong)y_slice + (ulong)Ny*(ulong)z);
@@ -110,6 +150,7 @@ static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, c
 	}
 	// ★ Heiko 2026-08-08: alle Ausgaben eines Laufs in EINEN Ordner, keine Unterordner. Der Name traegt
 	// die Zuordnung (nah/fern) und die Zeit in Millisekunden, damit die Dateien von selbst sortieren.
+	if(!info.empty()) zeichne_text(&img, 8u, 8u, info, 3u); // Kadenz-Einblendung (Heiko 27.08.): t + cd/cz_rest
 	string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
 	write_png(dir+"schnitt_"+tag+"_"+ms+"ms.png", &img);
 }
@@ -1592,6 +1633,7 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
 	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden im kanal NICHT angewandt (nur fahrzeug_dd; M3).");
+	if(getenv("CFD_SLICE_NEAR_STEPS")||getenv("CFD_VTK_JEDE")||getenv("CFD_VTK_BEHALTE")) print_warning("CFD_SLICE_NEAR_STEPS/CFD_VTK_JEDE/CFD_VTK_BEHALTE werden in diesem Fall NICHT angewandt (nur fahrzeug_dd; Kadenz-Umbau 27.08.).");
 	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im kanal NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	  if(fc>0u) print_info(string("Facettenpfad: ")+(fc==1u?"Paartausch voll (Kontrollarm)":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll (Slip-Velocity-BB)":"iMEM NULLZIEL (tau=0)")); }
@@ -2234,6 +2276,7 @@ void main_setup_kugel() {
 	  LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; // Statik-Symmetrie VOLL (Pruefagent R2 N2): Kugel = uniformes Band ohne Split
 	  if(getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("CFD_BODEN_EQ_DOWN/CFD_FERN_BODEN_EQ/CFD_FERN_EINLASS_EQ wirken an der Kugel NICHT (uniformes Band ohne Split; XL-R2).");
 	  if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden an der Kugel NICHT angewandt (nur fahrzeug_dd; M3).");
+	if(getenv("CFD_SLICE_NEAR_STEPS")||getenv("CFD_VTK_JEDE")||getenv("CFD_VTK_BEHALTE")) print_warning("CFD_SLICE_NEAR_STEPS/CFD_VTK_JEDE/CFD_VTK_BEHALTE werden in diesem Fall NICHT angewandt (nur fahrzeug_dd; Kadenz-Umbau 27.08.).");
 	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird an der Kugel NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2).");
@@ -2683,6 +2726,7 @@ static void main_setup_fahrzeug() {
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal; Fahrzeug braucht erst Relativgeschwindigkeit und Facetten).");
 	LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // C1b: Aktivierung folgt je Fall (fahrzeug/dd: Stufe 5)
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird in diesem Fall noch NICHT angewandt (aktiv: kanal, kugel, facetten_test; Fahrzeug folgt mit Stufe 5).");
+	if(getenv("CFD_SLICE_NEAR_STEPS")||getenv("CFD_VTK_JEDE")||getenv("CFD_VTK_BEHALTE")) print_warning("CFD_SLICE_NEAR_STEPS/CFD_VTK_JEDE/CFD_VTK_BEHALTE werden in diesem Fall NICHT angewandt (nur fahrzeug_dd; Kadenz-Umbau 27.08.).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im Einzelgitter-Fahrzeugfall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	{ const char* bq_[] = {"CFD_BODEN_EQ","CFD_BODEN_EQ_DOWN","CFD_BODEN_EQ_ABSTAND","CFD_FERN_BODEN_EQ","CFD_FERN_BODEN_EQ_DOWN","CFD_FERN_EINLASS_EQ","CFD_KOPPLUNG_ZEITINTERP","CFD_KOPPLUNG_GLATT"}; for(const char* b : bq_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird im Einzelgitter-Fahrzeugfall aber NICHT angewandt (fahrzeug_dd; CFD_BODEN_EQ/ABSTAND auch kugel, CFD_FERN_EINLASS_EQ auch fernfeld -- XL-R2/R3)."); }
@@ -4291,7 +4335,20 @@ static void main_setup_fahrzeug_dd() {
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
 	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
-	const float slice_dt = env_f("CFD_SLICE_DT", 0.010f); // alle 10 ms (Heiko); 0 = aus
+	// ★ KADENZ-UMBAU (Heiko 27.08.): Ausgabe-Kadenz in NEAR-STEPS statt Sekunden-Uhr. Default 5000
+	// Near-Steps (= 1250 Outer = 50 ms bei 4 mm; gitterschritt-, nicht zeitfest -- bei 8 mm 100 ms).
+	// Entscheidungstabelle (S=CFD_SLICE_NEAR_STEPS, D=CFD_SLICE_DT): S>0 -> Kadenz-Modus (Warnung,
+	// falls D auch gesetzt); S=0 UND D gesetzt -> Legacy-Uhr wortgleich; S=0 allein -> alles aus;
+	// S ungesetzt UND D gesetzt -> Legacy (Rueckwaertskompat.); beide ungesetzt -> Kadenz 5000.
+	const bool kad_s_gesetzt = getenv("CFD_SLICE_NEAR_STEPS")!=nullptr, kad_d_gesetzt = getenv("CFD_SLICE_DT")!=nullptr;
+	const ulong slice_ns = kad_s_gesetzt ? (ulong)env_u("CFD_SLICE_NEAR_STEPS", 5000u) : (kad_d_gesetzt ? 0ull : 5000ull);
+	const float slice_dt = (slice_ns==0ull&&kad_d_gesetzt) ? env_f("CFD_SLICE_DT", 0.010f) : 0.0f;
+	const bool slices_an = slice_ns>0ull||slice_dt>0.0f;
+	if(kad_s_gesetzt&&kad_d_gesetzt&&slice_ns>0ull) print_warning("CFD_SLICE_NEAR_STEPS und CFD_SLICE_DT beide gesetzt -- die Near-Step-Kadenz gewinnt, die Sekunden-Uhr ist wirkungslos.");
+	if(slice_ns>0ull) {
+		print_info("SLICE-KADENZ: alle "+to_string(slice_ns)+" Near-Steps = "+to_string(slice_ns/(ulong)ratio)+" Outer = "+to_string((float)((double)slice_ns/(double)ratio*(double)dt_c*1000.0),1u)+" ms Physik (CFD_SLICE_NEAR_STEPS; 0 = aus; Sekunden-Uhr nur noch als Legacy ueber explizites CFD_SLICE_DT).");
+		if(slice_ns%((ulong)sample_every*(ulong)ratio)!=0ull) print_warning("CFD_SLICE_NEAR_STEPS ("+to_string(slice_ns)+") ist kein Vielfaches von CFD_SAMPLE_EVERY*ratio ("+to_string((ulong)sample_every*(ulong)ratio)+") -- Ereignisse quantisieren auf den naechsten Sample-Punkt.");
+	}
 	// ★ Slice-Ebenen-Read (Perf-Hebel 2026-08-26): CFD_SLICE_GPU=1 (Default) holt je Slice-Ereignis
 	// nur die konsumierten y-Ebenen per Device-Gather (~14 MB bei 4 mm) statt der vollen Felder
 	// (~8,65 GB); =0 ist der wortgleiche Altpfad. CFD_SLICE_PRUEF=1 rechnet BEIDE Wege und druckt
@@ -4299,8 +4356,8 @@ static void main_setup_fahrzeug_dd() {
 	const bool slice_gpu   = env_u("CFD_SLICE_GPU", 1u)>0u;
 	const bool slice_pruef = env_u("CFD_SLICE_PRUEF", 0u)>0u;
 	// ★ Auditor-B B-3 (Ansage-Doktrin): der Transportweg ist Default AN und muss im Log stehen.
-	if(slice_dt>0.0f) print_info(string("Slice-Transportweg: ")+(slice_pruef?"PRUEF-Arm (beide Wege, Vergleich je Ebene)":(slice_gpu?"Ebenen-Gather (CFD_SLICE_GPU=1)":"Voll-Read-Altpfad (CFD_SLICE_GPU=0)"))+".");
-	else if(slice_pruef) print_warning("CFD_SLICE_PRUEF=1 ohne CFD_SLICE_DT>0 -- keine Slice-Ereignisse, kein Wirkpfad."); // Auditor-B B-4
+	if(slices_an) print_info(string("Slice-Transportweg: ")+(slice_pruef?"PRUEF-Arm (beide Wege, Vergleich je Ebene)":(slice_gpu?"Ebenen-Gather (CFD_SLICE_GPU=1)":"Voll-Read-Altpfad (CFD_SLICE_GPU=0)"))+".");
+	else if(slice_pruef) print_warning("CFD_SLICE_PRUEF=1 ohne aktive Slice-Kadenz -- keine Slice-Ereignisse, kein Wirkpfad."); // Auditor-B B-4
 	// ★ KIPP-WAECHTER-SCHARFSCHALTUNG (Heiko 2026-08-21, Befund aus f4_std_diff): der Waechter stand
 	// fest auf t > 0,02 s. Diese Zahl ist auf der 8-mm-Sprosse geeicht. Der Impulsstart-Transient
 	// erreicht auf BEIDEN Sprossen ein Vielfaches der Schwelle (8 mm: |Cd| 41,25 / 4 mm: 49,24, je bei
@@ -4320,12 +4377,12 @@ static void main_setup_fahrzeug_dd() {
 	// zusaetzlich an einer eigenen Kadenz. CFD_VTK_STRIDE tastet ab (2 -> 1/8 der Punkte).
 	// ★ DIFF-SCHNITT: EINMAL gelesen (env-Read-Falle -- die Konstanten tragen bis in die Zeitschleife,
 	// wie bei CFD_N2F_SCHALE/CFD_FERN_EINLASS_EQ). Vorher standen beide env-Aufrufe IM Schleifenkoerper.
-	const bool  diff_an   = env_u("CFD_DIFF_SCHNITT", 1u)>0u;
+	const bool  diff_an   = getenv("CFD_DIFF_SCHNITT") ? env_u("CFD_DIFF_SCHNITT", 1u)>0u : (slice_ns>0ull ? false : true); // Kadenz-Modus: Default AUS (Heiko 26.08. "spaeter drauf zurueck"), CFD_DIFF_SCHNITT=1 reaktiviert
 	const float diff_span = env_f("CFD_DIFF_SPAN", 15.0f);
 	if(!(diff_span>0.0f)) print_error("CFD_DIFF_SPAN muss groesser als 0 sein (Halbbreite der Diff-Farbskala in m/s; NaN faengt dieser Test mit)."); // Negativform, faengt NaN
-	if(slice_dt>0.0f&&diff_an) print_info("DIFF-SCHNITT aktiv: je Schnitt zusaetzlich |u_nah|-|u_fern| an derselben Weltposition (Fernfeld trilinear auf den Feinzellmittelpunkt), Skala +-"
+	if(slices_an&&diff_an) print_info("DIFF-SCHNITT aktiv: je Schnitt zusaetzlich |u_nah|-|u_fern| an derselben Weltposition (Fernfeld trilinear auf den Feinzellmittelpunkt), Skala +-"
 		+to_string(diff_span,1u)+" m/s (blau/weiss/rot), Solid schwarz -> schnitt_diff_<ms>ms.png + schnitt_diff_letzter.csv (Echtdaten, Iron Rule 5). Laeuft auf der CPU aus dem Hostspeicher, KEIN zusaetzlicher Device-Read.");
-	else if(slice_dt>0.0f) print_info("DIFF-SCHNITT AUS (CFD_DIFF_SCHNITT=0).");
+	else if(slices_an) print_info(string("DIFF-SCHNITT AUS (")+(slice_ns>0ull&&!getenv("CFD_DIFF_SCHNITT")?"Kadenz-Modus-Default; CFD_DIFF_SCHNITT=1 reaktiviert":"CFD_DIFF_SCHNITT=0")+").");
 	// ★ SAUBERER STOPP (Heiko 2026-08-21). V1 hatte das (/tmp/cfd_stop), V2 nicht -- beim Neuaufbau
 	// nicht mitportiert. Ohne den Mechanismus ist ein laufender Lauf nur per kill zu beenden, und
 	// dabei geht ALLES verloren, was hinter der Zeitschleife steht: der VTK-Dump am Laufende, die
@@ -4341,6 +4398,13 @@ static void main_setup_fahrzeug_dd() {
 	const float vtk_dt     = env_f("CFD_VTK_DT", 0.0f);
 	const bool  vtk_ende   = env_u("CFD_VTK_ENDE", 0u)>0u;
 	const uint  vtk_stride = max(1u, env_u("CFD_VTK_STRIDE", 1u));
+	// ★ KADENZ-UMBAU (Heiko 27.08.): VTK an der Near-Step-Kadenz (jeder JEDE-te Kadenzpunkt) mit
+	// Behalte-Rotation -- "nur die letzten zwei VTKs behalten" spart Platte (12,1 GB je Doppeldump
+	// bei 4mm/Stride 1); der Enddump (CFD_VTK_ENDE) rotiert NIE mit.
+	const uint  vtk_jede    = env_u("CFD_VTK_JEDE", 0u);    // 0 = aus; 1 = jeder Kadenzpunkt
+	const uint  vtk_behalte = env_u("CFD_VTK_BEHALTE", 2u); // 0 = alle behalten
+	if(vtk_jede>0u&&slice_ns==0ull) print_warning("CFD_VTK_JEDE>0 ohne Near-Step-Kadenz (CFD_SLICE_NEAR_STEPS=0) -- wirkungslos.");
+	if(vtk_jede>0u&&vtk_dt>0.0f) print_warning("CFD_VTK_JEDE und CFD_VTK_DT beide aktiv -- zwei VTK-Uhren gleichzeitig (Enddump-Dedup greift, Rotation auf beide).");
 	const string out_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 	create_folder(out_dir);
 	sichere_lauf(out_dir, "fahrzeug_dd");
@@ -4391,7 +4455,7 @@ static void main_setup_fahrzeug_dd() {
 	}
 	// ★ Slice-Ebenen-Read: die y-Ebenen beider Domaenen laufen ueber DENSELBEN Kopplungspuffer
 	// (Plan Variante b) -- ihre Groesse explizit einrechnen, exakt die Lektion der Bilanzebenen oben.
-	if(slice_dt>0.0f && (slice_gpu||slice_pruef)) {
+	if(slices_an && (slice_gpu||slice_pruef)) {
 		const ulong smax = max((ulong)fNx*(ulong)fNz, (ulong)cNx*(ulong)cNz);
 		if(smax>max_cp) print_info("SLICE-EBENEN-READ: y-Ebene "+to_string(smax)+" Zellen ueberschreitet die Kopplungsebenen ("+to_string(max_cp)+") -- Kopplungspuffer wird entsprechend groesser angelegt.");
 		max_cp = max(max_cp, smax);
@@ -4453,13 +4517,14 @@ static void main_setup_fahrzeug_dd() {
 	// bei t=1 ms feuern -- 11,5 GB Anfangszustands-Muell je 4mm-Lauf (f4_wandfrei_v2 belegt).
 	// Erste Marke jetzt bei vtk_dt; der Enddump (CFD_VTK_ENDE) ist davon unabhaengig.
 	float slice_next = 0.0f, vtk_next = vtk_dt;
+	ulong slice_ns_next = slice_ns, kad_punkt = 0ull; int vtk_ms_letzt = -1; std::vector<int> vtk_rotation; // Kadenz-Zustand + Behalte-Rotation (27.08.)
 	double t_si_letzt = 0.0; bool stop_angefordert = false; // gesetzt je Aussenschritt bzw. beim sauberen Stopp
 	// ★ 2026-08-22, Befund aus dem Stopp-Rauchtest: die Wirkpfad-Sollwerte unten rechneten mit
 	// n_outer, also der GEPLANTEN Schrittzahl. Nach einem sauberen Stopp ist die tatsaechliche
 	// kleiner -- ein voellig korrekter Lauf meldete sich als "Ist != Soll, Bindung defekt" und
 	// endete mit rc=1. Wer den Lauf gerettet hat, haette ihn danach fuer ungueltig gehalten.
 	ulong n_outer_ist = 0ull; // Aussenschritte, die WIRKLICH gelaufen sind (== n_outer ohne Stopp)
-	if(vtk_dt>0.0f||vtk_ende) { // Kosten VOR dem ersten Zeitschritt ansagen, nicht erst beim Schreiben
+	if(vtk_dt>0.0f||vtk_ende||(slice_ns>0ull&&vtk_jede>0u)) { // Kosten VOR dem ersten Zeitschritt ansagen, nicht erst beim Schreiben
 		auto mb = [&](const uint Nx, const uint Ny, const uint Nz) {
 			const ulong np=(ulong)((Nx+vtk_stride-1u)/vtk_stride)*(ulong)((Ny+vtk_stride-1u)/vtk_stride)*(ulong)((Nz+vtk_stride-1u)/vtk_stride);
 			return (float)(np*17ull)/1048576.0f; };
@@ -4468,7 +4533,21 @@ static void main_setup_fahrzeug_dd() {
 			+(vtk_ende?string("EIN Dump am Laufende"):string("kein Dump am Laufende"))
 			+(vtk_dt>0.0f?", zusaetzlich alle "+to_string(vtk_dt*1000.0f,0u)+" ms":"")
 			+". ORIGIN/SPACING sind die ECHTE Weltlage beider Gitter -- die Dateien liegen im Betrachter deckungsgleich uebereinander.");
+		if(slice_ns>0ull&&vtk_jede>0u) {
+			const ulong kp = ((ulong)n_outer*(ulong)ratio/slice_ns)/(ulong)vtk_jede;
+			print_info("VTK AN DER KADENZ (CFD_VTK_JEDE="+to_string(vtk_jede)+", CFD_VTK_BEHALTE="+to_string(vtk_behalte)+"): voraussichtlich "+to_string(kp)+" Doppeldumps a "+to_string(mb(fNx,fNy,fNz)+mb(cNx,cNy,cNz),0u)+" MB"
+				+(vtk_behalte>0u?"; Platte haelt maximal "+to_string((float)(vtk_behalte+1u)*(mb(fNx,fNy,fNz)+mb(cNx,cNy,cNz))/1024.0f,1u)+" GB (Rotation)":"; KEINE Rotation -- "+to_string((float)kp*(mb(fNx,fNy,fNz)+mb(cNx,cNy,cNz))/1024.0f,1u)+" GB gesamt")+".");
+		}
 	}
+	auto vtk_rotiere = [&](const int t_ms_neu) { // Behalte-Rotation: nur die letzten N Zeitpunkte auf Platte
+		vtk_rotation.push_back(t_ms_neu);
+		while(vtk_behalte>0u && vtk_rotation.size()>(size_t)vtk_behalte) {
+			string ma = to_string(vtk_rotation.front()); while(ma.length()<6u) ma = "0"+ma;
+			std::remove((out_dir+"feld_nah_"+ma+"ms.vtk").c_str()); std::remove((out_dir+"feld_fern_"+ma+"ms.vtk").c_str());
+			print_info("[VTK] Rotation: feld_{nah,fern}_"+ma+"ms.vtk geloescht (CFD_VTK_BEHALTE="+to_string(vtk_behalte)+").");
+			vtk_rotation.erase(vtk_rotation.begin());
+		}
+	};
 	Clock outer_clock; double t_acc = 0.0; ulong n_acc = 0ull;
 	double Fx_prev = 1e300, Fz_prev = 1e300; uint n_frozen = 0u; // fuer den Einfrier-Test, siehe Zeitschleife
 	// ★ Pruefer-Befund 2026-08-08: die CSV entstand bisher ERST NACH der Schleife. Bei 2,5 Stunden
@@ -4487,6 +4566,7 @@ static void main_setup_fahrzeug_dd() {
 	std::ofstream fac_csv;
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
 	const bool fac_an_zs = env_u("CFD_FACETTEN", 0u)>0u; // env-Read VOR der Zeitschleife (Doktrin; stand im Sample-Block)
+	double kad_cd_rest=0.0, kad_cz_rest=0.0; bool kad_cdcz_da=false; // letzte korrigierte Werte fuer Bild-Einblendung + [KADENZ]-Status (27.08.)
 	// ★ P8/P9 Schritt 0: INTERFACE-DRUCK-INSTRUMENT (reine AUSGABE, keine Physik, kein Schalter --
 	// Muster unterboden_sonde). Die face[p]-Puffer der 4 getriebenen Ebenen liegen nach
 	// extract_plane_macros jeden Outer ohnehin auf dem Host (rho an Index 4*i+0); an der
@@ -4525,9 +4605,9 @@ static void main_setup_fahrzeug_dd() {
 	std::ofstream sonde_csv(out_dir+"einlass_saeule_nah.csv"); sonde_csv.precision(7);
 	sonde_csv << "# Welt-x der Saeulen (NEAR_VOR-Fallstrick -- ueber Welt-x vergleichen, nicht ueber den Index): x_f=2 -> "
 	          << (near_x0+2.0f*dx_f) << " m, x_f=10 -> " << (near_x0+10.0f*dx_f) << " m; y = fNy/2 = " << fNy/2u
-	          << "; geschrieben an der Slice-Kadenz (CFD_SLICE_DT>0 noetig)\n";
+	          << "; geschrieben an der Slice-Kadenz (aktive Kadenz noetig)\n";
 	sonde_csv << "time_s,x_f,z,ux_rel,uy_rel,uz_rel,rho,solid\n" << std::flush;
-	print_info("SONDE einlass_saeule_nah aktiv (Iron Rule 5): z-Saeulen x_f=2 (Welt-x "+to_string(near_x0+2.0f*dx_f,3u)+" m) und x_f=10 (Welt-x "+to_string(near_x0+10.0f*dx_f,3u)+" m), y = "+to_string(fNy/2u)+", "+to_string(fNz)+" z-Zellen -> "+out_dir+"einlass_saeule_nah.csv; am SLICE-Hook gekoppelt (nur bei CFD_SLICE_DT>0; einziger Zusatz-Read: rho).");
+	print_info("SONDE einlass_saeule_nah aktiv (Iron Rule 5): z-Saeulen x_f=2 (Welt-x "+to_string(near_x0+2.0f*dx_f,3u)+" m) und x_f=10 (Welt-x "+to_string(near_x0+10.0f*dx_f,3u)+" m), y = "+to_string(fNy/2u)+", "+to_string(fNz)+" z-Zellen -> "+out_dir+"einlass_saeule_nah.csv; am SLICE-Hook gekoppelt (nur bei aktiver Slice-Kadenz; einziger Zusatz-Read: rho).");
 	// ★ FORK Kraft-Zerlegung nach z-Region (Heiko-Vorgabe): CFD_KRAFT_ZBAND = unterste N Zellen ab z=0
 	// (inkl.) vs Rest. unset/0 = AUS = bitidentisch (null neue Kernelaufrufe/Logzeilen/Dateien).
 	// EINMAL gelesen, nicht je Zelle/Sample (env-Read-Falle).
@@ -5093,6 +5173,7 @@ static void main_setup_fahrzeug_dd() {
 					const double qA=(double)q_inf*A_ref;
 					const double cdb=(double)units_fine.si_F((float)FK.pbx)/qA, cdg=(double)units_fine.si_F((float)FK.px)/qA;
 					const double czb=(double)units_fine.si_F((float)FK.pbz)/qA, czg=(double)units_fine.si_F((float)FK.pz)/qA;
+					kad_cd_rest=cdg-cdb; kad_cz_rest=czg-czb; kad_cdcz_da=true; // Puffer fuer die Kadenz-Einblendung
 					fac_csv << t_si << "," << cdg << "," << czg << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest
 					        << "," << cdb << "," << (cdg-cdb) << "," << czb << "," << (czg-czb) << "\n" << std::flush;
@@ -5115,9 +5196,13 @@ static void main_setup_fahrzeug_dd() {
 				}
 			}
 			const auto _t5 = t_now();
-			if(slice_dt>0.0f && (float)t_si>=slice_next) {
-				slice_next = (float)t_si + slice_dt;
+			const ulong ns_ist = (outer+1ull)*(ulong)ratio; // exakte Near-Steps: BEIDE Pfade laufen ratio feine Schritte je Outer (Plan 27.08., setup.cpp:4699/4717)
+			bool slice_jetzt = false;
+			if(slice_ns>0ull) { if(ns_ist>=slice_ns_next) { slice_jetzt = true; slice_ns_next = (ns_ist/slice_ns+1ull)*slice_ns; kad_punkt++; } }
+			else if(slice_dt>0.0f && (float)t_si>=slice_next) { slice_jetzt = true; slice_next = (float)t_si + slice_dt; }
+			if(slice_jetzt) {
 				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
+				const string kad_info = "t="+to_string(t_ms)+"ms  cd="+(kad_cdcz_da?to_string((float)kad_cd_rest,2u):string("--"))+"  cz="+(kad_cdcz_da?to_string((float)kad_cz_rest,2u):string("--"));
 				// ★ Slice-Ebenen-Read (Perf-Hebel 2026-08-26, Plan Variante b): nur die konsumierten
 				// y-Ebenen holen statt der vollen Felder (4 mm nah: ~14 MB statt ~8,65 GB je Ereignis).
 				// Altpfad wortgleich unter CFD_SLICE_GPU=0; CFD_SLICE_PRUEF rechnet beide Wege.
@@ -5129,7 +5214,7 @@ static void main_setup_fahrzeug_dd() {
 				} else {
 					lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
 				}
-				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "nah");
+				render_yslice(lbm_f, fNx, fNy, fNz, fNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "nah", kad_info);
 				// ★ SONDE einlass_saeule_nah (Iron Rule 5, Ansage beim CSV-Anlegen oben): die Sonde liegt
 				// auf der Ebene y = fNy/2 -- im Gather- und im Pruef-Pfad ist rho dort schon frisch,
 				// nur der Altpfad braucht den vollen rho-Read. Je Sample geflusht (Abbruch-fest).
@@ -5162,14 +5247,24 @@ static void main_setup_fahrzeug_dd() {
 				} else {
 					lbm_c.u.read_from_device(); lbm_c.flags.read_from_device();
 				}
-				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "fern");
+				render_yslice(lbm_c, cNx, cNy, cNz, cNy/2u, si_u/u_lat, si_u, t_ms, out_dir, "fern", kad_info);
 				// ★ DIFF-SCHNITT nah-fern (Heiko 2026-08-21): KEIN zusaetzlicher Device-Read -- lbm_f.u/flags
 				// und lbm_c.u/flags liegen fuer die beiden Schnitte oben ohnehin schon auf dem Host. Skala
 				// ueber CFD_DIFF_SPAN (Default 15 m/s = Heiko-Vorgabe blau -15 / weiss 0 / rot +15).
 				if(diff_an)
 					render_yslice_diff(lbm_f, lbm_c, fNx, fNy, fNz, cNx, cNy, cNz, NF_OX, NF_OY, NF_OZ, ratio,
 					                   si_u/u_lat, diff_span, near_x0, near_z0, dx_f, t_ms, out_dir);
-				print_info("[SLICE] t = "+to_string((float)t_si,3u)+" s");
+				print_info("[KADENZ] t = "+to_string((float)t_si,3u)+" s | Near-Step "+to_string(ns_ist)+" | cd_rest "+(kad_cdcz_da?to_string((float)kad_cd_rest,4u):string("--"))+" | cz_rest "+(kad_cdcz_da?to_string((float)kad_cz_rest,4u):string("--")));
+				fcsv.flush(); if(fac_csv.is_open()) fac_csv.flush(); if(zb>0u) zcsv.flush(); sonde_csv.flush(); // Guertel-und-Hosentraeger: Zeilen flushen bereits einzeln (Plan-Befund B2), hier nur die Kadenz-Garantie
+			}
+			if(slice_ns>0ull&&vtk_jede>0u&&slice_jetzt&&kad_punkt%(ulong)vtk_jede==0ull) { // ★ VTK an der Near-Step-Kadenz (27.08.)
+				const int t_ms = (int)((float)t_si*1000.0f+0.5f);
+				string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
+				lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
+				schreibe_vtk_feld(lbm_f, fNx, fNy, fNz, near_x0, near_y0, near_z0, dx_f, si_u/u_lat, vtk_stride, out_dir+"feld_nah_"+ms+"ms.vtk");
+				lbm_c.u.read_from_device(); lbm_c.rho.read_from_device(); lbm_c.flags.read_from_device();
+				schreibe_vtk_feld(lbm_c, cNx, cNy, cNz, far_x0, far_y0, 0.0f, dx_c, si_u/u_lat, vtk_stride, out_dir+"feld_fern_"+ms+"ms.vtk");
+				vtk_ms_letzt = t_ms; vtk_rotiere(t_ms);
 			}
 			// ★ VTK-Kadenz: EIGENE Uhr, unabhaengig von CFD_SLICE_DT. Die Lesevorgaenge stehen hier
 			// bewusst noch einmal -- der Slice-Block laeuft an einer anderen Kadenz und kann in diesem
@@ -5182,6 +5277,7 @@ static void main_setup_fahrzeug_dd() {
 				schreibe_vtk_feld(lbm_f, fNx, fNy, fNz, near_x0, near_y0, near_z0, dx_f, si_u/u_lat, vtk_stride, out_dir+"feld_nah_"+ms+"ms.vtk");
 				lbm_c.u.read_from_device(); lbm_c.rho.read_from_device(); lbm_c.flags.read_from_device();
 				schreibe_vtk_feld(lbm_c, cNx, cNy, cNz, far_x0, far_y0, 0.0f, dx_c, si_u/u_lat, vtk_stride, out_dir+"feld_fern_"+ms+"ms.vtk");
+				vtk_ms_letzt = t_ms; vtk_rotiere(t_ms);
 			}
 			ph_kraft += std::chrono::duration<double>(_t5-_t4).count();
 			ph_schnitt += std::chrono::duration<double>(t_now()-_t5).count();
@@ -5227,15 +5323,23 @@ static void main_setup_fahrzeug_dd() {
 	if(vtk_ende) {
 		const int t_ms = (int)((float)t_si_letzt*1000.0f+0.5f); // WIRKLICH erreichte Zeit -- bei sauberem Stopp ist das NICHT n_outer*dt_c
 		string ms = to_string(t_ms); while(ms.length()<6u) ms = "0"+ms;
+		if(t_ms==vtk_ms_letzt) print_info("[VTK] Enddump uebersprungen -- der letzte Kadenzpunkt hat dasselbe t_ms ("+ms+") bereits geschrieben (Dedup; Datei bleibt, rotiert nicht mehr).");
+		else {
 		lbm_f.u.read_from_device(); lbm_f.rho.read_from_device(); lbm_f.flags.read_from_device();
 		schreibe_vtk_feld(lbm_f, fNx, fNy, fNz, near_x0, near_y0, near_z0, dx_f, si_u/u_lat, vtk_stride, out_dir+"feld_nah_"+ms+"ms.vtk");
 		lbm_c.u.read_from_device(); lbm_c.rho.read_from_device(); lbm_c.flags.read_from_device();
 		schreibe_vtk_feld(lbm_c, cNx, cNy, cNz, far_x0, far_y0, 0.0f, dx_c, si_u/u_lat, vtk_stride, out_dir+"feld_fern_"+ms+"ms.vtk");
+		}
 	}
 	// Wirkpfad-Nachweis: ein Schalter ohne feuernden Zaehler ist ein harter Fehler (Iron Rule).
-	if(vtk_dt>0.0f||vtk_ende) {
-		if(g_vtk_dateien==0ull) print_error("CFD_VTK_ENDE/CFD_VTK_DT war gesetzt, es wurde aber KEINE einzige VTK-Datei geschrieben -- stiller No-Op.");
-		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben.");
+	if(vtk_dt>0.0f||vtk_ende||(slice_ns>0ull&&vtk_jede>0u)) {
+		if(g_vtk_dateien==0ull) print_error("CFD_VTK_ENDE/CFD_VTK_DT/CFD_VTK_JEDE war gesetzt, es wurde aber KEINE einzige VTK-Datei geschrieben -- stiller No-Op.");
+		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben (Rotation loescht nachtraeglich, der Zaehler zaehlt GESCHRIEBENE).");
+	}
+	if(slice_ns>0ull) { // Wirkpfad der Near-Step-Kadenz (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler)
+		const ulong kad_soll = (n_outer_ist*(ulong)ratio)/slice_ns;
+		if(kad_punkt==0ull&&kad_soll>0ull) print_error("SLICE-KADENZ war aktiv (CFD_SLICE_NEAR_STEPS="+to_string(slice_ns)+"), aber KEIN Kadenzpunkt gefeuert -- stiller No-Op.");
+		else print_info("[KADENZ] Wirkpfad: "+to_string(kad_punkt)+" Kadenzpunkte (Soll "+to_string(kad_soll)+").");
 	}
 	if(stop_angefordert) print_info("[STOPP] Lauf regulaer beendet bei t = "+to_string((float)t_si_letzt,4u)+" s statt der geplanten "
 		+to_string((float)n_outer*dt_c,4u)+" s. Alle Ausgaben sind vollstaendig; die Mittelwerte unten beziehen sich auf das VERKUERZTE Fenster.");
@@ -5565,6 +5669,7 @@ static void main_setup_fernfeld() {
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im fernfeld-Fall NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
+	if(getenv("CFD_SLICE_NEAR_STEPS")||getenv("CFD_VTK_JEDE")||getenv("CFD_VTK_BEHALTE")) print_warning("CFD_SLICE_NEAR_STEPS/CFD_VTK_JEDE/CFD_VTK_BEHALTE werden in diesem Fall NICHT angewandt (nur fahrzeug_dd; Kadenz-Umbau 27.08.).");
 	if(env_u("CFD_FACETTEN_DIAG", 0u)>0u) print_warning("CFD_FACETTEN_DIAG wird im fernfeld-Fall NICHT angewandt.");
 	// ★ Nachpruefer-Befund 2026-08-15: diese sechste Konstruktorstelle FEHLTE in der Verdrahtung von
 	// CFD_SGS_WANDFREI -- der Schalter waere im fernfeld-Fall still wirkungslos gewesen (die
