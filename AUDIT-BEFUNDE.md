@@ -3417,19 +3417,26 @@ VRAM (aus dem Lauf-Log, nicht geschaetzt): B70 hat 32.655 MB, belegt waren 29.31
 gesparter F-BBox). Marginal fuer neue FLUID-Zellen unter FP16C: 19 DDF x 2 + flags 1 + u 12 +
 rho 4 = 55 B. Heikos 512 MB erlauben damit +9,76 Mio Zellen, Obergrenze 518,5 Mio.
 
-FESTGELEGT:
-  CFD_NEAR_LZ 1.9360 -> 1.8720   cez 122 -> 118, fNz 485 -> 469, z+ 732 -> 668 mm
-  CFD_NEAR_LY 2.4800 -> 2.6080   cey 156 -> 164, fNy 621 -> 653, y  316/320 -> 380/384 mm
-  Gitter 1689 x 653 x 469 = 517,3 Mio Zellen (+1,68 %), VRAM ~29.767 MB (+449 MB von 512 erlaubt).
-  Damit ist y- (Bedarf 384 mm) getroffen, y+ (Bedarf 512 mm) nicht -- der Rest braucht Dual-B70.
-  Alternative, falls mehr y gewuenscht: cez 117 + cey 166 -> y 396/400 mm, z+ 652 mm,
-  29.865 MB (12 MB ueber Heikos Budget, aber 2,8 GB unter dem physischen Limit).
+FESTGELEGT (Heiko hat die groessere y-Variante gewaehlt, 27.08. abends):
+  CFD_NEAR_LZ 1.9360 -> 1.8560   cez 122 -> 117, fNz 485 -> 465, z+ 732 -> 652 mm
+  CFD_NEAR_LY 2.4800 -> 2.6400   cey 156 -> 166, fNy 621 -> 661, y  316/320 -> 396/400 mm
+  Gitter 1689 x 661 x 465 = 519.139.485 Zellen (+2,05 %), VRAM ~29.865 MB (+547 MB).
+  Das sind 35 MB ueber den genannten 512 MB (+6,9 %) -- ausdruecklich so gewaehlt; die Reserve
+  auf der B70 bleibt 2.790 MB. y- (Bedarf 384 mm) ist damit uebererfuellt, y+ (512 mm) zu rund
+  drei Vierteln gedeckt; der Rest braucht Dual-B70. z+ behaelt 12 mm ueber dem Bedarf 640 mm.
+  Verworfene kleinere Variante: cez 118 + cey 164 -> y 380/384 mm, z+ 668 mm, 29.767 MB.
+RASTERUNG GEGEN DEN CODE NACHGERECHNET (setup.cpp:3034 n_cells, :3044 auf_grobe_zelle, :3087 f.):
+  auf_grobe_zelle trifft 2,6400 und 1,8560 exakt (165 bzw. 116 Grobzellen); cey 166 ist GERADE,
+  die Paritaetsbedingung gegen cNy 480 ist also erfuellt und die stille Korrektur cey++ greift
+  NICHT; NF_OY 157, NF_OY + cey = 323 <= 480. Beide Werte liegen fern der Rundungsgrenzen.
 
 NEBENBEDINGUNGEN geprueft:
-  - N2F-Band-Abstand z+ faellt 39 -> 35 Grobzellen (Soll >= 2, komfortabel >= 4) -- unkritisch;
+  - N2F-Band-Abstand z+ faellt 39 -> 34 Grobzellen (Soll >= 2, komfortabel >= 4) -- unkritisch;
     y+- steigt von 13 GZ, weil die Entnahmeebene weiter vom Koerper wegrueckt.
   - Fernfeld umschliesst die neue Box: NF_OY + cey = 158 + 164 = 322 <= cNy 480.
-  - Laufzeit steigt mit der Zellzahl um rund 1,7 % (Index 10,958 -> ~11,14 s-Wand je s-Phys).
+  - Laufzeit steigt mit der Zellzahl um rund 2,1 % (Index 10,958 -> ~11,18 s-Wand je s-Phys).
+  - ABNAHME AM LOG: es MUSS "Fein (Geraet 1, ...): 1689 x 661 x 465" erscheinen. Ein anderes fNy
+    hiesse, dass die Paritaetskorrektur gegriffen hat und die Box nicht die bestellte ist.
   - x bleibt unveraendert (die 144 mm Spielraum in x- wurden NICHT genommen).
 
 VORBEREITET, NICHT GESTARTET: logs/f5_box_serie.txt enthaelt einen 8-mm-FORMTEST (Minuten statt
