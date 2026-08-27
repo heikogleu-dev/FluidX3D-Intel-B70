@@ -3850,3 +3850,70 @@ ZUSAMMEN MIT B20 (Alignment, Spannweite 1,7 % ueber x aligned/ungerade/prim und 
 ergibt das ein konsistentes Bild: die frueheren iGPU-Eigenheiten sind auf dem heutigen Stack nicht
 mehr messbar. Beide Nullbefunde sind wertvoll -- sie nehmen zwei Nebenbedingungen aus der
 Box-Planung heraus, die bisher als gesetzt galten.
+
+### B25 -- KORREKTUR ZU B22 + der ELIBB-Konflikt ist ENV-TRENNBAR (27.08. spaetabends)
+Ein Untersuchungsagent hat den Mechanismus auseinandergenommen. Zwei Ergebnisse: ein Fehler in
+MEINER Dokumentation, und ein Weg aus dem Zielkonflikt.
+
+KORREKTUR ZU B22 (Befund des Agenten, nachgerechnet und bestaetigt): die dort genannten
+Anwendungsanteile "40 % / 87 % / 53 %" vermischen zwei Definitionen -- die 40 % waren Slot 10 als
+RUECKFALLanteil, die 87 % waren 100 % minus Slot 10 als ANWENDUNGSanteil, und beide ignorieren
+die Slots 13 und 16. Richtig ist 1 - Slot69/Wirkpfad:
+    ELIBB=1   Slot 69 = 118.657.473  ->  25,6 %   (nicht 40 %)
+    ELIBB=0   Slot 69 =  85.078.217  ->  46,7 %   (nicht 87 %)
+    Nullziel  Slot 69 = 129.758.580  ->  18,7 %   (nicht 53 %)
+Der ELIBB-Effekt ist damit GROESSER als in B22 beschrieben (er halbiert den Anwendungsanteil),
+aber die Folgerung kippt: der Nullziel-Punkt ist nicht der mittlere, sondern der NIEDRIGSTE.
+Die Monotonie "mehr Anwendung -> weniger u_tau", auf der der in B22 vorgeschlagene naechste
+Schritt aufbaute, existiert in den eigenen Zahlen NICHT (25,6 % -> 2,382; 46,7 % -> 1,943;
+18,7 % -> 0,741). Der Buchungswaechter selbst rechnet in allen drei Armen korrekt.
+
+DER MECHANISMUS, jetzt verstanden: die 26-Grad-Treppe zerfaellt in DREI gleich grosse Zellklassen
+(je 10.620) mit y_w 0,187 / 0,698 / 1,069 und 8 / 4 / 1 Wandlinks -- keine q-Streuung, sondern
+drei diskrete Werte. Die Klasse mit 1 Link sitzt dauerhaft im Slot-13-Rueckfall, wo iMEM unter
+ALPHA2 beweisbar nie wirken kann (erreichbarer Unterraum {0}); die mit 4 Links haengt dauerhaft am
+Schur-Skalarrueckfall (Slot 14), dessen Akzeptanzschwelle Gt11 >= 1e-4*G11 eine Verstaerkung von
+bis zu 1e4 auf R1 zulaesst -- direkt vor dem harten Gate. Genau auf diese beiden Klassen legt
+ELIBB seine STARKE Blende (q 0,789/0,792, chi 0,58), waehrend die vollrangige 8-Link-Klasse nur
+den q<0,5-Zweig bekommt. Gemessene Folge: mittleres Modell-tau_w 2,39e-6 -> 14,42e-6 (Faktor 6,0),
+y+ 87,8 -> 218,2.
+GEGENPROBE, die den Mechanismus beweist: bei 45 Grad ist die MLS-Aktivitaet fast DOPPELT so hoch
+(87,5 % der geblendeten Links gegen 50,0 %), Slot 10 aber 0,098 % statt 40,2 % -- dort gibt es
+keine rangdefiziente Klasse (Slot 14 = 0) und die starke Blende landet auf der folgenlosen
+1-Link-Klasse. Nicht ELIBB als solches ist der Taeter, sondern das Zusammentreffen.
+
+DER AUSWEG -- die q-Baender sind fast disjunkt:
+    Kugel D=40:      max q < 0,7362, Anteil im Schadensband  0,0 %
+    Fahrzeug 8 mm:                                           1,38 %
+    Fahrzeug 4 mm:                                           1,38 %
+    kipp26:          q = 0,789/0,792                        40,0 % der geschnittenen Links
+Eine q-Schwelle in [0,7362 ... 0,7894) trennt beide Faelle exakt. CFD_FAC_QKAPPE (lbm.cpp:600,
+Default 1,0) ist genau dieser Schalter -- ENV-ONLY. Warnung dazu: an der Kugel ist die Kappe
+hochsensibel (QKAPPE=0,65 halbierte dort den Druckwiderstand), 0,75 muss dort per Startprotokoll
+als echter No-Op belegt werden ("q>Kappe->BB: 0").
+Zweiter Env-Kandidat, den B22 uebersehen hat: CFD_FAC_LSQ=1 (kernel.cpp:2186) ersetzt s1 = R1/Gt11
+durch die Kleinste-Quadrate-Loesung und entschaerft damit die 1e4-Verstaerkung SELBST. Der
+Kernelkommentar nennt als Motiv woertlich die 26-Grad-Wand.
+
+EMPFOHLENE REIHENFOLGE (alles Env, ~10 min je Arm am 26-Grad-Kanal):
+  T0  Nullziel x ELIBB=0 -- der fehlende vierte Quadrant, schliesst die einzige Verwechslung
+  C   QDIAG 2 und 3 auf dem MLS-Binary -- lokalisiert den Zweig (die alte Messung dazu stammt
+      vom K1'-Stand vor dem MLS-Umbau und ist NICHT uebertragbar)
+  B   LSQ=1 -- entschaerft den Verstaerker
+  A   QKAPPE=0,75 -- trennt die Geometrien
+Erst danach BUDGET, und Code erst, wenn C und B die Zuordnung bestaetigt haben.
+
+EHRLICHE EINSCHAETZUNG des Agenten, die ich teile: fuer den 4-mm-PRODUKTIONSLAUF ist der Konflikt
+mit hoher Wahrscheinlichkeit operativ aufloesbar (1,4 % der Links betroffen, Kugel unberuehrt).
+Fuer die 26-Grad-Klasse als PHYSIKPROBLEM ist er es nicht -- ein Drittel der Zellen (1 Wandlink)
+liegt prinzipiell ausserhalb dessen, was iMEM loesen kann.
+
+### B26 -- CCS-KANARIE, sanfte Probe: PASS (27.08. spaetabends)
+werkzeuge/ccs_kanarie/ccs_kanarie 1 45 3072 auf der B70 (Device 1). 27.950 MB in 8 Bloecken
+belegt von 31.023 MB, Restluft 3.073 MB. Sofortkontrolle 0 fehlerhafte Worte, nach 45 s
+Endkontrolle 0 fehlerhafte Worte. VERDIKT PASS.
+EINSCHRAENKUNG, die das Werkzeug selbst ansagt: mit Reserve ist NICHT garantiert, dass die
+oberste VRAM-Seite in unseren Puffern liegt -- und genau dort saesse der Xe-Flat-CCS-Fehler
+(Aufrundung der CCS-Basis auf 128 KiB). Der sanfte Modus ist eine Vorab-Probe, kein Verdikt.
+Das volle Verdikt braucht reserve_mb=0, also VRAM-Erschoepfung auf der DESKTOP-GPU -- das birgt
+Freeze-Risiko und wird Heiko vorgelegt statt selbst entschieden.
