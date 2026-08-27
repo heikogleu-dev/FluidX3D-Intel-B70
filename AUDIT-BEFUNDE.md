@@ -3815,3 +3815,38 @@ FIX: zwei exakte Ein-Block-Ersetzungen, "if(zi_<=0.0f) return;" -> "if(zi_>0.0f)
 alle Arme mit def_fac_tau > 0 ist der Zweig unveraendert -- t2_26_u10 belegt das ziffernidentisch
 gegen b2s1_kipp26. JIT-Kurzlauf bestanden (der Arm lief sauber durch, rc-Fehler stammt vom
 K2-Waechter, nicht vom Kernel).
+
+### B24 -- iGPU-SKALIERUNG: der fruehere Einbruch ueber der Fallgroesse existiert NICHT MEHR
+Heiko-Frage 27.08. spaetabends: "bricht die iGPU je nach Fallgroesse immer noch so ploetzlich ein?"
+Serie logs/s_igpu_skala_serie.txt, 12 Arme, CFD_CASE=fernfeld (Einzelgitter, feste Boxgroesse),
+NUR CFD_DX variiert -> Zellzahl ~ dx^-3. Geraet: iGPU (CFD_QUEUE_DEV Default 2). Census sauber.
+
+  Zellen      ns/Zelle        Zellen      ns/Zelle
+   25,6M       1,828          117,8M       1,821
+   47,6M       1,832          134,0M       1,821
+   74,4M       1,845          175,7M       1,821
+   92,7M       1,845          203,5M       1,815
+  104,4M       1,835          278,7M       1,818
+  110,8M       1,842          397,4M       1,828
+
+ERGEBNIS: ueber einen Faktor 15,5 in der Zellzahl liegt die Spannweite bei 1,7 % -- das ist
+Messrauschen, kein Trend und kein Sprung. KEIN Einbruch.
+
+DIE GEPRUEFTE HYPOTHESE FAELLT EBENFALLS: die iGPU meldet "Buffer Limits 4095 MB global"
+(Log Z. 142); der DDF-Block ist 38 B je Zelle (FP16C), die Grenze liegt also bei 113,0 Mio
+Zellen. Die Leiter hat sie mit zwei dichten Punkten eingeklammert -- 110,8M (4017 MB, darunter)
+gegen 117,8M (4268 MB, darueber): 1,842 gegen 1,821 ns/Zelle. Der groessere Fall ist sogar
+minimal SCHNELLER. Ein Buffer-Limit-Sprung existiert nicht.
+
+EINORDNUNG gegen die V1-Messung (FluidX3D, knowledge/hardware.md, 15.06.2026 -- ANDERE Fassung,
+gleiche Hardware): dort 3,20 ns/Zelle im besten Fall (Nx 1024) und 3,79 im schlechtesten (Nx 937).
+Heute liegt der SCHLECHTESTE Punkt der ganzen Leiter bei 1,845. Die iGPU ist also rund
+1,8-fach schneller geworden UND gutmuetig ueber die Groesse. Welcher Treiber-, Kernel- oder
+Codestand das gebracht hat, sagt diese Messung nicht -- sie sagt nur, dass die alten
+Vorsichtsmassnahmen (Nx durch 64, grosse Faelle meiden) heute nichts mehr kosten und nichts
+mehr bringen.
+
+ZUSAMMEN MIT B20 (Alignment, Spannweite 1,7 % ueber x aligned/ungerade/prim und y aligned/ungerade)
+ergibt das ein konsistentes Bild: die frueheren iGPU-Eigenheiten sind auf dem heutigen Stack nicht
+mehr messbar. Beide Nullbefunde sind wertvoll -- sie nehmen zwei Nebenbedingungen aus der
+Box-Planung heraus, die bisher als gesetzt galten.
