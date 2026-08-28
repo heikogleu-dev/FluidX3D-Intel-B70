@@ -4871,3 +4871,29 @@ Heiko sah es am Slice ("die rueckkopplung ist offensichtlich deaktiviert"), nich
    Defekt, den ich selbst eingebaut hatte und der sich ueber die Referenz in die ganze Reihe
    fortpflanzte. Jetzt harter Fehler im Code, Korrektur im Generator, Vermerk im Referenzkopf.
    Ein Schalter ohne Physikwirkung kann eine Messreihe trotzdem unauswertbar machen.
+
+### B54 -- KORREKTUR AN B50: cd_rest gehoert IMMER dazu, und es kippt die Aussage
+Heiko 28.08. abends: "cd_rest ist immer zu rechnen". Ich hatte in B50 cd_druck berichtet und
+daraus "die Normalenquelle ist kraftneutral" geschlossen -- das galt nur fuer Cz.
+
+  Arm                    Cd_rest  +-SEM     vs a      Cz_rest   Cd_band
+  a  Bezug (V1)           6,3034  0,0110      --       0,4102    0,8025
+  b  nur Normale          6,4777  0,0142    9,7 sigma  0,4166    0,8013
+  c  nur y_w-Anker        6,5052  0,0133   11,7 sigma  0,5091    0,8021
+  d  Kantentest AUS       6,1525  0,0200    6,6 sigma  0,4304    0,8014
+  OF13 mr2v40H: Cd 0,599 / Cz -1,301
+
+1) DIE NORMALENQUELLE IST NICHT KRAFTNEUTRAL. Auf Cz war sie es (0,6 sigma), auf Cd_rest
+   verschlechtert sie um 9,7 sigma (+2,8 %). Mein Schluss in B50 stand auf EINER Groesse.
+2) DER y_w-ANKER schadet auf BEIDEN Groessen (11,7 sigma auf Cd_rest, 8,7 auf Cz_rest).
+   Das bleibt der klarste Negativbefund und betrifft meine Zutat, nicht Heikos Idee.
+3) ARM D IST DER EINZIGE, DER ETWAS VERBESSERT: Cd_rest -2,4 % (6,6 sigma) Richtung OF13.
+   Der Kantentest AUS senkt den Widerstand. Das widerspricht meiner Hypothese vom Nachmittag,
+   V1s K2-Verwerfung sei ein wirksamer Kantenschutz gewesen -- auf Cd_rest ist sie ein Nachteil.
+   Cz bewegt sich dabei um 2,3 sigma in die falsche Richtung; die beiden Groessen zeigen also
+   GEGENLAEUFIG, und der Kantentest ist damit ein Zielkonflikt, kein Schutz.
+4) Cd_band ist in allen vier Armen praktisch identisch (0,8013 bis 0,8025) -- das Latschband
+   ist von allen drei Hebeln unberuehrt, die Wirkung sitzt vollstaendig darueber.
+LEHRE, die ueber diesen Fall hinausgeht: eine Aussage ueber "die Kraft" aus EINER Kraftgroesse
+zu ziehen, war voreilig. cd_rest und cz_rest gehoeren zusammen berichtet, auch wenn nur eine
+davon in der Fragestellung steht.
