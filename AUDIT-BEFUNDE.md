@@ -4766,3 +4766,36 @@ VERDIKT: V3b ist auf der Abdeckung belegt besser und auf dem Abtrieb belegt schl
 Default kommt es damit NICHT in Frage. Die naechste Frage ist nicht "annehmen oder verwerfen",
 sondern WARUM mehr behandelte Zellen weniger Abtrieb ergeben -- das ist der eigentliche Befund
 dieses Tages und war ohne den Fahrzeuglauf nicht sichtbar.
+
+### T1 -- OFFENE TODO: horizontale Artefakte zwischen Dach und Heck im Nahfeld-Slice
+Heiko 28.08. beim Ansehen von export/tj_8mm_v3b/schnitt_nah_001000ms.png: "eine todo die wir am
+near slice sehen, waere das artefakt zwischen dach und heck welche so horizontal laufen...habe
+ich immer wieder mal gesehen, deshalb wurde der slice immer mit einem leichten offset von
+y=2.5cm oder so gemacht. die ursache fuer diese artefakte wurde jedoch noch nie untersucht."
+Sein Verdacht: Zusammenhang mit dem Blockage-Artefakt des 4-mm-Laufs vom 27.08. (B10/B12/B14,
+rund 0,11 Cd, Ursache offen, nicht-deterministisch), das er "vermehrt bei sparse tiles" gesehen
+hat und das "irgendwie was mit dem voxelieren zu tun" haben koennte.
+
+SOFORT EINGEGRENZT, ohne neuen Lauf:
+  CFD_SPARSE_TILES war in den heutigen Armen NICHT gesetzt -- und kann im Fahrzeugfall gar nicht
+  wirken: lbm.cpp:421 bricht bei mehr als einer Domaene hart ab ("nur fuer eine einzelne GPU
+  validiert"), der dd-Fall ist zweidomaenig. Das Artefakt ist in tj_8mm_v3b also OHNE Sparse
+  Tiles vorhanden. Sparse Tiles koennen es demnach hoechstens VERSTAERKEN, nicht verursachen.
+  Damit faellt eine der beiden Spuren aus -- und die Voxelierungsspur bleibt.
+
+WAS ZU PRUEFEN WAERE, in dieser Reihenfolge und ohne Bildauswertung (Iron Rule 5):
+ 1. ABSTAND DER BAENDER. Liegen die horizontalen Streifen auf einem festen Zellabstand? Ein
+    Vielfaches der Kachelgroesse deutete auf eine Block-/Kachelstruktur, ein Abstand von einer
+    Zelle auf die Voxeltreppe. Messbar an einer z-Saeule aus den Feld-CSVs, nicht am Bild.
+ 2. DIE y-ABHAENGIGKEIT. Der Ausweichoffset von 2,5 cm ist der beste vorhandene Hinweis: das
+    Artefakt ist offenbar nicht y-invariant. Eine Saeulenschar bei mehreren y wuerde zeigen, ob
+    es an der Symmetrieebene haengt oder wandert.
+ 3. DIE GEOMETRIE DORT. Zwischen Dach und Heck ist die Karosserie flach und schwach geneigt --
+    die Voxelierung erzeugt dort lange waagerechte Laeufe mit vereinzelten Einzelstufen. Das ist
+    genau die Population, die heute vermessen wurde: solid_dicke und r21 liegen je Zelle in
+    export/tj_8mm_v1/nah/facetten_histogramme.csv, samt Zellindex n. Eine Auswertung nur auf
+    diesen Bereich zeigt, ob dort etwas Auffaelliges sitzt.
+ 4. ERST DANN die Verbindung zum Blockage-Artefakt pruefen -- getrennt, wie Heiko sagt.
+NICHT VERMISCHEN mit der laufenden V3b-Untersuchung: das Artefakt ist in V1 und V3b gleichermassen
+zu erwarten (es ist aelter als beide), und die drei Arme von heute liegen als Vergleichsmaterial
+bereits vor.
