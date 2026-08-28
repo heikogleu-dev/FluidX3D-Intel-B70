@@ -4321,5 +4321,16 @@ die Glaettung ist gegen die Treppe gedacht (schraege Flaechen), schadet aber due
 Merkmalen. Ob ein einziger ITER-Wert beides bedient, ist offen und muss gemessen werden;
 falls nicht, ist der vorhandene v_fest/Quetschkanten-Mechanismus (setup.cpp:875-880) die
 Stelle, an der merkmalserhaltend geklemmt werden koennte.
-NICHT GEPRUEFT: wie sich das auf Cz am Fahrzeug auswirkt -- die MR2 hat in dieser Fassung
-keinen Gurney. Die Zahlen oben sind Geometrie, keine Stroemung.
+KORREKTUR (Heiko, 28.08., unmittelbar nach der ersten Fassung dieses Befunds): mein Satz
+"die MR2 hat in dieser Fassung keinen Gurney" war FALSCH. Heiko: "natuerlich hat der mr2
+gurney, canards und luftleitbleche...sind selbst bei 8mm noch deutlich durch sat voxelizer
+sichtbar". Damit ist B37 kein synthetisches Randthema, sondern trifft den Produktionsfall
+direkt -- und zwar auf der Sprosse, auf der wir messen.
+WAS DARAUS FOLGT: die Duennteil-Population der MR2 muss GEZAEHLT werden, bevor irgendein
+ITER-Wert gewaehlt wird. Dafuer fehlt heute das Instrument; der Facettenzensus kennt keine
+Solid-Dicke. Neu zu bauen: solid_dicke(x,y,z) als Gegenstueck zu freie_weite
+(setup.cpp:1092-1105) -- Minimum der Solid-Lauflaenge ueber die drei Achsen -- und daraus ein
+Histogramm {1, 2, 3, >=4 Zellen} am Fahrzeug 8 mm, plus die Winkelabweichung alt-gegen-neu
+NACH Solid-Dicke aufgeschluesselt. Ohne diese Aufschluesselung geht der Duennteileffekt in
+755.344 Zellen unter. Laeuft als Census (CFD_FACETTEN_DIAG=2), kostet keine GPU-Stunde.
+Die Zahlen oben bleiben Geometrie, keine Stroemung.
