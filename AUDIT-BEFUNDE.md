@@ -4568,3 +4568,46 @@ EHRLICH ZUR GEGENRICHTUNG: das q90 kreuzt NICHT mit. Bei dx=20 ist V3 im q90 bes
 auseinander -- V3 hat den besseren Schwerpunkt, V1 den kuerzeren Schwanz. Ein Verfahren, das
 in BEIDEN Massen gewinnt, gibt es nach diesen drei Sprossen nicht.
 Abdeckung bei dx=10: V1 3,40 %, V3b 2,35 % -- auf der glatten Kugel spielt sie keine Rolle.
+
+### B45 -- PRUEFAGENT-BEFUNDE BEHOBEN; DIE PRODUKTIVE ZAHL LIEGT VOR (22,1 -> 7,0 %)
+Unabhaengige Pruefung gegen den Diff 98a5634..db7f0ee: ein HARTER Befund, acht mittlere.
+
+H1 (HART): die Vergleichstabelle stellte V1 NACH der Glaettung gegen V2..V3b DAVOR. F[i].klasse
+ist der Endzustand (die Glaettung bewertet K4 neu), kl2v..kl6v stammen aus der Zellschleife.
+Damit enthielten 21,88 -> 7,26 % einen unbekannten Glaettungsanteil, und die 7,26 % beschrieben
+NICHT, was der Loeser bekommt. BEHOBEN: kl1v haelt V1s Klasse vor der Glaettung, die Tabelle
+zeigt beide Zeilen; die produktive Zahl kommt aus einem Lauf mit aktivem V3b.
+GEMESSENE GROESSE DES BIAS (td_vgl_8mm): V1 vor der Glaettung 165.481 = 21,91 %, danach
+165.239 = 21,88 %. Der Glaettungsanteil sind 242 Zellen = 0,03 Prozentpunkte. Der Befund war
+methodisch richtig, seine praktische Wirkung ist klein -- aber jetzt gemessen statt angenommen.
+
+DIE PRODUKTIVE ZAHL, td_prod_8mm, Fahrzeug 8 mm, CFD_FACETTEN_NORMQUELLE=1, gelesen an der
+Klassen-Zeile (post-Glaettung), also das, was der Loeser wirklich bekaeme:
+  V1 (t7_basis_heute / td_vgl_8mm)  markierte Zellen 166.677 = 22,1 %
+  V3b (td_prod_8mm)                 markierte Zellen  52.717 =  7,0 %
+  im Detail V3b: K1 0, K2 0, K3 0, K4 49.442, Orientierung 6.952, bewegte Wand 1.274
+  gegen V1:      K1 0, K2 95.953,   K3 0, K4 100.891, Orientierung 23.034, bewegte Wand 1.274
+FAKTOR 3,2 WENIGER VERWERFUNG. Nebenbefund, nicht vorhergesagt: die ORIENTIERUNGSKONFLIKTE
+fallen von 23.034 auf 6.952 (-70 %). Die bewegte-Wand-Zahl bleibt exakt gleich (1.274) -- sie
+ist reine Geometrie und darf sich nicht bewegen, das ist eine gute Gegenprobe.
+Wirkpfad: 755.344 von 755.344 Facetten aus der Voxelflaechen-Summe, Duennteil-Rueckfall 2.233 --
+exakt V3s frueherer K1-Zahl. Die Zuordnung "entartete Summe = einzellige Teile und Spalten"
+ist damit zum dritten Mal unabhaengig bestaetigt.
+
+BITANKER ZWEIMAL GEHALTEN: td_bitanker und td_kipp0_v3b liefern beide FELD-HASH
+4722579264326613690. Der Pruefagent hatte V3b am ebenen Kanal von Hand nachgerechnet (nq=9
+Flaechen, Summe (0,0,9), y_w exakt 0,5, cx_ identisch mit V1s Schwerpunkt) und daraus ein
+hartes Abnahmetor abgeleitet -- es haelt.
+
+BEHOBENE MITTLERE BEFUNDE: M2 unbelegte Schalterwerte warnten "V3b aktiv" und rechneten V1
+(jetzt print_error). M3 der Laengenwaechter prueft jetzt alle 17 Parallelvektoren und BRICHT AB
+(vorher 2 von 15, und er lief nach dem Fehler weiter -> undefiniertes Verhalten). M4 Gates im
+K1-Zweig an den Normalpfad angeglichen. M5 die beiden Duennteil-Messwege hatten GEGENSAETZLICHE
+Randkonventionen -- am kipp0-Kanal haette der Waechter faelschlich Alarm geschlagen. M6 der
+gekoppelte Waechter lief im Produktionsarm gar nicht mit. M8 die Schalter-Ansage nennt jetzt
+auch den fac_geo-Flaechenfaktor und den ELIBB-Ebenen-q als Wirkpfade. M9 die Kugel-Grundwahrheit
+konnte still entfallen.
+OFFEN (M7): bei NORMQUELLE=1 ohne VERGLEICH werden V2/V4/V5 unnoetig mitgerechnet, rund
+131 MB Ballastspeicher am Fahrzeug 4 mm und geschaetzt +40..80 % auf den Facettenbau. Reine
+Setup-Kosten, kein Laufzeiteffekt -- nicht behoben, um vor der Physikmessung keine
+Umstrukturierung einzuziehen.
