@@ -1278,9 +1278,19 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Solid/Fluid-Flaechen, die diese Schleife ohnehin schon findet (B36: die rohe Flaeche
 	// liefert q exakt 0,5 auf allen Links, ihre Geometrie steckt vollstaendig in den Achslinks).
 	const bool vgl_an = env_u("CFD_FACETTEN_VERGLEICH", 0u)>0u;
-	std::vector<double> qx(vgl_an?np_max:0u), qy(vgl_an?np_max:0u), qz(vgl_an?np_max:0u);
-	std::vector<uchar>  qd(vgl_an?np_max:0u); // Richtungsindex der Achsflaeche -> Normale = -FZ_C[qd]
-	std::vector<uchar>  qt(vgl_an?np_max:0u); // ★ DUENNTEIL-FLAGGE je Flaeche (Heiko 28.08.):
+	// ★ AKTIVE NORMALENQUELLE (Heiko-Auftrag 28.08.). 0 = V1 wie bisher (Default, bitidentisch),
+	// 1 = V3b: Heikos Flaechennormalen-Summe + Duennteil-Rueckfall + y_w gegen die naechste
+	// Flaeche. Belege: B39/B40 (Verwerfung 21,88 -> 7,26 % bei 8 mm, K1 und K2 strukturell null),
+	// B41/B42 (Genauigkeit exakt V3, mein Sichtbarkeitsfilter war der Schaden und ist raus),
+	// B44 (V1s Winkelfehler saettigt bei 4,69 Grad, V3 konvergiert weiter auf 4,54).
+	// NICHT belegt (B43): dass das die Kraefte verbessert. Genau dafuer ist dieser Schalter da.
+	const uint normquelle = env_u("CFD_FACETTEN_NORMQUELLE", 0u);
+	const bool v3_noetig = vgl_an||normquelle>0u;
+	ulong nq_aktiv=0ull; // Wirkpfad: wie oft V3b wirklich in die Facette geschrieben wurde
+	if(normquelle>0u) print_warning("CFD_FACETTEN_NORMQUELLE="+to_string(normquelle)+" -- die Normale kommt aus V3b (Voxelflaechen-Summe), NICHT aus der 18-Link-PCA. Deklarierter Messarm.");
+	std::vector<double> qx(v3_noetig?np_max:0u), qy(v3_noetig?np_max:0u), qz(v3_noetig?np_max:0u);
+	std::vector<uchar>  qd(v3_noetig?np_max:0u); // Richtungsindex der Achsflaeche -> Normale = -FZ_C[qd]
+	std::vector<uchar>  qt(v3_noetig?np_max:0u); // ★ DUENNTEIL-FLAGGE je Flaeche (Heiko 28.08.):
 	// "wenn rueckseitig des dreiecks keine weitere solidzelle ist, ist das dann ein duennteil".
 	// Test ist O(1): hinter der Solidzelle S in derselben Richtung nachsehen. Kein Solid -> S ist
 	// in dieser Richtung genau EINE Zelle dick, die Flaeche gehoert also zu einem Duennteil.
@@ -1366,7 +1376,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				if(!ist_wand(idx(wx(xn),wy(yn),zni))) continue;
 				if(np<np_max) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
 				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
-				if(vgl_an&&i<7u) { // NUR Achslinks: das sind genau die Voxel-Grenzflaechen (Flaeche 1, Normale -FZ_C ins Fluid)
+				if(v3_noetig&&i<7u) { // NUR Achslinks: das sind genau die Voxel-Grenzflaechen (Flaeche 1, Normale -FZ_C ins Fluid)
 					const double mx=0.5*((double)cx+(double)xn), my=0.5*((double)cy+(double)yn), mz=0.5*((double)cz+(double)zn);
 					if(nq<np_max) {
 						// Zelle HINTER der Solidzelle, gleiche Richtung: Geometrie ungewickelt, Index gewickelt
@@ -1423,7 +1433,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
 		const double ax=fabs(nxd), ay=fabs(nyd), az=fabs(nzd);
 		f.achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); // Tie-Break: kleinste Achsnummer
-		if(vgl_an) { // ---- V2 (Achslinks-PCA) und V3 (Heikos Normalensumme), rein diagnostisch
+		if(v3_noetig) { // ---- V2 (Achslinks-PCA) und V3 (Heikos Normalensumme), rein diagnostisch
 			double n2x=0.0,n2y=0.0,n2z=0.0, yw2=0.0; uchar k2b=0u;
 			if(nq<6u) k2b|=1u; // K1-Aequivalent: zu wenig Stuetzpunkte
 			else {
@@ -1583,7 +1593,22 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				nv5.push_back((float)n5x); nv5.push_back((float)n5y); nv5.push_back((float)n5z);
 				nv6.push_back((float)n6x); nv6.push_back((float)n6y); nv6.push_back((float)n6z);
 			}
-			yw6v.push_back((float)yw6); kl6v.push_back(k6b);
+			if(vgl_an) { yw6v.push_back((float)yw6); kl6v.push_back(k6b); }
+			// ---- V3b AKTIV SCHALTEN: nur hier aendert sich, was in der Facette landet.
+			if(normquelle==1u) {
+				nq_aktiv++;
+				f.klasse &= (uchar)~(uchar)(1u|2u|4u|8u|16u); // K1..K4 und Orientierung neu bewerten
+				f.klasse |= (uchar)(k6b&(uchar)(1u|8u));      // V3b kennt kein r21/r10 -> kein K2/K3
+				f.nx=(float)n6x; f.ny=(float)n6y; f.nz=(float)n6z; f.yw=(float)yw6;
+				f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z; // EINZIGER Abnehmer: die
+				// y_w-Neuberechnung der Glaettung (setup.cpp ~1619). Stuende hier der PCA-Schwerpunkt,
+				// wuerde die Glaettung V3bs y_w still gegen einen fremden Bezug ueberschreiben.
+				f.r21_=0.0f; f.r10_=1.0f;                     // ausdruecklich neutral, nicht "unbestimmt"
+				const double geg6 = n6x*((double)x-(double)snx)+n6y*((double)y-(double)sny)+n6z*((double)z-(double)snz);
+				if(geg6<=0.0) f.klasse|=16u;                  // Orientierungs-Gegenprobe bleibt
+				const double q6x=fabs(n6x), q6y=fabs(n6y), q6z=fabs(n6z);
+				f.achse = (q6x>=q6y&&q6x>=q6z) ? 0u : ((q6y>=q6z) ? 1u : 2u);
+			}
 			yw5v.push_back((float)yw5); kl5v.push_back(k5b);
 			a12.push_back((k2b&1u)?-1.0f:wink(n2x,n2y,n2z));
 			a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
@@ -1627,9 +1652,14 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
 	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
 	hist_yw.clear(); hist_winkel.clear();
-	ulong markiert=0ull; k4=0ull; kori=0ull; ulong k_ueberlauf=0ull, k_ms=0ull; // kori seit R3-Nachschliff aus der ENDbitmaske (Glaettungs-Kipp zaehlt mit; Bit 16 ist bewusst sticky)
+	ulong markiert=0ull; k4=0ull; kori=0ull; ulong k_ueberlauf=0ull, k_ms=0ull;
+	k1=0ull; k2=0ull; k3=0ull; // ★ auch K1..K3 aus der ENDbitmaske -- sonst meldete der Zensus bei
+	// NORMQUELLE=1 weiter die Inline-Zaehler des V1-Pfades, obwohl die Bits geloescht sind. // kori seit R3-Nachschliff aus der ENDbitmaske (Glaettungs-Kipp zaehlt mit; Bit 16 ist bewusst sticky)
 	for(const Facette& f : F) {
 		if(f.klasse!=0u) markiert++;
+		if(f.klasse&1u)  k1++;
+		if(f.klasse&2u)  k2++;
+		if(f.klasse&4u)  k3++;
 		if(f.klasse&8u)  k4++;
 		if(f.klasse&32u) k_ueberlauf++;
 		if(f.klasse&64u) k_ms++;
@@ -1643,6 +1673,11 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		if(v.empty()) return 0.0; std::sort(v.begin(), v.end());
 		return v[(size_t)fmin((double)v.size()-1.0, q*(double)v.size())]; };
 	const ulong nf=(ulong)F.size();
+	if(normquelle==1u) {
+		if(nq_aktiv==0ull) print_error("CFD_FACETTEN_NORMQUELLE=1, aber V3b wurde KEIN einziges Mal in die Facette geschrieben -- stiller No-Op.");
+		else print_info("  NORMALENQUELLE V3b AKTIV: "+to_string(nq_aktiv)+" von "+to_string((ulong)F.size())
+			+" Facetten aus der Voxelflaechen-Summe (Duennteil-Rueckfall "+to_string(v6_rueck)+").");
+	}
 	print_info(string("Facetten (")+wo+"): "+to_string(nf)+" wandnahe Fluidzellen; Klassen: K1(<6 Punkte) "+to_string(k1)
 		+", K2(Kante) "+to_string(k2)+", K3(Linie) "+to_string(k3)+", K4(y_w, nach Glaettung) "+to_string(k4)
 		+", Orientierung "+to_string(kori)+", Punktueberlauf "+to_string(k_ueberlauf)+", bewegte-Wand-Naehe "+to_string(k_ms));
