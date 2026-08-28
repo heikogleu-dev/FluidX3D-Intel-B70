@@ -4497,3 +4497,49 @@ V1 versagt genau dort, wo V4b traegt (duenn, kantig), und V4 verliert genau dort
 (dick, glatt). Der naheliegende Schluss ist ein AUSWAHLKRITERIUM statt eines Siegers -- und die
 Werkzeuge dafuer liegen bereits: solid_dicke (B38) trennt duenn von dick, V1s eigenes r21
 erkennt die Kante. NICHT gebaut, NICHT gemessen -- das ist eine Hypothese, kein Befund.
+
+### B42 -- V3b IST DER PARETO-PUNKT: Heikos V3 unangetastet, zwei Reparaturen, ohne meinen Sichtfilter
+V5 (V3 + Sichtbarkeit, OHNE Abstandsgewicht) trennt die beiden Zusaetze aus B40. Kugel:
+  Winkelfehler Median  V1 6,67 | V3 9,89 | V4 13,54 | V5 14,96   (dx=40)
+                       V1 4,85 | V3 5,53 | V4  9,47 | V5  9,60   (dx=20)
+V5 ist NICHT besser als V4 -- also kostet nicht das Abstandsgewicht die Genauigkeit, sondern
+DER SICHTBARKEITSFILTER. Er halbiert am konvexen Koerper die beitragenden Flaechen; die
+entfernten Flaechen im Fenster liegen dort auf derselben Wand und tragen echte Information.
+Beide Zusaetze waren meine Idee, beide sind damit widerlegt.
+
+V3b = V3 + NUR die zwei Reparaturen, die die Mittelung nicht antasten:
+  (a) Duennteil-Rueckfall auf die naechste Flaeche, wenn die Vektorsumme entartet
+  (b) y_w gegen die naechste Flaeche statt gegen den Schwerpunkt
+KONTROLLE BESTANDEN: auf der Kugel liefert V3b Winkel 9,89/12,96 und 5,53/9,43 -- ZIFFERNGLEICH
+mit V3. Die Kugel hat keine Duennteile, der Rueckfall darf dort nicht feuern, und er tut es
+nicht (Zaehler 0, gekoppelter Waechter meldet korrekte Stille). V3b aendert die Normale also
+ausschliesslich dort, wo V3 gar keine hatte.
+
+  OHNE FACETTE      8 mm      4 mm  | Winkelfehler Kugel dx=20
+  V1 (heute)      21,88 %   19,89 % | 4,85 / 9,81 Grad
+  V3              12,09 %   13,48 % | 5,53 / 9,43
+  V3b              7,26 %    7,80 % | 5,53 / 9,43   <- gleiche Genauigkeit wie V3
+  V4b              2,55 %    2,41 % | 9,47 / 16,24  <- Abdeckung erkauft mit 4 Grad
+
+V3b ist damit der Pareto-Punkt: beste Genauigkeit der neuen Verfahren (im q90 bei dx=20 sogar
+VOR V1: 9,43 gegen 9,81) bei dreifach besserer Abdeckung als heute. V4b kauft mehr Abdeckung
+mit Genauigkeit -- ein Tausch, kein Gewinn.
+
+HEIKOS BEOBACHTUNG ZUR AUFLOESUNG, nachgerechnet: der Abstand V3 zu V1 faellt von 3,22 Grad
+(dx=40) auf 0,68 Grad (dx=20), also Faktor 4,7 bei halber Zellgroesse, waehrend V1 selbst sich
+nur um Faktor 1,4 verbessert. Hochrechnen ist nicht zulaessig; eine dritte Sprosse entscheidet.
+
+### B43 -- WARNUNG: BESSERE ABDECKUNG IST NICHT BELEGT BESSERE PHYSIK
+Heiko fragte, ob die bessere Abdeckung heisst, dass das Wandmodell genauer arbeitet. NEIN, und
+das ist ausdruecklich festzuhalten, weil der Schluss naheliegt und falsch waere:
+ 1. Alles bisher ist reine Diagnose. Der Loeser rechnet unveraendert mit V1 (Bitgleichheit in
+    jedem Lauf bestaetigt, FELD-HASH 4722579264326613690). Es gibt keine Cd-, Cz- oder
+    u_tau-Zahl mit den neuen Normalen.
+ 2. Abdeckung ist notwendig, nicht hinreichend. Dass der Bounce-Back-Rueckfall schadet, ist
+    gemessen; daraus folgt nur, dass FEHLENDE Facetten schaden, nicht dass JEDE hilft.
+ 3. Eine falsch stehende Facette kann SCHLECHTER sein als keine: sie bucht Kraft in die falsche
+    Richtung, waehrend Bounce-Back keine falsche Richtung behauptet. Und die Zellen, die V3b
+    neu zulaesst, sind gerade die mit kleinem y_w -- dort reagiert das Wandgesetz am staerksten.
+ENTSCHEIDBAR NUR DURCH VERDRAHTEN UND MESSEN: kipp0 (darf sich nicht aendern), kipp26 gegen
+u_tau IST/Ziel 2,382, dann Fahrzeug 8 mm gegen cd_druck 1,5747 +-0,0126 und Cz_rest
+-0,0942 +-0,0146 (OF13 -1,301).
