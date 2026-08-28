@@ -4334,3 +4334,43 @@ Histogramm {1, 2, 3, >=4 Zellen} am Fahrzeug 8 mm, plus die Winkelabweichung alt
 NACH Solid-Dicke aufgeschluesselt. Ohne diese Aufschluesselung geht der Duennteileffekt in
 755.344 Zellen unter. Laeuft als Census (CFD_FACETTEN_DIAG=2), kostet keine GPU-Stunde.
 Die Zahlen oben bleiben Geometrie, keine Stroemung.
+
+### B38 -- DIE VERWERFUNGEN SITZEN AN HEIKOS BAUTEILEN: K2 ist 5,2-fach haeufiger an 1-Zellen-Teilen
+Neues Instrument `solid_dicke` im Facettenzensus (setup.cpp, Block nach dem Winkel-Bericht):
+je Wandnachbar die Solid-Lauflaenge entlang der drei Achsen, davon das Minimum = lokale
+Bauteildicke; je Facettenzelle das Minimum ueber ihre Wandnachbarn (das duennste beruehrte
+Teil). Lauflaenge bei 9 gekappt, Wrap-Trennung wie im Rest der Funktion. Zusaetzlich als
+Spalte `solid_dicke` in facetten_histogramme.csv. Lauf t8_dicke_dd (Fahrzeug 8 mm,
+CFD_FACETTEN_DIAG=2, kein Stroemungslauf), Census vor und nach der Serie frei.
+
+DICKENVERTEILUNG, 755.344 wandnahe Fluidzellen:
+  1 Zelle 57.248 (7,58 %) | 2 Zellen 102.369 (13,55 %) | 3 Zellen 40.446 (5,35 %)
+  4-8 Zellen 73.160 (9,69 %) | >=9 Zellen 482.121 (63,83 %)
+  <=3 Zellen zusammen 200.063 = 26,49 %. Im FERNFELD sogar 19.153 von 42.887 = 44,66 %.
+
+KREUZTABELLE KLASSE GEGEN DICKE -- der eigentliche Befund:
+  Solid-Dicke   Zellen     K2(Kante)      K4(y_w)     ohne Facette
+  1 Zelle        57.248   19.953 34,9%   9.615 16,8%   23.019 40,2%
+  2 Zellen      102.369   24.935 24,4%  15.575 15,2%   33.628 32,8%
+  3 Zellen       40.446    9.285 23,0%   6.208 15,3%   12.368 30,6%
+  4-8 Zellen     73.160    9.461 12,9%  10.867 14,9%   17.572 24,0%
+  >=9 Zellen    482.121   32.319  6,7%  58.626 12,2%   80.090 16,6%
+  GESAMT        755.344   95.953 12,7% 100.891 13,4%  166.677 22,1%
+
+1) K2 IST EIN DUENNTEIL-PHAENOMEN: 34,9 % an 1-Zellen-Teilen gegen 6,7 % an Teilen >=9 Zellen,
+   also FAKTOR 5,2. Die Kantenklasse ist damit keine gleichverteilte Eigenschaft der
+   Geometrie, sondern konzentriert sich dort, wo Heikos Gurney, Canards und Luftleitbleche
+   sitzen. An einem einzelligen Teil bekommen ZWEI VON FUENF wandnahen Zellen (40,2 %)
+   ueberhaupt keine Facette.
+2) K4 IST ES NICHT: 16,8 % gegen 12,2 % ist nahezu flach. Der y_w-Topf hat mit der Bauteildicke
+   fast nichts zu tun -- die beiden grossen Verwerfungsgruende haben also VERSCHIEDENE
+   Ursachen und brauchen verschiedene Loesungen. Das war vorher nicht bekannt.
+3) GEWICHT: die Verwerfungsrate ist duenn 34,5 % gegen dick 16,6 % (Faktor 2,08). 41,4 % ALLER
+   verworfenen Zellen sitzen an Teilen <=3 Zellen, die nur 26,5 % der Bevoelkerung stellen.
+
+FOLGERUNG: Heikos Vermutung ("gerade bei den canards, gurny und luftleitblechen deutlich
+physik/detailgetreuer") trifft die schlechteste Population des heutigen Verfahrens. Der
+Kantenfall und seine Bauteile sind dasselbe Problem. Zusammen mit B37 (Taubin dickt genau dort
+die projizierte Stirnflaeche um bis zu 5,8 % auf, waehrend die rohe Voxelflaeche exakt ist)
+ergibt das eine klare Reihenfolge: die Normalenquelle muss aus der Flaeche kommen, und die
+Glaettung ist an Duennteilen der Gegner, nicht der Helfer.

@@ -1419,10 +1419,61 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
 	print_info("  Winkel zur dominanten Achse: Median "+to_string((float)quantil(hist_winkel,0.5),1u)
 		+" Grad, q90 "+to_string((float)quantil(hist_winkel,0.9),1u)+" Grad");
+	// ★ SOLID-DICKE (Heiko 28.08.: "natuerlich hat der mr2 gurney, canards und luftleitbleche
+	// ... sind selbst bei 8mm noch deutlich durch sat voxelizer sichtbar"). Der Facettenzensus
+	// kannte bis hier KEINE Bauteildicke -- damit war der Taubin-Duennteileffekt (B37:
+	// projizierte Stirnflaeche +5,8 % bei 2 Zellen Merkmalshoehe gegen +1,1 % bei 10) in
+	// 755.344 Zellen unsichtbar. Gegenstueck zu freie_weite (oben, Zeile 1092 ff.):
+	// je Wandnachbar die Solid-Lauflaenge entlang der drei Achsen, davon das Minimum = lokale
+	// Bauteildicke; je Facettenzelle das Minimum ueber ihre Wandnachbarn, also das DUENNSTE
+	// Teil, das sie beruehrt. Lauflaenge bei 9 Zellen gekappt (nur 1..4 sind die Frage).
+	// Wrap wie ueberall in dieser Funktion: Geometrie ungewickelt, NUR der Speicherindex wickelt.
+	std::vector<uchar> sdicke(F.size(), (uchar)0u); // ★ auch fuer die CSV -- Kreuztabelle Klasse gegen Dicke
+	{
+		ulong dh[10]={0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull}; ulong ohne_nachbar=0ull;
+		size_t fi_=0ull;
+		for(const Facette& f : F) {
+			const uint zc=(uint)(f.n/((ulong)Nx*(ulong)Ny));
+			const uint yc=(uint)((f.n/(ulong)Nx)%(ulong)Ny);
+			const uint xc=(uint)(f.n%(ulong)Nx);
+			uint dmin=10u;
+			for(uint i=1u; i<19u; i++) {
+				const int zn0=(int)zc+FZ_C[i][2]; if(!z_per&&(zn0<0||zn0>=(int)Nz)) continue;
+				const uint zni=(uint)(z_per?(int)wz(zn0):zn0);
+				const int xn=(int)xc+FZ_C[i][0], yn=(int)yc+FZ_C[i][1];
+				if(!ist_wand(idx(wx(xn),wy(yn),zni))) continue;
+				uint dachse=10u;
+				for(uint a=0u; a<3u; a++) {
+					uint lauf=1u;
+					for(int sg=-1; sg<=1; sg+=2) for(uint k=1u; k<9u; k++) {
+						int px=xn, py=yn, pz=zn0;
+						if(a==0u) px+=sg*(int)k; else if(a==1u) py+=sg*(int)k; else pz+=sg*(int)k;
+						if(!z_per&&(pz<0||pz>=(int)Nz)) break;
+						if(!ist_wand(idx(wx(px),wy(py),(uint)(z_per?(int)wz(pz):pz)))) break;
+						lauf++;
+					}
+					if(lauf>9u) lauf=9u;
+					if(lauf<dachse) dachse=lauf;
+				}
+				if(dachse<dmin) dmin=dachse;
+			}
+			if(dmin>9u) { ohne_nachbar++; fi_++; continue; } // Waechter: kann bei wandnahen Zellen nicht auftreten
+			dh[dmin]++; sdicke[fi_++]=(uchar)dmin;
+		}
+		string h="  SOLID-DICKE der beruehrten Bauteile (1..>=9 Zellen): ";
+		for(uint d=1u; d<10u; d++) h+=to_string(dh[d])+(d<9u?" ":"");
+		print_info(h);
+		const ulong duenn=dh[1]+dh[2]+dh[3];
+		if(nf>0ull) print_info("  davon an Teilen <=3 Zellen dick: "+to_string(duenn)+" = "
+			+to_string(100.0f*(float)duenn/(float)nf,2u)+" % (Gurney/Canard/Leitblech-Population -- "
+			+"B37: dort dickt Taubin die projizierte Stirnflaeche um bis zu 5,8 % auf)");
+		if(ohne_nachbar>0ull) print_error("SOLID-DICKE: "+to_string(ohne_nachbar)+" Facettenzellen ohne Wandnachbarn -- unmoeglich, Zaehler oder Wrap defekt.");
+	}
 	std::ofstream fh(out_dir+"facetten_histogramme.csv");
-	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,r21,r10,klasse,achse,n_punkte,eigene_links,n\n"; // ★ K4-Ring-Etappe: Zellindex n als letzte Spalte -- ohne ihn war keine DIAGZ-Zielwahl aus dem Census moeglich
-	for(const Facette& f : F) fh << f.yw << "," << (acos(fmin(1.0f,fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0f/3.14159265f)
-		<< "," << f.r21_ << "," << f.r10_ << "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "," << f.n << "\n";
+	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,r21,r10,klasse,achse,n_punkte,eigene_links,n,solid_dicke\n"; // ★ solid_dicke angehaengt (Heiko 28.08.), Spaltenzahl waechst -- Auswerter lesen nach Namen // ★ K4-Ring-Etappe: Zellindex n als letzte Spalte -- ohne ihn war keine DIAGZ-Zielwahl aus dem Census moeglich
+	{ size_t fi_=0ull; for(const Facette& f : F) { fh << f.yw << "," << (acos(fmin(1.0f,fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0f/3.14159265f)
+		<< "," << f.r21_ << "," << f.r10_ << "," << (uint)f.klasse << "," << (uint)f.achse << "," << f.n_punkte << "," << f.eigene_links << "," << f.n
+		<< "," << (uint)sdicke[fi_++] << "\n"; } }
 	fh.close();
 	print_info("  CSV: "+out_dir+"facetten_histogramme.csv");
 	return F;
