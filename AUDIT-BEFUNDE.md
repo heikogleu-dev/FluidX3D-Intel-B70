@@ -4165,3 +4165,55 @@ METHODISCHE BESTAETIGUNG, warum der Nachlauf noetig war: derselbe Konfigurations
 Commit fdb3a03 ein Cz_rest von -0,0729, heute -0,0942. 29 % Unterschied allein aus 69
 src/-Commits. Haette ich t6 gegen den alten Bezugslauf gerechnet, waere der FENSTER-Effekt
 (-0,0570) fast vollstaendig aus der Codeluecke gekommen statt aus dem Schalter.
+
+### B35 -- HEIKOS RUECKFRAGE DECKT DEN KONSTRUKTIONSFEHLER AUF: wir facettieren die Oberflaeche gar nicht
+Heiko am 28.08.: "wir voxelieren und dann facettieren wir die komplette Oberflaeche des
+Solidkoerpers ... ich bin mit deiner Angabe 3^3 und 5^3 bezueglich Facettenmenge etwas
+ueberrascht, denn so viele duerfte es nach meiner Rechnung niemals sein."
+Die Ueberraschung ist berechtigt -- die Praemisse trifft nicht zu, und das Wort "Facette" ist
+im Code ein Fehlname. Belegt an FluidX3D-v2, src/setup.cpp, Commit 362f410:
+
+WAS DER CODE WIRKLICH TUT (setup.cpp:1254-1320):
+  - EINE Facette je wandnaher FLUIDZELLE, nicht je Dreieck. Am Fahrzeug 8 mm sind das 755.344.
+  - 3^3/5^3 ist KEINE Facettenzahl, sondern der Radius der Nachbarschaft, aus der STUETZPUNKTE
+    eingesammelt werden.
+  - Die Stuetzpunkte sind LINKMITTELPUNKTE: setup.cpp:1319 setzt sie auf
+    0.5*(Zellmitte + Wandzellmitte) jedes Fluid->Wand-Links der 18 D3Q19-Richtungen.
+    Fest 0,5 -- kein q, kein Subgrid-Abstand, kein Dreieck.
+  - Daher die Punktzahlen: bis zu 27 Zellen x 18 Richtungen = 486 moegliche Stuetzpunkte je
+    Zelle bei 3^3, gemessener Median 61 (B31). Es sind Linkmitten, keine Dreiecke -- Heikos
+    Rechnung, dass an einem Zellmittelpunkt niemals so viele Dreiecke haengen, stimmt.
+  - baue_facetten() SIEHT DIE STL NIE: die Signatur (setup.cpp:1254-1256) hat keinen Mesh*.
+
+FOLGE: DIE AUSGLEICHSEBENE BESCHREIBT DIE VOXELTREPPE, NICHT DIE GEOMETRIE.
+Unabhaengiger Nachbau des Algorithmus in Python (Rampe 1:2, wahre Normale atan(1/2) =
+26,565 Grad), 150 Zellen, identische PCA:
+     Stuetzpunkt                      3^3      5^3      7^3
+     Linkmitte 0,5 (heutiger Code)  28,01    27,19    26,86    Fehler +1,44 / +0,62 / +0,29
+     wahrer Flaechenschnitt (q)     26,57    26,57    26,57    Fehler +0,00 / +0,00 / +0,00
+Der Nachbau trifft die MESSUNG (28,2 / 27,2 aus t2_26_u10 und t4_fenster2) auf 0,2 bzw.
+0,01 Grad. Der Winkelfehler ist damit KEIN Bug und kein Rauschen, sondern die zwangslaeufige
+Folge der 0,5-Annahme -- und er verschwindet vollstaendig, sobald der Stuetzpunkt auf der
+wahren Flaeche liegt, bei JEDER Fenstergroesse.
+
+DAS ENTWERTET DIE HEUTIGE FENSTERSERIE ALS LOESUNG UND ERKLAERT SIE ZUGLEICH:
+5^3 half am 26-Grad-Kanal (B28: u_tau 2,382 -> 1,507), weil es die Treppe teilweise
+wegmittelt -- 1,44 -> 0,62 Grad. Es ist ein Behelf gegen ein Abtastproblem. An der Kugel
+scheitert er (B32), weil Mitteln dort echte Kruemmung zerstoert. Mit richtigen Stuetzpunkten
+braucht man das Fenster ueberhaupt nicht: 3^3 ist dann bereits exakt.
+
+DIE MITTEL DAFUER LIEGEN BEREIT UND SIND NUR NICHT ANGESCHLOSSEN:
+  - setup.cpp:3148 legt veh_f = read_stl(...) an und platziert es im Nahfeldgitter;
+    baue_facetten(lbm_f, ...) wird in DERSELBEN Funktion bei 3598/3613 gerufen. Das Mesh ist
+    an der Aufrufstelle in Reichweite, es wird nur nicht uebergeben.
+  - Die REMESH-Stufe rechnet bereits mit echten Dreiecken (setup.cpp:1137-1172,
+    stl->p0/p1/p2), der Facettenbau also nicht aus Mangel an Daten.
+
+DAS ORDNET AUCH DIE KANTENVERWERFUNG NEU EIN (B30/B31): die 95.953 K2-Faelle sind Zellen, in
+denen die LINKMITTEN nicht eben liegen. Mit echten Dreiecken waere eine Kantenzelle nicht ein
+Fehlschlag, sondern schlicht eine Zelle mit zwei Flaechen -- genau Heikos urspruenglicher
+Vorschlag, jetzt aber aus der richtigen Datenquelle.
+
+NOCH NICHT BEWIESEN und ehrlich zu trennen: dass exakte Normalen die Fahrzeugkraefte
+verbessern. Gezeigt ist die Normale an einer analytischen Rampe. Am Fahrzeug kommen
+Dreiecksdichte gegen Zellgroesse, Mehrfachflaechen je Zelle und der Reibungsloeser dazu.
