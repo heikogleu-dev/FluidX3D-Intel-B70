@@ -4374,3 +4374,48 @@ Kantenfall und seine Bauteile sind dasselbe Problem. Zusammen mit B37 (Taubin di
 die projizierte Stirnflaeche um bis zu 5,8 % auf, waehrend die rohe Voxelflaeche exakt ist)
 ergibt das eine klare Reihenfolge: die Normalenquelle muss aus der Flaeche kommen, und die
 Glaettung ist an Duennteilen der Gegner, nicht der Helfer.
+
+### B39 -- DREIFACHVERGLEICH DER NORMALENQUELLE: HEIKOS VERFAHREN GEWINNT KLAR, ERREICHT ABER NICHT NULL
+Serie logs/t9_vergleich_serie.txt, Schalter CFD_FACETTEN_VERGLEICH (Default 0). Census vor und
+nach der Serie frei. ABNAHME BITGLEICHHEIT bestanden: Arm t9_bitgleich (Schalter AUS, voller
+Kanallauf) liefert FELD-HASH 4722579264326613690 == Soll -- der neue Code fasst die Physik nicht an.
+Alle drei Verfahren speisen sich AUSSCHLIESSLICH aus dem Voxelkoerper (Heiko-Vorgabe), der
+Remesh wird nicht gebraucht: die rohe Voxeloberflaeche SIND die achsparallelen Solid/Fluid-Flaechen.
+
+  8 mm, 755.344 wandnahe Fluidzellen        K1     K2(Kante)   K4(y_w)   OHNE FACETTE
+  V1 alle 18 Linkmitten (heute)              0        95.953   100.891   165.239 = 21,88 %
+  V2 nur Achslinks, PCA (mein Vorschlag)   236        64.142    93.376   135.201 = 17,90 %
+  V3 Flaechennormalen-Summe (HEIKO)      2.233             0    89.071    91.304 = 12,09 %
+
+  4 mm, 3.275.381 wandnahe Fluidzellen      K1     K2(Kante)   K4(y_w)   OHNE FACETTE
+  V1                                         0       312.840   483.121   651.623 = 19,89 %
+  V2                                       215       204.975   467.040   548.969 = 16,76 %
+  V3                                       170             0   441.212   441.382 = 13,48 %
+
+1) K2 IST BEI V3 EXAKT NULL -- in BEIDEN Aufloesungen. Das war die Vorabprognose und sie ist
+   konstruktiv: ohne Eigenwertproblem gibt es kein r21, also kann die Klasse "Kante" gar nicht
+   entstehen. Damit verschwindet der Topf, der 95.953 (8 mm) bzw. 312.840 (4 mm) Zellen kostete.
+2) AN DUENNTEILEN IST DER ABSTAND AM GROESSTEN -- genau dort, wo Heiko es vermutet hat.
+   Verwerfungsrate an 1-Zellen-Teilen:  8 mm  V1 40,0 % -> V2 29,6 % -> V3 12,5 %
+                                        4 mm  V1 53,4 % -> V2 42,7 % -> V3 16,2 %
+   V3 drittelt die Verwerfung an genau der Population, an der Gurney, Canards und Leitbleche
+   sitzen. Bei 4 mm ist der Effekt GROESSER als bei 8 mm, nicht kleiner.
+3) HEIKOS ABNAHME "VERWORFENE FACETTEN DUERFEN WIR NICHT HABEN" IST NICHT ERFUELLT.
+   V3 landet bei 12,09 % (8 mm) bzw. 13,48 % (4 mm), und der Rest ist VOLLSTAENDIG K4 (y_w):
+   89.071 von 91.304 bzw. 441.212 von 441.382. K4 ist damit der alleinige verbleibende Grund.
+   Das passt zu B38: K4 ist nicht dickenabhaengig (16,8 % gegen 12,2 %), hat also eine ANDERE
+   Ursache als K2 und braucht eine eigene Loesung. Der naechste Schritt liegt damit fest.
+4) ZWEI EHRLICHE EINSCHRAENKUNGEN AN V3:
+   a) V3 hat als einziges Verfahren einen K1-Topf, der bei 8 mm auf 2.233 Zellen anwaechst
+      (4 mm nur 170). Ursache ist konstruktiv: an einem einzelligen Teil zeigen die beiden
+      gegenueberliegenden Voxelflaechen exakt entgegengesetzt, die Vektorsumme hebt sich auf
+      und es gibt KEINE Normale. Das ist der Preis der Vektorsumme und trifft ausgerechnet die
+      duennste Lage. Bei 4 mm ist dasselbe Bauteil zwei Zellen dick, deshalb der Einbruch von
+      2.233 auf 170. Eine Rueckfallregel dafuer fehlt noch.
+   b) Der Winkel von V3 weicht von V1 im Median um 3,55 Grad ab (q90 9,57). Welcher der beiden
+      naeher an der Wahrheit liegt, sagt dieser Lauf NICHT -- am Fahrzeug gibt es keine
+      Grundwahrheit. Belegt ist die Ueberlegenheit von V3 bei der VERWERFUNG, nicht beim Winkel.
+      Die Winkelfrage entscheidet die Kugel gegen die analytische Normale (noch offen).
+   c) Auffaellig und noch nicht erklaert: bei 4 mm melden Dicke-2-Zellen (367.988) einen
+      Winkelmedian von exakt 0,00 fuer BEIDE Verfahren. Plausibel bei achsparallelen 2-Zellen-
+      Blechen, wo alle drei Verfahren dieselbe Achsnormale liefern -- geprueft ist es nicht.

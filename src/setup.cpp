@@ -1268,6 +1268,19 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	if(getenv("CFD_FACETTEN_FENSTER")!=nullptr&&env_u("CFD_FACETTEN_FENSTER", 1u)==0u) print_warning("CFD_FACETTEN_FENSTER=0 wird auf 1 gehoben (Radius 0 gibt es nicht).");
 	const uint np_max = (uint)((2*R+1)*(2*R+1)*(2*R+1))*18u; // absolutes Maximum geschnittener Links im Fenster
 	std::vector<double> px(np_max), py(np_max), pz(np_max);
+	// ★ DREIFACHVERGLEICH DER NORMALENQUELLE (Heiko-Auftrag 28.08.). Standard AUS -> bitidentisch.
+	//   V1 = heute: PCA ueber die Mitten ALLER 18 geschnittenen Links (px/py/pz oben).
+	//   V2 = nur die ACHSLINKS, also die echten Voxelflaechen, ebenfalls per PCA.
+	//   V3 = HEIKOS IDEE: flaechengewichtete Vektorsumme der Voxelflaechen-Normalen; y_w gegen
+	//        den flaechengewichteten Flaechenschwerpunkt. Kein Eigenwertproblem, also
+	//        konstruktiv KEIN K2/K3 -- die Klasse "Kante" kann dort gar nicht entstehen.
+	// Der Remesh wird dafuer NICHT gebraucht: die rohe Voxeloberflaeche SIND die achsparallelen
+	// Solid/Fluid-Flaechen, die diese Schleife ohnehin schon findet (B36: die rohe Flaeche
+	// liefert q exakt 0,5 auf allen Links, ihre Geometrie steckt vollstaendig in den Achslinks).
+	const bool vgl_an = env_u("CFD_FACETTEN_VERGLEICH", 0u)>0u;
+	std::vector<double> qx(vgl_an?np_max:0u), qy(vgl_an?np_max:0u), qz(vgl_an?np_max:0u);
+	std::vector<float> a12, a13, yw2v, yw3v; std::vector<uchar> kl2v, kl3v;
+	if(vgl_an) print_info(string("Facetten (")+wo+"): NORMALEN-DREIFACHVERGLEICH aktiv (CFD_FACETTEN_VERGLEICH=1) -- reine Diagnose, Physik unveraendert.");
 	print_info(string("Facetten (")+wo+"): Fenster "+to_string(2*R+1)+"^3 (CFD_FACETTEN_FENSTER="+to_string((uint)R)+")");
 	auto idx = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
 	auto ist_wand  = [&](const ulong n) { return L.flags[n]==wand_flag; };
@@ -1302,6 +1315,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		if(!wandnah) continue;
 		// Stuetzpunkte: geschnittene Links (Fluid->wand_flag) aller Zellen im 5^3-Fenster.
 		uint np=0u, eigene=0u, verworfen=0u; // Puffer np_max = (2R+1)^3 * 18, dynamisch (Nachpruefer B1)
+		uint nq=0u; double nsx=0.0, nsy=0.0, nsz=0.0, csx=0.0, csy=0.0, csz=0.0; // V2/V3: Achslinks + Normalensumme
 		for(int dz=-R; dz<=R; dz++) for(int dy=-R; dy<=R; dy++) for(int dx2=-R; dx2<=R; dx2++) {
 			const int cx=(int)x+dx2, cy=(int)y+dy, cz0=(int)z+dz;
 			if(!z_per&&(cz0<1||cz0>=(int)Nz-1)) continue; // z hart (Standard) bzw. periodisch (Torus)
@@ -1317,12 +1331,22 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				if(!ist_wand(idx(wx(xn),wy(yn),zni))) continue;
 				if(np<np_max) { px[np]=0.5*((double)cx+(double)xn); py[np]=0.5*((double)cy+(double)yn); pz[np]=0.5*((double)cz+(double)zn); np++; if(dx2==0&&dy==0&&dz==0) eigene++; }
 				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
+				if(vgl_an&&i<7u) { // NUR Achslinks: das sind genau die Voxel-Grenzflaechen (Flaeche 1, Normale -FZ_C ins Fluid)
+					const double mx=0.5*((double)cx+(double)xn), my=0.5*((double)cy+(double)yn), mz=0.5*((double)cz+(double)zn);
+					if(nq<np_max) { qx[nq]=mx; qy[nq]=my; qz[nq]=mz; nq++; }
+					nsx-=(double)FZ_C[i][0]; nsy-=(double)FZ_C[i][1]; nsz-=(double)FZ_C[i][2];
+					csx+=mx; csy+=my; csz+=mz;
+				}
 			}
 		}
 		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u; f.cx_=f.cy_=f.cz_=0.0f; f.r21_=0.0f; f.r10_=0.0f;
 		if(verworfen>0u) f.klasse|=32u; // Ueberlauf -- markieren+zaehlen, nicht still rechnen (A4)
 		if(ms_nah) f.klasse|=64u; // bewegte-Wand-Naehe: Zellgate schloesse sie ohnehin aus -- gezaehlt statt Soll-Luecke
-		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u; F.push_back(f); continue; }
+		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u;
+			// ★ Vergleichsvektoren MUESSEN mitwachsen, sonst verrutschen die Indizes gegen F
+			// (hier faellt V1 selbst schon aus; V2/V3 werden als "keine Normale" gefuehrt).
+			if(vgl_an) { a12.push_back(-1.0f); a13.push_back(-1.0f); yw2v.push_back(0.0f); yw3v.push_back(0.0f); kl2v.push_back((uchar)1u); kl3v.push_back((uchar)1u); }
+			F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
 		for(uint i=0u;i<np;i++) { cx+=px[i]; cy+=py[i]; cz+=pz[i]; }
 		cx/=np; cy/=np; cz/=np;
@@ -1356,6 +1380,51 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
 		const double ax=fabs(nxd), ay=fabs(nyd), az=fabs(nzd);
 		f.achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); // Tie-Break: kleinste Achsnummer
+		if(vgl_an) { // ---- V2 (Achslinks-PCA) und V3 (Heikos Normalensumme), rein diagnostisch
+			double n2x=0.0,n2y=0.0,n2z=0.0, yw2=0.0; uchar k2b=0u;
+			if(nq<6u) k2b|=1u; // K1-Aequivalent: zu wenig Stuetzpunkte
+			else {
+				double bx=0.0,by=0.0,bz=0.0;
+				for(uint i=0u;i<nq;i++) { bx+=qx[i]; by+=qy[i]; bz+=qz[i]; }
+				bx/=nq; by/=nq; bz/=nq;
+				double M2[3][3]={{0,0,0},{0,0,0},{0,0,0}};
+				for(uint i=0u;i<nq;i++) {
+					const double dxp=qx[i]-bx, dyp=qy[i]-by, dzp=qz[i]-bz;
+					M2[0][0]+=dxp*dxp; M2[0][1]+=dxp*dyp; M2[0][2]+=dxp*dzp;
+					M2[1][1]+=dyp*dyp; M2[1][2]+=dyp*dzp; M2[2][2]+=dzp*dzp;
+				}
+				M2[1][0]=M2[0][1]; M2[2][0]=M2[0][2]; M2[2][1]=M2[1][2];
+				double e2[3], v2[3][3]; jacobi3(M2, e2, v2);
+				int i2n=0,i2x=0; for(int i=1;i<3;i++){ if(e2[i]<e2[i2n]) i2n=i; if(e2[i]>e2[i2x]) i2x=i; }
+				const int i2m = 3-i2n-i2x==3 ? 0 : 3-i2n-i2x;
+				n2x=v2[0][i2n]; n2y=v2[1][i2n]; n2z=v2[2][i2n];
+				const double l2=sqrt(n2x*n2x+n2y*n2y+n2z*n2z); n2x/=l2; n2y/=l2; n2z/=l2;
+				yw2 = n2x*((double)x-bx)+n2y*((double)y-by)+n2z*((double)z-bz);
+				if(yw2<0.0) { n2x=-n2x; n2y=-n2y; n2z=-n2z; yw2=-yw2; }
+				const double r21b = e2[i2x]>1e-30 ? e2[i2n]/fmax(e2[i2m],1e-30) : 1.0;
+				const double r10b = e2[i2x]>1e-30 ? e2[i2m]/e2[i2x] : 0.0;
+				if(r21b>0.15) k2b|=2u;
+				if(r10b<0.02) k2b|=4u;
+				if(yw2<(double)yw_min||yw2>2.0) k2b|=8u;
+			}
+			double n3x=0.0,n3y=0.0,n3z=0.0, yw3=0.0; uchar k3b=0u;
+			const double l3=sqrt(nsx*nsx+nsy*nsy+nsz*nsz);
+			if(nq==0u||l3<1e-12) k3b|=1u; // keine Flaeche ODER Vektorsumme hebt sich auf (geschlossene Duennstelle)
+			else {
+				n3x=nsx/l3; n3y=nsy/l3; n3z=nsz/l3;
+				const double gx=csx/(double)nq, gy=csy/(double)nq, gz=csz/(double)nq;
+				yw3 = n3x*((double)x-gx)+n3y*((double)y-gy)+n3z*((double)z-gz);
+				if(yw3<0.0) { n3x=-n3x; n3y=-n3y; n3z=-n3z; yw3=-yw3; }
+				if(yw3<(double)yw_min||yw3>2.0) k3b|=8u;
+			}
+			auto wink=[&](const double bx,const double by,const double bz){
+				const double c=fabs(nxd*bx+nyd*by+nzd*bz);
+				return (float)(acos(fmin(1.0,c))*180.0/3.14159265358979); };
+			a12.push_back((k2b&1u)?-1.0f:wink(n2x,n2y,n2z));
+			a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
+			yw2v.push_back((float)yw2); yw3v.push_back((float)yw3);
+			kl2v.push_back(k2b); kl3v.push_back(k3b);
+		}
 		F.push_back(f);
 		// Erstpass-Histogramme entfernt (Gross-Audit N18): wurden vor jeder Nutzung geleert -- der Endzustands-Pass fuellt neu.
 	}
@@ -1468,6 +1537,70 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			+to_string(100.0f*(float)duenn/(float)nf,2u)+" % (Gurney/Canard/Leitblech-Population -- "
 			+"B37: dort dickt Taubin die projizierte Stirnflaeche um bis zu 5,8 % auf)");
 		if(ohne_nachbar>0ull) print_error("SOLID-DICKE: "+to_string(ohne_nachbar)+" Facettenzellen ohne Wandnachbarn -- unmoeglich, Zaehler oder Wrap defekt.");
+	}
+	// ★ BERICHT DREIFACHVERGLEICH (Heiko-Auftrag 28.08.). Reine Diagnose.
+	if(vgl_an) {
+		if(a12.size()!=F.size()||kl3v.size()!=F.size())
+			print_error("VERGLEICH: Vektorlaenge "+to_string((ulong)a12.size())+" != Facettenzahl "+to_string((ulong)F.size())+" -- Indexversatz, Zahlen ungueltig.");
+		const ulong nn=(ulong)F.size();
+		auto zaehl=[&](const int v, const uchar bit)->ulong {
+			ulong c=0ull;
+			for(ulong i=0ull;i<nn;i++) {
+				const uchar k = (v==1)?F[i].klasse:((v==2)?kl2v[i]:kl3v[i]);
+				if(k&bit) c++;
+			}
+			return c; };
+		auto verw=[&](const int v)->ulong { // "keine Facette" = K1|K2|K3|K4, fuer alle drei gleich definiert
+			ulong c=0ull;
+			for(ulong i=0ull;i<nn;i++) {
+				const uchar k = (v==1)?F[i].klasse:((v==2)?kl2v[i]:kl3v[i]);
+				if(k&(uchar)15u) c++;
+			}
+			return c; };
+		print_info("  ---- NORMALENQUELLEN im Vergleich (K1..K4 gleich definiert; V1 zaehlt zusaetzlich Orientierung/Ueberlauf/MS, hier ausgeklammert)");
+		const char* nm[3]={"V1 alle 18 Linkmitten (heute)","V2 nur Achslinks (PCA)      ","V3 Flaechennormalen-Summe   "};
+		for(int v=1; v<=3; v++) {
+			const ulong vv=verw(v);
+			print_info(string("   ")+nm[v-1]+": K1 "+to_string(zaehl(v,1u))+", K2(Kante) "+to_string(zaehl(v,2u))
+				+", K3 "+to_string(zaehl(v,4u))+", K4(y_w) "+to_string(zaehl(v,8u))
+				+"  -> OHNE FACETTE "+to_string(vv)+" = "+to_string(nn>0ull?100.0f*(float)vv/(float)nn:0.0f,2u)+" %");
+		}
+		auto med=[&](std::vector<float> v)->std::pair<float,float> {
+			if(v.empty()) return {0.0f,0.0f};
+			std::sort(v.begin(), v.end());
+			return { v[v.size()/2], v[(size_t)fmin((double)v.size()-1.0, 0.9*(double)v.size())] }; };
+		{ std::vector<float> w2,w3;
+		  for(ulong i=0ull;i<nn;i++) { if(a12[i]>=0.0f) w2.push_back(a12[i]); if(a13[i]>=0.0f) w3.push_back(a13[i]); }
+		  const auto m2=med(w2), m3=med(w3);
+		  print_info("   Winkel gegen V1: V2 Median "+to_string(m2.first,2u)+" Grad (q90 "+to_string(m2.second,2u)
+			+"), V3 Median "+to_string(m3.first,2u)+" Grad (q90 "+to_string(m3.second,2u)+")"); }
+		{ std::vector<float> y1,y2,y3;
+		  for(ulong i=0ull;i<nn;i++) { if(!(F[i].klasse&1u)) y1.push_back(F[i].yw); if(!(kl2v[i]&1u)) y2.push_back(yw2v[i]); if(!(kl3v[i]&1u)) y3.push_back(yw3v[i]); }
+		  const auto q1=med(y1), q2=med(y2), q3=med(y3);
+		  print_info("   y_w Median/q90: V1 "+to_string(q1.first,3u)+"/"+to_string(q1.second,3u)
+			+"  V2 "+to_string(q2.first,3u)+"/"+to_string(q2.second,3u)+"  V3 "+to_string(q3.first,3u)+"/"+to_string(q3.second,3u)); }
+		// Aufschluesselung nach Solid-Dicke -- ohne sie geht der Duennteileffekt in 755k Zellen unter (B38)
+		const uint gl[4]={1u,2u,3u,4u}; const char* gn[4]={"Dicke 1   ","Dicke 2   ","Dicke 3   ","Dicke >=4 "};
+		for(uint g=0u; g<4u; g++) {
+			std::vector<float> w2,w3; ulong n_g=0ull, v1=0ull, v2c=0ull, v3c=0ull;
+			for(ulong i=0ull;i<nn;i++) {
+				const uint d=(uint)sdicke[i];
+				const bool drin = (g<3u) ? (d==gl[g]) : (d>=4u);
+				if(!drin) continue;
+				n_g++;
+				if(F[i].klasse&(uchar)15u) v1++;
+				if(kl2v[i]&(uchar)15u) v2c++;
+				if(kl3v[i]&(uchar)15u) v3c++;
+				if(a12[i]>=0.0f) w2.push_back(a12[i]);
+				if(a13[i]>=0.0f) w3.push_back(a13[i]);
+			}
+			if(n_g==0ull) continue;
+			const auto m2=med(w2), m3=med(w3);
+			print_info(string("   ")+gn[g]+": "+to_string(n_g)+" Zellen | ohne Facette V1 "
+				+to_string(100.0f*(float)v1/(float)n_g,1u)+" % V2 "+to_string(100.0f*(float)v2c/(float)n_g,1u)
+				+" % V3 "+to_string(100.0f*(float)v3c/(float)n_g,1u)+" % | Winkel gegen V1: V2 "
+				+to_string(m2.first,2u)+" V3 "+to_string(m3.first,2u)+" Grad");
+		}
 	}
 	std::ofstream fh(out_dir+"facetten_histogramme.csv");
 	fh << "# Facetten-Diagnose ("<<wo<<"), Stufe 1 -- yw,winkel_grad,r21,r10,klasse,achse,n_punkte,eigene_links,n,solid_dicke\n"; // ★ solid_dicke angehaengt (Heiko 28.08.), Spaltenzahl waechst -- Auswerter lesen nach Namen // ★ K4-Ring-Etappe: Zellindex n als letzte Spalte -- ohne ihn war keine DIAGZ-Zielwahl aus dem Census moeglich
