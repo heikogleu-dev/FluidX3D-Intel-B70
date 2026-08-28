@@ -4030,9 +4030,32 @@ gleich, ist die alte Begruendung am Fahrzeug nicht reproduzierbar.
 Zensus f8_standard_final (Fahrzeug 8 mm, Fenster 3^3, YWMIN-Default 0,2), 755.344 wandnahe
 Fluidzellen:  K1 0 | K2(Kante) 95.953 (12,7 %) | K3 0 | K4(y_w) 100.891 (13,4 %) |
 Orientierung 23.034 (3,0 %) | Punktueberlauf 0 | bewegte-Wand-Naehe 1.274 (0,2 %)
-SUMME 221.152 = 29,3 %.
+SUMME der ZAEHLER 221.152 -- aber das sind Mehrfachnennungen (allein K2 und K4 ueberlappen
+in 31.605 Zellen). Die richtige Zahl steht in der Facetten-CSV: klasse==0 gilt fuer 588.667
+Zellen, also bekommen 166.677 = 22,07 % KEINE Facette. (Korrektur meiner ersten Angabe 29,3 %,
+die die Zaehler unzulaessig addiert hat.)
 Im 26-Grad-Kanal sind dieselben Zaehler ALLE 0 -- das Verwerfen ist ein reines Fahrzeugproblem
 und war an der Treppe nicht sichtbar. Die zwei grossen Toepfe entsprechen genau Heikos beiden
 Ideen: K4 ist die y_w-Untergrenze (Arm g5 zieht daran, der Code empfiehlt selbst 0,15), K2 ist
 die Kante -- dort kann EINE Ausgleichsebene die Geometrie prinzipiell nicht darstellen, und
 genau dort waeren mehrere Facetten je Zelle der richtige Ansatz (Codeaenderung, noch nicht getan).
+
+### B31 -- DIE VERWORFENE POPULATION SEZIERT (ohne neuen Lauf, aus export/zband_d_dd/facetten_histogramme.csv)
+Fahrzeug 8 mm, 755.344 Facettenzeilen, Fenster 3^3, YWMIN 0,2. Drei Befunde, alle aus Echtdaten:
+
+1) DIE K2-SCHWELLE 0,15 IST GUT GEEICHT, NICHT WILLKUERLICH. r21 = ew_min/ew_mid ist ein
+   PCA-Ebenheitsmass (setup.cpp:1350-1353). Die SAUBERE Population endet bei q99 = 0,1327, die
+   K2-Population beginnt bei q10 = 0,1635, Median 0,2591. Die Schwelle liegt genau im Tal
+   zwischen beiden. Nur 21,1 % der K2-Faelle sind Grenzfaelle (r21 < 0,20) -- die uebrigen
+   78,9 % sind ECHTE Kanten, an denen eine einzelne Ausgleichsebene prinzipiell falsch ist.
+   FOLGERUNG: die Schwelle hochzuschrauben waere der falsche Hebel -- er wuerde falsche Ebenen
+   zulassen statt Kanten richtig zu behandeln.
+
+2) HEIKOS MEHRFACH-FACETTEN-IDEE IST FUER DIESE POPULATION NUMERISCH DURCHFUEHRBAR.
+   Punkte je Zelle in der K2-Population: Median 61, q10 27, q90 92. np >= 12 (das Minimum fuer
+   zwei Ebenen zu je 6 Punkten) gilt fuer 95.953 von 95.953 Zellen = 100,0 %. Es fehlt also
+   nicht an Datenpunkten, sondern nur an einer Zerlegung der Wolke.
+
+3) K4 IST ZU 100 % EIN UNTERSCHREITEN, KEIN UEBERSCHREITEN. Alle 100.891 K4-Faelle haben
+   y_w < 0,20; kein einziger liegt ueber 2,0. YWMIN=0,15 rettet davon 53.869 = 53,4 %,
+   YWMIN=0,10 rettet 73.708 = 73,1 %. Das ist die Grundlage der Vorab-Prognose in Arm g5.
