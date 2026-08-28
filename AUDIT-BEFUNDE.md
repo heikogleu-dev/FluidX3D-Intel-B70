@@ -4707,3 +4707,19 @@ Unabhaengige Untersuchung des Rang0-Anstiegs. Ergebnis kippt die Bewertung von B
    NICHT ANZUFASSEN: kernel.cpp:2155 (Entkopplungs-Gate) und 2176-2190 (relative Kaskaden-
    schwellen). Die absoluten 1e-8-Schwellen lagen exakt auf dem float-Schur-Rauschen und liessen
    31 % der Kugelfacetten ins Rang-2 flackern; ein Aufweichen stellt genau diesen Fehler wieder her.
+
+### B48 -- BUCHUNGSFRAGE ALS BEANTWORTET ERKLAERT (Heiko-Entscheid 28.08., 12:10)
+Die Bestaetigungssprosse ti_kipp26_v3b_640 wurde bei 65 % sauber abgebrochen (Census danach:
+kein Prozess, kein Lock). Grund: die Frage ist beantwortet, die Sprosse war Formalismus gegen
+meine eigene Schwelle.
+STAND, DER DAMIT GILT -- ausdruecklich deklariert statt stillschweigend uebernommen:
+  Verhaeltnis Reibungspfad/Kraftbilanz  80 ETT 0,8853 | 160 ETT 0,9551 | 320 ETT 0,9846
+  y-Reibung                             +0,1074 | +0,1901 | -0,0066  (V1-Niveau: -0,0171)
+Meine vorab gesetzte Schwelle war >0,99; erreicht sind 0,9846. Die Buchungsluecke ist damit
+NICHT formal abgenommen, sondern als Transienz eingeordnet -- gestuetzt auf drei unabhaengige
+Zeichen: die monotone Drittelung je Verdopplung, den Zusammenfall der y-Reibung auf V1-Niveau,
+und die Tatsache, dass V1 dieselbe Pruefung bei 80 ETT bereits besteht (1,0004), das Modell also
+nicht die Bilanz verletzt, sondern langsamer einschwingt.
+WER SPAETER DARAUF AUFBAUT, MUSS DAS WISSEN: die 1,5 % Restluecke sind gemessen, nicht erklaert
+weggerechnet. Sollte am Fahrzeug etwas in dieser Groessenordnung unklar bleiben, ist die
+640-ETT-Sprosse der erste Ort, an dem nachzusehen ist.
