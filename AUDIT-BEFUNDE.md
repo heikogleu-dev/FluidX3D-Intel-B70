@@ -3917,3 +3917,57 @@ oberste VRAM-Seite in unseren Puffern liegt -- und genau dort saesse der Xe-Flat
 (Aufrundung der CCS-Basis auf 128 KiB). Der sanfte Modus ist eine Vorab-Probe, kein Verdikt.
 Das volle Verdikt braucht reserve_mb=0, also VRAM-Erschoepfung auf der DESKTOP-GPU -- das birgt
 Freeze-Risiko und wird Heiko vorgelegt statt selbst entschieden.
+
+### B27 -- t3-SERIE AUSGEWERTET: die Aufloesungs-These ist WIDERLEGT (28.08. morgens)
+Serie logs/t3_elibb_serie.txt, 5 Arme am 26-Grad-Kanal, gelaufen 27.08. 22:48-23:37, Binary
+bada4ed. Alle Kill-Kriterien waren VOR dem Lauf in der Seriendatei formuliert.
+
+WIRKPFADE ZUERST -- alle drei Schalter haben nachweislich gegriffen, und zwar exakt in der
+vorhergesagten Groesse:
+  QKAPPE=0,75:  "q>Kappe->BB: 42480"     (Prognose 42.480 -- getroffen)
+  LSQ=1:        Slot 65 = 53.195.580     (Prognose ~53,2 Mio -- getroffen)
+  QDIAG=2:      Diagnosearm-Ansage vorhanden
+Die Arme haben also getan, was sie sollten. Das Ergebnis ist trotzdem negativ.
+
+ERGEBNIS, nach u_tau IST/Ziel sortiert (Ziel 1,000):
+  Arm                u_tau   Gate(Slot 10)  Anwendung   tau_w [1e-6]    y+
+  Nullziel+ELIBB0    0,761       9.295.740     55,5 %       0,4573    40,78
+  ELIBB=0 (Basis)    1,943      21.128.937     46,7 %       2,3946    87,78
+  QDIAG=2            2,150      68.866.776     22,7 %       2,2165    99,18
+  QKAPPE=0,75        2,219      69.154.033     22,5 %       2,2102    99,04
+  ELIBB=1 (Basis)    2,382      64.144.958     25,6 %      14,4248   218,16
+  LSQ=1              2,455      17.228.465     52,3 %      15,6211   227,00
+  QDIAG=3            2,459      58.946.622     29,2 %      38,2225   349,81
+
+KILL-KRITERIEN, formell gezogen:
+  A (QKAPPE) -- KILL. Kriterium war "Slot 10 unter 30 Mio ODER u_tau unter 2,2". Gemessen
+     69.154.033 (HOEHER als die Basis) und 2,219. Die q-Trennung ist als Hebel tot, obwohl die
+     Kappe exakt die vorhergesagten 42.480 Links erwischt hat.
+  C1 (QDIAG=2) -- KILL. Kriterium war "Slot 10 in die Naehe von 21 Mio". Gemessen 68.866.776.
+     Der m1/m2-Pfad traegt die Schuld also NICHT allein.
+  B (LSQ) -- Zuordnung BESTAETIGT (Slot 10 faellt um 46,9 Mio, weit ueber der 10-Mio-Schwelle,
+     Slot 65 trifft die Klassengroesse exakt), aber u_tau wird SCHLECHTER: 2,382 -> 2,455.
+  T0 (Nullziel x ELIBB=0) -- MECHANISMUS BESTAETIGT: Slot 10 faellt von 74.656.440 (ELIBB=1)
+     auf 9.295.740, also Faktor 8. ELIBB hebt P1 tatsaechlich massiv.
+
+DER EIGENTLICHE BEFUND -- DIE GATE-THESE IST WIDERLEGT, UND ZWAR ANTIKORRELIERT:
+  LSQ hat den zweitbesten Gate-Wert (17,2 Mio) und den SCHLECHTESTEN u_tau (2,455).
+  QDIAG=2 hat den schlechtesten Gate-Wert (68,9 Mio) und den zweitbesten u_tau (2,150).
+  Ueber alle sieben Arme: r(u_tau, Gate) = +0,58, r(u_tau, Anwendungsanteil) = -0,56.
+  "Weniger Gate-Rueckfaelle = bessere Wandtreue" ist damit als Arbeitshypothese erledigt --
+  und mit ihr der in B22 vorgeschlagene BUDGET-Sweep als NAECHSTER Schritt (er greift genau am
+  Gate). Er bleibt als Messarm interessant, aber nicht als Hebel.
+
+WAS STATTDESSEN TRAEGT -- das Modell ueberzieht, und das Ziel ist der Hebel:
+  Beide ELIBB=0-Arme klammern die Loesung ein:  Nullziel 0,761  |  Vollziel 1,943.
+  1,000 liegt DAZWISCHEN, bei gleichem ELIBB-Zustand und gleicher Geometrie. Das bestaetigt die
+  Ziel-/Zustandsbegrenzung zum dritten Mal, jetzt auf dem heutigen Code und mit sauberem Paar.
+  s_fac_tau ist heute BINAER (setup.cpp:1646/2285: fc==2||fc==4 ? 0 : 1) -- ein Zwischenwert ist
+  ohne Codeaenderung nicht messbar. Eine Env-Skala waere EINE Zeile und wuerde die Antwortkurve
+  zwischen 0,761 und 1,943 erschliessen. WICHTIG: der Zweck ist der BEFUND "um welchen Faktor
+  ueberzieht das Modell", nicht eine Eichkonstante -- ein aus der Kurve abgelesener Zielfaktor
+  waere ein Handwert und faellt unter die Handwert-Regel.
+
+STAND DER 26-GRAD-KLASSE nach zwei Tagen: der beste erreichbare Wert bleibt ELIBB=0 mit 1,943.
+Kein Schalter, keiner der drei Aufloesungs-Kandidaten und keine der beiden geplanten Baumassnahmen
+hat u_tau naeher an 1,0 gebracht. Was gewonnen wurde, ist die Ausschlussliste.
