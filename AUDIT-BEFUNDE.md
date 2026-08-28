@@ -4463,3 +4463,37 @@ Zwei rein geometrische Zusaetze zu V3, keine gesetzten Konstanten:
    weicht V4 staerker ab. Bei 4 mm an 1-Zellen-Teilen weicht V4 sogar MEHR ab als V3
    (10,33 gegen 8,40 Grad). Welcher Winkel richtiger ist, sagt keiner dieser Laeufe -- am
    Fahrzeug gibt es keine Grundwahrheit. Das entscheidet die Kugel gegen die analytische Normale.
+
+### B41 -- KUGEL GEGEN DIE ANALYTISCHE NORMALE: V1 IST AM GENAUESTEN, V4 AM SCHLECHTESTEN
+Der einzige Fall mit Grundwahrheit. Serie logs/ta_kugel_serie.txt, reiner Zensus, Census frei.
+Wahre Normale = (Zelle - Schwerpunkt)/|...|, Schwerpunkt im Code selbst bestimmt.
+
+  Winkelfehler Median / q90 [Grad]     V1        V2        V3        V4
+  Kugel dx=40 (794 Zellen)          6,67/11,50 6,74/13,76 9,89/12,96 13,54/21,13
+  Kugel dx=20 (2522 Zellen)         4,85/ 9,81 5,40/10,89 5,53/ 9,43  9,47/16,24
+
+DAS IST EIN KLARES NEIN ZUR GENAUIGKEIT: die heutige Implementierung V1 ist auf der glatten
+gekruemmten Wand die BESTE, meine V4 die schlechteste -- rund doppelter Fehler. Auch Heikos V3
+liegt hinter V1. Die Reihenfolge ist in beiden Aufloesungen dieselbe, das ist kein Ausreisser.
+
+URSACHE, soweit aus der Reihe ablesbar: V1 6,67 -> V3 9,89 -> V4 13,54 ist genau die Reihenfolge
+ABNEHMENDER MITTELUNG. V1 mittelt ueber alle 18 Linkmitten im Fenster, V3 nur ueber die
+Achsflaechen, V4 gewichtet zusaetzlich nach Naehe und stuetzt sich damit auf noch weniger
+Flaechen. Auf einer GLATTEN Wand ist mehr Mittelung besser -- die Diskretisierungsfehler
+mitteln sich weg. Das Abstandsgewicht, das an Kanten schaerft, unterabtastet hier.
+
+WAS DIESER LAUF NICHT ZEIGT, und das ist entscheidend fuer die Einordnung: die Kugel hat laut
+eigenem Dickenzensus KEIN Teil unter 3 Zellen (Histogramm 0 0 222 0 456 0 116) und praktisch
+keine Kanten (V1-K2 nur 48 von 794 bzw. 2522). Sie ist damit der BESTFALL fuer V1 und testet
+genau die Population NICHT, an der V1 am Fahrzeug 22 % verwirft. Eine Grundwahrheit fuer duenne
+und kantige Geometrie existiert hier nicht -- es waere ebenso falsch, aus der Kugel auf das
+Fahrzeug zu schliessen, wie es falsch waere, V4 aufgrund der Verwerfungszahlen zu uebernehmen.
+
+GESAMTBILD, ehrlich:
+  Abdeckung (Verwerfung, Fahrzeug):  V4b 2,55 % << V1 21,88 %   -- V4b gewinnt klar
+  Genauigkeit (Winkel, Kugel):       V1 4,85 Grad << V4 9,47    -- V1 gewinnt klar
+Das ist ein TAUSCH, kein Gewinn. Und die beiden Staerken liegen an komplementaeren Stellen:
+V1 versagt genau dort, wo V4b traegt (duenn, kantig), und V4 verliert genau dort, wo V1 traegt
+(dick, glatt). Der naheliegende Schluss ist ein AUSWAHLKRITERIUM statt eines Siegers -- und die
+Werkzeuge dafuer liegen bereits: solid_dicke (B38) trennt duenn von dick, V1s eigenes r21
+erkennt die Kante. NICHT gebaut, NICHT gemessen -- das ist eine Hypothese, kein Befund.

@@ -1285,6 +1285,23 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Test ist O(1): hinter der Solidzelle S in derselben Richtung nachsehen. Kein Solid -> S ist
 	// in dieser Richtung genau EINE Zelle dick, die Flaeche gehoert also zu einem Duennteil.
 	ulong v4_duenn=0ull, v4_rueck=0ull, v4_unten=0ull, v4_oben=0ull; // Wirkpfad-Zaehler V4/V5
+	// ★ KUGEL-GRUNDWAHRHEIT (CFD_FACETTEN_KUGELREF=1). Die Kugel ist der EINZIGE Fall mit
+	// analytischer Normalen: (Zelle - Schwerpunkt)/|...|. Am Fahrzeug gibt es keine, dort ist
+	// nur die VERWERFUNG vergleichbar, nicht die Genauigkeit. Schwerpunkt hier selbst bestimmen,
+	// damit weder Signatur noch Aufrufstellen angefasst werden muessen.
+	const bool kref_an = vgl_an&&env_u("CFD_FACETTEN_KUGELREF", 0u)>0u;
+	double kmx=0.0, kmy=0.0, kmz=0.0;
+	std::vector<float> nv1, nv2, nv3, nv4; // Normalen fuer den Vergleich gegen die Wahrheit
+	if(kref_an) {
+		ulong nsol=0ull;
+		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++)
+			if(L.flags[(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx]==wand_flag) { kmx+=(double)x; kmy+=(double)y; kmz+=(double)z; nsol++; } // idx() ist hier noch nicht deklariert
+		if(nsol==0ull) print_error("KUGELREF: keine Wandzelle gefunden -- Referenz unbrauchbar.");
+		else { kmx/=(double)nsol; kmy/=(double)nsol; kmz/=(double)nsol;
+			print_info("  KUGELREF: "+to_string(nsol)+" Solidzellen, Schwerpunkt ("+to_string((float)kmx,2u)+", "
+				+to_string((float)kmy,2u)+", "+to_string((float)kmz,2u)+"), volumenaequivalenter Radius "
+				+to_string((float)pow(3.0*(double)nsol/(4.0*M_PI),1.0/3.0),3u)+" Zellen."); }
+	}
 	std::vector<float> a14, yw4v, yw4nv, yw4av; std::vector<uchar> kl4v; // V4 = V3 + Sichtbarkeit + Abstandsgewicht
 	std::vector<float> a12, a13, yw2v, yw3v; std::vector<uchar> kl2v, kl3v;
 	if(vgl_an) print_info(string("Facetten (")+wo+"): NORMALEN-DREIFACHVERGLEICH aktiv (CFD_FACETTEN_VERGLEICH=1) -- reine Diagnose, Physik unveraendert.");
@@ -1358,6 +1375,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u;
 			// ★ Vergleichsvektoren MUESSEN mitwachsen, sonst verrutschen die Indizes gegen F
 			// (hier faellt V1 selbst schon aus; V2/V3 werden als "keine Normale" gefuehrt).
+			if(kref_an) for(int r_=0;r_<12;r_++) { (r_<3?nv1:(r_<6?nv2:(r_<9?nv3:nv4))).push_back(0.0f); }
 			if(vgl_an) { a12.push_back(-1.0f); a13.push_back(-1.0f); a14.push_back(-1.0f); yw2v.push_back(0.0f); yw3v.push_back(0.0f); yw4v.push_back(0.0f); yw4nv.push_back(0.0f); yw4av.push_back(0.0f); kl2v.push_back((uchar)1u); kl3v.push_back((uchar)1u); kl4v.push_back((uchar)1u); }
 			F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
@@ -1509,6 +1527,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				return (float)(acos(fmin(1.0,c))*180.0/3.14159265358979); };
 			a14.push_back((k4b&1u)?-1.0f:wink(n4x,n4y,n4z));
 			yw4v.push_back((float)yw4); yw4nv.push_back((float)yw4n); yw4av.push_back((float)yw4a); kl4v.push_back(k4b);
+			if(kref_an) {
+				nv1.push_back((float)nxd); nv1.push_back((float)nyd); nv1.push_back((float)nzd);
+				nv2.push_back((float)n2x); nv2.push_back((float)n2y); nv2.push_back((float)n2z);
+				nv3.push_back((float)n3x); nv3.push_back((float)n3y); nv3.push_back((float)n3z);
+				nv4.push_back((float)n4x); nv4.push_back((float)n4y); nv4.push_back((float)n4z);
+			}
 			a12.push_back((k2b&1u)?-1.0f:wink(n2x,n2y,n2z));
 			a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
 			yw2v.push_back((float)yw2); yw3v.push_back((float)yw3);
@@ -1587,6 +1611,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Teil, das sie beruehrt. Lauflaenge bei 9 Zellen gekappt (nur 1..4 sind die Frage).
 	// Wrap wie ueberall in dieser Funktion: Geometrie ungewickelt, NUR der Speicherindex wickelt.
 	std::vector<uchar> sdicke(F.size(), (uchar)0u); // ★ auch fuer die CSV -- Kreuztabelle Klasse gegen Dicke
+	ulong n_dicke1=0ull; // ★ Gegenprobe fuer den Duennteil-Waechter (siehe Bericht)
 	{
 		ulong dh[10]={0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull}; ulong ohne_nachbar=0ull;
 		size_t fi_=0ull;
@@ -1621,6 +1646,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		string h="  SOLID-DICKE der beruehrten Bauteile (1..>=9 Zellen): ";
 		for(uint d=1u; d<10u; d++) h+=to_string(dh[d])+(d<9u?" ":"");
 		print_info(h);
+		n_dicke1=dh[1];
 		const ulong duenn=dh[1]+dh[2]+dh[3];
 		if(nf>0ull) print_info("  davon an Teilen <=3 Zellen dick: "+to_string(duenn)+" = "
 			+to_string(100.0f*(float)duenn/(float)nf,2u)+" % (Gurney/Canard/Leitblech-Population -- "
@@ -1645,7 +1671,17 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			+to_string(v4_duenn)+" = "+to_string(nn>0ull?100.0f*(float)v4_duenn/(float)nn:0.0f,2u)
 			+" % | Rueckfall auf die naechste Flaeche (Summe entartet) "+to_string(v4_rueck)
 			+" | K4 bei V4b: Untergrenze "+to_string(v4_unten)+", Obergrenze "+to_string(v4_oben));
-		if(v4_duenn==0ull) print_error("V4-Wirkpfad: KEINE Duennteil-Flaeche gefunden -- der Rueckseitentest feuert nicht.");
+		// ★ WAECHTER MIT GEGENPROBE statt Pauschalregel. Erste Fassung meldete jedes v4_duenn==0
+		// als harten Fehler und schoss damit die Kugel ab -- deren Solid-Dicke-Histogramm ist
+		// 0 0 222 0 456 0 116, sie hat also gar kein Teil unter 3 Zellen und NULL ist dort die
+		// richtige Antwort. Der Rueckseitentest (Heiko) und die Lauflaengenmessung sind zwei
+		// unabhaengige Wege zur selben Aussage -- geprueft wird jetzt ihre UEBEREINSTIMMUNG.
+		if(n_dicke1>0ull&&v4_duenn==0ull)
+			print_error("V4-Wirkpfad: "+to_string(n_dicke1)+" Zellen an 1-Zellen-Teilen, aber KEINE Duennteil-Flaeche -- Rueckseitentest defekt.");
+		else if(n_dicke1==0ull&&v4_duenn>0ull)
+			print_error("V4-Wirkpfad: "+to_string(v4_duenn)+" Duennteil-Flaechen, aber KEIN 1-Zellen-Teil im Dickenzensus -- die beiden Messwege widersprechen sich.");
+		else if(v4_duenn==0ull)
+			print_info("   V4-Wirkpfad: kein 1-Zellen-Teil im Fall (Dickenzensus bestaetigt) -- Rueckseitentest korrekt still.");
 		print_info("  ---- NORMALENQUELLEN im Vergleich (K1..K4 gleich definiert; V1 zaehlt zusaetzlich Orientierung/Ueberlauf/MS, hier ausgeklammert)");
 		const char* nm[6]={"V1 alle 18 Linkmitten (heute)     ","V2 nur Achslinks (PCA)            ",
 		                   "V3 Flaechennormalen-Summe         ","V4 = V3 + Sicht + Abstandsgewicht ",
@@ -1675,6 +1711,31 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		  print_info("   y_w Median/q90: V1 "+to_string(q1.first,3u)+"/"+to_string(q1.second,3u)
 			+"  V2 "+to_string(q2.first,3u)+"/"+to_string(q2.second,3u)+"  V3 "+to_string(q3.first,3u)+"/"+to_string(q3.second,3u)
 			+"  V4 "+to_string(q4.first,3u)+"/"+to_string(q4.second,3u)+"  V4b "+to_string(q4n.first,3u)+"/"+to_string(q4n.second,3u)); }
+		if(kref_an&&nv1.size()==3ull*nn) { // ---- WINKELFEHLER GEGEN DIE ANALYTISCHE KUGELNORMALE
+			std::vector<float> e1,e2,e3,e4;
+			for(ulong i=0ull;i<nn;i++) {
+				if(F[i].klasse&1u) continue;
+				const uint zc=(uint)(F[i].n/((ulong)Nx*(ulong)Ny));
+				const uint yc=(uint)((F[i].n/(ulong)Nx)%(ulong)Ny);
+				const uint xc=(uint)(F[i].n%(ulong)Nx);
+				double wx_=(double)xc-kmx, wy_=(double)yc-kmy, wz_=(double)zc-kmz;
+				const double wl=sqrt(wx_*wx_+wy_*wy_+wz_*wz_); if(wl<1e-9) continue;
+				wx_/=wl; wy_/=wl; wz_/=wl;
+				auto fe=[&](const std::vector<float>& v)->float {
+					const double c=fabs((double)v[3ull*i]*wx_+(double)v[3ull*i+1ull]*wy_+(double)v[3ull*i+2ull]*wz_);
+					return (float)(acos(fmin(1.0,c))*180.0/3.14159265358979); };
+				e1.push_back(fe(nv1)); e2.push_back(fe(nv2)); e3.push_back(fe(nv3)); e4.push_back(fe(nv4));
+			}
+			auto med2=[&](std::vector<float> v)->std::pair<float,float> {
+				if(v.empty()) return {0.0f,0.0f}; std::sort(v.begin(),v.end());
+				return { v[v.size()/2], v[(size_t)fmin((double)v.size()-1.0,0.9*(double)v.size())] }; };
+			const auto q1=med2(e1), q2=med2(e2), q3=med2(e3), q4=med2(e4);
+			print_info("   WINKELFEHLER GEGEN DIE ANALYTISCHE KUGELNORMALE (Median / q90, "+to_string((ulong)e1.size())+" Zellen):");
+			print_info("     V1 "+to_string(q1.first,2u)+" / "+to_string(q1.second,2u)
+				+"   V2 "+to_string(q2.first,2u)+" / "+to_string(q2.second,2u)
+				+"   V3 "+to_string(q3.first,2u)+" / "+to_string(q3.second,2u)
+				+"   V4 "+to_string(q4.first,2u)+" / "+to_string(q4.second,2u)+" Grad");
+		}
 		// Aufschluesselung nach Solid-Dicke -- ohne sie geht der Duennteileffekt in 755k Zellen unter (B38)
 		const uint gl[4]={1u,2u,3u,4u}; const char* gn[4]={"Dicke 1   ","Dicke 2   ","Dicke 3   ","Dicke >=4 "};
 		for(uint g=0u; g<4u; g++) {
