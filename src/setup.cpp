@@ -1299,12 +1299,18 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	//      vollstaendig durch, r21 liegt kostenlos vor. 46,4 % des gemessenen Abdeckungsgewinns
 	//      kamen allein daher. Jetzt quellenunabhaengig.
 	const uint ywquelle  = env_u("CFD_FACETTEN_YWQUELLE", 0u);   // 0 = PCA-Schwerpunkt (V1), 1 = naechste Flaeche
-	const float kante_r21 = env_f("CFD_FACETTEN_KANTE", 0.15f);  // Schwelle; sehr gross = Test aus
+	ulong yw_aktiv=0ull; // ★ Wirkpfad des y_w-Ankers -- ohne ihn war der Schalter ein stiller No-Op
+	// ★ Pruefagent M1: als float war (double)0.15f = 0,15000000596 -- die Schwelle WANDERTE um
+	// 6e-9 gegen das alte Literal 0.15. Facetten mit r21 in diesem Band haetten Bit 2 verloren
+	// und waeren damit von ausgeschlossen auf AKTIV gekippt. Bit 2 ist ein Physik-Gate, kein
+	// Diagnosebit. Als double gelesen ist der Default wieder bitgleich.
+	const double kante_r21 = (getenv("CFD_FACETTEN_KANTE")==nullptr) ? 0.15 : atof(getenv("CFD_FACETTEN_KANTE"));
+	if(kante_r21<=0.0) print_error("CFD_FACETTEN_KANTE muss > 0 sein (sehr gross = Test aus).");
 	if(normquelle>0u&&getenv("CFD_FACETTEN_KANTE")==nullptr)
 		print_warning("CFD_FACETTEN_NORMQUELLE=1 ohne ausdrueckliches CFD_FACETTEN_KANTE -- der Kantentest laeuft mit dem Default 0,15 WEITER. Das ist Absicht (frueher fiel er still weg); wer ihn abschalten will, setzt ihn ausdruecklich.");
-	if(kante_r21!=0.15f) print_warning("CFD_FACETTEN_KANTE = "+to_string(kante_r21,3u)+" (Default 0,15, geeicht 2026-08-15) -- deklarierter Messarm.");
+	if(getenv("CFD_FACETTEN_KANTE")!=nullptr) print_warning("CFD_FACETTEN_KANTE = "+to_string((float)kante_r21,3u)+" (Default 0,15, geeicht 2026-08-15) -- deklarierter Messarm.");
 	if(ywquelle>0u) print_warning("CFD_FACETTEN_YWQUELLE=1 -- y_w gegen die naechste Voxelflaeche statt gegen den PCA-Schwerpunkt. ANDERE GROESSE, nicht derselbe Wert genauer.");
-	const bool v3_noetig = vgl_an||normquelle>0u;
+	const bool v3_noetig = vgl_an||normquelle>0u||ywquelle>0u; // ★ H1: der y_w-Anker braucht c6, also den V3-Block
 	ulong nq_aktiv=0ull; // Wirkpfad: wie oft V3b wirklich in die Facette geschrieben wurde
 	if(normquelle>1u) print_error("CFD_FACETTEN_NORMQUELLE="+to_string(normquelle)+" ist nicht belegt -- nur 0 und 1 (Pruefagent M2: sonst warnt der Lauf 'V3b aktiv' und rechnet V1).");
 	if(normquelle==1u) print_warning("CFD_FACETTEN_NORMQUELLE=1 -- die Normale kommt aus V3b (Voxelflaechen-Summe), NICHT aus der 18-Link-PCA. Wirkt auf fac_geo (Wandfunktion UND Flaechenfaktor 1/|n_achse|) sowie auf den ELIBB-Ebenen-q sq=yw/(-ndc). Deklarierter Messarm.");
@@ -1463,7 +1469,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		const double r21 = ew[imax]>1e-30 ? ew[imin]/fmax(ew[imid],1e-30) : 1.0;   // K2: Kante
 		const double r10 = ew[imax]>1e-30 ? ew[imid]/ew[imax] : 0.0;               // K3: Linie
 		f.r21_=(float)r21; f.r10_=(float)r10;
-		if(r21>(double)kante_r21) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
+		if(r21>kante_r21) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
 		if(r10<0.02) { f.klasse|=4u; k3++; }
 		if(yw<(double)yw_min||yw>2.0) { f.klasse|=8u; k4++; }
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
@@ -1610,7 +1616,11 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				if(nq==0u) k6b|=1u;
 				else {
 					const double koh = (nq>0u) ? l6/(double)nq : 0.0; // Kohaerenz der Flaechensumme
-				if(v3_noetig) { v3b_koh.push_back(koh); if(koh<0.25) v3b_schwach++; }
+				// ★ Pruefagent: 0,25 war ein Handwert. Herleitbar ohne neue Konstante: die
+				// Flaechennormalen stammen aus sechs Achsrichtungen; liegt KEIN gegenlaeufiges
+				// Paar vor, ist |Summe|/nq >= 1/sqrt(3) (Minimum bei gleich vielen Flaechen in
+				// drei Richtungen). koh < 1/sqrt(3) BEWEIST also Ausloeschung.
+				if(v3_noetig) { v3b_koh.push_back(koh); if(koh<0.5773502692) v3b_schwach++; }
 				if(l6<1e-12) { n6x=n6nx; n6y=n6ny; n6z=n6nz; v6_rueck++; } // Duennteil-Rueckfall
 					else { n6x=nsx/l6; n6y=nsy/l6; n6z=nsz/l6; }
 					yw6 = n6x*((double)x-c6x)+n6y*((double)y-c6y)+n6z*((double)z-c6z);
@@ -1659,6 +1669,18 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
 			yw2v.push_back((float)yw2); yw3v.push_back((float)yw3);
 			kl2v.push_back(k2b); kl3v.push_back(k3b);
+			// ★ Pruefagent H1: der y_w-ANKER stand INNERHALB des normquelle-Blocks und war ohne
+			// NORMQUELLE=1 ein stiller No-Op -- der Arm, der ihn allein messen sollte, haette
+			// garantiert die Zahlen des Bezugsarms geliefert und daraus "der Anker kostet nichts"
+			// belegt. Jetzt quellenunabhaengig, mit eigenem Wirkpfad-Zaehler.
+			// Vorzeichen wie bei V1 durch KIPPEN der Normalen, nicht per fabs (H2).
+			if(ywquelle>0u&&!(f.klasse&1u)) {
+				yw_aktiv++;
+				double ywn = (double)f.nx*((double)x-c6x)+(double)f.ny*((double)y-c6y)+(double)f.nz*((double)z-c6z);
+				if(ywn<0.0) { f.nx=-f.nx; f.ny=-f.ny; f.nz=-f.nz; ywn=-ywn; }
+				f.yw=(float)ywn; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z;
+				f.klasse &= (uchar)~8u; if(ywn<(double)yw_min||ywn>2.0) f.klasse|=8u;
+			}
 		}
 		F.push_back(f);
 		// Erstpass-Histogramme entfernt (Gross-Audit N18): wurden vor jeder Nutzung geleert -- der Endzustands-Pass fuellt neu.
@@ -1722,10 +1744,14 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		std::sort(v3b_koh.begin(), v3b_koh.end());
 		auto q=[&](const double t){ return v3b_koh[(size_t)fmin((double)v3b_koh.size()-1.0, t*(double)v3b_koh.size())]; };
 		print_info("  V3b-KOHAERENZ |Summe|/nq: Median "+to_string((float)q(0.5),3u)+", q10 "+to_string((float)q(0.1),3u)
-			+", q01 "+to_string((float)q(0.01),3u)+" -- unter 0,25 (Restrichtung ueberwiegend Ausloeschung): "
+			+", q01 "+to_string((float)q(0.01),3u)+" -- unter 1/sqrt(3)=0,577 (beweist Ausloeschung, hergeleitet aus den sechs Achsrichtungen): "
 			+to_string(v3b_schwach)+" = "+to_string(100.0f*(float)v3b_schwach/(float)v3b_koh.size(),2u)+" %");
 		if(normquelle==1u&&v3b_schwach*20ull>(ulong)v3b_koh.size())
 			print_warning("V3b: mehr als 5 % der Facetten haben eine schwach kohaerente Flaechensumme -- ihre Normalenrichtung ist dort ueberwiegend Ausloeschungsrest. Die betroffenen Zellen sitzen erfahrungsgemaess an Duennteilen.");
+	}
+	if(ywquelle>0u) {
+		if(yw_aktiv==0ull) print_error("CFD_FACETTEN_YWQUELLE=1, aber der Anker wurde KEIN einziges Mal gesetzt -- stiller No-Op.");
+		else print_info("  y_w-ANKER AKTIV: "+to_string(yw_aktiv)+" Facetten gegen die naechste Voxelflaeche verankert (statt gegen den PCA-Schwerpunkt).");
 	}
 	if(normquelle==1u) {
 		if(nq_aktiv==0ull) print_error("CFD_FACETTEN_NORMQUELLE=1, aber V3b wurde KEIN einziges Mal in die Facette geschrieben -- stiller No-Op.");
@@ -1737,7 +1763,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		+", Orientierung "+to_string(kori)+", Punktueberlauf "+to_string(k_ueberlauf)+", bewegte-Wand-Naehe "+to_string(k_ms));
 	if(nf>0ull) print_info("  markierte ZELLEN (klasse!=0, Nachpruefer B2 -- Bitmaske, keine Zaehlersumme): "
 		+to_string(markiert)+" = "+to_string(100.0f*(float)markiert/(float)nf,1u)
-		+" % (Schwellen GEEICHT 2026-08-15: r21>0,15 aus Fenster-A/B, r10<0,02 Sicherheitsnetz -- K3 war ueberall leer)");
+		+" % (Schwelle r21>"+to_string((float)kante_r21,3u)+", Default 0,15 geeicht 2026-08-15 aus Fenster-A/B, r10<0,02 Sicherheitsnetz -- K3 war ueberall leer)");
 	print_info("  y_w: Median "+to_string((float)quantil(hist_yw,0.5),3u)+", q10 "+to_string((float)quantil(hist_yw,0.1),3u)
 		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
 	// ★ NORMALEN-KOMPONENTEN (28.08.): der 26-Grad-Arm mit V3b meldet eine y-Reibung von +0,1074
@@ -4979,6 +5005,12 @@ static void main_setup_fahrzeug_dd() {
 	const bool kad_s_gesetzt = getenv("CFD_SLICE_NEAR_STEPS")!=nullptr, kad_d_gesetzt = getenv("CFD_SLICE_DT")!=nullptr;
 	const ulong slice_ns = kad_s_gesetzt ? (ulong)env_u("CFD_SLICE_NEAR_STEPS", 5000u) : (kad_d_gesetzt ? 0ull : 5000ull);
 	const float slice_dt = (slice_ns==0ull&&kad_d_gesetzt) ? env_f("CFD_SLICE_DT", 0.010f) : 0.0f;
+	// ★ Heiko 28.08.: "sliceausgabe muss an sein! kostet nichts". Der Baseline-Lauf trug
+	// CFD_SLICE_DT=0 und schrieb damit gar keine Slices; ueber die Referenz hat sich das in
+	// eine ganze Messreihe fortgepflanzt, und die Bilder mussten hinterher aus den VTK-Feldern
+	// nachgerendert werden. Ein Schalter, der keine Physik beruehrt, kann eine Messreihe
+	// trotzdem unauswertbar machen -- deshalb hier ein harter Riegel statt einer Warnung.
+	if(slice_ns==0ull&&slice_dt<=0.0f) print_error("Dieser Lauf schriebe KEINE Slices (CFD_SLICE_DT=0 und CFD_SLICE_NEAR_STEPS ungesetzt/0). Slice-Ausgabe ist Pflicht -- sie kostet praktisch nichts und ohne sie ist der Lauf hinterher nicht ansehbar. CFD_SLICE_DT auf einen positiven Wert setzen (0.1 = alle 100 ms).");
 	const bool slices_an = slice_ns>0ull||slice_dt>0.0f;
 	if(kad_s_gesetzt&&kad_d_gesetzt&&slice_ns>0ull) print_warning("CFD_SLICE_NEAR_STEPS und CFD_SLICE_DT beide gesetzt -- die Near-Step-Kadenz gewinnt, die Sekunden-Uhr ist wirkungslos.");
 	if(slice_ns>0ull) {

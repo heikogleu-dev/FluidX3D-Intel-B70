@@ -33,6 +33,12 @@ EINHEIT = {
  "CFD_VTK_DT":"ausgabe","CFD_SLICE_DT":"ausgabe","CFD_RUN_NAME":"ausgabe",
  "CFD_CASE":"modus",
 }
+# ★ KORREKTUREN AN DER QUELLE (Heiko 28.08.): der Baseline-Lauf traegt CFD_SLICE_DT=0 und
+# schreibt damit GAR KEINE Slices -- ein Defekt, den ich selbst eingebaut hatte und der sich
+# ueber die Referenz in jeden neuen Lauf fortgepflanzt haette. Heiko: "sliceausgabe muss an
+# sein! kostet nichts". Die Referenz ist eine VORLAGE, kein Archiv: sie traegt den richtigen
+# Wert, und die Abweichung vom aufgezeichneten Lauf wird im Kopf vermerkt.
+KORREKTUR = { "CFD_SLICE_DT": ("0.1", "Baseline hatte 0 = Slices AUS; das war ein Fehler, nicht Absicht") }
 if len(sys.argv)<3: sys.exit("Aufruf: basis_aus_lauf.py <LAUF.txt> <ziel.basis>")
 s=open(sys.argv[1]).read()
 m=re.search(r'Umgebung.*?\n(.*?)(\n\n|\Z)', s, re.S)
@@ -46,8 +52,11 @@ with open(sys.argv[2],"w") as f:
     f.write("# Spalten: NAME WERT EINHEIT\n")
     if unbekannt:
         f.write("# ACHTUNG, Einheit unbekannt (als modus gefuehrt, bitte einordnen): "+", ".join(sorted(unbekannt))+"\n")
+    for k,(v,grund) in KORREKTUR.items():
+        if k in env and env[k]!=v: f.write(f"# KORRIGIERT gegen den Lauf: {k} {env[k]} -> {v} ({grund})\n")
     for k in sorted(env):
         if k=="CFD_RUN_NAME": continue
-        f.write(f"{k} {env[k]} {EINHEIT.get(k,'modus')}\n")
+        wert = KORREKTUR[k][0] if k in KORREKTUR else env[k]
+        f.write(f"{k} {wert} {EINHEIT.get(k,'modus')}\n")
 print(f"geschrieben: {sys.argv[2]}  ({len(env)-1} Schalter, Quelle {commit[:7]}, dx {dx})")
 if unbekannt: print("  Einheit unbekannt bei:", ", ".join(sorted(unbekannt)))

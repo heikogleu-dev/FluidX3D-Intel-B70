@@ -2,6 +2,7 @@
 # Quelle-Commit: 94a802cdf913f19884943ffa751f97b7a1e88918
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
+# KORRIGIERT gegen den Lauf: CFD_SLICE_DT 0 -> 0.1 (Baseline hatte 0 = Slices AUS; das war ein Fehler, nicht Absicht)
 CFD_BODEN_EQ 2 modus
 CFD_BODEN_EQ_ABSTAND 2 modus
 CFD_BODEN_EQ_DOWN 1 modus
@@ -28,7 +29,7 @@ CFD_N2F_BAND_WAKE_START_X 311 index_grob
 CFD_N2F_BAND_WANDFREI 2 modus
 CFD_N2F_SCHALE 0.5 modus
 CFD_NEAR_VOR_MM 96 phys
-CFD_SLICE_DT 0 ausgabe
+CFD_SLICE_DT 0.1 ausgabe
 CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.5 phys
 CFD_T_WARMUP 0.2 phys
