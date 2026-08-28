@@ -4217,3 +4217,72 @@ Vorschlag, jetzt aber aus der richtigen Datenquelle.
 NOCH NICHT BEWIESEN und ehrlich zu trennen: dass exakte Normalen die Fahrzeugkraefte
 verbessern. Gezeigt ist die Normale an einer analytischen Rampe. Am Fahrzeug kommen
 Dreiecksdichte gegen Zellgroesse, Mehrfachflaechen je Zelle und der Reibungsloeser dazu.
+
+### B36 -- HEIKOS DREIECKSFACETTIERUNG DES VOXELKOERPERS: numerisch geprueft, und SIE IST SCHON GEBAUT
+Heiko-Vorgabe 28.08. (bindend, gemerkt): nach dem Voxelieren wird NICHT mehr auf die STL
+zurueckgegriffen. Grund: duenne/spitze Teile werden beim Voxelieren aufgedickt; Normalen aus der
+STL und ein Stroemungsfeld am aufgedickten Koerper waeren zwei Wahrheiten im selben Modell.
+Sein Vorschlag stattdessen: Oberflaeche des VOXELKOERPERS dreiecksfacettieren, je Zelle alle
+beruehrenden Dreiecke heranziehen.
+
+A) DIE TRAGENDE EIGENSCHAFT IST EXAKT -- und sie ist der eigentliche Fund.
+   Rampe 1:2, Oberflaechenbilanz ueber die schraege Deckflaeche (jede Voxelflaeche genau einmal):
+     Vektorsumme |sum n*A| = 429,33  vs wahre Flaeche 429,33   ->  +0,00 %
+     Skalare Summe  sum|A| = 576,00  vs wahre Flaeche 429,33   -> +34,16 %
+     Winkel der Gesamtnormalen 26,565 Grad gegen wahr 26,565   -> Fehler +0,000
+   Die Voxeloberflaeche traegt den EXAKTEN Flaechenvektor des glatten Koerpers; die Aufdickung
+   steckt vollstaendig im SKALAR, nicht im Vektor. Bestaetigt an der Kugel ueber die projizierte
+   Flaeche (die den Druckwiderstand traegt): R=8 -4,01 %, R=20 -0,93 %, R=40 -0,27 % -- sie
+   KONVERGIERT gegen exakt, waehrend die Mantelflaeche mit +44/+48,6/+49,6 % gegen +50 % laeuft.
+   Duenne Platte (Heikos Aufdickungssorge): bei 0,4 / 0,8 / 1,6 Zellen Dicke ist die projizierte
+   Flaeche IMMER exakt (+0,0 %), der Mantel +5,8 / +1,9 / -5,2 %. Die Aufdickung eines
+   Duennteils beruehrt die projizierte Flaeche also gar nicht.
+
+B) JE ZELLE IST KEIN VERFAHREN UEBERALL BESSER. Winkelfehler gegen die wahre Normale,
+   Fenster 3^3, eigener Nachbau:
+     Verfahren                          Rampe 1:2   Rampe 1:1   Kugel R=20   Ebene
+     M1 alle 18 Linkmitten (HEUTE)         1,44        0,00        4,52       0,00
+     M2 nur Voxelflaechen, PCA             0,83        0,00        5,19       0,00
+     M3 Normalen-Vektorsumme (Heiko lit.)  8,13        0,00        4,00       0,00
+   ZWEI ABLESUNGEN: (1) Die DIAGONALLINKS sind eine echte Fehlerquelle -- sie wegzulassen
+   halbiert den Rampenfehler (1,44 -> 0,83), und sie liegen bauartbedingt gar nicht auf der
+   Voxeloberflaeche (ihre Mitte streift die Solid-Ecke). (2) Die reine Normalensumme ist lokal
+   phasenempfindlich (3^3 fasst 1,5 Treppenperioden), global aber exakt -- siehe A.
+
+C) HEIKOS "KEINE FACETTE KANN VERWORFEN WERDEN": BESTAETIGT, mit einer Praezisierung.
+   Nimmt man nur die direkt begrenzenden Flaechen, bleiben 144 von 424 Zellen (Rampe) bzw. 200
+   von 408 (45 Grad) ohne Normale. Nimmt man alle Flaechen der 3^3-Nachbarschaft, sind es NULL
+   -- in jedem geprueften Fall. Die heutige Klasse K2(Kante) mit 95.953 Fahrzeugzellen
+   verschwindet als Fehlerart vollstaendig: eine Kantenzelle ist dann kein Fehlschlag, sondern
+   eine Zelle mit zwei Flaechen. K4(y_w) braucht weiterhin eine Wandabstandsdefinition.
+
+D) "AN KANTEN VIELLEICHT DIE AUFDICKUNG REDUZIEREN": gemessen, und es stimmt mechanisch.
+   An einer 90-Grad-Aussenkante liefert die Normalensumme exakt (0,707, 0, 0,707) = 45,0 Grad,
+   ueber der Deckflaeche 0,0 und vor der Seitenflaeche 90,0 Grad. Das Verfahren SCHNEIDET die
+   Ecke also. EHRLICHE EINSCHRAENKUNG: bei einer ECHTEN 90-Grad-Kante ist diese Fase eine
+   Erfindung, keine Korrektur. Nur wo die Kante durch Aufdickung erst entstanden ist, ist sie
+   richtig -- und welcher Fall vorliegt, ist aus dem Voxelfeld allein nicht entscheidbar.
+
+E) DER EIGENTLICHE BEFUND: DAS IST ALLES SCHON GEBAUT UND LIEGT BRACH.
+   setup.cpp:753-1215, remesh_facetten_diag(), Kopfzeile woertlich: "REMESH DER VOXEL-AUSSENWAND
+   (Heiko-Vorgabe, Arbeitsliste 11a): geschlossene Dreiecksflaeche ueber dem FINALEN flags-Feld
+   (nicht der STL ...)". Verfahren: NAIVE SURFACE NETS, je Grenzflaeche solid|fluid ein Quad,
+   Taubin-Glaettung mit harter Vertex-Klemme +-0,5 Zelle. Es berechnet q je (Zelle, Richtung)
+   aus der geglaetteten Flaeche (setup.cpp:1212/1215) und fuellt elibb_qmap. Der Kernel nimmt es
+   entgegen (kernel.cpp:1744/1791, fac_q). Plan: FACETTEN-ELIBB-PLAN.md, dort steht als erste
+   Zeile "Facettenquelle = Remesh der VOXEL-Aussenwand (nicht STL)".
+   ZWEI LUECKEN:
+   1. baue_facetten() BEKOMMT DIESE FLAECHE NIE. Seine Signatur (setup.cpp:1254-1256) hat weder
+      Mesh noch q. Der Wandabstand q kommt also aus der geglaetteten Voxelflaeche, die NORMALE
+      aber weiter aus der 0,5-Linkmitten-PCA der rohen Treppe. Zwei Flaechen im selben
+      Wandmodell -- nicht die STL/Voxel-Diskrepanz, die Heiko befuerchtet hat, aber derselbe
+      Fehlertyp eine Ebene tiefer.
+   2. AM FAHRZEUG LAEUFT REMESH UEBERHAUPT NICHT. Gate (setup.cpp:3600):
+      CFD_FACETTEN_REMESH>0 ODER (CFD_FACETTEN>=3 UND CFD_FAC_ELIBB>0). Die Standardkonfiguration
+      setzt kein ELIBB -- gezaehlt in den heutigen Logs: t7_basis_heute 0 REMESH-Zeilen,
+      t6_fahrzeug_ywmin15 0, dagegen t5_kugel_f2 26.
+
+   FOLGERUNG: der naechste Schritt ist nicht "Heikos Idee bauen", sondern die Normale an die
+   Flaeche anzuschliessen, die bereits erzeugt wird. Die Taubin-geglaettete Remesh-Flaeche ist
+   dabei WEDER M1 noch M2 noch M3 -- sie ist der einzige Kandidat, der Treppe und Kruemmung
+   zugleich adressieren koennte, und sie ist NICHT VERMESSEN. Das ist der erste zu messende Arm.
