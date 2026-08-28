@@ -4799,3 +4799,75 @@ WAS ZU PRUEFEN WAERE, in dieser Reihenfolge und ohne Bildauswertung (Iron Rule 5
 NICHT VERMISCHEN mit der laufenden V3b-Untersuchung: das Artefakt ist in V1 und V3b gleichermassen
 zu erwarten (es ist aelter als beide), und die drei Arme von heute liegen als Vergleichsmaterial
 bereits vor.
+
+## 2026-08-28 ABSCHLUSS -- die Facettenquelle, ein entwerteter Vormittag und was daraus folgt
+
+### B50 -- DIE MESSREIHE, ZUM ERSTEN MAL EINVARIABEL
+Vier Arme auf der uebersetzten Baseline (basis/fahrzeug_dd.basis, 8 mm, Rueckkopplung und
+UTKORR an, T_END 1,0 s deklariert), jeder mit EINER Variablen gegen Arm a. Bitanker vor und
+nach jedem Umbau gehalten (FELD-HASH 4722579264326613690).
+
+  Arm                     Cz_rest  +-SEM    vs a      cd_druck  +-SEM
+  a  Bezug (V1)            0,4102  0,0068     --        1,5217  0,0036
+  b  nur Normale           0,4166  0,0077   0,6 sigma   1,5367  0,0033
+  c  nur y_w-Anker         0,5091  0,0091   8,7 sigma   1,6634  0,0026
+  d  Kantentest AUS        0,4304  0,0056   2,3 sigma   1,5064  0,0044
+  OF13 mr2v40H: Cz gesamt -1,301
+
+1) DIE NORMALENQUELLE IST KRAFTNEUTRAL (0,6 sigma). Damit ist die Schlagzeile vom Vormittag
+   ("V3b verschlechtert den Abtrieb") widerlegt -- sie war keine Aussage ueber die Normale,
+   sondern ueber die fuenf anderen Dinge, die im selben Schalter steckten.
+2) DER y_w-ANKER IST DER HEBEL, und er schadet: 8,7 sigma, cd_druck +9,3 %. Das war MEINE
+   Zutat (uebernommen aus V4b, um K4 zu senken -- das gelingt: 100.891 -> 42.266). Ich habe
+   dabei die physikalische Groesse ausgetauscht statt sie genauer zu schaetzen.
+3) DER KANTENTEST liegt mit 2,3 sigma dazwischen. Meine Hypothese, die Kantenzulassung sei der
+   Hauptschaden, ist damit NICHT bestaetigt.
+4) Cz GESAMT IST IN ALLEN VIER ARMEN POSITIV (+0,41 bis +0,51) gegen OF13 -1,301. Das Modell
+   erzeugt Auftrieb statt Abtrieb; keiner der drei Hebel dreht das Vorzeichen. Wir vergleichen
+   Nuancen innerhalb eines Regimes, das qualitativ nicht stimmt.
+   ACHTUNG: CFD_KRAFT_ZBAND ist jetzt 2 statt 4 (Feingitterzellen, haelt das Latschband bei
+   16 mm wie bei 4 mm). Cz_band faellt damit von 0,607 auf 0,0008 -- die Cz_rest-Zahlen dieser
+   Reihe sind mit denen vom Vormittag NICHT vergleichbar. Der Code warnt selbst davor.
+
+### B51 -- WAS HEIKOS URSPRUENGLICHE IDEE WAR, UND WAS DAVON GEBAUT WURDE
+Beim Nachlesen seiner eigenen Worte: die erste Formulierung lautete "koennen wir nicht MEHRERE
+zellangrenzende Facetten pro Zelle nutzen", spaeter "durch den schnitt aller dreiecke die die
+zelle beruehren sowohl an KANTEN wie auch an FLAECHEN gute ergebnisse".
+GEBAUT wurde EINE gemittelte Normale je Zelle. Ich habe die Idee vom ersten Moment an auf einen
+Wert zusammengefaltet, weil die Datenstruktur eine Facette je Zelle haelt -- und das nie
+hinterfragt. An einer Kante ist eine gemittelte Normale aber das falsche Objekt: zwei unter
+90 Grad zusammenstossende Flaechen mitteln sich zu einer 45-Grad-Richtung, die auf keiner von
+beiden liegt. Die gemessene Kraftneutralitaet (0,6 sigma) passt dazu -- die Mittelung kann an
+genau der Stelle nichts ausrichten, an der der Gewinn liegen sollte.
+NICHT GEPRUEFT, WEIL NIE GEBAUT: mehrere Facetten je Zelle. Kostenanalyse laeuft.
+
+### B52 -- DER TEURE FEHLER DES TAGES: KONFIGURATION AUS EINEM ALTSTAND REKONSTRUIERT
+Alle Fahrzeugzahlen vom Vormittag sind entwertet. Ich hatte die 8-mm-Arme aus f8_standard_final
+rekonstruiert -- Name klang nach Referenz, Lauf war 7 Tage und 69 src/-Commits alt. Dabei
+fehlten ELF Schalter, darunter die komplette Nah->Fern-Rueckkopplung und CFD_FAC_UTKORR=1.5.
+Gemessener Preis der fehlenden Kette: rund 12 % Abtrieb (8 mm mit Kette cz_druck_rest -0,6458,
+ohne -0,5666; der dokumentierte 4-mm-Effekt liegt bei 0,084).
+ERSCHWEREND: Heiko hatte baseline_2026-08-27_f4vollumfang ausdruecklich als "Referenz fuer alle
+folgenden A/Bs" deklariert, und es stand in AUDIT-BEFUNDE.md:3053. Ich hatte es selbst notiert
+und dann ignoriert. Und ich hatte die 69-Commit-Luecke desselben Laufs am SELBEN Vormittag
+gefunden und die Kraftvergleiche darueber verweigert -- aber die Konfiguration uebernommen.
+Der Fehler war nicht, dass mir etwas entgangen ist, sondern dass ich zwei Dinge nicht
+zusammengebracht habe, die beide vor mir lagen.
+Heiko sah es am Slice ("die rueckkopplung ist offensichtlich deaktiviert"), nicht ich.
+
+### B53 -- WAS GEBAUT WURDE, DAMIT ES NICHT WIEDERKOMMT
+1) BASIS-WAECHTER (setup.cpp, erste Anweisung von main_setup_fahrzeug_dd). Prueft jede
+   dd-Konfiguration gegen basis/fahrzeug_dd.basis. Er FORDERT KEINE GLEICHHEIT, er RECHNET UM:
+   aus der Einheit und dem CFD_DX des Laufs leitet er den Sollwert ab (WAKE_START_X 311 -> 156,
+   ZBAND 4 -> 2, SPONGE_N 64 -> 32, WAKE_ABSTAND 32 -> 16). Bei Uneindeutigkeit nennt er beide
+   Kandidaten. FEHLENDE Schalter meldet er genauso hart wie abweichende -- das ist die Haelfte,
+   die im entwerteten Lauf gefehlt hat; die vorhandene Pruefung schaute nur in die Gegenrichtung.
+   Wirkpfad bewiesen: auf der Vormittagskonfiguration zehn fehlende, zwei abweichende, Abbruch.
+   Die Referenz wird MASCHINELL erzeugt (werkzeuge/basis_aus_lauf.py) -- eine handgepflegte
+   weicht irgendwann von dem ab, was tatsaechlich lief, und genau das war schon passiert.
+2) SCHALTERZERLEGUNG: NORMQUELLE (nur die Normale), YWQUELLE (der y_w-Anker), KANTE (die
+   Kantenschwelle, quellenunabhaengig). Vorher aenderte ein Schalter sechs Dinge zugleich.
+3) SLICE-AUSGABE IST PFLICHT (Heiko: "kostet nichts"). Die Baseline trug CFD_SLICE_DT=0 -- ein
+   Defekt, den ich selbst eingebaut hatte und der sich ueber die Referenz in die ganze Reihe
+   fortpflanzte. Jetzt harter Fehler im Code, Korrektur im Generator, Vermerk im Referenzkopf.
+   Ein Schalter ohne Physikwirkung kann eine Messreihe trotzdem unauswertbar machen.

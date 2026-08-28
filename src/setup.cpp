@@ -1687,8 +1687,29 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	}
 	// Normalen-Glaettung (A6): 1 Pass, flaechengewichtet (w = n_punkte), 3^3-Nachbarfacetten.
 	{
-		std::vector<uint> feld((ulong)Nx*Ny*Nz, 0xFFFFFFFFu);
-		for(uint i=0u; i<(uint)F.size(); i++) feld[F[i].n]=i;
+		// ★ Audit-Performance: das Indexfeld war ueber die GANZE Domaene angelegt --
+		// bei 8 mm 845x317x241 = 64,6 Mio Eintraege = 258 MB, bei 4 mm rund 2,06 GB, obwohl nur
+		// die wandnahen Zellen je vorkommen. lbm.cpp macht es fuer fac_idx laengst richtig und
+		// meldet dafuer "0.52 GB gespart". Hier dieselbe Bounding-Box, ueber die Facetten selbst
+		// bestimmt (eine Facette liegt IMMER an der Wand, die BBox ist also eng).
+		uint bx0=Nx,by0=Ny,bz0=Nz,bx1=0u,by1=0u,bz1=0u;
+		for(const Facette& fb : F) {
+			const uint zc=(uint)(fb.n/((ulong)Nx*(ulong)Ny)), yc=(uint)((fb.n/(ulong)Nx)%(ulong)Ny), xc=(uint)(fb.n%(ulong)Nx);
+			bx0=min(bx0,xc); by0=min(by0,yc); bz0=min(bz0,zc);
+			bx1=max(bx1,xc); by1=max(by1,yc); bz1=max(bz1,zc);
+		}
+		const ulong bnx=(ulong)(bx1-bx0+1u), bny=(ulong)(by1-by0+1u), bnz=(ulong)(bz1-bz0+1u);
+		std::vector<uint> feld(bnx*bny*bnz, 0xFFFFFFFFu);
+		auto bidx=[&](const uint x_,const uint y_,const uint z_)->ulong {
+			return (ulong)(x_-bx0)+((ulong)(y_-by0)+(ulong)(z_-bz0)*bny)*bnx; };
+		auto in_box=[&](const uint x_,const uint y_,const uint z_) {
+			return x_>=bx0&&x_<=bx1&&y_>=by0&&y_<=by1&&z_>=bz0&&z_<=bz1; };
+		print_info("  Glaettungsindex ueber die Facetten-BBox "+to_string(bnx)+"x"+to_string(bny)+"x"+to_string(bnz)
+			+" = "+to_string((ulong)(bnx*bny*bnz*4ull/1048576ull))+" MB statt "+to_string((ulong)((ulong)Nx*Ny*Nz*4ull/1048576ull))+" MB ueber die Domaene.");
+		for(uint i=0u; i<(uint)F.size(); i++) {
+			const uint zc=(uint)(F[i].n/((ulong)Nx*(ulong)Ny)), yc=(uint)((F[i].n/(ulong)Nx)%(ulong)Ny), xc=(uint)(F[i].n%(ulong)Nx);
+			feld[bidx(xc,yc,zc)]=i;
+		}
 		std::vector<Facette> G=F;
 		for(uint i=0u; i<(uint)F.size(); i++) {
 			if(F[i].klasse&1u) continue;
@@ -1698,7 +1719,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				const int cx2=(int)x+dx2, cy2=(int)y+dy, cz20=(int)z+dz;
 				if(!z_per&&(cz20<0||cz20>=(int)Nz)) continue;
 				const uint cz2=(uint)(z_per?(int)wz(cz20):cz20);
-				const uint j = feld[idx(wx(cx2),wy(cy2),cz2)];
+				const uint wxx=wx(cx2), wyy=wy(cy2);
+				if(!in_box(wxx,wyy,cz2)) continue; // ausserhalb der Facetten-BBox gibt es keine Facette
+				const uint j = feld[bidx(wxx,wyy,cz2)];
 				if(j==0xFFFFFFFFu||(F[j].klasse&1u)) continue;
 				const double w = (double)max(1u, F[j].eigene_links); // Flaechenproxy der FACETTENZELLE (Nachpruefer-Randnotiz: Fenstersummen ueberlappen fast vollstaendig -> de facto uniform)
 				sx+=w*F[j].nx; sy+=w*F[j].ny; sz+=w*F[j].nz;
@@ -1714,7 +1737,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				G[i].klasse &= (uchar)~8u; if(G[i].yw<yw_min||G[i].yw>2.0f) G[i].klasse|=8u; // K4 neu bewerten
 			}
 		}
-		F=G;
+		F=std::move(G); // ★ Audit: war Copy-Assignment -- 56 B je Facette, bei 4 mm 183 MB umsonst
 	}
 	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
 	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
@@ -3554,6 +3577,8 @@ static void main_setup_fahrzeug() {
 // Umrechnung nicht eindeutig ist, nennt er BEIDE Kandidaten und verlangt eine Wahl.
 // Und er meldet FEHLENDE Schalter genauso hart wie abweichende -- das ist die Haelfte, die
 // im entwerteten Lauf gefehlt hat.
+#include <sstream>   // ★ Audit-Notiz: istringstream kam bisher nur transitiv ueber <regex>
+extern char** environ; // ★ H3: fuer die Gegenrichtung (im Lauf gesetzt, in der Referenz unbekannt)
 struct BasisZeile { string name, wert, einheit; };
 static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 	if(getenv("CFD_BASIS")!=nullptr&&string(getenv("CFD_BASIS"))=="aus") {
@@ -3561,14 +3586,20 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 		return;
 	}
 	std::ifstream f(basisdatei);
-	if(!f) { print_error("BASIS-WAECHTER: "+basisdatei+" nicht lesbar. Erzeugen mit werkzeuge/basis_aus_lauf.py <LAUF.txt> "+basisdatei); return; }
+	// ★ M7, bewusst entschieden: eine fehlende Referenz bricht ab. Ein dd-Lauf ohne
+	// Konfigurationsnachweis ist genau das, was am 28.08. einen Vormittag gekostet hat.
+	// Wer aus einer exportierten Code-Kopie startet, kopiert basis/ mit oder setzt CFD_BASIS=aus.
+	if(!f) print_error("BASIS-WAECHTER: "+basisdatei+" nicht lesbar. Erzeugen mit werkzeuge/basis_aus_lauf.py <LAUF.txt> "+basisdatei+", oder CFD_BASIS=aus setzen (laut warnend).");
 	float dx_ref=0.0f; std::vector<BasisZeile> B; string zeile;
 	while(std::getline(f,zeile)) {
 		if(zeile.empty()) continue;
-		if(zeile[0]=='#') { const size_t k=zeile.find("dx_ref:"); if(k!=string::npos) dx_ref=(float)atof(zeile.substr(k+7).c_str()); continue; }
+		// ★ Audit-Notiz: find() traf JEDE Kommentarzeile im File, ein spaeterer Treffer
+		// ueberschrieb den Kopfwert. Jetzt nur die erste Nennung.
+		if(zeile[0]=='#') { if(dx_ref<=0.0f) { const size_t k=zeile.find("dx_ref:"); if(k!=string::npos) dx_ref=(float)atof(zeile.substr(k+7).c_str()); } continue; }
 		std::istringstream is(zeile); BasisZeile b; if(!(is>>b.name>>b.wert>>b.einheit)) continue; B.push_back(b);
 	}
 	if(dx_ref<=0.0f) { print_error("BASIS-WAECHTER: kein 'dx_ref:' im Kopf von "+basisdatei+" -- Umrechnung unmoeglich."); return; }
+	if(!(dx_lauf>0.0f)) { print_error("BASIS-WAECHTER: CFD_DX = "+to_string(dx_lauf,4u)+" ist nicht positiv -- die Umrechnung waere undefiniert (M5)."); return; }
 	const double skal = (double)dx_ref/(double)dx_lauf; // Feingitter-Zellen: kleineres dx -> mehr Zellen
 	// Deklarierte Abweichungen, Format CFD_A=1,CFD_B=2 -- OHNE Leerzeichen: der Serienlaeufer
 	// spaltet sein env-Stueck unquotiert an Leerzeichen, ein Freitextgrund zerlegte die Zeile.
@@ -3576,12 +3607,23 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 	std::unordered_map<string,string> erlaubt;
 	if(const char* d=getenv("CFD_BASIS_ABWEICHUNG")) {
 		string t(d), stueck; std::istringstream ds(t);
-		while(std::getline(ds,stueck,',')) { const size_t g=stueck.find('='); if(g!=string::npos) erlaubt[stueck.substr(0,g)]=stueck.substr(g+1); }
+		while(std::getline(ds,stueck,',')) {
+			while(!stueck.empty()&&(stueck.front()==' '||stueck.front()=='\t')) stueck.erase(stueck.begin()); // ★ Audit-Notiz: " CFD_B" traf nie
+			while(!stueck.empty()&&(stueck.back()==' '||stueck.back()=='\t')) stueck.pop_back();
+			if(stueck.empty()) continue;
+			const size_t g=stueck.find('=');
+			if(g==string::npos) { print_warning("CFD_BASIS_ABWEICHUNG: Stueck ohne '=' ignoriert: '"+stueck+"'"); continue; }
+			erlaubt[stueck.substr(0,g)]=stueck.substr(g+1);
+		}
 	}
-	std::vector<string> fehlt, weicht_ab; string vorschlag;
+	std::vector<string> fehlt, weicht_ab; string vorschlag, zu_setzen; ulong n_geprueft=0ull;
 	for(const BasisZeile& b : B) {
 		if(b.einheit=="ausgabe") continue;                 // beruehrt die Loesung nicht
 		if(b.name=="CFD_DX"||b.name=="CFD_CASE") continue;  // die Sprosse selbst bzw. der Fall
+		n_geprueft++;
+		if(b.einheit!="phys"&&b.einheit!="modus"&&b.einheit!="zellen_grob"&&b.einheit!="zellen_fein"
+		   &&b.einheit!="zellen_grob_laenge"&&b.einheit!="index_grob")
+			print_error("BASIS-WAECHTER: unbekannte Einheit '"+b.einheit+"' bei "+b.name+" -- sie fiele still auf 'Wert bleibt' zurueck (M6).");
 		string soll=b.wert, hinweis;
 		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob") {
 			const double roh = atof(b.wert.c_str())*skal;
@@ -3590,8 +3632,14 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 			if(unten!=oben) hinweis = " (nicht eindeutig: "+to_string((ulong)unten)+" oder "+to_string((ulong)oben)+" -- Wahl deklarieren)";
 		}
 		const char* ist_c = getenv(b.name.c_str());
-		if(ist_c==nullptr) { fehlt.push_back(b.name+" (Soll "+soll+", Einheit "+b.einheit+")"+hinweis);
-			vorschlag+=(vorschlag.empty()?"":",")+b.name+"="+soll; continue; }
+		if(ist_c==nullptr) {
+			// ★ M4: ein bewusst weggelassener Schalter war bisher NICHT deklarierbar -- der
+			// continue stand vor dem Lookup, einziger Ausweg war CFD_BASIS=aus (schaltet alles ab).
+			// Sentinel "-" heisst "absichtlich ungesetzt".
+			auto itf=erlaubt.find(b.name);
+			if(itf!=erlaubt.end()&&itf->second=="-") continue;
+			fehlt.push_back(b.name+" (Soll "+soll+", Einheit "+b.einheit+")"+hinweis);
+			zu_setzen+=(zu_setzen.empty()?"":" ")+b.name+"="+soll; continue; }
 		const string ist(ist_c);
 		// Wertvergleich, nicht Stringvergleich -- sonst schlaegt "8" gegen "08" oder "1.5" gegen "1.50" an.
 		const bool gleich = fabs(atof(ist.c_str())-atof(soll.c_str()))<1e-9 || ist==soll;
@@ -3601,9 +3649,28 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 		weicht_ab.push_back(b.name+": Soll "+soll+", Ist "+ist+" ("+b.einheit+")"+hinweis);
 		vorschlag+=(vorschlag.empty()?"":",")+b.name+"="+ist;
 	}
+	// ★ H3: die Schleife lief nur ueber die BASIS und fragte getenv. Der Spiegelfall -- im Lauf
+	// gesetzt, in der Basis unbekannt -- war unsichtbar, und der Waechter meldete trotzdem
+	// "deckt sich mit der Baseline". Genau so ist ein Lauf mit CFD_FACETTEN_NORMQUELLE=1 als
+	// deckungsgleich durchgegangen. Besonders heikel: CFD_RATIO ist die stille Voraussetzung
+	// der ganzen Umrechnung (dx_c = dx_f*ratio).
+	{	std::unordered_map<string,int> bekannt;
+		for(const BasisZeile& b : B) bekannt[b.name]=1;
+		ulong extra=0ull;
+		for(char** e=environ; *e!=nullptr; e++) {
+			const string ev(*e); const size_t g=ev.find('=');
+			if(g==string::npos||ev.compare(0,4,"CFD_")!=0) continue;
+			const string nm=ev.substr(0,g);
+			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME") continue;
+			print_warning("BASIS ZUSAETZLICH: "+nm+"="+ev.substr(g+1)+" -- steht nicht in der Referenz, wird also NICHT geprueft.");
+			if(nm=="CFD_RATIO") print_error("CFD_RATIO ist gesetzt, steht aber nicht in der Referenz -- die Umrechnung zellen_grob/index_grob haengt an unveraendertem ratio (dx_c = dx_f*ratio). Referenz erneuern oder Schalter entfernen.");
+			extra++;
+		}
+		if(extra>0ull) print_info("  "+to_string(extra)+" Schalter ausserhalb der Referenz (siehe Warnungen) -- die Entwarnung unten gilt NUR fuer die gefuehrten.");
+	}
 	print_info("BASIS-WAECHTER: "+basisdatei+", dx_ref "+to_string(dx_ref,2u)+" gegen Lauf-dx "+to_string(dx_lauf,2u)
-		+", "+to_string((ulong)B.size())+" Schalter geprueft, "+to_string((ulong)erlaubt.size())+" Abweichungen deklariert.");
-	if(fehlt.empty()&&weicht_ab.empty()) { print_info("  Konfiguration deckt sich mit der Baseline (nach Umrechnung)."); return; }
+		+", "+to_string((ulong)n_geprueft)+" von "+to_string((ulong)B.size())+" Schaltern geprueft (Rest: ausgabe/Fall/Sprosse), "+to_string((ulong)erlaubt.size())+" Abweichungen deklariert.");
+	if(fehlt.empty()&&weicht_ab.empty()) { print_info("  Keine Abweichung unter den gefuehrten Schaltern (nach Umrechnung)."); return; }
 	// ★ JE BEFUND EINE EIGENE ZEILE. Die erste Fassung packte alles in EINEN print_error --
 	// der Konsolenumbruch zerschnitt die Namen und machte ausgerechnet die kopierbare
 	// Vorschlagszeile unlesbar. Ein Waechter, dessen Meldung man nicht lesen kann, wird
@@ -3617,7 +3684,9 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 		if(bf) { bf << "# Basis-Waechter, Abweichungen gegen " << basisdatei << "\n";
 			for(const string& x : fehlt)     bf << "FEHLT:      " << x << "\n";
 			for(const string& x : weicht_ab) bf << "ABWEICHEND: " << x << "\n";
-			bf << "\nCFD_BASIS_ABWEICHUNG=" << vorschlag << "\n"; bf.close();
+			if(!zu_setzen.empty()) bf << "\n# ZU SETZEN (fehlende Schalter -- oder mit '-' als absichtlich ungesetzt deklarieren):\n" << zu_setzen << "\n";
+			if(!vorschlag.empty()) bf << "\n# ZU DEKLARIEREN (abweichende Werte):\nCFD_BASIS_ABWEICHUNG=" << vorschlag << "\n";
+			bf.close();
 			print_info("  Vollstaendig und kopierbar in: "+bp); }
 	}
 	print_error("BASIS-WAECHTER: "+to_string((ulong)fehlt.size())+" Schalter FEHLEN, "+to_string((ulong)weicht_ab.size())
