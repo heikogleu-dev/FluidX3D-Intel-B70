@@ -4659,3 +4659,51 @@ Unabhaengige Untersuchung der -9,0 % an Cd_druck (b2s1_kugel 0,6648 gegen tc_kug
 
 FOLGERUNG: die -9,0 % sind KEIN Befund ueber V3b. Bevor an diesem Fall ueberhaupt ein Kriterium
 gelten kann, muss die Eigenstreuung des AUSGANGSWERTS bekannt sein.
+
+### B47 -- KORREKTUR AN B45: DER VERWERFUNGSGEWINN IST NUR ZUR HAELFTE PHYSIK
+Unabhaengige Untersuchung des Rang0-Anstiegs. Ergebnis kippt die Bewertung von B45.
+
+1) DIE ENTARTUNG HAENGT NICHT VON DER NORMALEN AB, sondern allein von der Zahl der eigenen
+   Solid-Links der Zelle. Die Momentenmatrix M = Summe 6*w_i*c_i c_i^T (kernel.cpp:1996-2009)
+   entsteht ausschliesslich aus flags; ihr Rang ist basisinvariant. Eine Ein-Link-Zelle hat
+   analytisch Gt == 0 und faellt DETERMINISTISCH, bei jedem Zeitschritt, in Slot 13 oder 15.
+   BELEG, exakte Arithmetik, von mir am Fahrzeug unabhaengig nachgerechnet:
+     aktive Facetten (klasse==0) mit genau 1 Eigenlink: 94.236
+     94.236 x 250 Abtastungen = 23.559.000 gegen geloggtes ohneTang 23.558.999 -- Abweichung 1.
+   An der Kugel ebenso: V1 216x37 = 7.992 = Slot 13+15, V3b 264x37 = 9.768. Slot 14 (Rang2)
+   = 48x37 = die Zellen mit genau ZWEI Eigenlinks.
+   Die +23,1 % Rang0 sind damit KEINE neue Entartung, sondern eine NENNER-UMBUCHUNG: es sind
+   genau die Ein-Link-Zellen, die V1 als K2 verworfen hatte und die V3b hereinnimmt.
+   Meine Hypothese (V3bs diskretere Normalenrichtungen treffen haeufiger die entartete
+   Ausrichtung) ist WIDERLEGT: der zugehoerige Zaehler u_t~0-Skips steht auf 2 in BEIDEN Armen.
+
+2) DAMIT UEBERZEICHNET B45s SCHLAGZEILE. Host-Zensus von export/td_vgl_8mm/nah/
+   facetten_histogramme.csv: von den 64.618 Zellen, die V1 NUR wegen Kante/Linie/Orientierung
+   verwirft -- also denen, die V3b sicher hereinholt --
+     haben 24.863 genau EINEN Eigenlink   -> unter ALPHA=2 entartet, kein Wandmodell moeglich
+     haben  5.415 genau ZWEI Eigenlinks   -> ebenfalls entartet
+     bleiben 34.340 = 53,1 %              -> nur diese koennen ein Wandmodell tragen
+   Der physisch nutzbare Gewinn ist also rund die HAELFTE dessen, was "22,1 -> 7,0 %" nahelegt,
+   und der K4-Verlust ist davon noch abzuziehen.
+
+3) DAS RICHTIGE ERFOLGSMASS ist nicht die Verwerfung, sondern die Zahl BEHANDELTER Facetten:
+   Slot 7 (Wirkpfad) minus Slot 9 (u_t~0) minus Slot 69 (Rueckfall-Buchung), geteilt durch die
+   Abtastzahl. An der Kugel: V1 (26.825-2-10.746)/37 = 434,5 von 725 Facetten;
+   V3b (27.713-2-12.135)/37 = 421,0 von 749. V3B BEHANDELT DORT 3,1 % WENIGER ZELLEN, OBWOHL ES
+   3,3 % MEHR FACETTEN HAT. Verwerfungsrate und Rang0 sind beide Nennerartefakte; diese Zahl
+   ist es nicht -- und sie steht am Kugelfall gegen V3b.
+   EINSCHRAENKUNG: die Kugellaeufe hatten CFD_FAC_ALPHA ungesetzt (=0), die Produktion faehrt 2.
+   Die Fahrzeug-Identitaet oben gilt dagegen unter ALPHA=2.
+
+4) DIE LOESUNG BRAUCHT KEINEN CODE, SONDERN EINEN SCHALTER. Ein-Link-Zellen sind fuer den
+   iMEM-Solve prinzipiell unerreichbar (ein Link = ein Freiheitsgrad; jede Erfuellung injiziert
+   Normalimpuls, kernel.cpp:2190). Fuer die ELIBB-Blende sind sie voll behandelbar: sie laeuft
+   VOR dem Solve (kernel.cpp:1913), braucht nur q je Link und keinen Rang -- aber ausschliesslich
+   fuer Zellen, die eine FACETTE SIND (fid==0xFFFFFFFF -> return, kernel.cpp:1899). Eine
+   verworfene Zelle bekommt gar nichts.
+   DER BEZUGSLAUF t7_basis_heute HATTE ELIBB AUS. Ohne ELIBB kann V3bs Gewinn strukturell nicht
+   sichtbar werden -- dann bekommen die Ein-Link-Zellen in BEIDEN Armen nichts, und die
+   Umbuchung ist alles, was uebrig bleibt. Das A/B faehrt deshalb ELIBB in BEIDEN Armen an.
+   NICHT ANZUFASSEN: kernel.cpp:2155 (Entkopplungs-Gate) und 2176-2190 (relative Kaskaden-
+   schwellen). Die absoluten 1e-8-Schwellen lagen exakt auf dem float-Schur-Rauschen und liessen
+   31 % der Kugelfacetten ins Rang-2 flackern; ein Aufweichen stellt genau diesen Fehler wieder her.
