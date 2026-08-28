@@ -1694,6 +1694,18 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		+" % (Schwellen GEEICHT 2026-08-15: r21>0,15 aus Fenster-A/B, r10<0,02 Sicherheitsnetz -- K3 war ueberall leer)");
 	print_info("  y_w: Median "+to_string((float)quantil(hist_yw,0.5),3u)+", q10 "+to_string((float)quantil(hist_yw,0.1),3u)
 		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
+	// ★ NORMALEN-KOMPONENTEN (28.08.): der 26-Grad-Arm mit V3b meldet eine y-Reibung von +0,1074
+	// gegen V1s -0,0171 -- sechsmal groesser und fast so gross wie die x-Reibung (0,1285). Die
+	// Treppe ist in y INVARIANT, dort darf keine Querkraft entstehen. Der Winkel zur dominanten
+	// Achse kann das nicht zeigen (acos(max|n_i|) ist blind dafuer, WELCHE der beiden anderen
+	// Komponenten den Rest traegt). Also je Komponente einzeln.
+	{	std::vector<double> hx, hy, hz;
+		for(const Facette& f : F) { if(f.klasse&1u) continue;
+			hx.push_back((double)fabs(f.nx)); hy.push_back((double)fabs(f.ny)); hz.push_back((double)fabs(f.nz)); }
+		if(!hx.empty()) print_info("  Normalen-Komponenten |n| Median/q90: x "+to_string((float)quantil(hx,0.5),4u)+"/"+to_string((float)quantil(hx,0.9),4u)
+			+"  y "+to_string((float)quantil(hy,0.5),4u)+"/"+to_string((float)quantil(hy,0.9),4u)
+			+"  z "+to_string((float)quantil(hz,0.5),4u)+"/"+to_string((float)quantil(hz,0.9),4u));
+	}
 	print_info("  Winkel zur dominanten Achse: Median "+to_string((float)quantil(hist_winkel,0.5),1u)
 		+" Grad, q90 "+to_string((float)quantil(hist_winkel,0.9),1u)+" Grad");
 	// ★ SOLID-DICKE (Heiko 28.08.: "natuerlich hat der mr2 gurney, canards und luftleitbleche
