@@ -4723,3 +4723,46 @@ nicht die Bilanz verletzt, sondern langsamer einschwingt.
 WER SPAETER DARAUF AUFBAUT, MUSS DAS WISSEN: die 1,5 % Restluecke sind gemessen, nicht erklaert
 weggerechnet. Sollte am Fahrzeug etwas in dieser Groessenordnung unklar bleiben, ist die
 640-ETT-Sprosse der erste Ort, an dem nachzusehen ist.
+
+### B49 -- DER ECHTE FAHRZEUGTEST: V3b DECKT MEHR AB UND MACHT DEN ABTRIEB SCHLECHTER
+Serie logs/tj_fahrzeug_ab_serie.txt, drei Arme, jedes Paar EINE Variable, alle rc=0, Census
+vor und nach der Serie frei, alle bei T_END 1,0 s, ELIBB in allen dreien an.
+Boxen wie bestellt gerastert: neu 845x333x233 (65,6 M), alt 845x317x241 (64,6 M) -- y 317->333
+Zellen (+128 mm), z 241->233 (-64 mm). Kopplungspruefung in allen drei Armen in Ordnung.
+
+  Arm                 behandelte Facetten     cd_druck (2.H, Block-SEM)   Cz_rest vs OF13 -1,301
+  a  V1  / NEUE Box   343.640 = 44,8 %        1,5515 +- 0,0055            -0,1552  (-88,1 %)
+  b  V3b / NEUE Box   403.068 = 52,6 %        1,4908 +- 0,0035            -0,0700  (-94,6 %)
+  c  V1  / ALTE Box   343.330 = 45,5 %        1,5270 +- 0,0047            -0,1548  (-88,1 %)
+
+1) V3b GEWINNT AUF DEM EHRLICHEN MASS: +59.428 behandelte Facetten = +17,3 %. Das ist die
+   Groesse, auf die B47 den Vergleich umgestellt hat (Slot 7 - Slot 9 - Slot 69, geteilt durch
+   500 Abtastungen), nicht die Verwerfungsrate. UND SIE WIDERSPRICHT DEM KUGELFALL: dort
+   behandelte V3b 3,1 % WENIGER. Die Kugel bei 12,6 Zellen Durchmesser war also kein
+   uebertragbarer Zeuge -- genau wie der Cd-Agent gewarnt hatte.
+2) V3b VERLIERT AUF DER GROESSE, DIE AM MEISTEN WEHTUT: der Abtrieb halbiert sich mehr als,
+   Cz_rest -0,1552 -> -0,0700, die Abweichung von OF13 waechst von -88,1 auf -94,6 %.
+   Abtrieb ist die Groesse, in der dieses Modell ohnehin am schlechtesten steht; V3b macht die
+   schlechteste Stelle schlechter.
+3) cd_druck faellt mit V3b um 3,9 % (1,5515 -> 1,4908, kombiniert 9,4 sigma). Das sieht nach
+   Annaeherung an OF13 (0,599) aus, ist aber KEIN Gewinnbeleg: nach B46 ist cd_druck ein nach
+   unten verzerrter Schaetzer, dessen Verzerrung mit dem Normalenfehler waechst, und an der
+   Kugel senkte JEDE Stoerung des Wandmodells diesen Wert um 7-9 %.
+4) DIE BOX BRINGT NICHTS MESSBARES (a gegen c, eine Variable): Cz_rest -0,1552 gegen -0,1548 --
+   identisch im Rahmen der Fehlerbalken. cd_druck 1,5515 gegen 1,5270, also +1,6 % (3,4 sigma)
+   in die FALSCHE Richtung. Behandelte Facetten praktisch gleich (343.640 gegen 343.330).
+   Die Umschichtung (y +128 mm, z+ -64 mm) war aus den Interface-Slices abgeleitet und ist damit
+   erstmals am Kraftergebnis geprueft: sie zahlt sich dort NICHT aus. Das entwertet die
+   Slice-Analyse nicht -- es zeigt, dass das |d|<1-m/s-Kriterium keine Kraftaussage traegt.
+5) KONVERGENZ, aus dem Kraefteverlauf statt aus einer Annahme (Heikos Punkt): alle drei Arme
+   driften von der ersten zur zweiten Haelfte nach unten -- a 1,5941 -> 1,5515, b 1,5400 ->
+   1,4908, c 1,5840 -> 1,5270. Keiner ist auskonvergiert, aber V3b driftet NICHT staerker als
+   V1. Die vierfache Einschwingzeit vom Kanal UEBERTRAEGT SICH NICHT auf das Fahrzeug.
+6) NEBENZAHLEN: V3b hat K2 = 0 (gegen 101.972), Orientierung 7.176 (gegen 25.598), markierte
+   Zellen 6,9 % (gegen 22,6 %), Duennteil-Rueckfall feuerte 3.245 mal. Der Wirkpfad meldet
+   766.234 von 766.234 Facetten aus der Voxelflaechen-Summe.
+
+VERDIKT: V3b ist auf der Abdeckung belegt besser und auf dem Abtrieb belegt schlechter. Als
+Default kommt es damit NICHT in Frage. Die naechste Frage ist nicht "annehmen oder verwerfen",
+sondern WARUM mehr behandelte Zellen weniger Abtrieb ergeben -- das ist der eigentliche Befund
+dieses Tages und war ohne den Fahrzeuglauf nicht sichtbar.
