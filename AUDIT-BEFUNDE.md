@@ -4286,3 +4286,40 @@ E) DER EIGENTLICHE BEFUND: DAS IST ALLES SCHON GEBAUT UND LIEGT BRACH.
    Flaeche anzuschliessen, die bereits erzeugt wird. Die Taubin-geglaettete Remesh-Flaeche ist
    dabei WEDER M1 noch M2 noch M3 -- sie ist der einzige Kandidat, der Treppe und Kruemmung
    zugleich adressieren koennte, und sie ist NICHT VERMESSEN. Das ist der erste zu messende Arm.
+
+### B37 -- TAUBIN GEGEN DUENNTEILE: die ROHE Voxelflaeche ist an Gurney/Canard exakt, die geglaettete nicht
+Anlass: Heiko 28.08. -- "dachte nur das meine idee gerade bei den canards, gurny und
+luftleitblechen deutlich physik/detailgetreuer waere". Der Code warnt an der Glaettung selbst
+(setup.cpp:884-886): "Taubin daempft bei lam/mu jedes Merkmal unter rund 11 Zellen Periode und
+loescht alles unter rund 6 aus". Genau diese Groessenordnung sind Gurneys und Canards.
+
+Eigener Nachbau des Remesh (Surface Nets auf dem dualen Eckgitter + Taubin lam 0,5 / mu -0,53 +
+harte Klemme +-0,5 Zelle, wie setup.cpp:793-901). Pruefkoerper: Lippe 1 Zelle dick, Hoehe h,
+Breite 20, auf einer 1 Zelle dicken Platte. Gemessen wird die PROJIZIERTE STIRNFLAECHE in
+Anstroemrichtung -- die Groesse, die den Abtrieb traegt. Soll = (h+1)*20.
+
+   h     Soll    roh ITER=0   ITER=8 (Default)   ITER=15
+   1     40,0     40,0  +0,0%    42,1  +5,3%      41,2  +2,9%
+   2     60,0     60,0  +0,0%    63,5  +5,8%      63,4  +5,7%
+   3     80,0     80,0  +0,0%    83,3  +4,1%      83,6  +4,4%
+   4    100,0    100,0  +0,0%   103,1  +3,1%     103,2  +3,2%
+   6    140,0    140,0  +0,0%   142,9  +2,1%     142,8  +2,0%
+  10    220,0    220,0  +0,0%   222,5  +1,1%     222,2  +1,0%
+
+ZWEI BEFUNDE:
+1) DIE ROHE VOXELFLAECHE IST BEI JEDER LIPPENHOEHE EXAKT (+0,0 %). Heikos Ansatz ist an
+   Duennteilen also nicht nur "genauer", sondern in dieser Groesse fehlerfrei -- und die
+   Aufdickung selbst beruehrt die projizierte Flaeche nicht (B36 A: 0,4-Zellen-Blech, +0,0 %).
+2) DIE GLAETTUNG VERSCHLECHTERT DAS, UND ZWAR AM STAERKSTEN BEI DEN KLEINSTEN MERKMALEN:
+   +5,8 % bei h=2 gegen +1,1 % bei h=10. Sie loescht den Gurney nicht (die +-0,5-Klemme
+   verhindert das), aber sie macht seine Stirnflaeche fett. Mehr Iterationen helfen nicht
+   (ITER=15 praktisch wie ITER=8) -- es ist die Klemme, die den Endzustand bestimmt.
+
+FOLGE FUER DEN BAU: CFD_FACETTEN_REMESH_ITER (setup.cpp:887, Default 8) ist damit KEIN
+Nebenparameter, sondern ein Messarm erster Ordnung. Es gibt einen echten Zielkonflikt:
+die Glaettung ist gegen die Treppe gedacht (schraege Flaechen), schadet aber duennen scharfen
+Merkmalen. Ob ein einziger ITER-Wert beides bedient, ist offen und muss gemessen werden;
+falls nicht, ist der vorhandene v_fest/Quetschkanten-Mechanismus (setup.cpp:875-880) die
+Stelle, an der merkmalserhaltend geklemmt werden koennte.
+NICHT GEPRUEFT: wie sich das auf Cz am Fahrzeug auswirkt -- die MR2 hat in dieser Fassung
+keinen Gurney. Die Zahlen oben sind Geometrie, keine Stroemung.
