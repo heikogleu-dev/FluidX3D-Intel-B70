@@ -4134,3 +4134,34 @@ Standardkonfiguration. Census vor und nach der Serie frei.
    t6_fahrzeug_ywmin15 reproduziert K2 = 95.953 und Orientierung = 23.034 des alten Laufs
    zellgenau. Der Facettenbau ist ueber die 69 Commits unveraendert.
    Fuer die Kraefte laeuft der zeitgleiche Bezugsarm t7_basis_heute (logs/t7_basis_serie.txt).
+
+### B34 -- FAHRZEUGKRAEFTE auf identischem Binary: beide Hebel bewegen Cz, keiner ist ein reiner Gewinn
+t7_basis_heute / t6_fahrzeug_f2 / t6_fahrzeug_ywmin15, src/ zwischen 04d4e2b und d7a283b
+nachweislich identisch (git diff --stat -- src/ ist leer). Alle drei rc=0, keine Abnahme
+verletzt. Fehlerbalken = Block-SEM ueber 16 Bloecke, zweite Laufhaelfte.
+
+                        cd_druck   +-SEM    cd_reib   Cz_rest    +-SEM    vs Basis
+  Basis (3^3, YWMIN 0,2)  1,5747   0,0126    0,0576   -0,0942   0,01456      --
+  FENSTER=2               1,5218   0,0114    0,0385   -0,1512   0,01632   2,61 sigma
+  YWMIN=0,15              1,7828   0,0113    0,0670   -0,1845   0,01758   3,96 sigma
+  OF13 mr2v40H                                         -1,3010
+
+BEIDE HEBEL SCHIEBEN Cz IN DIE RICHTIGE RICHTUNG, und zwar signifikant. YWMIN=0,15 ist der
+staerkere: Abstand zu OF13 von -92,8 auf -85,8 %. Das ist gemessen, aber es bleibt ein
+Siebtel des Ziels -- der Abtrieb fehlt weiterhin fast vollstaendig.
+
+Cd GEHT AUSEINANDER: FENSTER=2 senkt cd_druck um 0,0529 (3,1 sigma), YWMIN=0,15 HEBT es um
+0,2081 (12,3 sigma). Der YWMIN-Arm ist damit KEIN reiner Gewinn, sondern ein Tausch.
+
+DIE URSACHE DES Cd-ANSTIEGS IST AM ZAEHLER ABLESBAR: Slot 69 (Rueckfall auf reine
+Druckbuchung) steigt 60.607.351 -> 65.671.896 = +8,4 %, waehrend YWMIN nur 7,1 % mehr Zellen
+zulaesst (53.869 von 755.344). Die neu zugelassenen Zellen liegen bei y_w zwischen 0,15 und
+0,20, also sehr dicht an der Wand -- der Reibungsloeser scheitert dort ueberwiegend und faellt
+auf P-only zurueck. Sie bringen also Druckwiderstand ein, ohne die zugehoerige Reibungs-
+behandlung. Das erklaert Cz-Gewinn UND Cd-Verlust aus EINEM Mechanismus.
+VERDIKT: YWMIN=0,15 wird NICHT als Default uebernommen. Es bleibt ein deklarierter Messarm.
+
+METHODISCHE BESTAETIGUNG, warum der Nachlauf noetig war: derselbe Konfigurationssatz ergab bei
+Commit fdb3a03 ein Cz_rest von -0,0729, heute -0,0942. 29 % Unterschied allein aus 69
+src/-Commits. Haette ich t6 gegen den alten Bezugslauf gerechnet, waere der FENSTER-Effekt
+(-0,0570) fast vollstaendig aus der Codeluecke gekommen statt aus dem Schalter.
