@@ -3971,3 +3971,47 @@ WAS STATTDESSEN TRAEGT -- das Modell ueberzieht, und das Ziel ist der Hebel:
 STAND DER 26-GRAD-KLASSE nach zwei Tagen: der beste erreichbare Wert bleibt ELIBB=0 mit 1,943.
 Kein Schalter, keiner der drei Aufloesungs-Kandidaten und keine der beiden geplanten Baumassnahmen
 hat u_tau naeher an 1,0 gebracht. Was gewonnen wurde, ist die Ausschlussliste.
+
+### B28 -- HEIKOS FENSTER-IDEE TRIFFT: u_tau 2,382 -> 1,507 am 26-Grad-Kanal (28.08. morgens)
+Heiko: "koennen wir nicht mehrere zellangrenzende Facetten pro Zelle nutzen, waere das nicht
+genauer?" -- die Haelfte davon ist ohne Code messbar: CFD_FACETTEN_FENSTER (setup.cpp:1260)
+steuert den Radius der Nachbarschaft, ueber die die TLS-Ausgleichsebene gefittet wird
+(1 = 3^3 Default, 2 = 5^3, 3 = 7^3). Er aendert NORMALE und y_w, NICHT die Linkmenge des
+iMEM-Solves. Serie logs/t4_fenster_serie.txt, je eine Variable, Binary 22496f7.
+
+DER ANLASS, vorab gerechnet: die Treppe hat Steigung 1:2, die WAHRE Rampennormale liegt bei
+atan(1/2) = 26,565 Grad. Der 3^3-Fit misst 28,168 Grad -- 1,60 Grad daneben, bei allen drei
+Zellklassen identisch. Das ist Treppen-Diskretisierung, kein Rauschen.
+
+  Fenster   Winkel   Winkelfehler   y_w Median            u_tau   tau_w[1e-6]     y+   Slot 14
+  3^3        28,2     +1,63          0,187/0,698/1,069    2,382     14,4248     218,2  53.195.580
+  5^3        27,2     +0,63          0,647                1,507      0,7570      52,3  43.608.670
+  7^3        19,1     -7,46          1,190                ABBRUCH       -          -        -
+
+DAS 5^3-FENSTER IST DER GROESSTE EINZELHEBEL, DEN DIESE KLASSE BISHER GESEHEN HAT:
+u_tau IST/Ziel faellt von 2,382 auf 1,507 -- besser als ELIBB=0 (1,943), besser als alles aus
+der t2- und t3-Serie. In der ECHTEN Kraftbilanz (u_tau IST kommt aus f_akt, nicht aus dem
+Modell) entspricht das Faktor 2,50 weniger Wandschubspannung.
+Der Mechanismus passt zur Erklaerung: der Winkelfehler faellt von 1,63 auf 0,63 Grad, die drei
+diskreten y_w-Werte verschmelzen zu einem Median 0,647 -- die Klassentrennung, die das ganze
+Problem traegt, wird weicher. Slot 14 (Rang-2-Rueckfall) faellt von 53,2 auf 43,6 Mio.
+
+DAS 7^3-FENSTER IST KAPUTT -- auch das ein Befund: der Fit wird so grob, dass der Winkel auf
+19,1 Grad einbricht (7,5 Grad UNTER der Wahrheit) und y_w auf 1,190 wandert; danach verwirft die
+Klassifikation alles und der Lauf endet mit "alloc_facetten_domain: keine aktive Facette (alle
+markiert?)". Der Code faengt das sauber ab. Es gibt also ein Optimum, und der ganzzahlige Radius
+trifft es nicht genau -- bei 5^3 bleiben 0,63 Grad Fehler.
+
+OFFEN UND ZU KLAEREN: K2 steht im 5^3-Arm bei 1,02 (Waechter ausgeloest, rc=1) gegen 1,0004 bei
+3^3. Das ist eine Buchungsabweichung von 2 %, kein Absturz -- aber sie war bei 3^3 nicht da und
+muss erklaert werden, bevor der Arm als Gewinn zaehlt.
+
+GEGENPROBEN LAUFEN (logs/t5_gegenprobe_serie.txt), denn ein groesseres Fenster kann auch ECHTE
+Geometrie verschmieren statt nur kuenstliche Stufen:
+  g1 kipp0 -- an der ebenen Wand ist die Normale trivial richtig, das Fenster kann nur schaden.
+     KILL: Verhaeltnis mehr als 1 % schlechter oder u_tau unter 0,68.
+  g2 kipp45 -- wahre Normale 45,000 Grad. Naehert sich der Winkel UND faellt u_tau, ist der
+     Mechanismus geometrisch bestaetigt und nicht auf 26 Grad zugeschnitten.
+  g3 Kugel -- der eigentliche Gegenfall: keine Stufen zum Wegmitteln, nur echte Kruemmung.
+     KILL: Cd_druck bewegt sich mehr als 5 % (Referenz 0,6648).
+Erst wenn g1 und g3 neutral bleiben, ist das ein Hebel und kein Kompromiss.
