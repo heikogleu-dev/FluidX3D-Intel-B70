@@ -4015,3 +4015,24 @@ Geometrie verschmieren statt nur kuenstliche Stufen:
   g3 Kugel -- der eigentliche Gegenfall: keine Stufen zum Wegmitteln, nur echte Kruemmung.
      KILL: Cd_druck bewegt sich mehr als 5 % (Referenz 0,6648).
 Erst wenn g1 und g3 neutral bleiben, ist das ein Hebel und kein Kompromiss.
+
+### B29 -- VORAB-PROGNOSE zu g4 (Fenster 5^3 am Fahrzeug), vor dem Lauf festgehalten
+Der Quelltext (setup.cpp:1256-1259) traegt eine Fenster-A/B vom 2026-08-15 am Fahrzeug 8 mm mit
+gegenteiligem Verdikt zu B28: "3^3 gewinnt klar -- r21-q90 0,21/0,27/0,42 und Orientierungs-
+konflikte 2,7/5,4/9,0 % fuer 3/5/7". Das ist kein direkter Widerspruch: jene A/B entschied nach
+FIT-GUETE, B28 nach u_tau. Beides kann zugleich wahr sein.
+PROGNOSE fuer g4, damit sie widerlegbar ist: wenn die alte A/B recht hat und groessere Fenster
+"Kruemmung und Zweitflaechen" sehen, muss am Fahrzeug K2(Kante) STEIGEN (Basis 95.953 = 12,7 %)
+und Orientierung ebenfalls (Basis 23.034 = 3,0 %, alte A/B sagt 2,7 -> 5,4 %). Bleiben beide
+gleich, ist die alte Begruendung am Fahrzeug nicht reproduzierbar.
+
+### B30 -- HEIKOS FRAGE BEANTWORTET: 29,3 % der wandnahen Zellen bekommen keine Facette
+Zensus f8_standard_final (Fahrzeug 8 mm, Fenster 3^3, YWMIN-Default 0,2), 755.344 wandnahe
+Fluidzellen:  K1 0 | K2(Kante) 95.953 (12,7 %) | K3 0 | K4(y_w) 100.891 (13,4 %) |
+Orientierung 23.034 (3,0 %) | Punktueberlauf 0 | bewegte-Wand-Naehe 1.274 (0,2 %)
+SUMME 221.152 = 29,3 %.
+Im 26-Grad-Kanal sind dieselben Zaehler ALLE 0 -- das Verwerfen ist ein reines Fahrzeugproblem
+und war an der Treppe nicht sichtbar. Die zwei grossen Toepfe entsprechen genau Heikos beiden
+Ideen: K4 ist die y_w-Untergrenze (Arm g5 zieht daran, der Code empfiehlt selbst 0,15), K2 ist
+die Kante -- dort kann EINE Ausgleichsebene die Geometrie prinzipiell nicht darstellen, und
+genau dort waeren mehrere Facetten je Zelle der richtige Ansatz (Codeaenderung, noch nicht getan).
