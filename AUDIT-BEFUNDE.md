@@ -4543,3 +4543,28 @@ das ist ausdruecklich festzuhalten, weil der Schluss naheliegt und falsch waere:
 ENTSCHEIDBAR NUR DURCH VERDRAHTEN UND MESSEN: kipp0 (darf sich nicht aendern), kipp26 gegen
 u_tau IST/Ziel 2,382, dann Fahrzeug 8 mm gegen cd_druck 1,5747 +-0,0126 und Cz_rest
 -0,0942 +-0,0146 (OF13 -1,301).
+
+### B44 -- DRITTE KUGEL-SPROSSE: V3 UEBERHOLT V1 IM MEDIAN; V1s FEHLER SAETTIGT, V3s NICHT
+Heikos Beobachtung ("der winkelfehler faellt mit der aufloesung") nachgemessen statt
+hochgerechnet. Lauf tb_kugel_dx10, 9178 wandnahe Zellen, R_vol 23,23 Zellen. Census frei.
+
+  Kugel        Radius   V1 Median/q90    V3 = V3b Median/q90   Abstand im Median
+  dx=40         6,30 Z    6,67 / 11,50      9,89 / 12,96        V3 schlechter um 3,22
+  dx=20        11,95 Z    4,85 /  9,81      5,53 /  9,43        V3 schlechter um 0,68
+  dx=10        23,23 Z    4,69 /  8,78      4,54 /  9,87        V3 BESSER um 0,15
+
+DER EIGENTLICHE BEFUND STECKT IN DER KONVERGENZ, NICHT IM UEBERHOLEN:
+  V1: 6,67 -> 4,85 -> 4,69  (Verbesserung um Faktor 1,38 dann nur noch 1,03) -- SAETTIGT
+  V3: 9,89 -> 5,53 -> 4,54  (Faktor 1,79 dann 1,22) -- KONVERGIERT WEITER
+V1 hat einen Fehlerboden, V3 nicht. Erklaerbar aus der Konstruktion: V1 mittelt auch ueber die
+12 DIAGONAL-Linkmitten, und die liegen bauartbedingt NICHT auf der Voxeloberflaeche (sie
+streifen die Solid-Ecke, vgl. den Kommentar setup.cpp:1112). Dieser Versatz ist ein
+SYSTEMATISCHER Beitrag, der mit feinerem Gitter nicht verschwindet. V3 nutzt ausschliesslich
+die echten Voxelflaechen, sein Fehler ist reine Diskretisierung und faellt weiter.
+DAS IST DAS ERSTE ARGUMENT FUER V3, DAS AUF DER PRODUKTIONSSPROSSE STAERKER WIRD STATT SCHWAECHER.
+
+EHRLICH ZUR GEGENRICHTUNG: das q90 kreuzt NICHT mit. Bei dx=20 ist V3 im q90 besser
+(9,43 gegen 9,81), bei dx=10 schlechter (9,87 gegen 8,78). Median und q90 laufen also
+auseinander -- V3 hat den besseren Schwerpunkt, V1 den kuerzeren Schwanz. Ein Verfahren, das
+in BEIDEN Massen gewinnt, gibt es nach diesen drei Sprossen nicht.
+Abdeckung bei dx=10: V1 3,40 %, V3b 2,35 % -- auf der glatten Kugel spielt sie keine Rolle.
