@@ -4611,3 +4611,51 @@ OFFEN (M7): bei NORMQUELLE=1 ohne VERGLEICH werden V2/V4/V5 unnoetig mitgerechne
 131 MB Ballastspeicher am Fahrzeug 4 mm und geschaetzt +40..80 % auf den Facettenbau. Reine
 Setup-Kosten, kein Laufzeiteffekt -- nicht behoben, um vor der Physikmessung keine
 Umstrukturierung einzuziehen.
+
+### B46 -- DIE KUGEL-Cd-ABWEICHUNG IST NICHT ENTSCHEIDBAR; MEIN 5-PROZENT-KRITERIUM WAR UNGUELTIG
+Unabhaengige Untersuchung der -9,0 % an Cd_druck (b2s1_kugel 0,6648 gegen tc_kugel_v3b 0,6049).
+
+1) WIRKWEG, korrigiert: die Normale geht sehr wohl in den DRUCK ein, aber nur als
+   Projektionsrichtung -- setup.cpp:2009-2010 bzw. kernel.cpp:3735-3736 rechnen
+   fn = F*n_dach; K.px += fn*n_dach_x. Der Kraftvektor F selbst (Impulsaustausch, 1045 Zellen,
+   in beiden Armen identisch) bleibt unberuehrt. Der FLAECHENFAKTOR 1/|n_achse| (lbm.cpp:521-525)
+   steht NICHT im Druckpfad, sondern nur im Reibungs-/Wandmodellpfad (kernel.cpp:1682/1697).
+   FOLGE, und das ist der Kern: p_x = (F*n)n_x faellt mit <cos^2 theta>. Cd_druck ist ein nach
+   unten verzerrter Schaetzer, dessen Verzerrung MIT DEM NORMALENFEHLER WAECHST. "Niedriger"
+   heisst hier "staerker verzerrt", nicht "besser".
+2) QUANTITATIV: die Geometrie traegt nur -1,4 bis -2,3 % (aus dem Winkelfehler gegen die
+   analytische Normale, V1 6,67 gegen V3b 9,89 Grad). Der Rest kommt aus dem STROEMUNGSFELD:
+   Rang0-BB steigt 7.775 -> 9.572 (+23,1 %), Anteil am Wirkpfad 29,0 -> 34,5 %. V3bs Normalen
+   lassen den iMEM-Solve haeufiger entarten; diese Zellen buchen keine Modellreibung.
+3) KEINE REFERENZ MOEGLICH: der Lauf steht bei Re_D = 912.162, also UEBERKRITISCH; Achenbach
+   1972 / Clift-Grace-Weber erwarten dort Cd ~ 0,07-0,10 (FACETTEN-LITERATUR.md:44-46). Gemessen
+   sind 1,0796 bzw. 0,9838. Beide Arme liegen um eine Groessenordnung daneben -- eine
+   9-%-Verschiebung darin kann die Literatur nicht bewerten.
+4) MEIN B36-ARGUMENT IST WIDERLEGT, durch Gegenbeispiel: das 5^3-Fenster schiebt y_w um +28 %
+   (weg von der Voxelflaeche), V3b um -41 % (hin zu ihr) -- ENTGEGENGESETZTE Geometrievorzeichen,
+   und beide senken Cd_druck aehnlich stark (-7,4 gegen -9,0 %). Die Regel "naeher an der
+   Voxelflaeche also niedrigerer Druckwiderstand" gilt nicht. Was bleibt: JEDE Stoerung des
+   Wandmodells senkt hier Cd_druck um 7-9 %.
+5) DIE 9 % STEHEN AUF DER FALSCHEN SPROSSE: der einzige Stroemungslauf ist dx=40, und dort ist
+   V3bs Normalenfehler am groessten (9,89 gegen 6,67 Grad; bei dx=10 dreht es auf 4,54 gegen
+   4,69). Fuer die Produktionsaufloesung sagt die Zahl nichts.
+6) DER ENTSCHEIDENDE BEFUND -- MEIN KRITERIUM WAR VON ANFANG AN UNGUELTIG: das Drucksignal
+   dieses Kugelfalls ist eine ZWEI-ZUSTANDS-OSZILLATION. Gerade Samples 0,0892, ungerade 1,2404
+   (V1), Amplitude also 87 % des Mittelwerts; Autokorrelation Lag 1..8 alterniert mit +-0,9.
+   Grundperiode 4 oder 20 Zeitschritte -- 40- bis 200-mal schneller als die Abloeseperiode
+   (St~0,2 entspricht ~750 Schritten). Das ist kein aufgeloestes Stroemungsmerkmal.
+   Der gemeldete Block-SEM (2 sigma = 1,9 %) misst das nicht; ueber die Paarmittel mit
+   integrierter Autokorrelationszeit sind es 2 sigma = 5,5 % (V1) und 4,5 % (V3b), kombiniert
+   6,8 %. MEIN VORAB-KRITERIUM VON 5 % LAG ALSO UNTER DER EIGENSTREUUNG DES FALLS. Die -9,0 %
+   sind rund 2,6 sigma -- knapp ueber der Schwelle, nicht komfortabel, und kein Kill.
+   Am Fahrzeug existiert diese Oszillation NICHT (export/b8_kontrolle/forces.csv: Cd 10,175
+   gegen 10,027) -- sie ist ein Spezifikum dieses Kugelfalls.
+7) AUSGESCHLOSSEN: Zellenzahl im Kraftpfad (1045 in beiden), Commit-Drift (der V1-PCA-Pfad ist
+   zwischen 2a50a7d und db7f0ee Byte fuer Byte unveraendert, bestaetigt durch identische
+   V1-Geometrie im spaeteren Lauf). REAL und mitwirkend: Klassenmaske (aktive Facetten
+   725 -> 749) und der Grazing-Guard (2541 -> 2445 ELIBB-Links, -6,9 %).
+8) NEBENBEFUND: Cz bewegt sich staerker als Cd (1,0604 -> 1,2652, +19,3 %, gegen Cd -8,9 %).
+   Wer nur Cd_druck ansieht, sieht die halbe Verschiebung.
+
+FOLGERUNG: die -9,0 % sind KEIN Befund ueber V3b. Bevor an diesem Fall ueberhaupt ein Kriterium
+gelten kann, muss die Eigenstreuung des AUSGANGSWERTS bekannt sein.
