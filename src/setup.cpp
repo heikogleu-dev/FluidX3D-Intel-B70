@@ -1280,7 +1280,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	const bool vgl_an = env_u("CFD_FACETTEN_VERGLEICH", 0u)>0u;
 	std::vector<double> qx(vgl_an?np_max:0u), qy(vgl_an?np_max:0u), qz(vgl_an?np_max:0u);
 	std::vector<uchar>  qd(vgl_an?np_max:0u); // Richtungsindex der Achsflaeche -> Normale = -FZ_C[qd]
-	std::vector<float> a14, yw4v, yw4nv; std::vector<uchar> kl4v; // V4 = V3 + Sichtbarkeit + Abstandsgewicht
+	std::vector<uchar>  qt(vgl_an?np_max:0u); // ★ DUENNTEIL-FLAGGE je Flaeche (Heiko 28.08.):
+	// "wenn rueckseitig des dreiecks keine weitere solidzelle ist, ist das dann ein duennteil".
+	// Test ist O(1): hinter der Solidzelle S in derselben Richtung nachsehen. Kein Solid -> S ist
+	// in dieser Richtung genau EINE Zelle dick, die Flaeche gehoert also zu einem Duennteil.
+	ulong v4_duenn=0ull, v4_rueck=0ull, v4_unten=0ull, v4_oben=0ull; // Wirkpfad-Zaehler V4/V5
+	std::vector<float> a14, yw4v, yw4nv, yw4av; std::vector<uchar> kl4v; // V4 = V3 + Sichtbarkeit + Abstandsgewicht
 	std::vector<float> a12, a13, yw2v, yw3v; std::vector<uchar> kl2v, kl3v;
 	if(vgl_an) print_info(string("Facetten (")+wo+"): NORMALEN-DREIFACHVERGLEICH aktiv (CFD_FACETTEN_VERGLEICH=1) -- reine Diagnose, Physik unveraendert.");
 	print_info(string("Facetten (")+wo+"): Fenster "+to_string(2*R+1)+"^3 (CFD_FACETTEN_FENSTER="+to_string((uint)R)+")");
@@ -1335,7 +1340,13 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				else verworfen++; // kann bei np_max = Fenstermaximum nie greifen -- Waechter statt stiller Annahme
 				if(vgl_an&&i<7u) { // NUR Achslinks: das sind genau die Voxel-Grenzflaechen (Flaeche 1, Normale -FZ_C ins Fluid)
 					const double mx=0.5*((double)cx+(double)xn), my=0.5*((double)cy+(double)yn), mz=0.5*((double)cz+(double)zn);
-					if(nq<np_max) { qx[nq]=mx; qy[nq]=my; qz[nq]=mz; qd[nq]=(uchar)i; nq++; }
+					if(nq<np_max) {
+						// Zelle HINTER der Solidzelle, gleiche Richtung: Geometrie ungewickelt, Index gewickelt
+						const int hz0=zn+FZ_C[i][2]; const int hx=xn+FZ_C[i][0], hy=yn+FZ_C[i][1];
+						const bool rand = (!z_per&&(hz0<0||hz0>=(int)Nz));
+						const bool hinten_solid = rand ? true : ist_wand(idx(wx(hx),wy(hy),(uint)(z_per?(int)wz(hz0):hz0)));
+						qx[nq]=mx; qy[nq]=my; qz[nq]=mz; qd[nq]=(uchar)i; qt[nq]=hinten_solid?(uchar)0u:(uchar)1u; nq++;
+					}
 					nsx-=(double)FZ_C[i][0]; nsy-=(double)FZ_C[i][1]; nsz-=(double)FZ_C[i][2];
 					csx+=mx; csy+=my; csz+=mz;
 				}
@@ -1347,7 +1358,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		if(np<6u) { f.klasse|=1u; k1++; f.nx=f.ny=f.nz=0.0f; f.yw=0.0f; f.achse=0u;
 			// ★ Vergleichsvektoren MUESSEN mitwachsen, sonst verrutschen die Indizes gegen F
 			// (hier faellt V1 selbst schon aus; V2/V3 werden als "keine Normale" gefuehrt).
-			if(vgl_an) { a12.push_back(-1.0f); a13.push_back(-1.0f); a14.push_back(-1.0f); yw2v.push_back(0.0f); yw3v.push_back(0.0f); yw4v.push_back(0.0f); yw4nv.push_back(0.0f); kl2v.push_back((uchar)1u); kl3v.push_back((uchar)1u); kl4v.push_back((uchar)1u); }
+			if(vgl_an) { a12.push_back(-1.0f); a13.push_back(-1.0f); a14.push_back(-1.0f); yw2v.push_back(0.0f); yw3v.push_back(0.0f); yw4v.push_back(0.0f); yw4nv.push_back(0.0f); yw4av.push_back(0.0f); kl2v.push_back((uchar)1u); kl3v.push_back((uchar)1u); kl4v.push_back((uchar)1u); }
 			F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
 		for(uint i=0u;i<np;i++) { cx+=px[i]; cy+=py[i]; cz+=pz[i]; }
@@ -1432,8 +1443,8 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			// einer konkaven Ecke ist der wahre Wandabstand der zur naechsten Wand, nicht zum
 			// Schwerpunkt aller umliegenden. Beide Zahlen nebeneinander, damit die Wahl belegt
 			// statt gesetzt wird.
-			double n4x=0.0,n4y=0.0,n4z=0.0, gx4=0.0,gy4=0.0,gz4=0.0, wsum=0.0; uint nsicht=0u;
-			double dnah=1e30, cnx=0.0,cny=0.0,cnz=0.0;
+			double n4x=0.0,n4y=0.0,n4z=0.0, gx4=0.0,gy4=0.0,gz4=0.0, wsum=0.0; uint nsicht=0u, nduenn=0u;
+			double dnah=1e30, cnx=0.0,cny=0.0,cnz=0.0, nnx=0.0,nny=0.0,nnz=0.0;
 			for(uint j=0u;j<nq;j++) {
 				const int di=(int)qd[j];
 				const double nix=-(double)FZ_C[di][0], niy=-(double)FZ_C[di][1], niz=-(double)FZ_C[di][2];
@@ -1442,25 +1453,62 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				const double d2=vx*vx+vy*vy+vz*vz, w=1.0/(1.0+d2);
 				n4x+=w*nix; n4y+=w*niy; n4z+=w*niz;
 				gx4+=w*qx[j]; gy4+=w*qy[j]; gz4+=w*qz[j]; wsum+=w; nsicht++;
-				if(d2<dnah) { dnah=d2; cnx=qx[j]; cny=qy[j]; cnz=qz[j]; }
+				if(qt[j]) nduenn++;
+				if(d2<dnah) { dnah=d2; cnx=qx[j]; cny=qy[j]; cnz=qz[j]; nnx=nix; nny=niy; nnz=niz; }
 			}
-			double yw4=0.0, yw4n=0.0; uchar k4b=0u;
+			if(nduenn>0u) v4_duenn++;
+			double yw4=0.0, yw4n=0.0, yw4a=0.0; uchar k4b=0u;
 			const double l4=sqrt(n4x*n4x+n4y*n4y+n4z*n4z);
-			if(nsicht==0u||l4<1e-12) k4b|=1u;
+			if(nsicht==0u) k4b|=1u; // gar keine sichtbare Flaeche -- kein Rueckfall moeglich
+			else if(l4<1e-12) {
+				// ★ SONDERBEHANDLUNG DUENNTEIL (Heiko 28.08.): die gewichtete Summe ist entartet.
+				// Das passiert genau dort, wo sich gegenueberliegende sichtbare Flaechen aufheben --
+				// also an einzelligen Teilen und einzelligen Spalten. Statt zu verwerfen wird die
+				// NAECHSTE sichtbare Flaeche genommen; ihre Normale ist dort die einzig sinnvolle.
+				v4_rueck++;
+				n4x=nnx; n4y=nny; n4z=nnz;
+				yw4  = n4x*((double)x-cnx)+n4y*((double)y-cny)+n4z*((double)z-cnz);
+				yw4n = yw4; yw4a = yw4;
+				if(yw4<0.0) { n4x=-n4x; n4y=-n4y; n4z=-n4z; yw4=-yw4; yw4n=-yw4n; }
+				if(yw4<(double)yw_min) { k4b|=8u; v4_unten++; } else if(yw4>2.0) { k4b|=8u; v4_oben++; }
+				if(yw4n<(double)yw_min||yw4n>2.0) k4b|=16u;
+			}
 			else {
 				n4x/=l4; n4y/=l4; n4z/=l4;
 				gx4/=wsum; gy4/=wsum; gz4/=wsum;
 				yw4  = n4x*((double)x-gx4)+n4y*((double)y-gy4)+n4z*((double)z-gz4);
 				yw4n = n4x*((double)x-cnx)+n4y*((double)y-cny)+n4z*((double)z-cnz);
 				if(yw4<0.0) { n4x=-n4x; n4y=-n4y; n4z=-n4z; yw4=-yw4; yw4n=-yw4n; }
-				if(yw4<(double)yw_min||yw4>2.0) k4b|=8u;   // Bit 8 = K4 nach Schwerpunkt (wie V3)
-				if(yw4n<(double)yw_min||yw4n>2.0) k4b|=16u; // Bit 16 = K4 nach naechster Flaeche
+				if(yw4<(double)yw_min) k4b|=8u; else if(yw4>2.0) k4b|=8u;   // Bit 8 = K4 nach Schwerpunkt
+				if(yw4n<(double)yw_min) { k4b|=16u; v4_unten++; }            // Bit 16 = K4 nach naechster Flaeche
+				else if(yw4n>2.0) { k4b|=16u; v4_oben++; }                   // getrennt gezaehlt: Unter- gegen Obergrenze
+				// ★ V4c: y_w AUSGERICHTET. Die Obergrenze feuert nie (gemessen: 0), es ist immer
+				// die Untergrenze. Ursache: die NAECHSTE Flaeche muss nicht die sein, welche die
+				// Konsensnormale traegt. In einer konkaven Ecke ist die naechste Flaeche z. B. der
+				// Boden, waehrend n4 von vielen Seitenflaechen dominiert wird -- dann steht
+				// (Zelle - c_naechste) fast senkrecht auf n4 und die Projektion geht gegen null.
+				// Abhilfe ohne neue Konstante: y_w als gewichtetes Mittel ueber die sichtbaren
+				// Flaechen, GEWICHTET MIT DER AUSRICHTUNG (n_i*n4)_+ -- Flaechen, die die
+				// Konsensnormale tragen, bestimmen den Wandabstand, querstehende nicht.
+				{	double zs=0.0, ns_=0.0;
+					for(uint j2=0u;j2<nq;j2++) {
+						const int dj=(int)qd[j2];
+						const double jx=-(double)FZ_C[dj][0], jy=-(double)FZ_C[dj][1], jz=-(double)FZ_C[dj][2];
+						const double ux=(double)x-qx[j2], uy=(double)y-qy[j2], uz=(double)z-qz[j2];
+						if(jx*ux+jy*uy+jz*uz<=0.0) continue;                  // dieselbe Sichtbarkeit wie oben
+						const double al=jx*n4x+jy*n4y+jz*n4z; if(al<=0.0) continue; // Ausrichtung
+						const double wj=al/(1.0+(ux*ux+uy*uy+uz*uz));
+						zs+=wj*(n4x*ux+n4y*uy+n4z*uz); ns_+=wj;
+					}
+					yw4a = (ns_>1e-12) ? zs/ns_ : yw4n;
+					if(yw4a<(double)yw_min||yw4a>2.0) k4b|=32u;               // Bit 32 = K4 nach Ausrichtung
+				}
 			}
 			auto wink=[&](const double bx,const double by,const double bz){
 				const double c=fabs(nxd*bx+nyd*by+nzd*bz);
 				return (float)(acos(fmin(1.0,c))*180.0/3.14159265358979); };
 			a14.push_back((k4b&1u)?-1.0f:wink(n4x,n4y,n4z));
-			yw4v.push_back((float)yw4); yw4nv.push_back((float)yw4n); kl4v.push_back(k4b);
+			yw4v.push_back((float)yw4); yw4nv.push_back((float)yw4n); yw4av.push_back((float)yw4a); kl4v.push_back(k4b);
 			a12.push_back((k2b&1u)?-1.0f:wink(n2x,n2y,n2z));
 			a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
 			yw2v.push_back((float)yw2); yw3v.push_back((float)yw3);
@@ -1590,16 +1638,21 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			ulong c=0ull; for(ulong i=0ull;i<nn;i++) if(bits(v,i)&bit) c++; return c; };
 		// v=4 -> V4 mit y_w aus dem Schwerpunkt (Bit 8), v=5 -> V4 mit y_w aus der naechsten Flaeche (Bit 16)
 		auto verw=[&](const int v)->ulong {
-			const uchar maske = (v==5) ? (uchar)(1u|2u|4u|16u) : (uchar)15u;
-			const int vq = (v==5)?4:v;
+			const uchar maske = (v==5) ? (uchar)(1u|2u|4u|16u) : ((v==6) ? (uchar)(1u|2u|4u|32u) : (uchar)15u);
+			const int vq = (v>=5)?4:v;
 			ulong c=0ull; for(ulong i=0ull;i<nn;i++) if(bits(vq,i)&maske) c++; return c; };
+		print_info("   V4-Wirkpfad: Zellen mit mindestens einer DUENNTEIL-Flaeche (hinter dem Dreieck kein Solid) "
+			+to_string(v4_duenn)+" = "+to_string(nn>0ull?100.0f*(float)v4_duenn/(float)nn:0.0f,2u)
+			+" % | Rueckfall auf die naechste Flaeche (Summe entartet) "+to_string(v4_rueck)
+			+" | K4 bei V4b: Untergrenze "+to_string(v4_unten)+", Obergrenze "+to_string(v4_oben));
+		if(v4_duenn==0ull) print_error("V4-Wirkpfad: KEINE Duennteil-Flaeche gefunden -- der Rueckseitentest feuert nicht.");
 		print_info("  ---- NORMALENQUELLEN im Vergleich (K1..K4 gleich definiert; V1 zaehlt zusaetzlich Orientierung/Ueberlauf/MS, hier ausgeklammert)");
-		const char* nm[5]={"V1 alle 18 Linkmitten (heute)   ","V2 nur Achslinks (PCA)          ",
-		                   "V3 Flaechennormalen-Summe       ","V4 = V3 + Sicht + Abstandsgewicht",
-		                   "V4b wie V4, y_w aus Nachbarflaeche"};
-		for(int v=1; v<=5; v++) {
+		const char* nm[6]={"V1 alle 18 Linkmitten (heute)     ","V2 nur Achslinks (PCA)            ",
+		                   "V3 Flaechennormalen-Summe         ","V4 = V3 + Sicht + Abstandsgewicht ",
+		                   "V4b wie V4, y_w aus Nachbarflaeche","V4c wie V4, y_w ausgerichtet      "};
+		for(int v=1; v<=6; v++) {
 			const ulong vv=verw(v);
-			const int vq=(v==5)?4:v; const uchar k4bit=(v==5)?(uchar)16u:(uchar)8u;
+			const int vq=(v>=5)?4:v; const uchar k4bit=(v==5)?(uchar)16u:((v==6)?(uchar)32u:(uchar)8u);
 			print_info(string("   ")+nm[v-1]+": K1 "+to_string(zaehl(vq,1u))+", K2(Kante) "+to_string(zaehl(vq,2u))
 				+", K3 "+to_string(zaehl(vq,4u))+", K4(y_w) "+to_string(zaehl(vq,k4bit))
 				+"  -> OHNE FACETTE "+to_string(vv)+" = "+to_string(nn>0ull?100.0f*(float)vv/(float)nn:0.0f,2u)+" %");
@@ -1625,7 +1678,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		// Aufschluesselung nach Solid-Dicke -- ohne sie geht der Duennteileffekt in 755k Zellen unter (B38)
 		const uint gl[4]={1u,2u,3u,4u}; const char* gn[4]={"Dicke 1   ","Dicke 2   ","Dicke 3   ","Dicke >=4 "};
 		for(uint g=0u; g<4u; g++) {
-			std::vector<float> w2,w3,w4; ulong n_g=0ull, v1=0ull, v2c=0ull, v3c=0ull, v4c=0ull, v4bc=0ull;
+			std::vector<float> w2,w3,w4; ulong n_g=0ull, v1=0ull, v2c=0ull, v3c=0ull, v4c=0ull, v4bc=0ull, v4cc=0ull;
 			for(ulong i=0ull;i<nn;i++) {
 				const uint d=(uint)sdicke[i];
 				const bool drin = (g<3u) ? (d==gl[g]) : (d>=4u);
@@ -1636,6 +1689,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				if(kl3v[i]&(uchar)15u) v3c++;
 				if(kl4v[i]&(uchar)15u) v4c++;
 				if(kl4v[i]&(uchar)(1u|2u|4u|16u)) v4bc++;
+				if(kl4v[i]&(uchar)(1u|2u|4u|32u)) v4cc++;
 				if(a12[i]>=0.0f) w2.push_back(a12[i]);
 				if(a13[i]>=0.0f) w3.push_back(a13[i]);
 				if(a14[i]>=0.0f) w4.push_back(a14[i]);
@@ -1645,7 +1699,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			print_info(string("   ")+gn[g]+": "+to_string(n_g)+" Zellen | ohne Facette V1 "
 				+to_string(100.0f*(float)v1/(float)n_g,1u)+" V2 "+to_string(100.0f*(float)v2c/(float)n_g,1u)
 				+" V3 "+to_string(100.0f*(float)v3c/(float)n_g,1u)+" V4 "+to_string(100.0f*(float)v4c/(float)n_g,1u)
-				+" V4b "+to_string(100.0f*(float)v4bc/(float)n_g,1u)+" % | Winkel gegen V1: V2 "
+				+" V4b "+to_string(100.0f*(float)v4bc/(float)n_g,1u)+" V4c "+to_string(100.0f*(float)v4cc/(float)n_g,1u)+" % | Winkel gegen V1: V2 "
 				+to_string(m2.first,2u)+" V3 "+to_string(m3.first,2u)+" V4 "+to_string(m4.first,2u)+" Grad");
 		}
 	}
