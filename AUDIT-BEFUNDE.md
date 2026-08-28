@@ -4101,3 +4101,36 @@ VERDIKT: CFD_FACETTEN_FENSTER=2 wird NICHT global uebernommen. Der Default 3^3 b
 Der Befund ist trotzdem wertvoll, weil er die URSACHE der 26-Grad-Physik lokalisiert: nicht das
 Wandmodell, sondern die FALSCH GEMESSENE NORMALE des Fits (1,63 Grad). Ein Fenster ist dafuer
 das falsche Werkzeug -- es ist global, das Problem ist lokal.
+
+### B33 -- FAHRZEUGARME: beide Vorab-Prognosen eingetroffen, eine davon ZELLGENAU
+Serie logs/t6_fahrzeug_fenster_serie.txt, Binary 04d4e2b, je EINE Variable gegen die
+Standardkonfiguration. Census vor und nach der Serie frei.
+
+  Zaehler (von 755.344)   Basis    FENSTER=2            YWMIN=0,15
+  K2 (Kante)              95.953   162.977  (+69,9 %)    95.953  (+0,0 %)
+  K4 (y_w)               100.891    83.609  (-17,1 %)    47.022  (-53,4 %)
+  Orientierung            23.034    55.779 (+142,2 %)    23.034  (+0,0 %)
+
+1) PROGNOSE B29 BESTAETIGT. Vor dem Lauf festgehalten war: "wenn die alte A/B recht hat und
+   groessere Fenster Kruemmung und Zweitflaechen sehen, muss am Fahrzeug K2(Kante) STEIGEN und
+   Orientierung ebenfalls". Gemessen: K2 +69,9 %, Orientierung +142,2 %. Die alte A/B vom
+   15.08. nannte fuer die Orientierung 2,7 -> 5,4 %; gemessen wurden 3,05 -> 7,38 %. Gleiche
+   Richtung, gleiche Groessenordnung, unabhaengig reproduziert. Der Quelltext-Kommentar
+   setup.cpp:1256-1259 ist damit am Fahrzeug bestaetigt, nicht nur an der Kugel (B32).
+
+2) PROGNOSE B31 ZELLGENAU BESTAETIGT. Aus der Facetten-CSV war ohne Lauf vorhergesagt:
+   YWMIN=0,15 rettet 53.869 der 100.891 K4-Zellen. Gemessen: 100.891 - 47.022 = 53.869.
+   Nicht "ungefaehr" -- auf die Zelle. Damit ist die Zuordnung K4 <-> YWMIN bewiesen und die
+   CSV-Auswertung aus B31 als Vorhersageinstrument abgenommen.
+
+3) EINVARIABLEN-KONTROLLE BESTANDEN: g5 laesst K2 und Orientierung exakt unveraendert
+   (95.953 / 23.034). YWMIN wirkt ausschliesslich auf K4, wie es soll.
+
+4) DIE GEOMETRIEZAEHLER SIND UEBER DIE CODELUECKE HINWEG GUELTIG. Beim Auswerten fiel auf, dass
+   der bisherige Bezugslauf f8_standard_final von Commit fdb3a03 stammt, HEAD aber d7a283b ist
+   -- 69 Commits an src/, und die Kraft-CSV hat vier Spalten mehr. KRAEFTE ueber diese Luecke zu
+   vergleichen waere ein zweiter Variablenwechsel und wird hier NICHT getan.
+   Dass die GEOMETRIE trotzdem vergleichbar ist, ist gemessen und nicht angenommen:
+   t6_fahrzeug_ywmin15 reproduziert K2 = 95.953 und Orientierung = 23.034 des alten Laufs
+   zellgenau. Der Facettenbau ist ueber die 69 Commits unveraendert.
+   Fuer die Kraefte laeuft der zeitgleiche Bezugsarm t7_basis_heute (logs/t7_basis_serie.txt).
