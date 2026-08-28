@@ -1285,6 +1285,25 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// B44 (V1s Winkelfehler saettigt bei 4,69 Grad, V3 konvergiert weiter auf 4,54).
 	// NICHT belegt (B43): dass das die Kraefte verbessert. Genau dafuer ist dieser Schalter da.
 	const uint normquelle = env_u("CFD_FACETTEN_NORMQUELLE", 0u);
+	// ★ ZERLEGUNG (Pruefagent 28.08.): NORMQUELLE aenderte SECHS Dinge zugleich, der A/B war
+	// damit nicht einvariabel. Drei davon sind trennbar und werden es hier:
+	//  (a) die Normale selbst -- bleibt an NORMQUELLE, samt Achse, Flaechenfaktor und
+	//      Grazing-Guard-Richtung. Die vier sind physikalisch NICHT trennbar: wer die Ebene
+	//      wechselt, muss auch deren Achse und deren Guard nehmen.
+	//  (b) der y_w-Anker -- eigener Schalter. V3bs y_w ist eine ANDERE GROESSE als V1s, nicht
+	//      derselbe Wert genauer: gegen die naechste Flaeche gemessen ist er fuer achsbenachbarte
+	//      Zellen hart <= 0,5. Das ist eine zweite physikalische Hypothese und gehoert nicht in
+	//      denselben Schalter wie die Normale.
+	//  (c) der Kantentest -- war unter V3b GAR NICHT MEHR GESTELLT, weil r21/r10 nicht neu
+	//      gesetzt wurden. Das war Bequemlichkeit, keine Entscheidung: die PCA laeuft ohnehin
+	//      vollstaendig durch, r21 liegt kostenlos vor. 46,4 % des gemessenen Abdeckungsgewinns
+	//      kamen allein daher. Jetzt quellenunabhaengig.
+	const uint ywquelle  = env_u("CFD_FACETTEN_YWQUELLE", 0u);   // 0 = PCA-Schwerpunkt (V1), 1 = naechste Flaeche
+	const float kante_r21 = env_f("CFD_FACETTEN_KANTE", 0.15f);  // Schwelle; sehr gross = Test aus
+	if(normquelle>0u&&getenv("CFD_FACETTEN_KANTE")==nullptr)
+		print_warning("CFD_FACETTEN_NORMQUELLE=1 ohne ausdrueckliches CFD_FACETTEN_KANTE -- der Kantentest laeuft mit dem Default 0,15 WEITER. Das ist Absicht (frueher fiel er still weg); wer ihn abschalten will, setzt ihn ausdruecklich.");
+	if(kante_r21!=0.15f) print_warning("CFD_FACETTEN_KANTE = "+to_string(kante_r21,3u)+" (Default 0,15, geeicht 2026-08-15) -- deklarierter Messarm.");
+	if(ywquelle>0u) print_warning("CFD_FACETTEN_YWQUELLE=1 -- y_w gegen die naechste Voxelflaeche statt gegen den PCA-Schwerpunkt. ANDERE GROESSE, nicht derselbe Wert genauer.");
 	const bool v3_noetig = vgl_an||normquelle>0u;
 	ulong nq_aktiv=0ull; // Wirkpfad: wie oft V3b wirklich in die Facette geschrieben wurde
 	if(normquelle>1u) print_error("CFD_FACETTEN_NORMQUELLE="+to_string(normquelle)+" ist nicht belegt -- nur 0 und 1 (Pruefagent M2: sonst warnt der Lauf 'V3b aktiv' und rechnet V1).");
@@ -1296,6 +1315,15 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Test ist O(1): hinter der Solidzelle S in derselben Richtung nachsehen. Kein Solid -> S ist
 	// in dieser Richtung genau EINE Zelle dick, die Flaeche gehoert also zu einem Duennteil.
 	ulong v4_duenn=0ull, v4_rueck=0ull, v4_unten=0ull, v4_oben=0ull; // Wirkpfad-Zaehler V4/V5
+	// ★ ENTARTUNGSWAECHTER (Pruefagent 28.08.): V3b faengt bisher nur die EXAKTE Ausloeschung
+	// ab (|Summe| < 1e-12). Die viel haeufigere FAST-Ausloeschung ist ungeschuetzt: an einem
+	// 1-Zellen-Blech oder in einem 1-Zellen-Spalt ist die Summe klein, aber nicht null -- etwa
+	// drei Flaechen gegen zwei. Die Restrichtung ist dann Rauschen, wird auf Laenge 1 normiert
+	// und traegt in der Glaettung volles Gewicht. Und genau dort waechst die Abdeckung am
+	// staerksten: 38,5 % der Neuzugaenge sitzen an Teilen <= 2 Zellen Dicke.
+	// |Summe|/nq ist das Mass dafuer (1 = alle Flaechen gleichgerichtet, 0 = vollstaendige
+	// Ausloeschung). Es wird ohnehin gerechnet und bisher weggeworfen.
+	std::vector<double> v3b_koh; ulong v3b_schwach=0ull;
 	// ★ KUGEL-GRUNDWAHRHEIT (CFD_FACETTEN_KUGELREF=1). Die Kugel ist der EINZIGE Fall mit
 	// analytischer Normalen: (Zelle - Schwerpunkt)/|...|. Am Fahrzeug gibt es keine, dort ist
 	// nur die VERWERFUNG vergleichbar, nicht die Genauigkeit. Schwerpunkt hier selbst bestimmen,
@@ -1435,7 +1463,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		const double r21 = ew[imax]>1e-30 ? ew[imin]/fmax(ew[imid],1e-30) : 1.0;   // K2: Kante
 		const double r10 = ew[imax]>1e-30 ? ew[imid]/ew[imax] : 0.0;               // K3: Linie
 		f.r21_=(float)r21; f.r10_=(float)r10;
-		if(r21>0.15) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
+		if(r21>(double)kante_r21) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
 		if(r10<0.02) { f.klasse|=4u; k3++; }
 		if(yw<(double)yw_min||yw>2.0) { f.klasse|=8u; k4++; }
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
@@ -1581,7 +1609,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			{	const double l6=sqrt(nsx*nsx+nsy*nsy+nsz*nsz);
 				if(nq==0u) k6b|=1u;
 				else {
-					if(l6<1e-12) { n6x=n6nx; n6y=n6ny; n6z=n6nz; v6_rueck++; } // Duennteil-Rueckfall
+					const double koh = (nq>0u) ? l6/(double)nq : 0.0; // Kohaerenz der Flaechensumme
+				if(v3_noetig) { v3b_koh.push_back(koh); if(koh<0.25) v3b_schwach++; }
+				if(l6<1e-12) { n6x=n6nx; n6y=n6ny; n6z=n6nz; v6_rueck++; } // Duennteil-Rueckfall
 					else { n6x=nsx/l6; n6y=nsy/l6; n6z=nsz/l6; }
 					yw6 = n6x*((double)x-c6x)+n6y*((double)y-c6y)+n6z*((double)z-c6z);
 					if(yw6<0.0) { n6x=-n6x; n6y=-n6y; n6z=-n6z; yw6=-yw6; }
@@ -1605,13 +1635,20 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			// ---- V3b AKTIV SCHALTEN: nur hier aendert sich, was in der Facette landet.
 			if(normquelle==1u) {
 				nq_aktiv++;
-				f.klasse &= (uchar)~(uchar)(1u|2u|4u|8u|16u); // K1..K4 und Orientierung neu bewerten
-				f.klasse |= (uchar)(k6b&(uchar)(1u|8u));      // V3b kennt kein r21/r10 -> kein K2/K3
-				f.nx=(float)n6x; f.ny=(float)n6y; f.nz=(float)n6z; f.yw=(float)yw6;
-				f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z; // EINZIGER Abnehmer: die
+				// ★ Pruefagent: Bit 2 (Kante) und Bit 4 (Linie) bleiben JETZT STEHEN. Sie stammen
+				// aus der PCA, die auch unter V3b vollstaendig durchlaeuft, und sind eine Aussage
+				// ueber die PUNKTWOLKE -- unabhaengig davon, woher die Normale kommt. Sie hier zu
+				// loeschen war der Grund, warum der A/B nicht einvariabel war.
+				f.klasse &= (uchar)~(uchar)(1u|8u|16u);       // nur K1, K4 und Orientierung neu bewerten
+				f.klasse |= (uchar)(k6b&(uchar)(1u|8u));
+				f.nx=(float)n6x; f.ny=(float)n6y; f.nz=(float)n6z;
+				if(ywquelle>0u) { f.yw=(float)yw6; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z; }
+				else { // y_w bleibt V1s Groesse: gegen den PCA-Schwerpunkt, aber mit der NEUEN Normalen
+					const double ywp = n6x*((double)x-cx)+n6y*((double)y-cy)+n6z*((double)z-cz);
+					f.yw=(float)fabs(ywp); /* cx_/cy_/cz_ bleiben der PCA-Schwerpunkt */ } // EINZIGER Abnehmer: die
 				// y_w-Neuberechnung der Glaettung (setup.cpp ~1619). Stuende hier der PCA-Schwerpunkt,
 				// wuerde die Glaettung V3bs y_w still gegen einen fremden Bezug ueberschreiben.
-				f.r21_=0.0f; f.r10_=1.0f;                     // ausdruecklich neutral, nicht "unbestimmt"
+				// r21_/r10_ bleiben die PCA-Werte -- sie beschreiben die Punktwolke, nicht die Normale.
 				const double geg6 = n6x*((double)x-(double)snx)+n6y*((double)y-(double)sny)+n6z*((double)z-(double)snz);
 				if(geg6<=0.0) f.klasse|=16u;                  // Orientierungs-Gegenprobe bleibt
 				const double q6x=fabs(n6x), q6y=fabs(n6y), q6z=fabs(n6z);
@@ -1681,6 +1718,15 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		if(v.empty()) return 0.0; std::sort(v.begin(), v.end());
 		return v[(size_t)fmin((double)v.size()-1.0, q*(double)v.size())]; };
 	const ulong nf=(ulong)F.size();
+	if(v3_noetig&&!v3b_koh.empty()) {
+		std::sort(v3b_koh.begin(), v3b_koh.end());
+		auto q=[&](const double t){ return v3b_koh[(size_t)fmin((double)v3b_koh.size()-1.0, t*(double)v3b_koh.size())]; };
+		print_info("  V3b-KOHAERENZ |Summe|/nq: Median "+to_string((float)q(0.5),3u)+", q10 "+to_string((float)q(0.1),3u)
+			+", q01 "+to_string((float)q(0.01),3u)+" -- unter 0,25 (Restrichtung ueberwiegend Ausloeschung): "
+			+to_string(v3b_schwach)+" = "+to_string(100.0f*(float)v3b_schwach/(float)v3b_koh.size(),2u)+" %");
+		if(normquelle==1u&&v3b_schwach*20ull>(ulong)v3b_koh.size())
+			print_warning("V3b: mehr als 5 % der Facetten haben eine schwach kohaerente Flaechensumme -- ihre Normalenrichtung ist dort ueberwiegend Ausloeschungsrest. Die betroffenen Zellen sitzen erfahrungsgemaess an Duennteilen.");
+	}
 	if(normquelle==1u) {
 		if(nq_aktiv==0ull) print_error("CFD_FACETTEN_NORMQUELLE=1, aber V3b wurde KEIN einziges Mal in die Facette geschrieben -- stiller No-Op.");
 		else print_info("  NORMALENQUELLE V3b AKTIV: "+to_string(nq_aktiv)+" von "+to_string((ulong)F.size())
