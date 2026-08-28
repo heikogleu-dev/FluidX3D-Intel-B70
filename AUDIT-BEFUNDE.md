@@ -4419,3 +4419,47 @@ Remesh wird nicht gebraucht: die rohe Voxeloberflaeche SIND die achsparallelen S
    c) Auffaellig und noch nicht erklaert: bei 4 mm melden Dicke-2-Zellen (367.988) einen
       Winkelmedian von exakt 0,00 fuer BEIDE Verfahren. Plausibel bei achsparallelen 2-Zellen-
       Blechen, wo alle drei Verfahren dieselbe Achsnormale liefern -- geprueft ist es nicht.
+
+### B40 -- V4: HEIKOS VERFAHREN MIT SICHTBARKEITSFILTER -- VERWERFUNG VON 21,9 AUF 2,7 PROZENT
+Zwei rein geometrische Zusaetze zu V3, keine gesetzten Konstanten:
+ (1) SICHTBARKEIT -- eine Voxelflaeche zaehlt nur, wenn die Zelle vor ihr liegt: n_i*(Zelle-c_i)>0.
+     Die angrenzende Flaeche liefert immer +0,5, die Rueckseite eines einzelligen Blechs -1,5
+     und faellt heraus. Genau diese Rueckseite loeschte in V3 die Vektorsumme aus.
+ (2) ABSTANDSGEWICHT w = 1/(1+d^2) -- angrenzende Flaeche (d=0,5) wiegt 0,80, Fensterecke
+     (d~2,1) nur 0,18. V3 wog alle gleich, deshalb zog entfernte Geometrie die Normale mit.
+ Dazu y_w ZWEIFACH: gegen den gewichteten Schwerpunkt (V4) und gegen die naechste sichtbare
+ Flaeche (V4b). Bitgleichheit erneut bestanden (FELD-HASH 4722579264326613690, Schalter aus).
+
+  8 mm, 755.344 Zellen                K1      K2      K4(y_w)   OHNE FACETTE
+  V1 alle 18 Linkmitten (heute)        0   95.953    100.891    165.239 = 21,88 %
+  V2 nur Achslinks (PCA)             236   64.142     93.376    135.201 = 17,90 %
+  V3 Flaechennormalen-Summe        2.233        0     89.071     91.304 = 12,09 %
+  V4 = V3 + Sicht + Abstandsgewicht   848        0     37.738     38.586 =  5,11 %
+  V4b wie V4, y_w aus Nachbarflaeche  848        0     19.260     20.108 =  2,66 %
+
+  4 mm, 3.275.381 Zellen               K1      K2      K4(y_w)   OHNE FACETTE
+  V1                                    0  312.840    483.121    651.623 = 19,89 %
+  V2                                  215  204.975    467.040    548.969 = 16,76 %
+  V3                                  170        0    441.212    441.382 = 13,48 %
+  V4                                   62        0    145.853    145.915 =  4,45 %
+  V4b                                  62        0     79.050     79.112 =  2,42 %
+
+1) FAKTOR 8 GEGEN HEUTE, in beiden Aufloesungen (21,88 -> 2,66 % und 19,89 -> 2,42 %).
+   Der groesste Einzelschritt ist der Sichtbarkeitsfilter auf K4: 89.071 -> 37.738 (8 mm),
+   441.212 -> 145.853 (4 mm). Der Grund ist derselbe wie bei K1: entfernte Flaechen zogen den
+   Schwerpunkt zur Zelle und drueckten y_w unter YWMIN.
+2) AN DUENNTEILEN, ohne Facette an 1-Zellen-Teilen:
+     8 mm  V1 40,0 -> V3 12,5 -> V4 9,1 -> V4b 2,4 %
+     4 mm  V1 53,4 -> V3 16,2 -> V4 6,3 -> V4b 4,4 %
+3) HEIKOS NULL IST NOCH NICHT ERREICHT -- 2,66 bzw. 2,42 % bleiben. Zwei Resttoepfe:
+   a) K1 848 (8 mm) / 62 (4 mm). Der Sichtbarkeitsfilter hat V3s 2.233 auf 848 gedrueckt, aber
+      nicht auf null. Vermutung (NICHT geprueft): einzellige SPALTE, wo die Zelle zwischen zwei
+      gegenueberliegenden Waenden sitzt -- beide sind sichtbar, ihre Normalen heben sich auf.
+      Das waere ein geometrisch echter Zweideutigkeitsfall und braucht eine Rueckfallregel.
+   b) K4 19.260 (8 mm) / 79.050 (4 mm). Ob das die Untergrenze (y_w<YWMIN) oder die Obergrenze
+      (y_w>2,0) ist, meldet der Zaehler heute NICHT getrennt -- das ist die naechste Messung.
+4) EHRLICH ZUM WINKEL: V4 liegt im Median naeher an V1 als V3 (2,40 gegen 3,55 Grad), hat aber
+   den LAENGEREN Schwanz (q90 17,88 gegen 9,57). Das Abstandsgewicht schaerft Kanten, dort
+   weicht V4 staerker ab. Bei 4 mm an 1-Zellen-Teilen weicht V4 sogar MEHR ab als V3
+   (10,33 gegen 8,40 Grad). Welcher Winkel richtiger ist, sagt keiner dieser Laeufe -- am
+   Fahrzeug gibt es keine Grundwahrheit. Das entscheidet die Kugel gegen die analytische Normale.
