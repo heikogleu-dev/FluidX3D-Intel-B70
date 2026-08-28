@@ -1,0 +1,36 @@
+# Basis-Referenz, MASCHINELL erzeugt aus export/baseline_2026-08-27_f4vollumfang/code/LAUF.txt
+# Quelle-Commit: 94a802cdf913f19884943ffa751f97b7a1e88918
+# dx_ref: 4
+# Spalten: NAME WERT EINHEIT
+CFD_BODEN_EQ 2 modus
+CFD_BODEN_EQ_ABSTAND 2 modus
+CFD_BODEN_EQ_DOWN 1 modus
+CFD_CASE fahrzeug_dd modus
+CFD_DX 4 phys
+CFD_FACETTEN 3 modus
+CFD_FAC_ALPHA 2 modus
+CFD_FAC_CD_EVERY 1 ausgabe
+CFD_FAC_ELIBB 1 modus
+CFD_FAC_SATGATE 1 modus
+CFD_FAC_UTKORR 1.5 modus
+CFD_FERN_BODEN_EQ 2 modus
+CFD_FERN_BODEN_EQ_DOWN 1 modus
+CFD_FERN_EINLASS_EQ 2 modus
+CFD_KOPPLUNG_GLATT 1 modus
+CFD_KRAFT_ZBAND 4 zellen_fein
+CFD_N2F_BAND 1 modus
+CFD_N2F_BAND_N 8 zellen_grob
+CFD_N2F_BAND_PLATEAU 2 modus
+CFD_N2F_BAND_PROFIL 2 modus
+CFD_N2F_BAND_WAKE 1 modus
+CFD_N2F_BAND_WAKE_ABSTAND 32 zellen_grob_laenge
+CFD_N2F_BAND_WAKE_START_X 311 index_grob
+CFD_N2F_BAND_WANDFREI 2 modus
+CFD_N2F_SCHALE 0.5 modus
+CFD_NEAR_VOR_MM 96 phys
+CFD_SLICE_DT 0 ausgabe
+CFD_SPONGE_N 64 zellen_grob_laenge
+CFD_T_END 0.5 phys
+CFD_T_WARMUP 0.2 phys
+CFD_VTK_DT 0.15 ausgabe
+CFD_VTK_ENDE 1 ausgabe

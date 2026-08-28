@@ -3469,7 +3469,91 @@ static void main_setup_fahrzeug() {
 // auf dieser Liste. Eine Abweichung in dieser Groessenordnung ist also KEIN Hinweis auf einen
 // Fehler im Aufbau. [selbst nachgelesen 2026-08-08]
 // =============================================================================================
+// ★ BASIS-WAECHTER (Heiko 28.08.2026, nach einem entwerteten Messvormittag). Ein ganzer
+// A/B lief mit ELF fehlenden Schaltern, weil die Konfiguration aus einem 7 Tage alten Lauf
+// rekonstruiert wurde, dessen Name "standard_final" lautete. Darunter die komplette
+// Nah->Fern-Rueckkopplung und CFD_FAC_UTKORR -- gemessener Preis rund 12 Prozent Abtrieb.
+// Der Code konnte das strukturell nicht bemerken: die vorhandene Pruefung warnt nur, wenn
+// N2F-Unterschalter OHNE CFD_N2F_SCHALE gesetzt sind. Der umgekehrte Fall -- alle fehlen --
+// war weder Fehler noch Warnung.
+// Der Waechter FORDERT KEINE GLEICHHEIT, er RECHNET UM: aus der Einheit in basis/*.basis und
+// dem CFD_DX des Laufs leitet er den Sollwert ab. Ein 8-mm-Lauf deklariert nur CFD_DX und
+// bekommt SPONGE_N, KRAFT_ZBAND, WAKE_ABSTAND und WAKE_START_X vorgerechnet. Wo die
+// Umrechnung nicht eindeutig ist, nennt er BEIDE Kandidaten und verlangt eine Wahl.
+// Und er meldet FEHLENDE Schalter genauso hart wie abweichende -- das ist die Haelfte, die
+// im entwerteten Lauf gefehlt hat.
+struct BasisZeile { string name, wert, einheit; };
+static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
+	if(getenv("CFD_BASIS")!=nullptr&&string(getenv("CFD_BASIS"))=="aus") {
+		print_warning("BASIS-WAECHTER ABGESCHALTET (CFD_BASIS=aus) -- dieser Lauf ist NICHT gegen die Baseline geprueft. Der Notausgang ist absichtlich laut.");
+		return;
+	}
+	std::ifstream f(basisdatei);
+	if(!f) { print_error("BASIS-WAECHTER: "+basisdatei+" nicht lesbar. Erzeugen mit werkzeuge/basis_aus_lauf.py <LAUF.txt> "+basisdatei); return; }
+	float dx_ref=0.0f; std::vector<BasisZeile> B; string zeile;
+	while(std::getline(f,zeile)) {
+		if(zeile.empty()) continue;
+		if(zeile[0]=='#') { const size_t k=zeile.find("dx_ref:"); if(k!=string::npos) dx_ref=(float)atof(zeile.substr(k+7).c_str()); continue; }
+		std::istringstream is(zeile); BasisZeile b; if(!(is>>b.name>>b.wert>>b.einheit)) continue; B.push_back(b);
+	}
+	if(dx_ref<=0.0f) { print_error("BASIS-WAECHTER: kein 'dx_ref:' im Kopf von "+basisdatei+" -- Umrechnung unmoeglich."); return; }
+	const double skal = (double)dx_ref/(double)dx_lauf; // Feingitter-Zellen: kleineres dx -> mehr Zellen
+	// Deklarierte Abweichungen, Format CFD_A=1,CFD_B=2 -- OHNE Leerzeichen: der Serienlaeufer
+	// spaltet sein env-Stueck unquotiert an Leerzeichen, ein Freitextgrund zerlegte die Zeile.
+	// Der Grund gehoert als Kommentar in den Serienkopf, nicht ins env.
+	std::unordered_map<string,string> erlaubt;
+	if(const char* d=getenv("CFD_BASIS_ABWEICHUNG")) {
+		string t(d), stueck; std::istringstream ds(t);
+		while(std::getline(ds,stueck,',')) { const size_t g=stueck.find('='); if(g!=string::npos) erlaubt[stueck.substr(0,g)]=stueck.substr(g+1); }
+	}
+	std::vector<string> fehlt, weicht_ab; string vorschlag;
+	for(const BasisZeile& b : B) {
+		if(b.einheit=="ausgabe") continue;                 // beruehrt die Loesung nicht
+		if(b.name=="CFD_DX"||b.name=="CFD_CASE") continue;  // die Sprosse selbst bzw. der Fall
+		string soll=b.wert, hinweis;
+		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob") {
+			const double roh = atof(b.wert.c_str())*skal;
+			const long unten=(long)floor(roh), oben=(long)ceil(roh);
+			soll = to_string((ulong)llround(roh));
+			if(unten!=oben) hinweis = " (nicht eindeutig: "+to_string((ulong)unten)+" oder "+to_string((ulong)oben)+" -- Wahl deklarieren)";
+		}
+		const char* ist_c = getenv(b.name.c_str());
+		if(ist_c==nullptr) { fehlt.push_back(b.name+" (Soll "+soll+", Einheit "+b.einheit+")"+hinweis);
+			vorschlag+=(vorschlag.empty()?"":",")+b.name+"="+soll; continue; }
+		const string ist(ist_c);
+		// Wertvergleich, nicht Stringvergleich -- sonst schlaegt "8" gegen "08" oder "1.5" gegen "1.50" an.
+		const bool gleich = fabs(atof(ist.c_str())-atof(soll.c_str()))<1e-9 || ist==soll;
+		if(gleich) continue;
+		auto it=erlaubt.find(b.name);
+		if(it!=erlaubt.end()&&(fabs(atof(it->second.c_str())-atof(ist.c_str()))<1e-9||it->second==ist)) continue;
+		weicht_ab.push_back(b.name+": Soll "+soll+", Ist "+ist+" ("+b.einheit+")"+hinweis);
+		vorschlag+=(vorschlag.empty()?"":",")+b.name+"="+ist;
+	}
+	print_info("BASIS-WAECHTER: "+basisdatei+", dx_ref "+to_string(dx_ref,2u)+" gegen Lauf-dx "+to_string(dx_lauf,2u)
+		+", "+to_string((ulong)B.size())+" Schalter geprueft, "+to_string((ulong)erlaubt.size())+" Abweichungen deklariert.");
+	if(fehlt.empty()&&weicht_ab.empty()) { print_info("  Konfiguration deckt sich mit der Baseline (nach Umrechnung)."); return; }
+	// ★ JE BEFUND EINE EIGENE ZEILE. Die erste Fassung packte alles in EINEN print_error --
+	// der Konsolenumbruch zerschnitt die Namen und machte ausgerechnet die kopierbare
+	// Vorschlagszeile unlesbar. Ein Waechter, dessen Meldung man nicht lesen kann, wird
+	// umgangen; deshalb ist das kein Schoenheitsfehler.
+	for(const string& x : fehlt)     print_warning("BASIS FEHLT:      "+x);
+	for(const string& x : weicht_ab) print_warning("BASIS ABWEICHEND: "+x);
+	// Zusaetzlich in eine Datei, weil die Vorschlagszeile beliebig lang werden kann und
+	// zum Kopieren gedacht ist.
+	{	const string bp = get_exe_path()+"../logs/basis_abweichung.txt";
+		std::ofstream bf(bp);
+		if(bf) { bf << "# Basis-Waechter, Abweichungen gegen " << basisdatei << "\n";
+			for(const string& x : fehlt)     bf << "FEHLT:      " << x << "\n";
+			for(const string& x : weicht_ab) bf << "ABWEICHEND: " << x << "\n";
+			bf << "\nCFD_BASIS_ABWEICHUNG=" << vorschlag << "\n"; bf.close();
+			print_info("  Vollstaendig und kopierbar in: "+bp); }
+	}
+	print_error("BASIS-WAECHTER: "+to_string((ulong)fehlt.size())+" Schalter FEHLEN, "+to_string((ulong)weicht_ab.size())
+		+" weichen ab (Einzelheiten in den Zeilen darueber). Wenn das gewollt ist, im Serienkopf begruenden und CFD_BASIS_ABWEICHUNG setzen -- die fertige Zeile steht in logs/basis_abweichung.txt.");
+}
+
 static void main_setup_fahrzeug_dd() {
+	pruefe_basis(get_exe_path()+"../basis/fahrzeug_dd.basis", env_f("CFD_DX", 4.0f)); // ★ VOR jedem teuren Schritt
 	bool nahfeld_satgate = false; // SATGATE-Zustand der NAHFELD-Domaene (Funktionsscope; gesetzt im Fein-Block, gelesen vom Rueckfall-Detektor am Ende)
 	// ---------------------------------------------------------------- Physik
 	const float si_u      = 30.0f;
