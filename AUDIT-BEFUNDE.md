@@ -4059,3 +4059,45 @@ Fahrzeug 8 mm, 755.344 Facettenzeilen, Fenster 3^3, YWMIN 0,2. Drei Befunde, all
 3) K4 IST ZU 100 % EIN UNTERSCHREITEN, KEIN UEBERSCHREITEN. Alle 100.891 K4-Faelle haben
    y_w < 0,20; kein einziger liegt ueber 2,0. YWMIN=0,15 rettet davon 53.869 = 53,4 %,
    YWMIN=0,10 rettet 73.708 = 73,1 %. Das ist die Grundlage der Vorab-Prognose in Arm g5.
+
+### B32 -- GEGENPROBEN ZUM 5^3-FENSTER: der Hebel ist real, aber NICHT global brauchbar
+Serie logs/t5_gegenprobe_serie.txt, je EINE Variable (CFD_FACETTEN_FENSTER=2), Basis jeweils
+woertlich aus dem bestehenden Referenzarm. Census vor und nach der Serie frei.
+
+  Fall            Winkel 3^3 -> 5^3   wahrer Winkel   Leitgroesse                3^3 -> 5^3
+  kipp0 (eben)     0,0  ->  0,0         0,0           FELD-HASH             BIT-IDENTISCH
+  kipp45           45,0 ->  45,0        45,000        u_tau IST          0,004900 -> 0,004641
+  kipp26           28,2 ->  27,2        26,565        u_tau IST/Ziel       2,382  -> 1,507
+  Kugel            36,7 ->  36,4        (kruemmung)   Cd_druck             0,6648 -> 0,6154
+
+1) g1 EBENE WAND: BESTANDEN, und zwar maximal sauber. FELD-HASH 4722579264326613690,
+   Reibung x 0,01639657, u_tau IST 0,002148 -- auf jede Stelle identisch. Der Schalter feuert
+   nachweislich ("Facetten: Fenster 5^3 (CFD_FACETTEN_FENSTER=2)", R geht in die Fitschleife
+   setup.cpp:1305). Exakte Neutralitaet, nicht ungefaehre.
+
+2) g2 45-GRAD: der Winkel war schon bei 3^3 EXAKT 45,0 (die Diagonallinks des Gitters liegen
+   dort genau richtig), und er bleibt 45,0. Entsprechend klein der Effekt: u_tau IST faellt nur
+   5,3 %. ABER die Buchungsidentitaet verschlechtert sich: Verhaeltnis Reibungspfad/Kraftbilanz
+   1,0109 -> 1,0479, also von 1,1 auf 4,8 % Abweichung. (Anmerkung: der 3^3-Bezugsarm verletzt
+   K2 mit 1,0109 bereits selbst -- die K2-Verletzung ist bei 45 Grad nicht neu, sie waechst nur.)
+
+3) DAS IST DIE EIGENTLICHE ERKENNTNIS: DER GEWINN SKALIERT MIT DEM WINKELFEHLER DES FITS.
+   kipp0 Fehler 0,00 Grad -> Effekt exakt 0. kipp45 Fehler 0,00 Grad -> Effekt 5 %.
+   kipp26 Fehler 1,63 Grad -> Effekt 37 %. Das ist eine geschlossene Reihe ueber drei Faelle und
+   bestaetigt den Mechanismus aus B28 unabhaengig: das groessere Fenster hilft GENAU dort, wo der
+   kleine Fit die Normale falsch misst, und sonst nirgends.
+
+4) g3 KUGEL: DURCHGEFALLEN, am vorab festgelegten Kriterium (Cd_druck mehr als 5 %).
+   Cd_druck 0,6648 -> 0,6154 = -7,4 %, Summe 1,0796 -> 1,0375 = -3,9 %, Slot 69
+   10746 -> 12546 = +16,8 %. Der Grund ist am y_w direkt ablesbar: Median 0,814 -> 1,044
+   (+28 %), q10 0,291 -> 0,530. Der 5^3-Fit schiebt die Wand nach aussen, weil er ueber echte
+   Kruemmung mittelt. Beide Arme haben 184 Samples; die Kugel ist instationaer, ein Teil der
+   7,4 % kann Streuung sein -- die y_w-Drift von 28 % ist dagegen eine systematische
+   Geometrieverschiebung und traegt den Befund allein.
+   DAMIT IST DER ALTE QUELLTEXT-KOMMENTAR (setup.cpp:1258, A/B vom 15.08.) BESTAETIGT:
+   "Groessere Fenster sehen Kruemmung und Zweitflaechen, keine bessere Wand."
+
+VERDIKT: CFD_FACETTEN_FENSTER=2 wird NICHT global uebernommen. Der Default 3^3 bleibt.
+Der Befund ist trotzdem wertvoll, weil er die URSACHE der 26-Grad-Physik lokalisiert: nicht das
+Wandmodell, sondern die FALSCH GEMESSENE NORMALE des Fits (1,63 Grad). Ein Fenster ist dafuer
+das falsche Werkzeug -- es ist global, das Problem ist lokal.
