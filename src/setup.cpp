@@ -5404,8 +5404,8 @@ static void main_setup_fahrzeug_dd() {
 	// vorhandene [KADENZ]-Druck zeigt die MOMENTANwerte am Sample; ein Momentanwert
 	// schwankt im Ablauf um ein Vielfaches der Armunterschiede und taugt nicht zum Mitlesen.
 	// Gleitendes Zeitfenster, keine Blockmittel -- der Bericht soll den Verlauf zeigen.
-	const double ber_dt   = (double)env_f("CFD_BERICHT_DT", 0.1f);      // Berichtsabstand [s Physik]
-	const double ber_fen  = (double)env_f("CFD_BERICHT_FENSTER", 0.05f); // Mittelungsfenster [s Physik]
+	const double ber_dt   = (getenv("CFD_BERICHT_DT")     ==nullptr) ? 0.1  : atof(getenv("CFD_BERICHT_DT"));      // Berichtsabstand [s Physik]
+	const double ber_fen  = (getenv("CFD_BERICHT_FENSTER")==nullptr) ? 0.05 : atof(getenv("CFD_BERICHT_FENSTER")); // Mittelungsfenster [s Physik]
 	std::vector<double> ber_t, ber_cd, ber_cz; double ber_next = -1.0; ulong ber_n_aus=0ull;
 	std::ofstream ber_csv;
 	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
@@ -6047,7 +6047,10 @@ static void main_setup_fahrzeug_dd() {
 			const auto _t5 = t_now();
 			// ★ LAUFBERICHT alle ber_dt ueber das letzte ber_fen-Fenster (Heiko 29.08.).
 		if(ber_dt>0.0&&!ber_t.empty()) {
-			if(ber_next<0.0) ber_next = ber_t.front()+ber_dt;   // erster Bericht ber_dt nach dem ersten Kraftsample
+			// ★ Rauchtest 29.08.: stand auf "erstes Sample + ber_dt" und rastete erst DANACH aufs
+			// Raster -- bei kurzen Laeufen fiel dadurch ein Bericht ganz aus. Jetzt sofort aufs
+			// Raster, sobald das Mittelungsfenster ueberhaupt gefuellt sein kann.
+			if(ber_next<0.0) ber_next = (floor((ber_t.front()+ber_fen)/ber_dt)+1.0)*ber_dt;
 			while((size_t)ber_n_aus<ber_t.size()&&ber_t[ber_n_aus]<ber_t.back()-ber_fen) ber_n_aus++; // Fensteranfang nachziehen
 			if(t_si>=ber_next) {
 				double mcd=0.0, mcz=0.0; ulong nb=0ull;
