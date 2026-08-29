@@ -501,6 +501,35 @@ void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend 
 
 // ★ C1b Stufe 2: Facettendaten der Domaene bauen, hochladen, Kernel neu binden (FACETTEN-STUFE2.md F1/F2).
 // Filtert klasse!=0 (markierte Zellen behalten reinen BB); fac_a = 1/|n_achse| host-berechnet (R2).
+// ★ 29.08. (Heiko: "so dass wir wirklich wissen, wieviel Reserve wir immer noch haben und was
+// wir wirklich nutzen"). device_info.memory ist eine REKONSTRUKTION: opencl.hpp:170 rechnet NEOs
+// 95-%-Deckel mit 20/19 heraus, der Treiber meldet weniger. Und der Desktop haengt an derselben
+// Karte, ohne dass memory_used davon etwas sieht. Der einzige belastbare Wert steht im
+// DRM-Debugfs. NICHT ueber /proc/*/fdinfo -- der unterzaehlt grob (23.08.: Faktor sieben).
+// Liefert freie MiB, oder 0 wenn nicht lesbar (Debugfs braucht Rechte -- dann bleibt es bei
+// der Rekonstruktion, und der Aufrufer sagt das auch so).
+ulong vram_frei_gemessen() {
+	for(const string& pfad : {string("/sys/kernel/debug/dri/0/tile0/vram_mm"), string("/sys/kernel/debug/dri/0/i915_gem_objects")}) {
+		std::ifstream f(pfad);
+		if(!f) continue;
+		string z;
+		while(std::getline(f, z)) { // Zeile der Form "free: 12345678 KiB" bzw. "...: N B"
+			const size_t p_ = z.find("free");
+			if(p_==string::npos) continue;
+			ulong wert=0ull; bool ziffer=false;
+			for(size_t i=p_; i<z.size(); i++) {
+				if(z[i]>='0'&&z[i]<='9') { wert = wert*10ull + (ulong)(z[i]-'0'); ziffer=true; }
+				else if(ziffer) break;
+			}
+			if(!ziffer) continue;
+			if(z.find("KiB")!=string::npos||z.find("kB")!=string::npos) return wert/1024ull;
+			if(z.find("MiB")!=string::npos||z.find("MB")!=string::npos) return wert;
+			return wert/1048576ull; // Bytes
+		}
+	}
+	return 0ull;
+}
+
 void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap) {
 	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
 	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
@@ -509,6 +538,31 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	for(const Facette& f : F) { if(f.klasse==0u) aktiv++; else ausgeschlossen++; }
 	if(aktiv==0ull) { print_error("alloc_facetten_domain: keine aktive Facette (alle markiert?)."); return; }
 	if(aktiv>=0xFFFFFFFFull) { print_error("alloc_facetten_domain: Facettenzahl kollidiert mit dem NIL-Sentinel."); return; }
+	// ★ ZWEITE STUFE der Speicherpruefung (29.08.). Die Konstruktor-Vorpruefung kennt die
+	// Facettenzahl noch nicht -- hier steht sie. Das ist der letzte grosse Posten, und ohne
+	// diese Stufe faellt ein zu grosses Gitter erst nach zehn Minuten Aufbau auf.
+	{	const ulong bytes_fac = 4ull*FN                 // fac_idx
+		                      + (8ull+6ull)*4ull*aktiv  // fac_geo + fac_tau
+		                      + 4ull*aktiv              // fac_tau_n
+		                      + (fac_elibb_on ? 18ull*aktiv : 0ull); // fac_q
+		const ulong mb_fac = bytes_fac/1048576ull;
+		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
+		const ulong belegt = (ulong)device.info.memory_used;
+		const ulong kapazitaet = (ulong)device.info.memory;
+		print_info("SPEICHER-IST vor den Facettenpuffern: belegt "+to_string(belegt)+" MB von "
+			+to_string(kapazitaet)+" MB (rekonstruiert)"
+			+(frei_gemessen>0ull ? string(", GEMESSEN frei "+to_string(frei_gemessen)+" MB (DRM-Debugfs)")
+			                     : string(", gemessener Frei-Wert NICHT lesbar -- Debugfs braucht Rechte"))
+			+" | Facettenpuffer "+to_string(mb_fac)+" MB fuer "+to_string(aktiv)+" aktive Facetten");
+		// Gegen den GEMESSENEN Wert pruefen, wenn er da ist -- sonst gegen die Rekonstruktion.
+		const ulong frei = frei_gemessen>0ull ? frei_gemessen : (kapazitaet>belegt ? kapazitaet-belegt : 0ull);
+		const ulong mindest = (ulong)env_u("CFD_VRAM_MIN_FREI_MB", 1024u); // Heiko 29.08.: 1,0-1,5 GB Restluft sind legitim
+		if(!device.info.uses_ram && mb_fac+mindest > frei)
+			print_error("Facettenpuffer passen nicht: "+to_string(mb_fac)+" MB noetig, "+to_string(frei)
+				+" MB frei, Mindestluft "+to_string(mindest)+" MB (CFD_VRAM_MIN_FREI_MB). "
+				+to_string(aktiv)+" aktive Facetten bei F-BBox "+to_string(fbnx)+"x"+to_string(fbny)+"x"+to_string(fbnz)
+				+". Gitter verkleinern, Facettenzahl senken oder die Mindestluft bewusst herabsetzen.");
+	}
 	fac_geo   = Memory<float>(device, 8ull*aktiv);
 	fac_idx   = Memory<uint>(device, FN);
 	fac_tau   = Memory<float>(device, 6ull*aktiv); // Layout: [6k]=tw, [6k+1..3]=Wandkraft, [6k+4]=Delta-m, [6k+5]=Normalkontamination (iMEM-Umbau)
@@ -1584,9 +1638,62 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 	const uint local_Nx=Nx/Dx+2u*(Dx>1u), local_Ny=Ny/Dy+2u*(Dy>1u), local_Nz=Nz/Dz+2u*(Dz>1u);
 	uint memory_available = max_uint; // in MB
 	for(Device_Info device_info : device_infos) memory_available = min(memory_available, device_info.memory);
-	uint memory_required = (uint)((ulong)Nx*(ulong)Ny*(ulong)Nz/((ulong)(Dx*Dy*Dz))*(ulong)bytes_per_cell_device()/1048576ull); // in MB
-	if(memory_required>memory_available) {
-		float factor = cbrt((float)memory_available/(float)memory_required);
+	// ★ FORK 2026-08-29 (Variante C+D1+D2 nach Planungsschritt). Die Vorpruefung war in BEIDE
+	// Richtungen falsch und lehnte deshalb ein Gitter ab, das real passt:
+	//   ZU PESSIMISTISCH: sie rechnet FORCE_FIELD mit 12 B/Zelle ueber das VOLLE Gitter, obwohl
+	//     allocate() F laengst nur ueber die Bounding-Box anlegt (lbm.cpp:344-347). Beim
+	//     4-mm-Fahrzeug sind das 4.109 MB zuviel (Lauflog: "F-BBox: F auf 1118x468x306 statt
+	//     508701465 Zellen -> 4.18 GB gespart").
+	//   ZU OPTIMISTISCH: sie kennt fac_idx (4 B je F-BBox-Zelle, lbm.cpp:513) gar nicht -- 611 MB.
+	// F_N ist hier bereits bekannt: setup.cpp ruft set_force_bbox VOR dem Konstruktor, und der
+	// Konstruktor ruft diese Pruefung VOR new LBM_Domain (das s_fbbox erst ausliest und nullt).
+	// Also DERSELBE Ausdruck wie in allocate(), keine Schaetzung. Bei Dx*Dy*Dz>1 ist F voll-
+	// domaenig (lbm.cpp:432 sperrt F-BBox im Mehrgeraetefall), dort bleibt die alte Rechnung.
+	const bool fbb_gilt = (Dx*Dy*Dz==1u) && LBM_Domain::s_fbbox[3]>0u && LBM_Domain::s_fbbox[4]>0u && LBM_Domain::s_fbbox[5]>0u;
+	const ulong N_dom = (ulong)Nx*(ulong)Ny*(ulong)Nz/((ulong)(Dx*Dy*Dz));
+	const ulong F_N   = fbb_gilt ? (ulong)LBM_Domain::s_fbbox[3]*(ulong)LBM_Domain::s_fbbox[4]*(ulong)LBM_Domain::s_fbbox[5] : N_dom;
+	const ulong b_zelle = (ulong)bytes_per_cell_device();
+#ifdef FORCE_FIELD
+	const ulong b_ohne_F = b_zelle-12ull;   // F wird unten mit F_N statt N verrechnet
+#else
+	const ulong b_ohne_F = b_zelle;
+#endif // FORCE_FIELD
+	ulong bytes_bekannt = N_dom*b_ohne_F;
+#ifdef FORCE_FIELD
+	bytes_bekannt += 12ull*F_N;
+#endif // FORCE_FIELD
+	if(LBM_Domain::s_facetten) bytes_bekannt += 4ull*F_N; // fac_idx (lbm.cpp:513) -- die Pruefung kannte es nicht
+	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
+	// D1: RESERVE. ★ Pruefagent A-1: die Pruefung sieht `device_info.memory`, also den
+	// GESAMTspeicher -- `memory_used` wird hier nicht abgezogen (und Device_Info ist eine Kopie,
+	// Belegungen der ersten Domaene erreichen die zweite Pruefung ohnehin nicht). Der freie
+	// Speicher entsteht erst durch den Abzug der Reserve unten; teilen sich zwei Domaenen EIN
+	// Geraet, schuetzt sie nicht. Heiko-Vorgabe 2026-08-29: 1,0-1,5 GB
+	// Restluft sind legitim. Ohne benannte Reserve verschiebt die Korrektur oben den Deckel nur
+	// und laesst wieder Nutzlast zu, die es nicht gibt. Drei Posten, jeder belegt:
+	//   320 MB  Spaetpuffer, die erst nach dem Konstruktor entstehen (Facettengeometrie, Schale,
+	//           Kopplungsebene, kf_liste) -- gemessen am 4-mm-Lauf p4_v3b
+	//  1152 MB  DESKTOP: die B70 treibt den Bildschirm (card0-DP-5). memory_used sieht davon
+	//           nichts. Der Abbruch vom 22.08.2026 kam genau daher: 29,3 GB Lauf + 1,1 GB Desktop.
+	//  1024 MB  Mindestluft nach Heikos Untergrenze
+	// Nur fuer echte Geraete -- ein Fall, der im System-RAM rechnet (iGPU-Fernfeld), bekaeme
+	// sonst einen Deckel, der mit dem Hostbedarf kollidiert.
+	bool nur_ram = true;
+	for(Device_Info di : device_infos) nur_ram = nur_ram && di.uses_ram;
+	const uint reserve = nur_ram ? 0u : (uint)env_u("CFD_VRAM_RESERVE_MB", 2496u);
+	// D2: Speicherplan drucken. Kostet nichts und macht jeden kuenftigen Lauf nachrechenbar --
+	// genau das fehlte, als die alte Pruefung ein passendes Gitter ablehnte.
+	print_info("SPEICHERPLAN je Domaene: bekannt "+to_string(memory_required)+" MB"
+		+(fbb_gilt?string(" (F ueber BBox "+to_string(LBM_Domain::s_fbbox[3])+"x"+to_string(LBM_Domain::s_fbbox[4])+"x"+to_string(LBM_Domain::s_fbbox[5])+", nicht ueber das volle Gitter)"):string(" (F voll-domaenig)"))
+		+", Reserve "+to_string(reserve)+" MB (Spaetpuffer+Desktop+Mindestluft, CFD_VRAM_RESERVE_MB)"
+		+", verfuegbar "+to_string(memory_available)+" MB, Schlupf "
+		+((ulong)memory_required+(ulong)reserve<=(ulong)memory_available ? to_string(memory_available-memory_required-reserve)+" MB" : string("NEGATIV")));
+	if((ulong)memory_required+(ulong)reserve>(ulong)memory_available) {
+		// ★ Pruefagent A-4: die Reserve ist KONSTANT, sie skaliert nicht mit N^3. Sie gehoert
+		// deshalb vom Verfuegbaren abgezogen, nicht zum Bedarf addiert -- sonst schlaegt die
+		// Meldung eine zu kleine Aufloesung vor, und genau sie soll zum Skalieren anleiten.
+		float factor = cbrt((float)(memory_available>reserve?memory_available-reserve:1u)/(float)memory_required);
+		memory_required += reserve; // fuer die Textausgabe: was insgesamt gebraucht wird
 		const uint maxNx=(uint)(factor*(float)Nx), maxNy=(uint)(factor*(float)Ny), maxNz=(uint)(factor*(float)Nz);
 		string message = "Grid resolution ("+to_string(Nx)+", "+to_string(Ny)+", "+to_string(Nz)+") is too large: "+to_string(Dx*Dy*Dz)+"x "+to_string(memory_required)+" MB required, "+to_string(Dx*Dy*Dz)+"x "+to_string(memory_available)+" MB available. Largest possible resolution is ("+to_string(maxNx)+", "+to_string(maxNy)+", "+to_string(maxNz)+"). Restart the simulation with lower resolution or on different device(s) with more memory.";
 #if !defined(FP16S)&&!defined(FP16C)

@@ -69,7 +69,17 @@ void Info::print_initialize(LBM* lbm) {
 		cpu_mem_required = lbm->get_D()*lbm->lbm_domain[0]->get_device().info.memory_used;
 		gpu_mem_required = 0u;
 	} else {
-		cpu_mem_required = (uint)(lbm->get_N()*(ulong)bytes_per_cell_host()/1048576ull);
+		// ★ 29.08.: dieselbe Wurzel wie der VRAM-Befund -- bytes_per_cell_host() rechnet
+		// FORCE_FIELD mit 12 B/Zelle ueber das VOLLE Gitter, obwohl F host- wie geraeteseitig
+		// nur ueber die Bounding-Box liegt (lbm.cpp:344-347). Beim 4-mm-Fahrzeug ueberzeichnete
+		// die Anzeige den Hostbedarf dadurch um rund 3.989 MB. Jetzt derselbe Ausdruck wie dort.
+		{	const LBM_Domain* d0 = lbm->lbm_domain[0];
+			const ulong F_N = (ulong)d0->fbnx*(ulong)d0->fbny*(ulong)d0->fbnz;
+			ulong b = lbm->get_N()*(ulong)bytes_per_cell_host();
+#ifdef FORCE_FIELD
+			b -= 12ull*(lbm->get_N() - (ulong)lbm->get_D()*F_N); // F liegt nur ueber die BBox
+#endif // FORCE_FIELD
+			cpu_mem_required = (uint)(b/1048576ull); }
 		gpu_mem_required = lbm->lbm_domain[0]->get_device().info.memory_used;
 	}
 	const float Re = lbm->get_Re_max();

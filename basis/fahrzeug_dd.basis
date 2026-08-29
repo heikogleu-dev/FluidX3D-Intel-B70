@@ -3,12 +3,43 @@
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
 # KORRIGIERT gegen den Lauf: CFD_SLICE_DT 0 -> 0.1 (Baseline hatte 0 = Slices AUS; das war ein Fehler, nicht Absicht)
+# STANDARD GEAENDERT (Heiko 29.08.2026, zweiter Eintrag): Facettenpfad mit voller Abdeckung.
+#   CFD_FACETTEN_NORMQUELLE 1 : Normale aus der flaechengewichteten Voxelflaechensumme (V3b)
+#   CFD_FACETTEN_YWKLEMME   1 : zu kleines y_w wird auf yw_min GEKLEMMT statt die Zelle zu verwerfen
+#   CFD_FACETTEN_KANTE_KOH  1 : Kantentest aus V3bs eigener Kohaerenz statt aus dem PCA-Fit r21
+# Gemessen am 29.08. (Voxelierung 4 mm, export/ud_* und ue_*): Zellen OHNE Wandmodell
+#   beides aus 19,9 % | nur Klemme 9,7 % | nur Kantentest 15,5 % | BEIDE 4,5 %
+#   Die zwei Fixes sind nahezu additiv. Fernfeld 32,5 % -> 11,7 %.
+#   Heiko-Freigabe: "dann so uebernehmen wenn besser". Der Kraftvergleich steht noch aus --
+#   diese Zeilen sind eine ABDECKUNGS-Entscheidung, keine belegte Kraftverbesserung.
+# STANDARD GEAENDERT (Heiko 29.08.2026): die NEUE Nahfeld-Box ist ab jetzt die Baseline.
+#   CFD_NEAR_LY 2.4800 -> 2.6400 : y 316/320 -> 396/400 mm
+#   CFD_NEAR_LZ 1.9360 -> 1.8560 : z+ 732 -> 652 mm
+#   Gitter fein damit 1689 x 661 x 465 = 519,1 Mio Zellen statt 1689 x 621 x 485.
+#   ACHTUNG: FluidX3Ds Konstruktor-Vorpruefung (lbm.cpp:1586) lehnt dieses Gitter noch ab.
+#   Sie rechnet FORCE_FIELD mit 12 B/Zelle ueber das VOLLE Gitter, obwohl F laengst nur
+#   ueber eine Bounding-Box liegt (Lauflog: "F-BBox: F auf 1118x468x306 statt 508701465
+#   Zellen -> 4.18 GB gespart"). Gemessen am Lauf p4_v3b: belegt 29.322 MB von 32.655 MB,
+#   also 3.333 MB FREI -- die Vorpruefung reserviert davon rund 3.200 MB ohne Grund.
+#   Die breitere Box braucht rund +547 MB und laesst damit ~2.786 MB frei. Solange die
+#   Vorpruefung nicht korrigiert ist, blockiert sie den Standard.
+#   Das Paar p4_v3b/p4_v1 vom 29.08. lief noch auf der ALTEN Box -- dort ausgewiesen.
+# KORRIGIERT (Heiko 29.08.2026): CFD_T_END 0.5 -> 0.501. Die Slice-Uhr rechnet
+#   slice_next = t_si + slice_dt (setup.cpp:6085), also relativ zur Sample-Zeit und nicht
+#   aufs Raster -- sie driftet je Ausloesung um rund 1 ms. Bei T_END 0.5 lag die sechste
+#   Ausloesung bei 501 ms und damit hinter dem Laufende: der Slice zum Endzustand fehlte,
+#   obwohl das Feld-VTK geschrieben war. Heiko-Entscheid: nicht die Uhr anfassen, sondern
+#   1 ms laenger laufen. Betrifft p4_v3b und p4_v1 (beide noch mit 0.5) nicht mehr --
+#   deren 500-ms-Slices sind aus den VTK nachgerendert.
 CFD_BODEN_EQ 2 modus
 CFD_BODEN_EQ_ABSTAND 2 modus
 CFD_BODEN_EQ_DOWN 1 modus
 CFD_CASE fahrzeug_dd modus
 CFD_DX 4 phys
 CFD_FACETTEN 3 modus
+CFD_FACETTEN_KANTE_KOH 1 modus
+CFD_FACETTEN_NORMQUELLE 1 modus
+CFD_FACETTEN_YWKLEMME 1 modus
 CFD_FAC_ALPHA 2 modus
 CFD_FAC_CD_EVERY 1 ausgabe
 CFD_FAC_ELIBB 1 modus
@@ -28,10 +59,12 @@ CFD_N2F_BAND_WAKE_ABSTAND 32 zellen_grob_laenge
 CFD_N2F_BAND_WAKE_START_X 311 index_grob
 CFD_N2F_BAND_WANDFREI 2 modus
 CFD_N2F_SCHALE 0.5 modus
+CFD_NEAR_LY 2.6400 phys
+CFD_NEAR_LZ 1.8560 phys
 CFD_NEAR_VOR_MM 96 phys
 CFD_SLICE_DT 0.1 ausgabe
 CFD_SPONGE_N 64 zellen_grob_laenge
-CFD_T_END 0.5 phys
+CFD_T_END 0.501 phys
 CFD_T_WARMUP 0.2 phys
 CFD_VTK_DT 0.15 ausgabe
 CFD_VTK_ENDE 1 ausgabe

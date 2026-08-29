@@ -307,6 +307,10 @@ static void pruefe_slice_ebene(LBM& L, const uint Nx, const uint Ny, const uint 
 //
 // Der Aufrufer muss u, rho und flags VORHER vom Geraet gelesen haben.
 static ulong g_vtk_dateien = 0ull, g_vtk_bytes = 0ull; // Wirkpfad-Zaehler (Iron Rule: Nachweis im Binary)
+// ★ Weltlage fuer das Guete-VTK (Heiko 29.08.). baue_facetten kennt nur Gitterindizes; damit die
+// Punktwolke DECKUNGSGLEICH ueber den Feld-VTKs liegt, setzt das Setup diese vier Werte vorher.
+// Default 0/0/0/1 = Gitterkoordinaten (wie remesh_flaeche.vtk), also nie stillschweigend falsch.
+static float vtk_x0 = 0.0f, vtk_y0 = 0.0f, vtk_z0 = 0.0f, vtk_dx = 1.0f;
 static void schreibe_vtk_feld(LBM& L, const uint Nx, const uint Ny, const uint Nz,
                               const float x0, const float y0, const float z0, const float dx,
                               const float u2si, const uint stride, const string& datei) {
@@ -1214,13 +1218,19 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 	qfill = nullptr;
 	if(q_out!=nullptr) print_info("ELIBB Stufe 2: Remesh-q-Karte mit "+to_string((ulong)q_out->size())+" Zellen gefuellt (geglaettete Flaeche).");
 	// VTK der Flaeche fuer die Sichtpruefung (Iron Rule 3 gilt fuers MESSEN; sichten ist erlaubt)
+	// ★ Heiko 29.08.: "bekommst das allgemein aufgefangen, so dass es immer richtig sitzt?"
+	// Diese Flaeche stand in ROHEN Gitterkoordinaten, das Guete-VTK und die Feld-VTKs in
+	// Weltkoordinaten -- in ParaView lagen sie deshalb weder deckungsgleich noch im selben
+	// Massstab. Jetzt derselbe Raum, aus denselben vier Statiken. Stehen sie auf ihren
+	// Defaults (0/0/0/1), bleibt es wie bisher bei Gitterkoordinaten -- und die Meldung sagt es.
 	std::ofstream vtk(out_dir+"remesh_flaeche.vtk");
 	vtk << "# vtk DataFile Version 3.0\nRemesh ELIBB P1\nASCII\nDATASET POLYDATA\nPOINTS " << M.vx.size() << " float\n";
-	for(uint v=0u; v<nv; v++) vtk << M.vx[v] << " " << M.vy[v] << " " << M.vz[v] << "\n";
+	for(uint v=0u; v<nv; v++) vtk << (vtk_x0+vtk_dx*M.vx[v]) << " " << (vtk_y0+vtk_dx*M.vy[v]) << " " << (vtk_z0+vtk_dx*M.vz[v]) << "\n";
 	vtk << "POLYGONS " << ntri << " " << 4ull*ntri << "\n";
 	for(ulong t=0ull; t<ntri; t++) vtk << "3 " << M.tri[3ull*t] << " " << M.tri[3ull*t+1ull] << " " << M.tri[3ull*t+2ull] << "\n";
 	vtk.close();
-	print_info("REMESH: Flaeche geschrieben -> "+out_dir+"remesh_flaeche.vtk (Gitterkoordinaten der feinen Domaene).");
+	print_info(string("REMESH: Flaeche geschrieben -> ")+out_dir+"remesh_flaeche.vtk ("
+		+((vtk_dx==1.0f&&vtk_x0==0.0f&&vtk_y0==0.0f&&vtk_z0==0.0f)?string("GITTERkoordinaten -- die Aufrufstelle hat keine Weltlage gesetzt"):string("Weltkoordinaten -- deckungsgleich mit den Feld- und Guete-VTKs"))+").");
 }
 
 // 3x3-Jacobi in double: Eigenvektor zum kleinsten Eigenwert von M (symmetrisch).
@@ -1284,6 +1294,23 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// B41/B42 (Genauigkeit exakt V3, mein Sichtbarkeitsfilter war der Schaden und ist raus),
 	// B44 (V1s Winkelfehler saettigt bei 4,69 Grad, V3 konvergiert weiter auf 4,54).
 	// NICHT belegt (B43): dass das die Kraefte verbessert. Genau dafuer ist dieser Schalter da.
+	// ★ Heiko 29.08.: "auf der Aussenwand darf nichts verworfen werden". Zwei Schalter, beide
+	// Default AUS, damit der heutige Stand bitgleich bleibt und der A/B einvariabel ist.
+	//   YWKLEMME: ein zu kleines y_w macht die Facette nicht ungueltig -- es macht EINE Zahl
+	//     unsicher (die Abtasthoehe des Spalding-Arguments Y = u_t*y_w/nu). Bei y_w = 0,16 ist
+	//     Y noch rund 850, also mitten im gueltigen Bereich; singulaer wird es erst bei y_w = 0.
+	//     Statt zu verwerfen wird auf yw_min geklemmt -- dieselbe Bauform wie der q-Boden
+	//     (s_fac_qmin, lbm.cpp:593). Gemessen 4 mm: 459.224 Zellen, ALLE an der Untergrenze,
+	//     Haeufung bei 0,14..0,18 -- das sind die diskreten y_w-Klassen der geneigten Treppe.
+	//   KANTE_KOH: unter NORMQUELLE=1 kommt die Normale NICHT mehr aus der PCA, der Kantentest
+	//     misst aber weiter deren Fitguete r21. Wir verwerfen also wegen eines Fits, den wir
+	//     nicht benutzen. Mit dem Schalter entscheidet stattdessen V3bs eigenes Guetemass:
+	//     die Kohaerenz |Summe|/nq gegen 1/sqrt(3) (hergeleitet, siehe Waechter weiter unten).
+	//     Gemessen liegen dort nur 4,03 % statt 9,55 % bei r21.
+	const bool yw_klemme = env_u("CFD_FACETTEN_YWKLEMME", 0u)>0u;
+	const bool kante_koh = env_u("CFD_FACETTEN_KANTE_KOH", 0u)>0u;
+	const bool guete_vtk = env_u("CFD_FACETTEN_VTK", 0u)>0u;
+	ulong n_geklemmt=0ull, n_kante_koh=0ull;
 	const uint normquelle = env_u("CFD_FACETTEN_NORMQUELLE", 0u);
 	// ★ ZERLEGUNG (Pruefagent 28.08.): NORMQUELLE aenderte SECHS Dinge zugleich, der A/B war
 	// damit nicht einvariabel. Drei davon sind trennbar und werden es hier:
@@ -1335,6 +1362,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// |Summe|/nq ist das Mass dafuer (1 = alle Flaechen gleichgerichtet, 0 = vollstaendige
 	// Ausloeschung). Es wird ohnehin gerechnet und bisher weggeworfen.
 	std::vector<double> v3b_koh; ulong v3b_schwach=0ull;
+	// ★ Guete je Facette, PARALLEL zu F (Audit E: an BEIDEN F.push_back-Stellen mitschieben!).
+	// Bit 1 Duennteil-Rueckfall | Bit 2 schwache Kohaerenz | Bit 4 y_w geklemmt
+	std::vector<uchar> gt_v; std::vector<float> koh_v;
 	// ★ KUGEL-GRUNDWAHRHEIT (CFD_FACETTEN_KUGELREF=1). Die Kugel ist der EINZIGE Fall mit
 	// analytischer Normalen: (Zelle - Schwerpunkt)/|...|. Am Fahrzeug gibt es keine, dort ist
 	// nur die VERWERFUNG vergleichbar, nicht die Genauigkeit. Schwerpunkt hier selbst bestimmen,
@@ -1444,6 +1474,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				}
 			}
 		}
+		uchar gt=0u; float gt_koh=0.0f; // Guete DIESER Zelle (Bit 1 Rueckfall, 2 schwache Kohaerenz, 4 y_w geklemmt)
 		Facette f; f.n=n; f.n_punkte=np; f.eigene_links=eigene; f.klasse=0u; f.cx_=f.cy_=f.cz_=0.0f; f.r21_=0.0f; f.r10_=0.0f;
 		if(verworfen>0u) f.klasse|=32u; // Ueberlauf -- markieren+zaehlen, nicht still rechnen (A4)
 		if(ms_nah) f.klasse|=64u; // bewegte-Wand-Naehe: Zellgate schloesse sie ohnehin aus -- gezaehlt statt Soll-Luecke
@@ -1460,6 +1491,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			if(vgl_an) { yw5v.push_back(0.0f); kl5v.push_back((uchar)1u);
 				yw6v.push_back(0.0f); kl6v.push_back((uchar)1u);
 				a12.push_back(-1.0f); a13.push_back(-1.0f); a14.push_back(-1.0f); yw2v.push_back(0.0f); yw3v.push_back(0.0f); yw4v.push_back(0.0f); yw4nv.push_back(0.0f); yw4av.push_back(0.0f); kl2v.push_back((uchar)1u); kl3v.push_back((uchar)1u); kl4v.push_back((uchar)1u); kl1v.push_back(f.klasse); }
+			gt_v.push_back((uchar)0u); koh_v.push_back(0.0f); // Guete parallel zu F halten (Audit E)
 			F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
 		for(uint i=0u;i<np;i++) { cx+=px[i]; cy+=py[i]; cz+=pz[i]; }
@@ -1490,6 +1522,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		f.r21_=(float)r21; f.r10_=(float)r10;
 		if(r21>kante_r21) { f.klasse|=2u; k2++; } // Schwelle geeicht (Fenster-A/B): saubere Population endet bei q80=0,10, Kantenschwanz beginnt dahinter
 		if(r10<0.02) { f.klasse|=4u; k3++; }
+		// ★ KLEMMEN statt VERWERFEN, auch im V1-Pfad -- sonst waere der Schalter kein
+		// einvariabler A/B, sondern zusaetzlich ein V1/V3b-Unterschied.
+		if(yw_klemme&&yw<(double)yw_min) { yw=(double)yw_min; f.yw=(float)yw; gt|=(uchar)4u; n_geklemmt++; }
 		if(yw<(double)yw_min||yw>2.0) { f.klasse|=8u; k4++; }
 		f.nx=(float)nxd; f.ny=(float)nyd; f.nz=(float)nzd; f.yw=(float)yw;
 		const double ax=fabs(nxd), ay=fabs(nyd), az=fabs(nzd);
@@ -1650,7 +1685,8 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				// Paar vor, ist |Summe|/nq >= 1/sqrt(3) (Minimum bei gleich vielen Flaechen in
 				// drei Richtungen). koh < 1/sqrt(3) BEWEIST also Ausloeschung.
 				if(v3_noetig) { v3b_koh.push_back(koh); if(koh<0.5773502692) v3b_schwach++; }
-				if(l6<1e-12) { n6x=n6nx; n6y=n6ny; n6z=n6nz; v6_rueck++; } // Duennteil-Rueckfall
+				gt_koh = (float)koh; if(koh<0.5773502692) gt |= (uchar)2u;
+				if(l6<1e-12) { n6x=n6nx; n6y=n6ny; n6z=n6nz; v6_rueck++; gt |= (uchar)1u; } // Duennteil-Rueckfall
 					else { n6x=nsx/l6; n6y=nsy/l6; n6z=nsz/l6; }
 					yw6 = n6x*((double)x-c6x)+n6y*((double)y-c6y)+n6z*((double)z-c6z);
 					if(yw6<0.0) { n6x=-n6x; n6y=-n6y; n6z=-n6z; yw6=-yw6; }
@@ -1682,7 +1718,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				f.klasse &= (uchar)~(uchar)(1u|8u|16u);       // nur K1, K4 und Orientierung neu bewerten
 				f.klasse |= (uchar)(k6b&(uchar)1u);           // K1 aus V3b; K4 unten aus dem TATSAECHLICH gespeicherten y_w
 				double e6x=n6x, e6y=n6y, e6z=n6z;             // effektive Normale -- ggf. gekippt (Audit C)
-				if(ywquelle>0u) { f.klasse |= (uchar)(k6b&(uchar)8u); f.yw=(float)yw6; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z; }
+				if(ywquelle>0u) { // ★ Pruefagent B-1: hier fehlte die Klemme, und Bit 8 kam aus dem
+					// UNGEKLEMMTEN yw6 -- mit CFD_FACETTEN_YWQUELLE=1 waere YWKLEMME ein stiller No-Op gewesen.
+					double yw6k = yw6;
+					if(yw_klemme&&yw6k<(double)yw_min) { yw6k=(double)yw_min; gt|=(uchar)4u; }
+					f.yw=(float)yw6k; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z;
+					if(yw6k<(double)yw_min||yw6k>2.0) f.klasse|=8u; } // aus dem GESPEICHERTEN y_w, nicht aus k6b
 				else { // y_w bleibt V1s Groesse: gegen den PCA-Schwerpunkt, aber mit der NEUEN Normalen
 					// ★ Audit C+D 29.08.: hier stand fabs(ywp). Das liess die NORMALE stehen und
 					// meldete die Wand auf der falschen Seite -- f.yw und f.n konnten gegenlaeufig
@@ -1692,11 +1733,19 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 					// als die gespeicherte. Jetzt: Vorzeichen durch KIPPEN, K4 aus ywp selbst.
 					double ywp = n6x*((double)x-cx)+n6y*((double)y-cy)+n6z*((double)z-cz);
 					if(ywp<0.0) { e6x=-e6x; e6y=-e6y; e6z=-e6z; ywp=-ywp; nq_kipp++; }
+					// ★ KLEMMEN statt VERWERFEN (Heiko 29.08.), nur unter CFD_FACETTEN_YWKLEMME.
+					if(yw_klemme&&ywp<(double)yw_min) { ywp=(double)yw_min; gt|=(uchar)4u; n_geklemmt++; }
 					f.yw=(float)ywp; /* cx_/cy_/cz_ bleiben der PCA-Schwerpunkt */
 					if(ywp<(double)yw_min||ywp>2.0) f.klasse|=8u; } // EINZIGER Abnehmer: die
 				// y_w-Neuberechnung der Glaettung (setup.cpp ~1619). Stuende hier der PCA-Schwerpunkt,
 				// wuerde die Glaettung V3bs y_w still gegen einen fremden Bezug ueberschreiben.
 				// r21_/r10_ bleiben die PCA-Werte -- sie beschreiben die Punktwolke, nicht die Normale.
+				// ★ KANTENTEST AUS V3bs EIGENEM GUETEMASS (Heiko 29.08.), nur unter
+				// CFD_FACETTEN_KANTE_KOH. r21 beschreibt die Guete des PCA-Fits -- unter V3b
+				// benutzen wir diesen Fit gar nicht mehr. Das eigene Mass ist die Kohaerenz.
+				if(kante_koh) { const uchar k2_alt=(uchar)(f.klasse&2u);
+					f.klasse &= (uchar)~2u; if(gt&2u) f.klasse|=2u;
+					if((uchar)(f.klasse&2u)!=k2_alt) n_kante_koh++; }
 				f.nx=(float)e6x; f.ny=(float)e6y; f.nz=(float)e6z;
 				const double geg6 = e6x*((double)x-(double)snx)+e6y*((double)y-(double)sny)+e6z*((double)z-(double)snz);
 				if(geg6<=0.0) f.klasse|=16u;                  // Orientierungs-Gegenprobe bleibt -- gegen die GEKIPPTE Normale
@@ -1720,6 +1769,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				const float qnx_=f.nx, qny_=f.ny, qnz_=f.nz, qyw_=f.yw;
 				double ywn = (double)f.nx*((double)x-c6x)+(double)f.ny*((double)y-c6y)+(double)f.nz*((double)z-c6z);
 				if(ywn<0.0) { f.nx=-f.nx; f.ny=-f.ny; f.nz=-f.nz; ywn=-ywn; yw_kipp++; }
+				// ★ Pruefagent B-1: dieser Block ueberschrieb f.yw und setzte Bit 8 ungeklemmt --
+				// er loeschte damit auch die Klemme aus dem V1-Pfad wieder.
+				if(yw_klemme&&ywn<(double)yw_min) { ywn=(double)yw_min; gt|=(uchar)4u; }
 				f.yw=(float)ywn; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z;
 				f.klasse &= (uchar)~8u; if(ywn<(double)yw_min||ywn>2.0) f.klasse|=8u;
 				// ★ Audit C2 29.08.: das Kippen ueberschreibt die Orientierung, die vorher durch
@@ -1733,6 +1785,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				if(f.yw!=qyw_) yw_yw_geaendert++;
 			}
 		}
+		gt_v.push_back(gt); koh_v.push_back(gt_koh); // Guete parallel zu F halten (Audit E)
 		F.push_back(f);
 		// Erstpass-Histogramme entfernt (Gross-Audit N18): wurden vor jeder Nutzung geleert -- der Endzustands-Pass fuellt neu.
 	}
@@ -1789,6 +1842,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				double ywn = (sx/l)*((double)x-(double)F[i].cx_)+(sy/l)*((double)y-(double)F[i].cy_)+(sz/l)*((double)z-(double)F[i].cz_);
 				if(ywn<0.0) G[i].klasse|=16u; // Audit R3: Orientierungskipp durch die Glaettung -- markieren, fabs darf ihn nicht verdecken
 				G[i].yw = (float)fabs(ywn);
+				if(yw_klemme&&G[i].yw<yw_min) { G[i].yw=yw_min; gt_v[i]|=(uchar)4u; n_geklemmt++; } // klemmen statt verwerfen
 				G[i].klasse &= (uchar)~8u; if(G[i].yw<yw_min||G[i].yw>2.0f) G[i].klasse|=8u; // K4 neu bewerten
 			}
 		}
@@ -1879,12 +1933,18 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// Bauteildicke; je Facettenzelle das Minimum ueber ihre Wandnachbarn, also das DUENNSTE
 	// Teil, das sie beruehrt. Lauflaenge bei 9 Zellen gekappt (nur 1..4 sind die Frage).
 	// Wrap wie ueberall in dieser Funktion: Geometrie ungewickelt, NUR der Speicherindex wickelt.
+	// ★ 29.08.: der Zensus lief IMMER, ohne Schalter -- rund 860 Flag-Zugriffe je Facette. Er
+	// bleibt per Default AN (Iron Rule 2: Diagnostik gehoert in den Code, und er ist der einzige
+	// unabhaengige Gegencheck zum Duennteilbefund), ist jetzt aber abschaltbar. Aus heisst:
+	// Histogramm und CSV-Spalte tragen 0, und der V4-Wirkpfad-Abgleich entfaellt mit Ansage.
+	const bool dicke_an = env_u("CFD_FACETTEN_DICKE", 1u)>0u;
+	if(!dicke_an) print_warning("CFD_FACETTEN_DICKE=0: der Solid-Dicke-Zensus ist AUS -- solid_dicke ist ueberall 0 und der V4-Wirkpfad-Abgleich entfaellt.");
 	std::vector<uchar> sdicke(F.size(), (uchar)0u); // ★ auch fuer die CSV -- Kreuztabelle Klasse gegen Dicke
 	ulong n_dicke1=0ull; // ★ Gegenprobe fuer den Duennteil-Waechter (siehe Bericht)
 	{
 		ulong dh[10]={0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull,0ull}; ulong ohne_nachbar=0ull;
 		size_t fi_=0ull;
-		for(const Facette& f : F) {
+		if(dicke_an) for(const Facette& f : F) {
 			const uint zc=(uint)(f.n/((ulong)Nx*(ulong)Ny));
 			const uint yc=(uint)((f.n/(ulong)Nx)%(ulong)Ny);
 			const uint xc=(uint)(f.n%(ulong)Nx);
@@ -1937,6 +1997,9 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// richtige Antwort. Der Rueckseitentest (Heiko) und die Lauflaengenmessung sind zwei
 	// unabhaengige Wege zur selben Aussage -- geprueft wird jetzt ihre UEBEREINSTIMMUNG.
 	if(!v3_noetig) { /* ohne V3-Pfad gibt es keine Duennteil-Flaggen -- nichts zu pruefen */ }
+	// ★ 29.08.: ohne Dickenzensus ist n_dicke1 konstruktiv 0 -- der Abgleich wuerde dann
+	// faelschlich "Rueckseitentest ohne Gegenstueck" melden. Also ausdruecklich aussetzen.
+	else if(!dicke_an) { /* Dickenzensus aus -- der Gegencheck hat keine Datenbasis */ }
 	// ★ Audit L 29.08.: war print_error (= exit). Beide Messwege sind DIAGNOSEN, und die
 	// Richtung "Dicke sagt duenn, Rueckseitentest schweigt" ist nicht ausgeschlossen: der
 	// Rueckseitentest zaehlt nur SICHTBARE Flaechen, der Dickenzensus auch Diagonalnachbarn.
@@ -2076,6 +2139,130 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		<< "," << (uint)sdicke[fi_++] << "\n"; } }
 	fh.close();
 	print_info("  CSV: "+out_dir+"facetten_histogramme.csv");
+
+	// ================= GUETEKLASSE JE WANDZELLE, VTK fuer ParaView (Heiko 29.08.) =================
+	// "Kategorie 0 ist der schlechteste Fall, aufsteigend der bessere." Punktwolke an den
+	// Zellmittelpunkten in WELTkoordinaten -- sie liegt damit deckungsgleich ueber den Feld-VTKs.
+	//   0 KEIN WANDMODELL   klasse!=0, die Zelle faellt auf reines Bounce-Back zurueck (schlechtester Fall)
+	//   1 NORMALE UNSICHER  Kohaerenz |Summe|/nq < 1/sqrt(3): die Flaechensumme ist ueberwiegend
+	//                       Ausloeschungsrest, die Richtung traegt wenig Information
+	//   2 NORMALE GROB      Duennteil-Rueckfall: Vektorsumme entartet, Normale = naechste Voxelflaeche
+	//                       (grob, aber eindeutig definiert)
+	//   3 Y_W GEKLEMMT      Normale gut, aber die Abtasthoehe war geometriebedingt unter yw_min
+	//                       und wurde auf yw_min gesetzt statt die Zelle zu verwerfen
+	//   4 VOLL              kohaerente Flaechensumme, y_w im Fenster, kein Rueckfall
+	// Bei mehreren Treffern gilt der SCHLECHTESTE (kleinste) Wert.
+	if(guete_vtk&&!F.empty()) {
+		if(gt_v.size()!=F.size()||koh_v.size()!=F.size())
+			print_error("Guete-VTK: gt_v/koh_v sind nicht deckungsgleich mit F ("+to_string((ulong)gt_v.size())+"/"+to_string((ulong)koh_v.size())+" gegen "+to_string((ulong)F.size())+") -- der Parallel-Push ist verrutscht.");
+		std::vector<uchar> kat(F.size(), (uchar)4u);
+		ulong hist[5]={0ull,0ull,0ull,0ull,0ull};
+		for(size_t i=0ull;i<F.size();i++) {
+			uchar k=4u;
+			if(gt_v[i]&4u) k=3u;                 // geklemmt
+			if(gt_v[i]&1u) k=2u;                 // Duennteil-Rueckfall
+			if(gt_v[i]&2u) k=1u;                 // schwache Kohaerenz
+			if(F[i].klasse!=0u) k=0u;            // verworfen schlaegt alles
+			kat[i]=k; hist[k]++;
+		}
+		const string dat = out_dir+"facetten_guete.vtk";
+		std::ofstream v(dat, std::ios::out|std::ios::binary);
+		if(!v) print_warning("Guete-VTK: "+dat+" nicht schreibbar -- uebersprungen.");
+		else {
+			const ulong np_ = (ulong)F.size();
+			v << "# vtk DataFile Version 3.0\nFacetten-Guete " << wo << " (0 schlechtester Fall .. 4 voll)\nBINARY\nDATASET POLYDATA\n"
+			  << "POINTS " << np_ << " float\n";
+			{	std::vector<float> b(3ull*np_);
+				for(size_t i=0ull;i<np_;i++) { uint px_,py_,pz_; L.coordinates(F[i].n, px_, py_, pz_);
+					b[3ull*i   ] = reverse_bytes(vtk_x0 + vtk_dx*((float)px_+0.5f));
+					b[3ull*i+1u] = reverse_bytes(vtk_y0 + vtk_dx*((float)py_+0.5f));
+					b[3ull*i+2u] = reverse_bytes(vtk_z0 + vtk_dx*((float)pz_+0.5f)); }
+				v.write((const char*)b.data(), (std::streamsize)(b.size()*sizeof(float))); }
+			v << "\nVERTICES " << np_ << " " << 2ull*np_ << "\n";
+			{	std::vector<int> c(2ull*np_);
+				for(size_t i=0ull;i<np_;i++) { c[2ull*i]=reverse_bytes((int)1); c[2ull*i+1u]=reverse_bytes((int)i); }
+				v.write((const char*)c.data(), (std::streamsize)(c.size()*sizeof(int))); }
+			v << "\nPOINT_DATA " << np_ << "\n";
+			auto schreibe_uc = [&](const string& nm, const std::vector<uchar>& d) {
+				v << "SCALARS " << nm << " unsigned_char 1\nLOOKUP_TABLE default\n";
+				v.write((const char*)d.data(), (std::streamsize)d.size()); v << "\n"; };
+			auto schreibe_f = [&](const string& nm, const std::vector<float>& d) {
+				v << "SCALARS " << nm << " float 1\nLOOKUP_TABLE default\n";
+				const size_t blk = 65536ull; std::vector<float> b(blk); // ★ D-3: war ein Vollpuffer (13 MB je Feld)
+				for(size_t i0=0ull;i0<d.size();i0+=blk) {
+					const size_t n_ = min(blk, d.size()-i0);
+					for(size_t j=0ull;j<n_;j++) b[j]=reverse_bytes(d[i0+j]);
+					v.write((const char*)b.data(), (std::streamsize)(n_*sizeof(float))); }
+				v << "\n"; };
+			schreibe_uc("kategorie", kat);
+			{	std::vector<uchar> kl_bin(np_), ac(np_); std::vector<float> yw(np_), wk(np_), r21(np_);
+				for(size_t i=0ull;i<np_;i++) { kl_bin[i]=(uchar)(F[i].klasse?1u:0u); ac[i]=(uchar)F[i].achse; yw[i]=F[i].yw; r21[i]=F[i].r21_;
+					wk[i]=acos(fmin(1.0f,fmax(fabs(F[i].nx),fmax(fabs(F[i].ny),fabs(F[i].nz)))))*180.0f/3.14159265f; }
+				// ★ Heiko 29.08.: reine Zahlenskalen, keine Buchstaben-Zahlen-Kuerzel. Neben der
+				// Kategorie steht deshalb JEDE Verwerfungsursache als eigenes 0/1-Feld -- danach
+				// laesst sich in ParaView direkt einfaerben und schwellen, ohne Bitmasken zu lesen.
+				{	std::vector<uchar> u_kante(np_), u_wandabstand(np_), u_orientierung(np_),
+					                   u_bewegtewand(np_), u_wenigpunkte(np_), u_linie(np_),
+					                   u_ueberlauf(np_), u_rueckfall(np_), u_geklemmt(np_), u_unsicher(np_);
+					for(size_t i=0ull;i<np_;i++) {
+						const uchar c=F[i].klasse, g=gt_v[i];
+						u_wenigpunkte[i]  = (uchar)((c& 1u)?1u:0u);
+						u_kante[i]        = (uchar)((c& 2u)?1u:0u);
+						u_linie[i]        = (uchar)((c& 4u)?1u:0u);
+						u_wandabstand[i]  = (uchar)((c& 8u)?1u:0u);
+						u_orientierung[i] = (uchar)((c&16u)?1u:0u);
+						u_ueberlauf[i]    = (uchar)((c&32u)?1u:0u); // ★ Pruefagent D-2: fehlte -- eine nur
+						u_bewegtewand[i]  = (uchar)((c&64u)?1u:0u); //    deswegen verworfene Zelle war unauffindbar
+						u_rueckfall[i]    = (uchar)((g& 1u)?1u:0u);
+						u_unsicher[i]     = (uchar)((g& 2u)?1u:0u);
+						u_geklemmt[i]     = (uchar)((g& 4u)?1u:0u); }
+					schreibe_uc("verworfen_kante", u_kante);
+					schreibe_uc("verworfen_wandabstand", u_wandabstand);
+					schreibe_uc("verworfen_orientierung", u_orientierung);
+					schreibe_uc("verworfen_bewegtewand", u_bewegtewand);
+					schreibe_uc("verworfen_wenigpunkte", u_wenigpunkte);
+					schreibe_uc("verworfen_linie", u_linie);
+					schreibe_uc("verworfen_ueberlauf", u_ueberlauf);
+					schreibe_uc("normale_rueckfall", u_rueckfall);
+					schreibe_uc("normale_unsicher", u_unsicher);
+					schreibe_uc("wandabstand_geklemmt", u_geklemmt); }
+				schreibe_uc("verworfen", kl_bin);   // 1 = diese Zelle hat KEIN Wandmodell (klasse!=0)
+				schreibe_uc("bauteildicke", sdicke);// lokale Bauteildicke in Zellen (9 = gekappt)
+				schreibe_uc("dominante_achse", ac); // 0 = x, 1 = y, 2 = z
+				schreibe_f("wandabstand", yw);      // y_w in Zellen
+				schreibe_f("kohaerenz", koh_v);     // |Summe|/nq, unter 0,577 ist die Normale Ausloeschungsrest
+				schreibe_f("winkel", wk);           // Grad zur dominanten Achse
+				schreibe_f("fitguete", r21);        // Eigenwertverhaeltnis des PCA-Fits (klein = gute Ebene)
+				{	// ★ Pruefagent D-3: hier standen drei Zwischenpuffer nx_/ny_/nz_ (39 MB bei
+					// 3,28 Mio Facetten) NEBEN dem Schreibpuffer. Direkt aus F fuellen, blockweise
+					// schreiben wie der Referenzschreiber (setup.cpp:329) -- Spitze faellt von
+					// rund 128 MB auf unter 1 MB.
+					v << "VECTORS normale float\n";
+					const size_t blk = 65536ull; std::vector<float> b(3ull*blk);
+					for(size_t i0=0ull;i0<np_;i0+=blk) {
+						const size_t n_ = min(blk, np_-i0);
+						for(size_t j=0ull;j<n_;j++) { b[3ull*j]=reverse_bytes(F[i0+j].nx); b[3ull*j+1u]=reverse_bytes(F[i0+j].ny); b[3ull*j+2u]=reverse_bytes(F[i0+j].nz); }
+						v.write((const char*)b.data(), (std::streamsize)(3ull*n_*sizeof(float))); }
+					v << "\n"; }
+			}
+			v.close();
+			const bool welt = !(vtk_dx==1.0f&&vtk_x0==0.0f&&vtk_y0==0.0f&&vtk_z0==0.0f);
+			print_info("  GUETE-VTK: "+dat+" ("+to_string(np_)+" Punkte, "
+				+(welt?string("Weltkoordinaten -- liegt ueber den Feld-VTKs"):string("GITTERkoordinaten -- die Aufrufstelle hat keine Weltlage gesetzt"))+").");
+			print_info("   Kategorien: 0 kein Wandmodell "+to_string(hist[0])+" ("+to_string(100.0f*(float)hist[0]/(float)np_,1u)+" %)"
+				+" | 1 Normale unsicher "+to_string(hist[1])+" ("+to_string(100.0f*(float)hist[1]/(float)np_,1u)+" %)"
+				+" | 2 Normale grob "+to_string(hist[2])+" ("+to_string(100.0f*(float)hist[2]/(float)np_,1u)+" %)"
+				+" | 3 y_w geklemmt "+to_string(hist[3])+" ("+to_string(100.0f*(float)hist[3]/(float)np_,1u)+" %)"
+				+" | 4 voll "+to_string(hist[4])+" ("+to_string(100.0f*(float)hist[4]/(float)np_,1u)+" %)");
+		}
+	}
+	// ★ Pruefagent B-2: n_geklemmt zaehlte EREIGNISSE -- bei NORMQUELLE=1 feuert erst der
+	// V1-Pfad, dann V3b, ggf. noch die Glaettung fuer DIESELBE Zelle. Der Vergleich gegen die
+	// Zellzahl war damit bis zu dreifach zu gross. Jetzt aus gt_v: eine Zelle, ein Zaehler.
+	if(yw_klemme) { ulong zellen=0ull; for(uchar g_ : gt_v) if(g_&4u) zellen++;
+		print_info("  Y_W-KLEMME AKTIV: "+to_string(zellen)+" ZELLEN auf yw_min = "+to_string(yw_min,3u)
+			+" geklemmt statt verworfen ("+to_string(n_geklemmt)+" Klemmereignisse ueber alle drei Pfade)."); }
+	if(kante_koh) print_info("  KANTENTEST AUS KOHAERENZ AKTIV: "+to_string(n_kante_koh)+" Facetten haben ihr Kantenbit gegenueber r21 geaendert.");
 	return F;
 }
 
@@ -4399,12 +4586,14 @@ static void main_setup_fahrzeug_dd() {
 		// ★ Audit 2/3 MITTEL: beide Gitter schrieben in DENSELBEN Dateinamen -- das Fernfeld
 		// ueberschrieb den Nahfeld-Census kommentarlos. Jetzt je ein Unterordner.
 		const string fdn = fac_dir+"nah/", fdf = fac_dir+"fern/"; create_folder(fdn); create_folder(fdf);
+		vtk_x0=near_x0; vtk_y0=near_y0; vtk_z0=near_z0; vtk_dx=dx_f; // Guete-VTK in WELTkoordinaten (deckungsgleich mit feld_nah_*.vtk)
 		baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, "dd-Nahfeld");
 		const bool elibb_an_dd = env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u;
 		if(env_u("CFD_FACETTEN_REMESH", 0u)>0u||elibb_an_dd) { // ★ ELIBB P1 + Stufe 2 (Pflicht-q-Quelle bei ELIBB)
 			print_info("ELIBB P1: Remesh der Nahfeld-Voxelaussenwand (Surface Nets + Taubin) ...");
 			remesh_facetten_diag(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdn, nullptr, veh_f, elibb_an_dd?&elibb_qmap_dd:nullptr);
 		}
+		vtk_x0=far_x0; vtk_y0=far_y0; vtk_z0=0.0f; vtk_dx=dx_c; // ★ Pruefagent D-1: das Fernfeld erbte die NAHFELD-Lage
 		baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdf, "dd-Fernfeld");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
@@ -4414,6 +4603,7 @@ static void main_setup_fahrzeug_dd() {
 		const string fdir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 		create_folder(fdir);
 		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_f.get_N();n++) if(lbm_f.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		vtk_x0=near_x0; vtk_y0=near_y0; vtk_z0=near_z0; vtk_dx=dx_f; // ★ D-1: auch der PRODUKTIVE Pfad braucht die Weltlage
 		FFn = baue_facetten(lbm_f, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), fdir, "dd-Nahfeld");
 		// ★ B1-Stufe 2: bei ELIBB ist das Remesh die PFLICHT-q-Quelle -- auch ohne CFD_FACETTEN_DIAG
 		// (der Diagnoseblock oben laeuft im Normalfall nicht; die erste Verdrahtung hing daran).
@@ -4440,6 +4630,7 @@ static void main_setup_fahrzeug_dd() {
 		const string fdir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
 		create_folder(fdir); const string fdirc = fdir+"fern/"; create_folder(fdirc);
 		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_c.get_N();n++) if(lbm_c.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
+		vtk_x0=far_x0; vtk_y0=far_y0; vtk_z0=0.0f; vtk_dx=dx_c;
 		FFc = baue_facetten(lbm_c, cNx, cNy, cNz, (uchar)(TYPE_S|TYPE_X), fdirc, "dd-Fernfeld (P8)");
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm_c.get_N();n++) if(lbm_c.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau (Fernfeld) hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force/Fx_far-Falle!");
@@ -5254,6 +5445,26 @@ static void main_setup_fahrzeug_dd() {
 	// ---------------------------------------------------------------- Initialisieren und Kopplung anlegen
 	lbm_f.run(0u); // nur initialisieren
 	lbm_c.run(0u);
+	// ★ SPEICHER-SCHLUSSBILANZ (Heiko 29.08.: "was wir wirklich nutzen"). Die Zeile
+	// "Memory Usage" der Info-Box (info.cpp:73) liest memory_used ZU FRUEH -- Kopplungspuffer,
+	// N2F-Schale, kf_liste und slice_flags entstehen erst danach. Hier ist der Aufbau
+	// vollstaendig, also steht hier der SPITZENWERT. Dazu der gemessene freie Speicher aus dem
+	// DRM-Debugfs, der als einziger den Desktop-Anteil mitsieht.
+	{	const ulong belegt_f = (ulong)lbm_f.lbm_domain[0]->get_device().info.memory_used;
+		const ulong kap_f    = (ulong)lbm_f.lbm_domain[0]->get_device().info.memory;
+		const ulong belegt_c = (ulong)lbm_c.lbm_domain[0]->get_device().info.memory_used;
+		const ulong frei_g   = vram_frei_gemessen();
+		print_info("SPEICHER-SCHLUSSBILANZ (Aufbau vollstaendig, das ist der Spitzenwert):");
+		print_info("   Nahfeld  belegt "+to_string(belegt_f)+" MB von "+to_string(kap_f)+" MB rekonstruiert"
+			+"  ->  rechnerisch frei "+to_string((ulong)(kap_f>belegt_f?kap_f-belegt_f:0ull))+" MB");
+		print_info("   Fernfeld belegt "+to_string(belegt_c)+" MB (System-RAM, kein VRAM-Deckel)");
+		if(frei_g>0ull) print_info("   GEMESSEN frei auf der Karte: "+to_string(frei_g)
+			+" MB (DRM-Debugfs -- enthaelt den Desktop-Anteil, im Gegensatz zur Rechnung oben)."
+			+string(frei_g<1024ull?" ★ UNTER 1 GB -- das ist Heikos Untergrenze.":""));
+		else print_info("   Gemessener Frei-Wert nicht lesbar (Debugfs braucht Rechte) -- die Zahl oben"
+			" ist eine RECHNUNG aus device.info.memory, und die ist ihrerseits die 20/19-Rekonstruktion"
+			" von opencl.hpp:170. Sie sieht den Desktop-Anteil NICHT.");
+	}
 
 	// ---------------------------------------------------------------- Bodenkontakt und mitbewegte Wand
 	// Drei Fragen, die sich NUR nach initialize() beantworten lassen, weil erst dieser Kernel die
