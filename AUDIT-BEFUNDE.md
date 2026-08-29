@@ -4897,3 +4897,112 @@ daraus "die Normalenquelle ist kraftneutral" geschlossen -- das galt nur fuer Cz
 LEHRE, die ueber diesen Fall hinausgeht: eine Aussage ueber "die Kraft" aus EINER Kraftgroesse
 zu ziehen, war voreilig. cd_rest und cz_rest gehoeren zusammen berichtet, auch wenn nur eine
 davon in der Fragestellung steht.
+
+---
+
+# B55–B62 — Sechs-Agenten-Audit Grenzschicht/Bounce-Back, 29.08.2026
+
+Heiko-Auftrag: "Code Audit auf den Bounce Back Kernel (min 5 Agenten), speziell auf Fehler
+die eine Abloesung der Grenzschicht speziell hinter dem flach abfallenden Dach untersucht ...
+Druckrelaxation, ob die Funktionen zueinander fuer unsere Aufloesung auch passen, ob unsere
+neuen Dreiecksfacetten ueberhaupt ein Hebel fuer ein solches grobes Problem sein koennen."
+Bezugslauf p4_v3b (4 mm, Commit 1c361e9). Massstab: cz_druck_rest −0,9418 gegen OF13 −1,3113,
+also 0,36 fehlend IM DRUCKANTEIL; cz_reib +0,0408 gegen OF13 +0,0065.
+
+## B55 — Die Dreiecksfacetten sind NICHT der Hebel (Agent 5)
+Einvariabler 4-mm-A/B: Δcz_druck_rest = −0,0325 ± 0,0061 (5,4 σ) = 9 % der Luecke 0,41.
+Der Abtrieb ist zu 95,6 % Druck; das gesamte physikalische Wandschubbudget des Fahrzeugs
+betraegt C_|tau| = 0,0181 = 4,4 % der Luecke. Eine Normalenkorrektur, die ueberwiegend die
+Reibung trifft, kann die 0,41 konstruktiv nicht holen. Dach+Heck tragen in der Reibung 0,95 %
+der Luecke, der Dachabfall allein 0,21 %. — Der Ansatz ist trotzdem besser (Verwerfung
+21,9 -> 7,3 %, siehe B59) und bewegt Cz in die richtige Richtung; er ist ein Instrumenten-
+und Wandmodellhebel, kein Abtriebshebel.
+
+## B56 — 53,2 % der Wandzellen ohne Wandmodell, Gate selbstverstaerkend (Agent 1)
+19,91 % markiert (klasse!=0) + 41,60 % Laufzeit-Rueckfall (Slot 69). Das SATGATE feuert, wenn
+|s1| > 2·ut, also wenn der BB-Uebertrag die Ziel-Schubspannung uebersteigt -- genau an der
+Treppe. Es schaltet das Modell dort ab, wo die Treppen-Ueberreibung am groessten ist.
+KEIN Formelfehler: Impulsbilanz, Vorzeichen, Faktor 2 und Schrittreihenfolge nachgerechnet
+und korrekt (N4/N5). ELIBB verdreifacht die Gate-Rate (Kanal 40,2 % gegen 13,2 % ohne).
+
+## B57 — Wandmodell, SGS und tau setzen dieselbe Wandspannung ohne Aufteilung (Agent 3)
+tau = 0,50002832, Λ = (tau−0,5)² = 8,02e−10 gegen die Wandlage 3/16 -- 8,4 Dekaden darunter.
+Smagorinsky C_s = 0,1733 fest verdrahtet, KEINE Wanddaempfung (kein van Driest, kein WALE).
+tau_SGS/tau_Wandmodell = (1+nu_t/nu_0)/(kappa·y+); bei nu_t/nu_0 = 30 und y+ = 68 ist das 1,11
+-- das SGS traegt dort bereits die volle Wandspannung, das Wandmodell setzt sie ein zweites Mal.
+Netto kommt trotzdem ZU WENIG heraus: c_f = 5,9e−4 gegen Plattenkorrelation 2,73e−3, Faktor
+4,6 zu klein, INKLUSIVE CFD_FAC_UTKORR=1,5. Wirkrichtung: Abloesung zu spaet, Cd zu klein --
+gemessen cd_rest 0,5305 gegen 0,599 (−11 %), Vorzeichen stimmt.
+delta/dx = 10,3 Zellen auf dem Dach: die Abloesung ist nicht aufloesbar, sie wird vom
+Wandmodell diktiert. Projekteigene Herleitung c_f = 1,502/N² (WANDMODELL.md:108) -- es gibt
+genau EINE Gitterweite, bei der es zufaellig stimmt: dx ~ 6,4 mm. 4 mm liegt darunter.
+
+## B58 — Die Voxeltreppe erzwingt die Abloesung, und ELIBB ist dort abgeschaltet (Agent 4)
+u_x in der ersten Fluidzelle entlang der flachen Rampe bricht an JEDER Setzstufe zusammen:
+13 Zusammenbrueche auf 352 mm (i_x 742/758/768/775/781/788/795/804/808/815/820/829, Werte
+−0,40 bis +0,96 m/s zwischen Spitzen von 6,5 m/s). Am flachen Dach ohne Stufen fehlt das
+Muster. Durchgehende Abloesung ab x = 3,234 m -- 428 mm vor dem Ende der Heckscheibe, deren
+wahre Sekante nur 17,59° betraegt (unter der kritischen ~30°). Setzstufe 4 mm bei delta
+40-60 mm: k/delta = 7-10 %, ein Windkanal-Stolperdraht liegt bei 1-3 %.
+q ist auf der ROHEN Voxelflaeche 0,5 auf ALLEN 15.114.074 Links. Nach der Glaettung liegen am
+flachen Dach immer noch 99,6 % bei |q−0,5| <= 0,1 -- und bei q = 0,5 ist chi = 0, ELIBB also
+bitgleich reines BB. Ursache steht im Code selbst (setup.cpp:884): Taubin daempft jedes
+Merkmal unter ~11 Zellen Periode; die flachste Trittstufe ist 16 Zellen lang und ueberlebt.
+GENAU UMGEKEHRT ZUM BEDARF -- je flacher die Rampe, desto weniger bewegt sich q.
+Aufdickung gemessen: +0,97 Zellen am flachen Dach (= analytischer Wert 0,5 SAT + 0,5 BB),
++1,78 an der mittleren Rampe. NEGATIVBEFUND: keine Quetschkante am Dach oder an der
+Abrisskante -- die 198 Inzidenz-4-Kanten sitzen an Radhaeusern, die 836 offenen am Latsch.
+
+## B59 — Warum trotz Dreiecksfacetten nur 80 % Abdeckung, und der Fix
+Zwei getrennte Ursachen, gemessen am Zensus von p4_v3b (3.275.381 Zellen):
+- K4 (y_w), 459.224 Zellen, ALLE an der Untergrenze, Haeufung 0,14..0,18 = die diskreten
+  y_w-Klassen der geneigten Treppe. Bei y_w = 0,16 ist Y ~ 850, mitten im gueltigen Bereich.
+- K2 (Kante), 312.840 Zellen. Misst r21 = Guete des PCA-Fits, den V3b gar nicht benutzt.
+  27,9 % davon sitzen auf massiven Bauteilen (Dicke >= 9), sind also echte Geometriekanten.
+Mehrfachnennungen sind fast ausschliesslich K2+K4 (122.824 = 18,8 % der markierten) -- die
+Treppe erzeugt BEIDE Verwerfungsgruende gleichzeitig, zwei Tests fuer ein Phaenomen.
+Die y_w-Schwelle ist bereits aufloesungsunabhaengig (8 mm 13,4 %, 4 mm 14,0 % unter 0,2,
+gleiche Klassen) -- der Fehler war das VERWERFEN, nicht die Einheit.
+FIX gebaut (Commit 865e0c8): Klemme + Kohaerenz-Kantentest, 19,9 % -> 4,5 %.
+
+## B60 — Nahfeldraender praegen rho hart auf, Randdaten stellenweise unphysikalisch (Agent 2)
+Fuenf Dirichlet-Seiten schreiben rho UND u aus dem 16-mm-Gitter (kernel.cpp:3396), die
+Rueckkopplung korrigiert NUR u (kernel.cpp:3497). interface_druck.csv: cp bis +1,33 auf der
+Decke, +1,48 am Einlass -- ueber der Staugrenze, inkompressibel unmoeglich. band_bilanz.csv:
+cp −8,7 im groben Wake-Kasten, achtfache Sogspitze. Kein Abstandswaechter fuer getriebene
+Ebenen (setup.cpp:4547 prueft nur SCHNITT mit dem Fahrzeug). ΔCd ~ 0,075 = 14 %.
+ENTLASTET mit Zahl: RHO_CLAMP (greift bei cp = ∓59, APG ist O(cp 0,5) -- Faktor 140 daneben),
+BODEN_EQ/EINLASS_EQ (reichen 4-32 mm, Dach bei 1,20 m, praegen kein rho), SPONGE (beginnt
+4,15 m hinter dem Heck), KOPPLUNG_GLATT (Uebertragung 0,99997 fuer die Fahrzeugsignatur).
+D4 GEPRUEFT UND ENTLASTET am 29.08. abends: z-Schnitt gegen OF13 bei z = 1,836 m zeigt
+RMS 0,70 m/s (y-Schnitt: 5,1) und |dU| zum Rand hin FALLEND (0,536 gegen 0,720 in der Mitte)
+-- ein Randabdruck wuerde umgekehrt anwachsen. Werkzeug: werkzeuge/diff_of13_zslice.py.
+
+## B61 — Der APG-Term ist nicht im Binaer, und er ist der einzige mit passender Richtung
+FACETTEN_APG (kernel.cpp:1962) korrigiert tau_w um den Druckgradienten. CFD_FAC_APG ist nicht
+gesetzt, das Log sagt es im Klartext: "Gleichgewichtsmodell, kein APG -- Abloeselage bleibt
+modellfrei". Eine Gleichgewichts-Wandfunktion ueberschaetzt tau_w im Druckanstieg; als
+Impulssenke saugt sie die wandnahe Schicht leer -> Abloesung frueher. BLOCKIERT: lbm.cpp:144
+sperrt APG und ELIBB gegeneinander.
+
+## B62 — Sechs Instrumente, die still falsch messen
+- yplus_histogramm.csv ist NICHT y+: Median 1253,7 gegen 68,1 aus yplus_facetten.csv,
+  FAKTOR 18. messe_yplus nutzt hartkodiert y = 0,5 und die tangentiale F-Komponente,
+  druckkontaminiert an Voxeltreppen (setup.cpp:6247 sagt es selbst).
+- RHO_CLAMP-Zaehler sind als "t%100-Stichprobe" dokumentiert (lbm.cpp:331, setup.cpp:648),
+  sind aber ungegatet und saettigend -- FAKTOR 100 in der Lesart. Real ~445 Zellen je Schritt.
+- SPONGE-Slots 29/66 saettigen bei 0xF0000000; der Klemmzaehler steht HOEHER als der
+  Zonenzaehler, was unmoeglich ist. Die gemeldeten "100,0 %" sind ein Artefakt.
+- "tau-Klemme 0" (Slot 8) ist ein TOTER Zaehler: die Schwelle tw_max = 0,5·rho·ut verlangt
+  u_t > 0,2222·u+², im Logbereich also ~68 bei verfuegbaren 0,075 -- Faktor ~900 daneben.
+- forces.csv Cd 8,64 ist "PHANTOM-Reibung" (eigener Dateikopf), NICHT dieselbe Groesse wie
+  cd_rest 0,53 aus dem Facettenpfad. Nicht mischen.
+- van Driest wurde gegen y+ = 137 verworfen (Plattenkorrelation). Gemessener Median: 68,1.
+  Dort daempft er 14 %, im Mittel 23,5 %, auf 17,9 % der Facetten ueber 50 %. Kein No-op.
+
+## Heiko-Freigabe 29.08. abends
+A (Regressionssuche gegen 27.08.) GESTRICHEN -- "27.08 war aber gar kontaminiert, nicht
+vergleichbar". B UEBERNOMMEN (steht in der Basis). C liegen lassen, erst die neue Abdeckung
+testen. D2 selbststaendig geprueft: NICHT nachweislich falsch (die R-Tabelle stammt aus D1Q3
+und gilt nur fuer die ebenen-gleichfoermige Mode; der Anker sitzt seit 08.08. auf dem
+Flaechenmittel) -- nichts geaendert. D4 erledigt, siehe B60. E/F/G offen.
