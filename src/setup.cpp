@@ -1311,7 +1311,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	if(getenv("CFD_FACETTEN_KANTE")!=nullptr) print_warning("CFD_FACETTEN_KANTE = "+to_string((float)kante_r21,3u)+" (Default 0,15, geeicht 2026-08-15) -- deklarierter Messarm.");
 	if(ywquelle>0u) print_warning("CFD_FACETTEN_YWQUELLE=1 -- y_w gegen die naechste Voxelflaeche statt gegen den PCA-Schwerpunkt. ANDERE GROESSE, nicht derselbe Wert genauer.");
 	const bool v3_noetig = vgl_an||normquelle>0u||ywquelle>0u; // ★ H1: der y_w-Anker braucht c6, also den V3-Block
-	ulong nq_aktiv=0ull; // Wirkpfad: wie oft V3b wirklich in die Facette geschrieben wurde
+	ulong nq_aktiv=0ull; // Eintritte in den V3b-Schreibblock
+	// ★ Audit F 29.08.: nq_aktiv/yw_aktiv zaehlten den EINTRITT, nicht die WIRKUNG -- sie
+	// meldeten "755344 von 755344" und konnten einen No-Op konstruktiv nie aufdecken. Die
+	// folgenden Zaehler vergleichen gegen den V1-Zustand DIREKT VOR dem Schreiben.
+	ulong nq_n_geaendert=0ull, nq_yw_geaendert=0ull, nq_kipp=0ull;
+	ulong yw_n_geaendert=0ull, yw_yw_geaendert=0ull, yw_kipp=0ull, yw_ori_neu=0ull;
 	if(normquelle>1u) print_error("CFD_FACETTEN_NORMQUELLE="+to_string(normquelle)+" ist nicht belegt -- nur 0 und 1 (Pruefagent M2: sonst warnt der Lauf 'V3b aktiv' und rechnet V1).");
 	if(normquelle==1u) print_warning("CFD_FACETTEN_NORMQUELLE=1 -- die Normale kommt aus V3b (Voxelflaechen-Summe), NICHT aus der 18-Link-PCA. Wirkt auf fac_geo (Wandfunktion UND Flaechenfaktor 1/|n_achse|) sowie auf den ELIBB-Ebenen-q sq=yw/(-ndc). Deklarierter Messarm.");
 	std::vector<double> qx(v3_noetig?np_max:0u), qy(v3_noetig?np_max:0u), qz(v3_noetig?np_max:0u);
@@ -1375,9 +1380,19 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	std::vector<double> hist_yw, hist_winkel; // Audit 3/3 N3: r21/r10-Histogramme waren tot (leben in der Facette/CSV)
 	// ★ Stufe 2 (F6): x/y PERIODISCH gewickelt -- die z-WFB behandelt alle Wandzellen, der
 	// Facettenpfad muss es auch (sonst kein Ist=Soll und keine Kanal-Aequivalenz). z bleibt 1..Nz-2.
-	auto wx = [&](const int v) { return (uint)((v%(int)Nx+(int)Nx)%(int)Nx); };
-	auto wy = [&](const int v) { return (uint)((v%(int)Ny+(int)Ny)%(int)Ny); };
-	auto wz = [&](const int v) { return (uint)((v%(int)Nz+(int)Nz)%(int)Nz); };
+	// ★ Audit-Performance 29.08.: das Zellgate laeuft ueber JEDE Fluidzelle der Domaene
+	// (4 mm: 1689x621x483 ~ 5,07e8) mal 18 Nachbarn, und jeder Aufruf trug ZWEI Ganzzahl-
+	// Divisionen -- rund 3,6e10 idiv, einkernig. Die Offsets sind |d| <= 2 (5^3-Fenster),
+	// also greift immer der erste Zweig; der Modulo bleibt als exakt gleichwertiger
+	// Rueckfall stehen, damit die Funktion fuer JEDE Eingabe dasselbe liefert wie vorher.
+	auto wrap_ = [](const int v, const int N) -> uint {
+		if(v>=0&&v<N) return (uint)v;
+		if(v<0&&v>=-N) return (uint)(v+N);
+		if(v>=N&&v<2*N) return (uint)(v-N);
+		return (uint)((v%N+N)%N); };
+	auto wx = [&](const int v) { return wrap_(v,(int)Nx); };
+	auto wy = [&](const int v) { return wrap_(v,(int)Ny); };
+	auto wz = [&](const int v) { return wrap_(v,(int)Nz); };
 	const uint z_lo = z_per?0u:1u, z_hi = z_per?Nz:(Nz-1u);
 	for(uint z=z_lo; z<z_hi; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = idx(x,y,z);
@@ -1438,8 +1453,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			if(kref_an) for(int r_=0;r_<18;r_++) { (r_<3?nv1:(r_<6?nv2:(r_<9?nv3:(r_<12?nv4:(r_<15?nv5:nv6))))).push_back(0.0f); }
 			// ★ Pruefagent M4: die Gates hier muessen GENAU denen im Normalpfad entsprechen,
 			// sonst wachsen die Vektoren unterschiedlich weit und die Kreuztabellen verrutschen.
-			if(v3_noetig) { yw5v.push_back(0.0f); kl5v.push_back((uchar)1u); }
-			if(vgl_an) { yw6v.push_back(0.0f); kl6v.push_back((uchar)1u);
+			// ★ Audit E 29.08.: yw5v/kl5v standen hier unter v3_noetig, im Normalpfad aber
+			// UNGEGATET -- bei NORMQUELLE=1 ohne VERGLEICH waeren alle Vergleichsvektoren um
+			// die Zahl der K1-Facetten kuerzer als F gewesen. Alle Leser stehen unter vgl_an,
+			// also gaten jetzt BEIDE Seiten auf vgl_an. (Am Fahrzeug K1=0, daher bisher folgenlos.)
+			if(vgl_an) { yw5v.push_back(0.0f); kl5v.push_back((uchar)1u);
+				yw6v.push_back(0.0f); kl6v.push_back((uchar)1u);
 				a12.push_back(-1.0f); a13.push_back(-1.0f); a14.push_back(-1.0f); yw2v.push_back(0.0f); yw3v.push_back(0.0f); yw4v.push_back(0.0f); yw4nv.push_back(0.0f); yw4av.push_back(0.0f); kl2v.push_back((uchar)1u); kl3v.push_back((uchar)1u); kl4v.push_back((uchar)1u); kl1v.push_back(f.klasse); }
 			F.push_back(f); continue; }
 		double cx=0.0, cy=0.0, cz=0.0;
@@ -1477,7 +1496,11 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		f.achse = (ax>=ay&&ax>=az) ? 0u : ((ay>=az) ? 1u : 2u); // Tie-Break: kleinste Achsnummer
 		if(v3_noetig) { // ---- V2 (Achslinks-PCA) und V3 (Heikos Normalensumme), rein diagnostisch
 			double n2x=0.0,n2y=0.0,n2z=0.0, yw2=0.0; uchar k2b=0u;
-			if(nq<6u) k2b|=1u; // K1-Aequivalent: zu wenig Stuetzpunkte
+			// ★ Audit-Performance 29.08.: V2 ist REIN DIAGNOSTISCH -- alle Leser stehen unter
+			// vgl_an. Gerechnet wurde es aber unter v3_noetig, also auch im Produktionsarm:
+			// eine zweite vollstaendige jacobi3-Eigenzerlegung je Facette, bei 4 mm 3,28 Mio mal.
+			if(!vgl_an) k2b|=1u;
+			else if(nq<6u) k2b|=1u; // K1-Aequivalent: zu wenig Stuetzpunkte
 			else {
 				double bx=0.0,by=0.0,bz=0.0;
 				for(uint i=0u;i<nq;i++) { bx+=qx[i]; by+=qy[i]; bz+=qz[i]; }
@@ -1583,7 +1606,10 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				// Abhilfe ohne neue Konstante: y_w als gewichtetes Mittel ueber die sichtbaren
 				// Flaechen, GEWICHTET MIT DER AUSRICHTUNG (n_i*n4)_+ -- Flaechen, die die
 				// Konsensnormale tragen, bestimmen den Wandabstand, querstehende nicht.
-				{	double zs=0.0, ns_=0.0;
+				// ★ Audit-Performance 29.08.: V4c ist rein diagnostisch (widerlegt, B47) und war
+				// der zweite O(nq)-Lauf je Facette -- jetzt nur noch fuer den Vergleichsbericht.
+				if(!vgl_an) yw4a = yw4n;
+				else {	double zs=0.0, ns_=0.0;
 					for(uint j2=0u;j2<nq;j2++) {
 						const int dj=(int)qd[j2];
 						const double jx=-(double)FZ_C[dj][0], jy=-(double)FZ_C[dj][1], jz=-(double)FZ_C[dj][2];
@@ -1600,7 +1626,10 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			// ---- V5 auswerten: identische Sichtbarkeit und identischer Rueckfall wie V4,
 			// aber ALLE sichtbaren Flaechen gleich gewichtet. y_w wie V4b (naechste Flaeche).
 			double yw5=0.0; uchar k5b=0u;
-			{	const double l5=sqrt(n5x*n5x+n5y*n5y+n5z*n5z);
+			// ★ Audit-Performance 29.08.: V5 ist rein diagnostisch (isolierte den Sichtbarkeits-
+			// filter als Schaden, B45) -- ausserhalb des Vergleichsberichts nicht mehr rechnen.
+			if(!vgl_an) k5b|=1u;
+			else {	const double l5=sqrt(n5x*n5x+n5y*n5y+n5z*n5z);
 				if(nsicht==0u) k5b|=1u;
 				else {
 					if(l5<1e-12) { n5x=nnx; n5y=nny; n5z=nnz; }   // derselbe Duennteil-Rueckfall
@@ -1631,8 +1660,8 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			auto wink=[&](const double bx,const double by,const double bz){
 				const double c=fabs(nxd*bx+nyd*by+nzd*bz);
 				return (float)(acos(fmin(1.0,c))*180.0/3.14159265358979); };
-			a14.push_back((k4b&1u)?-1.0f:wink(n4x,n4y,n4z));
-			yw4v.push_back((float)yw4); yw4nv.push_back((float)yw4n); yw4av.push_back((float)yw4a); kl4v.push_back(k4b);
+			if(vgl_an) { a14.push_back((k4b&1u)?-1.0f:wink(n4x,n4y,n4z));
+				yw4v.push_back((float)yw4); yw4nv.push_back((float)yw4n); yw4av.push_back((float)yw4a); kl4v.push_back(k4b); }
 			if(kref_an) {
 				nv1.push_back((float)nxd); nv1.push_back((float)nyd); nv1.push_back((float)nzd);
 				nv2.push_back((float)n2x); nv2.push_back((float)n2y); nv2.push_back((float)n2z);
@@ -1649,26 +1678,38 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				// aus der PCA, die auch unter V3b vollstaendig durchlaeuft, und sind eine Aussage
 				// ueber die PUNKTWOLKE -- unabhaengig davon, woher die Normale kommt. Sie hier zu
 				// loeschen war der Grund, warum der A/B nicht einvariabel war.
+				const float pnx_=f.nx, pny_=f.ny, pnz_=f.nz, pyw_=f.yw; // V1-Zustand fuer den Wirkpfad-Nachweis
 				f.klasse &= (uchar)~(uchar)(1u|8u|16u);       // nur K1, K4 und Orientierung neu bewerten
-				f.klasse |= (uchar)(k6b&(uchar)(1u|8u));
-				f.nx=(float)n6x; f.ny=(float)n6y; f.nz=(float)n6z;
-				if(ywquelle>0u) { f.yw=(float)yw6; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z; }
+				f.klasse |= (uchar)(k6b&(uchar)1u);           // K1 aus V3b; K4 unten aus dem TATSAECHLICH gespeicherten y_w
+				double e6x=n6x, e6y=n6y, e6z=n6z;             // effektive Normale -- ggf. gekippt (Audit C)
+				if(ywquelle>0u) { f.klasse |= (uchar)(k6b&(uchar)8u); f.yw=(float)yw6; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z; }
 				else { // y_w bleibt V1s Groesse: gegen den PCA-Schwerpunkt, aber mit der NEUEN Normalen
-					const double ywp = n6x*((double)x-cx)+n6y*((double)y-cy)+n6z*((double)z-cz);
-					f.yw=(float)fabs(ywp); /* cx_/cy_/cz_ bleiben der PCA-Schwerpunkt */ } // EINZIGER Abnehmer: die
+					// ★ Audit C+D 29.08.: hier stand fabs(ywp). Das liess die NORMALE stehen und
+					// meldete die Wand auf der falschen Seite -- f.yw und f.n konnten gegenlaeufig
+					// sein, und fac_geo[8k+3] speist sowohl die Wandfunktion als auch ELIBB-q.
+					// Zweiter Fehler: K4 wurde aus k6b Bit 8 gesetzt, das aus yw6 (Ankermass der
+					// naechsten Flaeche) stammt -- entschieden wurde also ueber eine ANDERE Groesse
+					// als die gespeicherte. Jetzt: Vorzeichen durch KIPPEN, K4 aus ywp selbst.
+					double ywp = n6x*((double)x-cx)+n6y*((double)y-cy)+n6z*((double)z-cz);
+					if(ywp<0.0) { e6x=-e6x; e6y=-e6y; e6z=-e6z; ywp=-ywp; nq_kipp++; }
+					f.yw=(float)ywp; /* cx_/cy_/cz_ bleiben der PCA-Schwerpunkt */
+					if(ywp<(double)yw_min||ywp>2.0) f.klasse|=8u; } // EINZIGER Abnehmer: die
 				// y_w-Neuberechnung der Glaettung (setup.cpp ~1619). Stuende hier der PCA-Schwerpunkt,
 				// wuerde die Glaettung V3bs y_w still gegen einen fremden Bezug ueberschreiben.
 				// r21_/r10_ bleiben die PCA-Werte -- sie beschreiben die Punktwolke, nicht die Normale.
-				const double geg6 = n6x*((double)x-(double)snx)+n6y*((double)y-(double)sny)+n6z*((double)z-(double)snz);
-				if(geg6<=0.0) f.klasse|=16u;                  // Orientierungs-Gegenprobe bleibt
-				const double q6x=fabs(n6x), q6y=fabs(n6y), q6z=fabs(n6z);
+				f.nx=(float)e6x; f.ny=(float)e6y; f.nz=(float)e6z;
+				const double geg6 = e6x*((double)x-(double)snx)+e6y*((double)y-(double)sny)+e6z*((double)z-(double)snz);
+				if(geg6<=0.0) f.klasse|=16u;                  // Orientierungs-Gegenprobe bleibt -- gegen die GEKIPPTE Normale
+				const double q6x=fabs(e6x), q6y=fabs(e6y), q6z=fabs(e6z);
 				f.achse = (q6x>=q6y&&q6x>=q6z) ? 0u : ((q6y>=q6z) ? 1u : 2u);
+				if(f.nx!=pnx_||f.ny!=pny_||f.nz!=pnz_) nq_n_geaendert++;
+				if(f.yw!=pyw_) nq_yw_geaendert++;
 			}
-			yw5v.push_back((float)yw5); kl5v.push_back(k5b);
-			a12.push_back((k2b&1u)?-1.0f:wink(n2x,n2y,n2z));
-			a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
-			yw2v.push_back((float)yw2); yw3v.push_back((float)yw3);
-			kl2v.push_back(k2b); kl3v.push_back(k3b);
+			if(vgl_an) { yw5v.push_back((float)yw5); kl5v.push_back(k5b);
+				a12.push_back((k2b&1u)?-1.0f:wink(n2x,n2y,n2z));
+				a13.push_back((k3b&1u)?-1.0f:wink(n3x,n3y,n3z));
+				yw2v.push_back((float)yw2); yw3v.push_back((float)yw3);
+				kl2v.push_back(k2b); kl3v.push_back(k3b); }
 			// ★ Pruefagent H1: der y_w-ANKER stand INNERHALB des normquelle-Blocks und war ohne
 			// NORMQUELLE=1 ein stiller No-Op -- der Arm, der ihn allein messen sollte, haette
 			// garantiert die Zahlen des Bezugsarms geliefert und daraus "der Anker kostet nichts"
@@ -1676,10 +1717,20 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			// Vorzeichen wie bei V1 durch KIPPEN der Normalen, nicht per fabs (H2).
 			if(ywquelle>0u&&!(f.klasse&1u)) {
 				yw_aktiv++;
+				const float qnx_=f.nx, qny_=f.ny, qnz_=f.nz, qyw_=f.yw;
 				double ywn = (double)f.nx*((double)x-c6x)+(double)f.ny*((double)y-c6y)+(double)f.nz*((double)z-c6z);
-				if(ywn<0.0) { f.nx=-f.nx; f.ny=-f.ny; f.nz=-f.nz; ywn=-ywn; }
+				if(ywn<0.0) { f.nx=-f.nx; f.ny=-f.ny; f.nz=-f.nz; ywn=-ywn; yw_kipp++; }
 				f.yw=(float)ywn; f.cx_=(float)c6x; f.cy_=(float)c6y; f.cz_=(float)c6z;
 				f.klasse &= (uchar)~8u; if(ywn<(double)yw_min||ywn>2.0) f.klasse|=8u;
+				// ★ Audit C2 29.08.: das Kippen ueberschreibt die Orientierung, die vorher durch
+				// die Gegenprobe gegen den Wandnachbarn validiert war -- Bit 16 blieb aber stehen,
+				// wie es war. Also die Gegenprobe nach dem Kippen WIEDERHOLEN.
+				const double geg_n = (double)f.nx*((double)x-(double)snx)+(double)f.ny*((double)y-(double)sny)+(double)f.nz*((double)z-(double)snz);
+				const uchar ori_vor = (uchar)(f.klasse&16u);
+				f.klasse &= (uchar)~16u; if(geg_n<=0.0) f.klasse|=16u;
+				if((uchar)(f.klasse&16u)!=ori_vor) yw_ori_neu++;
+				if(f.nx!=qnx_||f.ny!=qny_||f.nz!=qnz_) yw_n_geaendert++;
+				if(f.yw!=qyw_) yw_yw_geaendert++;
 			}
 		}
 		F.push_back(f);
@@ -1692,6 +1743,10 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		// die wandnahen Zellen je vorkommen. lbm.cpp macht es fuer fac_idx laengst richtig und
 		// meldet dafuer "0.52 GB gespart". Hier dieselbe Bounding-Box, ueber die Facetten selbst
 		// bestimmt (eine Facette liegt IMMER an der Wand, die BBox ist also eng).
+		// ★ Audit H 29.08.: bei leerem F blieb bx0=Nx, bx1=0 -- (bx1-bx0+1u) lief als uint
+		// auf ~4,29e9 um und die Allokation warf, wo der alte Voll-Domaenen-Index harmlos war.
+		if(F.empty()) print_warning("Glaettung: keine Facetten vorhanden -- uebersprungen.");
+		else {
 		uint bx0=Nx,by0=Ny,bz0=Nz,bx1=0u,by1=0u,bz1=0u;
 		for(const Facette& fb : F) {
 			const uint zc=(uint)(fb.n/((ulong)Nx*(ulong)Ny)), yc=(uint)((fb.n/(ulong)Nx)%(ulong)Ny), xc=(uint)(fb.n%(ulong)Nx);
@@ -1738,6 +1793,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			}
 		}
 		F=std::move(G); // ★ Audit: war Copy-Assignment -- 56 B je Facette, bei 4 mm 183 MB umsonst
+		} // Ende des nicht-leeren Zweigs (Audit H)
 	}
 	// ★ Nachpruefer B4: Histogramme aus dem ENDzustand (nach Glaettung) -- Konsole und CSV sehen
 	// dieselbe Population; B2: "markiert" zaehlt ZELLEN mit klasse!=0, nicht die Zaehlersumme.
@@ -1759,8 +1815,12 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		hist_winkel.push_back(acos(fmin(1.0,(double)fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)))))*180.0/3.14159265358979);
 	}
 	// Bericht + Histogramm-CSV.
-	auto quantil = [](std::vector<double>& v, const double q) {
-		if(v.empty()) return 0.0; std::sort(v.begin(), v.end());
+	// ★ Audit-Performance 29.08.: das Lambda sortierte bei JEDEM Aufruf. Elf Aufrufe ueber
+	// je bis zu 3,28 Mio double bedeuteten zehn Sortierungen von bereits Sortiertem.
+	// Jetzt einmal sortieren (sortiere), danach nur noch indizieren.
+	auto sortiere = [](std::vector<double>& v) { std::sort(v.begin(), v.end()); };
+	auto quantil = [](const std::vector<double>& v, const double q) {
+		if(v.empty()) return 0.0;
 		return v[(size_t)fmin((double)v.size()-1.0, q*(double)v.size())]; };
 	const ulong nf=(ulong)F.size();
 	if(v3_noetig&&!v3b_koh.empty()) {
@@ -1772,14 +1832,19 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 		if(normquelle==1u&&v3b_schwach*20ull>(ulong)v3b_koh.size())
 			print_warning("V3b: mehr als 5 % der Facetten haben eine schwach kohaerente Flaechensumme -- ihre Normalenrichtung ist dort ueberwiegend Ausloeschungsrest. Die betroffenen Zellen sitzen erfahrungsgemaess an Duennteilen.");
 	}
+	// ★ Audit F 29.08.: geprueft wird jetzt die WIRKUNG (Vergleich gegen den V1-Zustand
+	// unmittelbar vor dem Schreiben), nicht der Eintritt in den Block. Der alte Waechter
+	// konnte nur den Totalausfall sehen und meldete sonst tautologisch "n von n".
 	if(ywquelle>0u) {
-		if(yw_aktiv==0ull) print_error("CFD_FACETTEN_YWQUELLE=1, aber der Anker wurde KEIN einziges Mal gesetzt -- stiller No-Op.");
-		else print_info("  y_w-ANKER AKTIV: "+to_string(yw_aktiv)+" Facetten gegen die naechste Voxelflaeche verankert (statt gegen den PCA-Schwerpunkt).");
+		if(yw_yw_geaendert==0ull&&yw_n_geaendert==0ull) print_error("CFD_FACETTEN_YWQUELLE=1, aber WEDER y_w NOCH eine Normale hat sich gegenueber dem Zustand davor geaendert -- stiller No-Op.");
+		else print_info("  y_w-ANKER AKTIV: "+to_string(yw_aktiv)+" Eintritte, davon y_w geaendert "+to_string(yw_yw_geaendert)
+			+", Normale gekippt "+to_string(yw_kipp)+", Orientierungsbit neu bewertet "+to_string(yw_ori_neu)+".");
 	}
 	if(normquelle==1u) {
-		if(nq_aktiv==0ull) print_error("CFD_FACETTEN_NORMQUELLE=1, aber V3b wurde KEIN einziges Mal in die Facette geschrieben -- stiller No-Op.");
+		if(nq_n_geaendert==0ull) print_error("CFD_FACETTEN_NORMQUELLE=1, aber KEINE einzige Normale unterscheidet sich von der PCA-Normalen -- stiller No-Op.");
 		else print_info("  NORMALENQUELLE V3b AKTIV: "+to_string(nq_aktiv)+" von "+to_string((ulong)F.size())
-			+" Facetten aus der Voxelflaechen-Summe (Duennteil-Rueckfall "+to_string(v6_rueck)+").");
+			+" Eintritte, Normale wirklich geaendert "+to_string(nq_n_geaendert)+", y_w geaendert "+to_string(nq_yw_geaendert)
+			+", Vorzeichen gekippt "+to_string(nq_kipp)+" (Duennteil-Rueckfall "+to_string(v6_rueck)+").");
 	}
 	print_info(string("Facetten (")+wo+"): "+to_string(nf)+" wandnahe Fluidzellen; Klassen: K1(<6 Punkte) "+to_string(k1)
 		+", K2(Kante) "+to_string(k2)+", K3(Linie) "+to_string(k3)+", K4(y_w, nach Glaettung) "+to_string(k4)
@@ -1787,6 +1852,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	if(nf>0ull) print_info("  markierte ZELLEN (klasse!=0, Nachpruefer B2 -- Bitmaske, keine Zaehlersumme): "
 		+to_string(markiert)+" = "+to_string(100.0f*(float)markiert/(float)nf,1u)
 		+" % (Schwelle r21>"+to_string((float)kante_r21,3u)+", Default 0,15 geeicht 2026-08-15 aus Fenster-A/B, r10<0,02 Sicherheitsnetz -- K3 war ueberall leer)");
+	sortiere(hist_yw); sortiere(hist_winkel); // einmal, danach nur noch indizieren (Audit-Performance)
 	print_info("  y_w: Median "+to_string((float)quantil(hist_yw,0.5),3u)+", q10 "+to_string((float)quantil(hist_yw,0.1),3u)
 		+", q90 "+to_string((float)quantil(hist_yw,0.9),3u)+" (Anker parallelwandig: exakt 0,500)");
 	// ★ NORMALEN-KOMPONENTEN (28.08.): der 26-Grad-Arm mit V3b meldet eine y-Reibung von +0,1074
@@ -1797,6 +1863,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	{	std::vector<double> hx, hy, hz;
 		for(const Facette& f : F) { if(f.klasse&1u) continue;
 			hx.push_back((double)fabs(f.nx)); hy.push_back((double)fabs(f.ny)); hz.push_back((double)fabs(f.nz)); }
+		sortiere(hx); sortiere(hy); sortiere(hz);
 		if(!hx.empty()) print_info("  Normalen-Komponenten |n| Median/q90: x "+to_string((float)quantil(hx,0.5),4u)+"/"+to_string((float)quantil(hx,0.9),4u)
 			+"  y "+to_string((float)quantil(hy,0.5),4u)+"/"+to_string((float)quantil(hy,0.9),4u)
 			+"  z "+to_string((float)quantil(hz,0.5),4u)+"/"+to_string((float)quantil(hz,0.9),4u));
@@ -1870,10 +1937,14 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 	// richtige Antwort. Der Rueckseitentest (Heiko) und die Lauflaengenmessung sind zwei
 	// unabhaengige Wege zur selben Aussage -- geprueft wird jetzt ihre UEBEREINSTIMMUNG.
 	if(!v3_noetig) { /* ohne V3-Pfad gibt es keine Duennteil-Flaggen -- nichts zu pruefen */ }
+	// ★ Audit L 29.08.: war print_error (= exit). Beide Messwege sind DIAGNOSEN, und die
+	// Richtung "Dicke sagt duenn, Rueckseitentest schweigt" ist nicht ausgeschlossen: der
+	// Rueckseitentest zaehlt nur SICHTBARE Flaechen, der Dickenzensus auch Diagonalnachbarn.
+	// Ein reines Kreuzmass darf einen 1,5-Stunden-Lauf nicht abschiessen -- jetzt Warnung.
 	else if(n_dicke1>0ull&&v4_duenn==0ull)
-		print_error("V4-Wirkpfad: "+to_string(n_dicke1)+" Zellen an 1-Zellen-Teilen, aber KEINE Duennteil-Flaeche -- Rueckseitentest defekt.");
+		print_warning("V4-Wirkpfad: "+to_string(n_dicke1)+" Zellen an 1-Zellen-Teilen, aber KEINE Duennteil-Flaeche -- Rueckseitentest pruefen (Diagnose, kein Abbruch).");
 	else if(n_dicke1==0ull&&v4_duenn>0ull)
-		print_error("V4-Wirkpfad: "+to_string(v4_duenn)+" Duennteil-Flaechen, aber KEIN 1-Zellen-Teil im Dickenzensus -- die beiden Messwege widersprechen sich.");
+		print_warning("V4-Wirkpfad: "+to_string(v4_duenn)+" Duennteil-Flaechen, aber KEIN 1-Zellen-Teil im Dickenzensus -- die beiden Messwege widersprechen sich (Diagnose, kein Abbruch).");
 	else if(v4_duenn==0ull)
 		print_info("   V4-Wirkpfad: kein 1-Zellen-Teil im Fall (Dickenzensus bestaetigt) -- Rueckseitentest korrekt still.");
 	if(normquelle==1u&&v6_rueck>0ull) print_info("   V3b-Rueckfall hat "+to_string(v6_rueck)
@@ -3618,13 +3689,29 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 	}
 	std::vector<string> fehlt, weicht_ab; string vorschlag, zu_setzen; ulong n_geprueft=0ull;
 	for(const BasisZeile& b : B) {
-		if(b.einheit=="ausgabe") continue;                 // beruehrt die Loesung nicht
+		if(b.einheit=="ausgabe") {
+			// ★ Audit I2 29.08.: uebersprungen, WEIL Ausgabe keine Physik ist -- aber still.
+			// Der Korrekturvermerk zu CFD_SLICE_DT in der Referenz suggerierte eine Absicherung,
+			// die es hier nie gab (der einzige echte Schutz ist der harte Slice-Riegel).
+			// Jetzt wenigstens sichtbar: Abweichung melden, ohne den Lauf anzuhalten.
+			const char* ist_a = getenv(b.name.c_str());
+			const string ist_s = (ist_a==nullptr) ? string("(ungesetzt)") : string(ist_a);
+			if(ist_a==nullptr||(fabs(atof(ist_a)-atof(b.wert.c_str()))>=1e-9&&ist_s!=b.wert))
+				print_info("  BASIS (Ausgabe, nicht erzwungen): "+b.name+" Referenz "+b.wert+", Lauf "+ist_s+".");
+			continue; }
 		if(b.name=="CFD_DX"||b.name=="CFD_CASE") continue;  // die Sprosse selbst bzw. der Fall
 		n_geprueft++;
 		if(b.einheit!="phys"&&b.einheit!="modus"&&b.einheit!="zellen_grob"&&b.einheit!="zellen_fein"
 		   &&b.einheit!="zellen_grob_laenge"&&b.einheit!="index_grob")
 			print_error("BASIS-WAECHTER: unbekannte Einheit '"+b.einheit+"' bei "+b.name+" -- sie fiele still auf 'Wert bleibt' zurueck (M6).");
 		string soll=b.wert, hinweis;
+		// ★ Audit I 29.08.: 'phys', 'modus' und 'zellen_grob' fielen still auf "Wert bleibt"
+		// durch -- genau die Rueckfallklasse, die M6 schliessen sollte. Sie sind wirklich
+		// sprossenunabhaengig, aber das gehoert hingeschrieben, nicht durchgereicht:
+		//   phys        physikalische Groesse (m, s, m/s) -- von dx unberuehrt
+		//   modus       Schalterstellung/Zaehlwert ohne Laengenbezug
+		//   zellen_grob ANZAHL grober Zellen -- die Anzahl bleibt, ihre Laenge waechst mit dx_c
+		//               (dx_c = dx_f*ratio); wer eine feste LAENGE will, nimmt zellen_grob_laenge.
 		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob") {
 			const double roh = atof(b.wert.c_str())*skal;
 			const long unten=(long)floor(roh), oben=(long)ceil(roh);
@@ -3695,6 +3782,13 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 
 static void main_setup_fahrzeug_dd() {
 	pruefe_basis(get_exe_path()+"../basis/fahrzeug_dd.basis", env_f("CFD_DX", 4.0f)); // ★ VOR jedem teuren Schritt
+	// ★ Audit J 29.08.: der Slice-Riegel stand erst NACH baue_facetten und dem ELIBB-Remesh --
+	// bei 4 mm also nach ueber zehn Minuten Aufbau. Die Entscheidung haengt aber nur an zwei
+	// getenv, also faellt sie hier. Entscheidungstabelle wortgleich zur Stelle weiter unten.
+	{	const bool s_ = getenv("CFD_SLICE_NEAR_STEPS")!=nullptr, d_ = getenv("CFD_SLICE_DT")!=nullptr;
+		const ulong ns_ = s_ ? (ulong)env_u("CFD_SLICE_NEAR_STEPS", 5000u) : (d_ ? 0ull : 5000ull);
+		const float dt_ = (ns_==0ull&&d_) ? env_f("CFD_SLICE_DT", 0.010f) : 0.0f;
+		if(ns_==0ull&&dt_<=0.0f) print_error("Dieser Lauf schriebe KEINE Slices (CFD_SLICE_DT=0 und CFD_SLICE_NEAR_STEPS ungesetzt/0). Slice-Ausgabe ist Pflicht -- sie kostet praktisch nichts und ohne sie ist der Lauf hinterher nicht ansehbar. CFD_SLICE_DT auf einen positiven Wert setzen (0.1 = alle 100 ms)."); }
 	bool nahfeld_satgate = false; // SATGATE-Zustand der NAHFELD-Domaene (Funktionsscope; gesetzt im Fein-Block, gelesen vom Rueckfall-Detektor am Ende)
 	// ---------------------------------------------------------------- Physik
 	const float si_u      = 30.0f;
@@ -5304,6 +5398,16 @@ static void main_setup_fahrzeug_dd() {
 	const ulong fac_cd_every = (ulong)max(1u, env_u("CFD_FAC_CD_EVERY", 4u));
 	const bool fac_an_zs = env_u("CFD_FACETTEN", 0u)>0u; // env-Read VOR der Zeitschleife (Doktrin; stand im Sample-Block)
 	double kad_cd_rest=0.0, kad_cz_rest=0.0; bool kad_cdcz_da=false; // letzte korrigierte Werte fuer Bild-Einblendung + [KADENZ]-Status (27.08.)
+	// ★ LAUFBERICHT (Heiko 29.08.): "alle 100ms physikalisch einen bericht ueber aktuelle
+	// ueber 50ms gemittelte korrigierte cd und cz". Korrigiert = REST = Gesamt minus
+	// Radkontakt-Band, dieselbe Groesse, auf der die Messarme verglichen werden. Der
+	// vorhandene [KADENZ]-Druck zeigt die MOMENTANwerte am Sample; ein Momentanwert
+	// schwankt im Ablauf um ein Vielfaches der Armunterschiede und taugt nicht zum Mitlesen.
+	// Gleitendes Zeitfenster, keine Blockmittel -- der Bericht soll den Verlauf zeigen.
+	const double ber_dt   = (double)env_f("CFD_BERICHT_DT", 0.1f);      // Berichtsabstand [s Physik]
+	const double ber_fen  = (double)env_f("CFD_BERICHT_FENSTER", 0.05f); // Mittelungsfenster [s Physik]
+	std::vector<double> ber_t, ber_cd, ber_cz; double ber_next = -1.0; ulong ber_n_aus=0ull;
+	std::ofstream ber_csv;
 	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
 	// "unklaren" Zellen. Die Zaehler sind geometrisch und ueber alle Samples konstant -- der
 	// letzte Stand genuegt; das Kraftgewicht ist nur im Host-Pfad belastbar (FacKraft.ukraft_ok).
@@ -5918,6 +6022,7 @@ static void main_setup_fahrzeug_dd() {
 					const double cdb=(double)units_fine.si_F((float)FK.pbx)/qA, cdg=(double)units_fine.si_F((float)FK.px)/qA;
 					const double czb=(double)units_fine.si_F((float)FK.pbz)/qA, czg=(double)units_fine.si_F((float)FK.pz)/qA;
 					kad_cd_rest=cdg-cdb; kad_cz_rest=czg-czb; kad_cdcz_da=true; // Puffer fuer die Kadenz-Einblendung
+					ber_t.push_back(t_si); ber_cd.push_back(cdg-cdb); ber_cz.push_back(czg-czb); // Laufbericht: gleitendes Fenster
 					fac_csv << t_si << "," << cdg << "," << czg << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest
 					        << "," << cdb << "," << (cdg-cdb) << "," << czb << "," << (czg-czb) << "\n" << std::flush;
@@ -5940,7 +6045,38 @@ static void main_setup_fahrzeug_dd() {
 				}
 			}
 			const auto _t5 = t_now();
-			const ulong ns_ist = (outer+1ull)*(ulong)ratio; // exakte Near-Steps: BEIDE Pfade laufen ratio feine Schritte je Outer (Plan 27.08., setup.cpp:4699/4717)
+			// ★ LAUFBERICHT alle ber_dt ueber das letzte ber_fen-Fenster (Heiko 29.08.).
+		if(ber_dt>0.0&&!ber_t.empty()) {
+			if(ber_next<0.0) ber_next = ber_t.front()+ber_dt;   // erster Bericht ber_dt nach dem ersten Kraftsample
+			while((size_t)ber_n_aus<ber_t.size()&&ber_t[ber_n_aus]<ber_t.back()-ber_fen) ber_n_aus++; // Fensteranfang nachziehen
+			if(t_si>=ber_next) {
+				double mcd=0.0, mcz=0.0; ulong nb=0ull;
+				for(size_t i=ber_n_aus;i<ber_t.size();i++) { mcd+=ber_cd[i]; mcz+=ber_cz[i]; nb++; }
+				if(nb>0ull) {
+					mcd/=(double)nb; mcz/=(double)nb;
+					double vcd=0.0, vcz=0.0;
+					for(size_t i=ber_n_aus;i<ber_t.size();i++) { vcd+=(ber_cd[i]-mcd)*(ber_cd[i]-mcd); vcz+=(ber_cz[i]-mcz)*(ber_cz[i]-mcz); }
+					const double scd = nb>1ull ? sqrt(vcd/(double)(nb-1ull)) : 0.0;
+					const double scz = nb>1ull ? sqrt(vcz/(double)(nb-1ull)) : 0.0;
+					print_info("[BERICHT] t = "+to_string((float)t_si,3u)+" s | Fenster "+to_string((float)(ber_fen*1000.0),0u)
+						+" ms, n = "+to_string(nb)+" | cd_rest = "+to_string((float)mcd,4u)+" +- "+to_string((float)scd,4u)
+						+" | cz_rest = "+to_string((float)mcz,4u)+" +- "+to_string((float)scz,4u)
+						+(t_si<(double)t_warmup?"  (noch im Warmlauf)":""));
+					if(!ber_csv.is_open()) { ber_csv.open(out_dir+"cd_bericht.csv"); ber_csv.precision(8);
+						ber_csv << "# Laufbericht (Heiko 29.08.): alle " << ber_dt << " s Physik das Mittel ueber die letzten "
+						        << ber_fen << " s. rest = Gesamt minus Radkontakt-Band. sd = Streuung IM Fenster, kein SEM der Messreihe.\n";
+						ber_csv << "time_s,n,cd_rest_mittel,cd_rest_sd,cz_rest_mittel,cz_rest_sd,warmup\n"; }
+					ber_csv << t_si << "," << nb << "," << mcd << "," << scd << "," << mcz << "," << scz
+					        << "," << (t_si<(double)t_warmup?1:0) << "\n" << std::flush;
+				}
+				ber_next = (floor(t_si/ber_dt)+1.0)*ber_dt;  // an das Raster binden, nicht aufaddieren (kein Drift)
+			}
+			if(ber_n_aus>4096ull) { // Puffer gelegentlich verdichten, damit er nicht ueber den Lauf waechst
+				ber_t.erase(ber_t.begin(), ber_t.begin()+(long)ber_n_aus);
+				ber_cd.erase(ber_cd.begin(), ber_cd.begin()+(long)ber_n_aus);
+				ber_cz.erase(ber_cz.begin(), ber_cz.begin()+(long)ber_n_aus); ber_n_aus=0ull; }
+		}
+		const ulong ns_ist = (outer+1ull)*(ulong)ratio; // exakte Near-Steps: BEIDE Pfade laufen ratio feine Schritte je Outer (Plan 27.08., setup.cpp:4699/4717)
 			bool slice_jetzt = false;
 			if(slice_ns>0ull) { if(ns_ist>=slice_ns_next) { slice_jetzt = true; slice_ns_next = (ns_ist/slice_ns+1ull)*slice_ns; kad_punkt++; } }
 			else if(slice_dt>0.0f && (float)t_si>=slice_next) { slice_jetzt = true; slice_next = (float)t_si + slice_dt; }

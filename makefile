@@ -1,6 +1,10 @@
 MAKEFLAGS = -j$(nproc)
 CC = g++
-CFLAGS = -std=c++17 -pthread -O -Wno-comment
+# ★ Audit-Performance 29.08.: stand auf -O (= -O1). Der gesamte Host-Aufbau -- Voxelierung,
+# baue_facetten, Remesh -- laeuft einkernig; bei 4 mm sind das Minuten. -O2 aendert die
+# FP-Semantik nicht (kein -ffast-math, kein -march=native, also auch keine FMA-Kontraktion
+# auf der x86-64-Grundlinie). Gegenprobe ist der Bitanker: FELD-HASH muss gleich bleiben.
+CFLAGS = -std=c++17 -pthread -O2 -Wno-comment
 
 .PHONY: no-target
 no-target:
