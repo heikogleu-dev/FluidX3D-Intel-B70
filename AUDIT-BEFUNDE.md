@@ -5092,3 +5092,48 @@ Plan Weg 1 (Agent): Stufe 0 Klassen-Diagnostik im Kernel (fac_kd: Sum u_t, Y, tw
 Facette, Host-Tabelle je Treppenklasse) -> Stufe 1 Bezugstabellen kipp0/kipp26-V1/kipp26-V3b/kipp45 -> Stufe 2
 Flaechen-Renormierung A_i (Host, bitgleich an kipp0/45) -> Stufe 3 Nachbarabtastung (u_t, y aus der zweiten Fluidzelle
 entlang n; ersetzt den Handwert UTKORR=1,5) -> 8 mm gepaart -> 4 mm.
+
+### B64 — Die BB-Nullinie und wo der Auflösungsfehler wirklich sitzt (30.08. abends, abgeschlossen)
+Reines Bounce-Back an der Wand (CFD_FACETTEN=0, sonst volle Basis) gegen Wandmodell, gepaart, je Arm mit
+seinem gueltigen Instrument (BB: object_force -- Reflexionsannahme exakt erfuellt; Wandmodell:
+Facettenpfad -- object_force ist dort phantombehaftet, w_ref zeigt cd 6,76 statt 1,02):
+  4 mm cd_rest: p4_ref 0,616 / 0,550 / 0,524 gegen p4_bb 0,740 / 0,658 / 0,598 (t = 0,2 / 0,3 / 0,4 s)
+  4 mm cz_rest: p4_ref -1,126 / -0,939 / -0,902 gegen p4_bb -0,998 / -0,847 / -0,801
+  p4_bb Schluss (0,5 s, kein p4_ref-Partner -- Absturz bei 0,435 s): cd_rest 0,573, cz_rest -0,779
+  8 mm: w_ref 1,025 / -0,080 gegen w_bb 0,374 / +0,065 (AUFTRIEB). OF13: Cd 0,599 / Cz -1,301.
+BEFUNDE: (1) Beim Widerstand liegt reines BB bei 4 mm NAEHER an OF13 (0,598 gegen 0,524 bei Ziel 0,599);
+das Wandmodell SENKT Cd, weil es an Treppenzellen auf 4-20 % der wahren Wandschubspannung zielt und dabei
+Slip statt BB anwendet. (2) Der Wandmodell-Hebel beim Abtrieb schrumpft mit der Aufloesung: 8 mm +0,23 Cz,
+4 mm nur noch +0,10; bei 4 mm liefert schon reines BB -0,80 von -1,30. Der Loewenanteil kommt aus
+Aufloesung, Kopplung, Moving-Floor und Boxgroesse. (3) INSTRUMENTENFALLE, von Heiko benannt: ein BB-Lauf
+schreibt keine cd_facetten.csv, und weder Nullziel (FACETTEN=4, wendet Slip an) noch Modus 2 (tauscht
+Populationen) taugen als BB-Bezug -- deshalb neu CFD_FAC_MESSNUR (fd1bcad).
+
+### B65 — Der Auflösungsfehler ist wandnahe SGS-Ueberviskositaet, nicht Druckphysik (zwei Agenten, 30.08.)
+Heikos Hypothese "bei der Druckrelaxation passt etwas nicht" ist WIDERLEGT: u_lat = 0,075 ist fest
+(setup.cpp:4051), Ma ist bei 8 und 4 mm bitgleich 0,1299, der Ma^2-Fehler aendert sich um exakt null --
+ein solcher Fehler kann kein Symptom erzeugen, das beim Halbieren von dx um Faktor 3,4 kleiner wird. Und
+der direkte Test schlaegt fehl: dcp/dx ueber dem Dach FX 4 mm 0,41-0,51 /m gegen OF13 0,44 /m (nicht
+staerker, sondern gleich). Ebenso ausgeschlossen: rho-Randaufpraegung (B60) -- exponentieller Abfall,
+bei 4 mm 5e-11 am Dach, und die cp-Spanne wird bei 4 mm sogar 3x SCHLECHTER waehrend Cz besser wird;
+Wandmodell-Abdeckung (Rueckfallquote 42,97 % gegen 42,34 % = dx^0); die Wandfunktion selbst (Kanal
+c_f/Ziel 0,716 / 0,669 / 0,725 ueber 3,8-fache Verfeinerung = dx^0).
+WAS UEBRIG BLEIBT, gemessen: delta_90 bei x = 2,50 m auf dem STUFENFREIEN flachen Dach ist 105-114 mm
+(8 mm) gegen 28-41 mm (4 mm) -- Faktor 3-4 -- und derselbe Faktor tritt im REINEN BOUNCE-BACK auf.
+Also weder Voxeltreppe noch Wandmodell. nu_t/nu_0 in der Wandlage: 60 / 45 / 15 bei dx+ 519 / 273 / 137
+(Kanal N=20/38/76) = O(dx), die einzige Quelle mit passender Skalierung; am Kanal traegt diese eine
+Zelllage 77 % der Wandschubspannung (c_f/Ziel 0,72 -> 0,17 mit CFD_SGS_WANDFREI).
+Abloeseposition (20 mm ueber der Dachhaut, 5 Zellen u_x<0): 8 mm 3,095 +-0,017 m, 4 mm 3,529 +-0,061 m,
+OF13 bleibt anliegend bis 3,66 m. Verschiebung +434 mm bei halbiertem dx = 7 sigma.
+DIAGNOSE: wir fahren WMLES (LES + Wandmodell), aber ohne die Kopplung -- das SGS bestimmt die
+Wandschubspannung mit (B57: tau_SGS/tau_WM = 1,11), obwohl das Wandmodell sie liefern soll. Drei
+Auswege: CFD_SGS_WANDFREI (existiert, grob), WALE/Sigma (nicht gebaut, Heiko-Freigabe 30.08.:
+"definitiv auf die Todo"), van Driest (verworfen).
+KEINE Sprosse unter 4 mm moeglich: 2 mm braucht 237 GB VRAM (7,9x Budget), feinstes fahrbares dx 3,978 mm.
+8 mm ist damit der PRUEFSTAND -- eine echte Reparatur muss den 8-mm-Lauf Richtung 4-mm-Verhalten schieben.
+OFFEN: (a) 2857 Fahrzeugzellen als 1-Zelle-Membran auf y = 0 im 8-mm-Gitter (x 2,90-4,33 m, z 0,74-1,16 m;
+bei 4 mm 8 Zellen) -- Agentenbefund, VON MIR NOCH NICHT GEGENGEPRUEFT, macht die 8-mm-Sprosse als
+Cz-Grobsprosse unbrauchbar solange er steht. (b) Kohaerente 151-Hz-Linie mit 60-80 % der
+Kraftfluktuation, trifft keine Boxmode. (c) tau -> 0,5 hat praktisch keine Volumenviskositaet
+(Schalldaempfung 1,9e-6 je Umlauf, 5,4 Mio RHO_CLAMP-Treffer bei 8 mm) -- echter Defekt, aber
+Stabilitaets- und nicht Abloeseursache (ARBEITSLISTE D1).
