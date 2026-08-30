@@ -1893,6 +1893,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_ELIBB"+R(
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
 )+"#endif"+R( // FACETTEN_ELIBB
+)+"#ifdef FACETTEN_NACHBAR"+R(
+                        , const global float* u // Nachbarabtastung: u der zweiten Fluidzelle entlang der Normale (Feld vom Ende des Vorschritts)
+)+"#endif"+R( // FACETTEN_NACHBAR
+)+"#ifdef FACETTEN_KDIAG"+R(
+                        , global float* fac_kd // ★ Klassen-Diagnostik: 8 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche), racefrei (1 Zelle = 1 Facette)
+)+"#endif"+R( // FACETTEN_KDIAG
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f,0.0f,0.0f);
 	const uint fid = fac_idx[fbi];
@@ -1922,7 +1928,58 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
+)+"#ifdef FACETTEN_MESSNUR"+R(
+	// ★★ MESS-NUR (CFD_FAC_MESSNUR, 30.08.2026, Heiko: "wenn du bb und wandmodell gegeneinander
+	// testest musst du auch Aepfel mit Aepfeln vergleichen"). Problem: ein Lauf mit CFD_FACETTEN=0
+	// schreibt KEINE cd_facetten.csv, also musste BB bisher mit object_force gemessen werden --
+	// und das Instrument ist im Wandmodell-Arm phantombehaftet (w_ref: cd 6,76 statt 1,02).
+	// Auch die vorhandenen Modi taugen nicht als BB-Bezug: Nullziel (FACETTEN=4) wendet Slip an
+	// (kipp0: 0,741 gegen Slip 0,719), Modus 2 tauscht die Populationen. Hier deshalb: Facetten
+	// werden gebaut, alloziert und vom Host-Druckpfad (kraft_facetten) ausgewertet, der Kernel
+	// laesst das Feld aber UNANGETASTET -- exakt reines Bounce-Back, gemessen mit dem
+	// Facetten-Instrument. Der Reibungsakkumulator bleibt 0 (es gibt keine Modellreibung);
+	// belastbar ist damit der DRUCKanteil, und der traegt bei Cz 99,5 % (OF13: Cz_p -1,3113
+	// gegen Cz_v +0,0065). Slot 23 zaehlt den Wirkpfad dieses Modus.
+	if(t%100ul==0ul) atomic_inc(&hits[23]);
+	return (float3)(0.0f,0.0f,0.0f);
+)+"#endif"+R( // FACETTEN_MESSNUR
 	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
+	// ★★ NACHBARABTASTUNG (CFD_FAC_NACHBAR, 30.08.2026, Weg-1 Stufe 3). BEFUND, der sie ausloest
+	// (Klassen-Diagnostik CFD_FAC_KDIAG am 26-Grad-Kanal, V3b-Konfiguration): die konkave Eckzelle
+	// (8 eigene Solid-Links, y_w 0,18) tastet u_t = 0,0051 ab, die freie Zelle ueber derselben
+	// Stufe 0,0224 -- Faktor 4,4. Die Eckzelle liegt im STUFENSCHATTEN; ihr u_t ist kein
+	// Grenzschichtwert, sondern der Rest einer abgeschatteten Rezirkulation. Spalding macht daraus
+	// tau ~ u^2, also Ziel/Ist 0,04. Abhilfe: den EINGANG (u_t und Wandabstand) aus der zweiten
+	// Fluidzelle ENTLANG DER NORMALE nehmen -- dort steht das Profil frei. Wie bei UTKORR wirkt das
+	// NUR auf Y/u+/u_tau; Tangentialbasis, Klemme tw_max und die Gates bleiben auf dem lokalen ut,
+	// damit Budget und Stabilitaet unveraendert bleiben. u traegt je Scheduling t-1 oder t
+	// (UPDATE_FIELDS schreibt spaeter im selben Kernel) -- fuer einen Profilwert dokumentiert
+	// akzeptabel, dieselbe Konvention wie rho im APG-Block.
+	float ut_ab = ut, yw_ab = yw; // Default: eigene Zelle = bisheriges Verhalten
+)+"#ifdef FACETTEN_NACHBAR"+R(
+	{
+		float bestp = 0.5f; uint ib = 0u; // Schwelle: Link muss ueberwiegend in Normalenrichtung zeigen
+		for(uint ia=1u; ia<def_velocity_set; ia++) {
+			if((flags[j[ia]]&TYPE_BO)!=0u) continue; // nur reines Fluid (kein Solid, kein TYPE_E/MS)
+			const float cxa=c(ia), cya=c(def_velocity_set+ia), cza=c(2u*def_velocity_set+ia);
+			const float cl = sqrt(cxa*cxa+cya*cya+cza*cza);
+			const float pr = (cxa*nx+cya*ny+cza*nz)/cl;
+			if(pr>bestp) { bestp=pr; ib=ia; }
+		}
+		if(ib>0u) {
+			const uxx nb = j[ib];
+			const float ubx=u[nb], uby=u[def_N+(ulong)nb], ubz=u[2ul*def_N+(ulong)nb];
+			const float undb = nx*ubx+ny*uby+nz*ubz;
+			const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
+			const float utb = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
+			if(utb>1e-6f) {
+				ut_ab = utb;
+				yw_ab = yw + (c(ib)*nx+c(def_velocity_set+ib)*ny+c(2u*def_velocity_set+ib)*nz); // Wandabstand der Abtastzelle
+				if(t%100ul==0ul) atomic_inc(&hits[20]); // Slot 20: Nachbarabtastung angewandt
+			} else if(t%100ul==0ul) atomic_inc(&hits[22]); // Slot 22: Nachbar gefunden, steht aber still (Schatten reicht weiter)
+		} else if(t%100ul==0ul) atomic_inc(&hits[21]); // Slot 21: kein Fluidnachbar in Normalenrichtung -- eigene Zelle
+	}
+)+"#endif"+R( // FACETTEN_NACHBAR
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
 	{
 		// ★★ 3/2-ABTASTPUNKT-MESSARM (2026-08-25, CFD_FAC_UTKORR, Default 1,0 = bitgleich).
@@ -1934,8 +1991,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// wirkt NUR auf den Wandmodell-EINGANG (Y, u+, u_tau); die Tangentialbasis und die
 		// Stabilitaetsklemme tw_max laufen weiter auf dem rohen ut. Deklarierter Messarm,
 		// NICHT still eingebaut -- Soll-Faktor der Theorie: 3/2.
-		const float ut_wm = ut*def_fac_utkorr;
-		const float Y  = ut_wm*((2.0f*yw)*def_fac_Y);
+		const float ut_wm = ut_ab*def_fac_utkorr; // ut_ab == ut ohne FACETTEN_NACHBAR (bitgleich)
+		const float Y  = ut_wm*((2.0f*yw_ab)*def_fac_Y);
 		const float up = wf_spalding_uplus(Y);
 		const float utau = ut_wm/up;
 		tw = rhon*utau*utau;
@@ -2326,6 +2383,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // 3x3: REST-Normalinjektion (Soll ~0 bei Vollrang; N1 |Summe|<=5 je Torus-Lauf)
 )+"#endif"+R( // FACETTEN_ALPHA-Weiche
 	fac_tau_cnt[fid] += 1u;
+)+"#ifdef FACETTEN_KDIAG"+R(
+	{ const uxx k8 = 10ul*(uxx)fid; fac_kd[k8]+=ut; fac_kd[k8+1ul]+=tw; fac_kd[k8+2ul]+=twe; fac_kd[k8+3ul]+=fabs(P1); fac_kd[k8+4ul]+=s1; fac_kd[k8+5ul]+=phi1; fac_kd[k8+6ul]+=(rueckfall?1.0f:0.0f); fac_kd[k8+7ul]+=1.0f; fac_kd[k8+8ul]+=ut_ab; fac_kd[k8+9ul]+=yw_ab; } // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
+)+"#endif"+R( // FACETTEN_KDIAG
 	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
 )+"#ifdef FACETTEN_DIAGZ"+R(
 	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
@@ -2374,6 +2434,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_ELIBB"+R(
 	, const global uchar* fac_q // ★ B1: q je Link (18 uchar je Facette; Position = Host-add-Reihenfolge)
 )+"#endif"+R( // FACETTEN_ELIBB
+)+"#ifdef FACETTEN_KDIAG"+R(
+	, global float* fac_kd // ★ Klassen-Diagnostik (Position = nach fac_q, Host-add-Reihenfolge)
+)+"#endif"+R( // FACETTEN_KDIAG
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
@@ -2429,6 +2492,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_ELIBB"+R(
 		, fac_q
 )+"#endif"+R( // FACETTEN_ELIBB
+)+"#ifdef FACETTEN_NACHBAR"+R(
+		, u
+)+"#endif"+R( // FACETTEN_NACHBAR
+)+"#ifdef FACETTEN_KDIAG"+R(
+		, fac_kd
+)+"#endif"+R( // FACETTEN_KDIAG
 	)+");"+R(
 )+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
