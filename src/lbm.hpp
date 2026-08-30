@@ -188,7 +188,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // FEST 70 Slots. Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
+	Memory<uint> rho_clamp_hits; // FEST 72 Slots (70 Kraftpfad, 71 reserviert; 30.08.). Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -197,6 +197,7 @@ public:
 	static float s_fac_ema;  // EMA-Faktor fuer u_s (CFD_FAC_EMA; 0 = aus; WIDERLEGT in J3 -- filtert die falsche Seite, bleibt als A/B-Arm)
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
+	static uint s_fac_kraft;   // ★ 30.08.: CFD_FAC_KRAFT -- Zellkraft statt Slip: 1 = an Rueckfallzellen, 2 = an allen Facettenzellen (Diskriminator); 0 = aus, bitgleich
 	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; static float s_boden_eq_u; static uint s_boden_eq_abstand; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_fac_alpha;

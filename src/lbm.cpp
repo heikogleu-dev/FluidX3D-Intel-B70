@@ -274,6 +274,7 @@ float LBM_Domain::s_fac_kappa = 0.4f;
 float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm
 float LBM_Domain::s_fac_qkappe = 1.0f; // Ex-Stabilitaetskappe des q>0,5-Zweigs: mit der MLS-Blende (Baustein 1, 26.08.) obsolet -- Default 1,0 = keine Kappung; Env-Hebel CFD_FAC_QKAPPE bleibt fuer A/Bs
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
+uint LBM_Domain::s_fac_kraft = 0u; // ★ 30.08. Zellkraft statt Slip (CFD_FAC_KRAFT)
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
 // MODELLAENDERUNG, kein Numerikfix. LSQ gewichtet t1 (Stroemungsrichtung, Ziel = Spalding-tau_w, die
@@ -321,7 +322,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 70ull); // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	rho_clamp_hits = Memory<uint>(device, 72ull); // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] reserviert // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
 	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
 	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
 	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden
@@ -1159,7 +1160,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_elibb) ? (string)"\n	#define FACETTEN_ELIBB" : (string)"") // ★ B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	+((s_facetten&&s_fac_imem&&s_fac_elibb_pur) ? (string)"\n	#define FACETTEN_ELIBB_PUR" : (string)"") // ★ Pur-Arm: NUR Geometrie-Blende (CFD_FAC_ELIBB=2)
 	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")
-	+((s_facetten&&s_fac_imem&&s_fac_quergate) ? (string)"\n	#define FACETTEN_QUERGATE" : (string)"") // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
+	+((s_facetten&&s_fac_imem&&s_fac_quergate) ? (string)"\n	#define FACETTEN_QUERGATE" : (string)"")
+	+((s_facetten&&s_fac_imem&&s_fac_kraft>0u) ? (string)"\n	#define FACETTEN_KRAFT\n	#define def_fac_kraft "+to_string(min(2u,s_fac_kraft))+"u" : (string)"") // ★ 30.08. Zellkraft statt Slip (Weg F) // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"
 	"\n	#define def_fac_apg "+to_string(s_fac_apg,6u)+"f" : (string)"") // APG-Messarm: Emission nur bei kappa != 0 (Kommentar-Verklebung R2 geloest) /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"

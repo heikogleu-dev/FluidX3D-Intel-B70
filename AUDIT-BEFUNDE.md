@@ -5006,3 +5006,30 @@ vergleichbar". B UEBERNOMMEN (steht in der Basis). C liegen lassen, erst die neu
 testen. D2 selbststaendig geprueft: NICHT nachweislich falsch (die R-Tabelle stammt aus D1Q3
 und gilt nur fuer die ebenen-gleichfoermige Mode; der Anker sitzt seit 08.08. auf dem
 Flaechenmittel) -- nichts geaendert. D4 erledigt, siehe B60. E/F/G offen.
+
+## B63 — Weg F gebaut: Zellkraft statt Slip (CFD_FAC_KRAFT), Pruefbefunde behoben (30.08.)
+Befund dahinter (Planungsagent): das Budget-Gate feuert bei |P1| > 2·G11·u_t, eine
+Linkmengen-Eigenschaft der Zelle, nicht ein Fehler des Zustands; Klemme und tanh haben einen
+vorzeichendefiniten Bias (w_satgate0: cz_druck_rest -0,152 -> -0,050, 16,9 sigma; 4 mm
+p4_satgate0 bei t=0,4 s: cz_rest -0,674 gegen -0,889 bei p4_v3b). Loesung: an Rueckfallzellen
+wird das Residuum R = Ziel - P nicht ueber Slip-Populationen, sondern als Guo-Volumenkraft
+R1·t1 + R2·t2 eingetragen (kernel.cpp apply_facette_imem, Rueckgabe float3 -> fxn/fyn/fzn).
+Modus 1 = Rueckfallzellen, Modus 2 = alle Facettenzellen (Diskriminator gegen den Slip-Pfad).
+Slot 70 zaehlt, [SLOTS]-Zeile und slots_verlauf.csv fuehren ihn, pruefe_kraftpfad() prueft
+Modus 0: 70 == 0, Modus 1: 70 == 69, Modus 2: 70 == 7 - 9 - 17.
+Pruefagent (Kernel GRUEN: bitgleich ohne Define per gcc -E in drei Konfigurationen, kein
+Faktor-2-Doppel, ELIBB-Blende zaehlt nicht doppelt, Spleisse balanciert). Host-Befunde, alle
+behoben: B1 ROT Nahfeld-Waechter las die FERNFELD-Statik (exit(1) im Abschlussbericht des
+dd-Falls; Muster von Befund 5a) -> nahfeld_kraft gesichert; B2 CSV ohne kraft70-Spalte;
+B3 Modus 2 ohne Soll; B5 Statik-Resets ohne s_fac_kraft. B4 (Semantik, dokumentiert): in
+Modus 2 zaehlen Slots 10/12/14/16/64 "was der Slip getan haette". Pruefpunkt 8 deklariert:
+object_force/forces.csv sieht die Volumenkraft NICHT (keine Newton-3-Reaktion am Koerper),
+der Reibungsanteil an Kraftzellen steht allein in der fac_tau-Buchung (cd_reib/cd_rest).
+CPU-Rauchtest (Geraet 0, kipp26, ETT 0,5, drei Modi): JIT sauber, alle Waechter gruen,
+Feld reagiert: c_f-Faktor gegen Ziel Slip 1,814 / Kraft1 2,243 / Kraft2 1,013 (Re_tau Ist
+9407 / 11635 / 5254 gegen 5186). Transiente, KEIN Ergebnis -- das entscheidet die Leiter
+logs/wc_kraft_leiter_serie.txt (10 Arme, iGPU/B70): kipp0 ref/kraft1 byte-identisch,
+kraft2 Diskriminator, kipp26 und kipp45 je ref/kraft1/kraft2, 8 mm w_kraft1 gepaart gegen w_ref.
+Offen (Pruefagent): ein Kraft-Akkumulator Sum R1/Sum|R1| im Kernel und ein CPU-Harness
+(werkzeuge/elibb_harness als Basis) wuerden die Wirkung je Zelle belegen; bisher belegt sie
+nur das Feld (A/B Modus 0<->1 am Kanal).

@@ -1875,7 +1875,7 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 // f_out_opp(t-2) -- der Esoteric-Pull-BB ist ein ZWEI-Schritt-Umlauf (Gegenpruefer, Auflage 1);
 // alle Formeln sind zeitindexfrei. 2x2-System in der Tangentialebene (Quer-Ziel 0 = Modell),
 // Degenerationskaskade fuer Einzellink-Zellen, Klemmen machen Ist!=Soll im Akkumulator sichtbar.
-void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
+float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const global uchar* flags,
                         const global float* fac_geo, const global uint* fac_idx,
                         global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t
 )+"#ifdef FACETTEN_EMA"+R(
@@ -1894,9 +1894,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
 )+"#endif"+R( // FACETTEN_ELIBB
 )+") {"+R(
-	uxx fbi; if(!f_bbox(n, &fbi)) return;
+	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f,0.0f,0.0f);
 	const uint fid = fac_idx[fbi];
-	if(fid==0xFFFFFFFFu) return;
+	if(fid==0xFFFFFFFFu) return (float3)(0.0f,0.0f,0.0f);
 	const uxx b = 8ul*(uxx)fid;
 	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
 )+"#ifdef FACETTEN_ELIBB"+R(
@@ -1913,7 +1913,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		elibb_dp = elibb_rekonstruiere(fhn, j, flags, fac_q, fid, r0, u0x, u0y, u0z, nx, ny, nz, fac_tau_acc, hits, t);
 	}
 )+"#ifdef FACETTEN_ELIBB_PUR"+R(
-	return; // ★ Pur-Arm (CFD_FAC_ELIBB=2): NUR die Geometrie-Blende, kein Wandmodell -- Isolationsmessung
+	return (float3)(0.0f,0.0f,0.0f); // ★ Pur-Arm (CFD_FAC_ELIBB=2): NUR die Geometrie-Blende, kein Wandmodell -- Isolationsmessung
 )+"#endif"+R( // FACETTEN_ELIBB_PUR
 )+"#endif"+R( // FACETTEN_ELIBB
 )+R(	float rhon, uxn, uyn, uzn;
@@ -1922,7 +1922,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
-	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return; } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
+	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
 	{
 		// ★★ 3/2-ABTASTPUNKT-MESSARM (2026-08-25, CFD_FAC_UTKORR, Default 1,0 = bitgleich).
@@ -2104,7 +2104,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		const float undb = nx*ubx+ny*uby+nz*ubz;
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float utb = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
-		if(utb<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[17]); return; } // IR3-Audit M2: KEIN stiller Rueckfall in den widerlegten Instantan-Modus -- BB belassen, Slot 17 zaehlt (Staupunkt-/Abloesezellen)
+		if(utb<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[17]); return (float3)(0.0f,0.0f,0.0f); } // IR3-Audit M2: KEIN stiller Rueckfall in den widerlegten Instantan-Modus -- BB belassen, Slot 17 zaehlt (Staupunkt-/Abloesezellen)
 		{
 			t1x=utxb/utb; t1y=utyb/utb; t1z=utzb/utb;
 			t2x=ny*t1z-nz*t1y; t2y=nz*t1x-nx*t1z; t2z=nx*t1y-ny*t1x;
@@ -2228,6 +2228,25 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	// ~40 % Facettenbesuche, die bisher per return NICHTS buchten (K2 -7,4 am 26-Grad-Kanal =
 	// Blenden-Korrektur ohne den BB-Anteil, den sie korrigiert). Explizit +0.0f, kein signed-zero-Anker.
 	if(rueckfall) { s1=0.0f; s2=0.0f; sn=0.0f; }
+	// ★★ ZELLKRAFT STATT SLIP (CFD_FAC_KRAFT, 30.08.2026, Planungsagent Weg F -- IVW-Hybrid nach
+	// Kuwata & Suga). Befund: das Gate feuert, wenn |P1| > 2*G11*ut -- eine Eigenschaft der
+	// LINKMENGE (Kopplung Sn1/G11, Schur-Verstaerkung), nicht der Physik; im Nullziel-Arm feuert es
+	// HAEUFIGER als mit Ziel. Klemme (SATGATE=0) hat einen vorzeichen-definiten Bias (G8): 8 mm
+	// cz_druck_rest -0,152 -> -0,050, 4 mm -1,016 -> -0,759. Hier stattdessen: das Residuum R, das
+	// der Solve in span(L) nicht erreicht, als VOLUMENKRAFT in R^3 -- massenexakt, ohne Rang-,
+	// Budget- oder Positivitaetsfrage, Normalanteil per Konstruktion 0. Modus 1: nur Rueckfallzellen
+	// (kipp0 hat keine -> bitgleich). Modus 2: ALLE Facettenzellen per Kraft, Additivterm aus --
+	// der Diskriminator gegen den Slip-Pfad (0,716 an der ebenen Wand).
+	bool pass2_an = !rueckfall;
+	float3 kraft = (float3)(0.0f,0.0f,0.0f);
+)+"#ifdef FACETTEN_KRAFT"+R(
+	const bool kz = rueckfall || (def_fac_kraft==2u);
+	if(kz) {
+		kraft = (float3)(R1*t1x+R2*t2x, R1*t1y+R2*t2y, R1*t1z+R2*t2z); // = Ziel - P, tangential
+		s1=0.0f; s2=0.0f; sn=0.0f; pass2_an=false;                    // kein Additivterm an Kraftzellen
+		if(t%100ul==0ul&&hits[70]<0xF0000000u) atomic_inc(&hits[70]); // Slot 70: Kraftpfad (saettigend)
+	}
+)+"#endif"+R( // FACETTEN_KRAFT
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
 )+"#ifdef FACETTEN_EMA"+R(
 	// LATENT (Audit 1/3): unter EMA x SATGATE prueft das Gate die GELOESTEN s, angewandt wird die
@@ -2254,7 +2273,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	const float alph = -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0;
 	if(fabs(alph)>ut&&t%100ul==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
 )+"#endif"+R( // FACETTEN_ALPHA
-	if(!rueckfall) for(uint i=1u; i<def_velocity_set; i++) { // Pass 2: q_i = 6 w_i (c_i*u_s) addieren (Gl. 3); Rueckfall: Feld bleibt BITGLEICH BB
+	if(pass2_an) for(uint i=1u; i<def_velocity_set; i++) { // Pass 2 (pass2_an == !rueckfall ohne KRAFT): q_i = 6 w_i (c_i*u_s) addieren (Gl. 3); Rueckfall: Feld bleibt BITGLEICH BB
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;
 		fhn[i] = fma(6.0f*w(i), c(i)*usx+c(def_velocity_set+i)*usy+c(2u*def_velocity_set+i)*usz, fhn[i]);
@@ -2262,7 +2281,10 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 		fhn[i] += w(i)*alph; // separater Summand: die bestehende fma-Zeile bleibt rundungsidentisch
 )+"#endif"+R( // FACETTEN_ALPHA
 	}
-	float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn; // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn; unter ALPHA2 sind G/Sn downgedatet -> alpha-Beitrag enthalten)
+	float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn;
+)+"#ifdef FACETTEN_KRAFT"+R(
+	if(kz) { phi1 += R1; phi2 += R2; } // Kraftzelle: Ist = P + Kraft = Ziel (Buchung Ist == Soll, wie im Slip-Pfad)
+)+"#endif"+R( // FACETTEN_KRAFT // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn; unter ALPHA2 sind G/Sn downgedatet -> alpha-Beitrag enthalten)
 )+"#ifdef FACETTEN_ALPHA"+R(
 )+"#ifndef FACETTEN_ALPHA2"+R(
 	// Stufe 1 traegt den alpha-Impuls (alpha*S1) NICHT im Downdate -- fuer die ehrliche Ist-Kraft addieren:
@@ -2323,6 +2345,7 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#endif"+R( // FACETTEN_APG
 	}
 )+"#endif"+R( // FACETTEN_DIAGZ
+	return kraft; // ★ KRAFT (30.08.): Zellkraft an Rueckfallzellen, sonst (0,0,0)
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM
 
@@ -2388,7 +2411,8 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 )+"#ifndef FACETTEN_IMEM"+R(
 	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t);
 )+"#else"+R(
-	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) apply_facette_imem)+"("+R(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t
+	float3 fac_kraft = (float3)(0.0f,0.0f,0.0f); // ★ KRAFT: Zellkraft aus dem Wandmodell, unten auf fxn/fyn/fzn (Guo)
+	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) fac_kraft = apply_facette_imem)+"("+R(n, fhn, j, flags, fac_geo, fac_idx, fac_tau_acc, fac_tau_cnt, rho_clamp_hits, t
 )+"#ifdef FACETTEN_EMA"+R(
 		, fac_us
 )+"#endif"+R( // FACETTEN_EMA
@@ -2446,6 +2470,9 @@ void apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const glob
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	float fxn=fx, fyn=fy, fzn=fz; // force starts as constant volume force, can be modified before call of calculate_forcing_terms(...)
+)+"#ifdef FACETTEN_KRAFT"+R(
+	fxn += fac_kraft.x; fyn += fac_kraft.y; fzn += fac_kraft.z; // ★ KRAFT: Wandmodell-Residuum als Volumenkraft (Guo-Kette unten, inkl. SGS-Guo-Korrektur)
+)+"#endif"+R( // FACETTEN_KRAFT
 	float Fin[def_velocity_set]; // forcing terms
 
 // ★ F-Null-Read-Gate (Perf-Audit Achse 1, Rang 3, 2026-08-26): F ist an Nicht-Solid-Zellen
