@@ -1168,6 +1168,13 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 		   position()-Konvention. Zwei Systeme -- also nicht lesen, sondern MESSEN: beide
 		   Ursprungsannahmen laufen mit, die mit der hoeheren Trefferquote ist die richtige. */
 		ulong nl=0ull, n_eng=0ull;
+		// ★ L0-ZENSUS (Planungsagent Dachabloesung 30.08., Heiko-Freigabe 18:55): derselbe STL-Durchgang, eingeschraenkt
+		// auf einen x-Bereich in Zellen dieser Domaene (CFD_ZENSUS_X0..X1, z. B. das flache Dach i_x 742-829 bei 4 mm, B58),
+		// getrennt nach vertikalen Links (0,0,+-1) und allen. Frage: liegt die wahre Wand dort innerhalb einer Linklaenge
+		// (dann kann eine Blende q in (0,1] sie darstellen) oder dahinter (dann nicht -- Geometriefehler erster Ordnung).
+		const uint zx0=env_u("CFD_ZENSUS_X0",0u), zx1=env_u("CFD_ZENSUS_X1",0u); const bool zroi=zx1>zx0;
+		ulong nl_r[2]={0ull,0ull}, ntr_r[2]={0ull,0ull}, nh_r[2]={0ull,0ull}, nle_r[2]={0ull,0ull}; double th_r[2]={0.0,0.0}, sq_r[2]={0.0,0.0};
+		ulong nlv_r[2]={0ull,0ull}, ntrv_r[2]={0ull,0ull}, nhv_r[2]={0ull,0ull}; double thv_r[2]={0.0,0.0};
 		ulong ntr[2]={0ull,0ull}, nleer[2]={0ull,0ull}, neng_tr[2]={0ull,0ull};
 		ulong nkeine[2]={0ull,0ull}, nhinter[2]={0ull,0ull}; double th_sum[2]={0.0,0.0}, th_max[2]={0.0,0.0};
 		double sq[2]={0.0,0.0}, sq_eng[2]={0.0,0.0}, qmin[2]={1e30,1e30};
@@ -1210,12 +1217,14 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 				const int nx2=(int)x+cd[i][0], ny2=(int)y+cd[i][1], nz2=(int)z+cd[i][2];
 				if(!solid(nx2,ny2,nz2)) continue;
 				nl++; if(fw<=2u) n_eng++;
+				const bool inroi = zroi&&x>=zx0&&x<=zx1, vert = (cd[i][0]==0&&cd[i][1]==0);
 				for(uint v=0u; v<2u; v++) {
 					const double off=(v==0u)?0.0:0.5;
 					double qs; bool leer=false;
-					if(!schuss(sx0+off,sy0+off,sz0+off,i,&qs,&leer)) { nleer[v]++; if(leer) nkeine[v]++; continue; }
-					if(qs>1.0+1e-6) { nhinter[v]++; th_sum[v]+=qs; if(qs>th_max[v]) th_max[v]=qs; continue; } // STL liegt HINTER der Voxelwand
-					ntr[v]++; sq[v]+=qs; if(qs<qmin[v]) qmin[v]=qs;
+					if(inroi) { nl_r[v]++; if(vert) nlv_r[v]++; }
+					if(!schuss(sx0+off,sy0+off,sz0+off,i,&qs,&leer)) { nleer[v]++; if(leer) nkeine[v]++; if(inroi) nle_r[v]++; continue; }
+					if(qs>1.0+1e-6) { nhinter[v]++; th_sum[v]+=qs; if(qs>th_max[v]) th_max[v]=qs; if(inroi) { nh_r[v]++; th_r[v]+=qs; if(vert) { nhv_r[v]++; thv_r[v]+=qs; } } continue; } // STL liegt HINTER der Voxelwand
+					ntr[v]++; sq[v]+=qs; if(qs<qmin[v]) qmin[v]=qs; if(inroi) { ntr_r[v]++; sq_r[v]+=qs; if(vert) ntrv_r[v]++; }
 					{ int hb=(int)(qs*10.0); if(hb>9) hb=9; if(hb<0) hb=0; qh2[v][hb]++; }
 					if(fw<=2u) { neng_tr[v]++; sq_eng[v]+=qs; }
 				}
@@ -1226,6 +1235,11 @@ static void remesh_facetten_diag(LBM& L, const uint Nx, const uint Ny, const uin
 			print_info("REMESH ["+na+"]: "+to_string(nl)+" Solid-Links. Mit STL-Schnitt innerhalb einer Linklaenge: "+to_string(ntr[v])+" ("+to_string((float)(100.0*(double)ntr[v]/(double)max(1ull,nl)),2u)+" %). STL liegt HINTER der Voxelwand (t in (1,"+to_string(stl_kk)+"]): "+to_string(nhinter[v])+" ("+to_string((float)(100.0*(double)nhinter[v]/(double)max(1ull,nl)),2u)+" %), mittleres t "+to_string((float)(th_sum[v]/(double)max(1ull,nhinter[v])),3u)+", groesstes "+to_string((float)th_max[v],2u)+". GAR KEIN Dreieck im Suchraum: "+to_string(nkeine[v])+". Sonstige ohne Schnitt: "+to_string(nleer[v]-nkeine[v])+".");
 			print_info("REMESH ["+na+"] q: Mittel "+to_string((float)(sq[v]/(double)max(1ull,ntr[v])),4u)+", min "+to_string((float)qmin[v],4u)+" | Engstellen (Weite<=2): "+to_string(neng_tr[v])+" von "+to_string(n_eng)+" getroffen, q-Mittel "+to_string((float)(sq_eng[v]/(double)max(1ull,neng_tr[v])),4u)+".");
 			string h="REMESH ["+na+"] q-HISTOGRAMM (Dezile 0,0-1,0): "; for(int k2=0;k2<10;k2++) h+=to_string(qh2[v][k2])+(k2<9?" ":""); print_info(h);
+			if(zroi) { // ★ L0-ZENSUS-Ausgabe
+				const double pn=(double)max(1ull,nl_r[v]), pv=(double)max(1ull,nlv_r[v]);
+				print_info("ZENSUS-ROI ["+na+"] x in ["+to_string(zx0)+","+to_string(zx1)+"] Zellen: "+to_string(nl_r[v])+" Solid-Links | innerhalb einer Linklaenge "+to_string(ntr_r[v])+" ("+to_string((float)(100.0*(double)ntr_r[v]/pn),1u)+" %, q-Mittel "+to_string((float)(sq_r[v]/(double)max(1ull,ntr_r[v])),3u)+") | STL DAHINTER "+to_string(nh_r[v])+" ("+to_string((float)(100.0*(double)nh_r[v]/pn),1u)+" %, mittleres t "+to_string((float)(th_r[v]/(double)max(1ull,nh_r[v])),3u)+") | kein Schnitt bis t<=4: "+to_string(nle_r[v])+" ("+to_string((float)(100.0*(double)nle_r[v]/pn),1u)+" %)");
+				print_info("ZENSUS-ROI ["+na+"] nur VERTIKALE Links (0,0,+-1): "+to_string(nlv_r[v])+" | innerhalb "+to_string(ntrv_r[v])+" ("+to_string((float)(100.0*(double)ntrv_r[v]/pv),1u)+" %) | dahinter "+to_string(nhv_r[v])+" ("+to_string((float)(100.0*(double)nhv_r[v]/pv),1u)+" %, mittleres t "+to_string((float)(thv_r[v]/(double)max(1ull,nhv_r[v])),3u)+") -- Kriterium L0: < 50 % innerhalb => Blenden-Schiene am Dach gestrichen.");
+			}
 		}
 	}
 	bericht("TREPPE", q_scan(ox,oy,oz));       // rohe Voxelflaeche = Bezug

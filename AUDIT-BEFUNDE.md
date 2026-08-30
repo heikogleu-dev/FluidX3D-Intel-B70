@@ -5064,3 +5064,31 @@ aus einer Zelle, deren wahre Wand 1,5-2,5 Links entfernt liegt (Planungsagent 30
 am Kanal 2,38 -> 1,51) und B56 (Gate feuert als Linkmengen-Eigenschaft).
 Entscheid: CFD_FAC_KRAFT bleibt als Diskriminator im Baum (Default 0), geht NICHT in die Basis;
 SATGATE=1 bleibt 4-mm-Standard (p4_ref gegen p4_satgate0: Cz-Delta -0,30/-0,23/-0,23 an 0,2/0,3/0,4 s).
+
+### B63c — KORREKTUR zu B63b (30.08. 19:40, Planungsagent Weg 1): die Kanal-Leiter lief auf der V1-Konfiguration
+Alle Kanalarme x0/x26/x45 (logs/wc_kraft_leiter_serie.txt, wd_ref_leiter_serie.txt) haben CFD_FACETTEN_NORMQUELLE,
+YWKLEMME, KANTE_KOH und UTKORR NICHT gesetzt -- die 4-mm-Basis fuehrt sie seit 29.08. (V3b-Normale, Klemme,
+Kohaerenzkante, UTKORR 1,5). Log x26_ref: "Winkel 28.2 Grad, y_w 0.698" = V1-PCA. Auf der PRODUKTIONS-Konfiguration
+(NORMQUELLE=1) steht kipp26 seit 28.08. bei c_f-Faktor 0,778 (80 ETT, logs/tc_kipp26_v3b.log), 0,759/0,761 bei
+160/320 ETT -- gleiches Niveau wie die ebene Wand (0,72). Heikos Einwand ("kipp26 war doch halbwegs geloest") ist
+berechtigt; der 2,23er-Wert von B63b ist ein V1-Artefakt meiner Leiterkonfiguration (Serie aus dem j4-Muster
+gebaut statt aus basis_zeile.py -- derselbe Fehler wie am 28.08., diesmal am Kanal).
+Was davon STEHT: (1) der 8-mm-Arm w_kraft1 lief auf der Basis (V3b etc.) gepaart gegen w_ref -> cd_rest +0,21...+0,26,
+Weg F bleibt am Fahrzeug ein Negativ; (2) Slot 70/71-Mechanik und Bitanker (Define aus == Altbinaer).
+Was NICHT steht: die Deutung "Ziel an der Treppe 2-3x zu hoch". Die Rechnung des Agenten an x26_ref (V1): Modell-tau_w
+15,2e-6 = 1,69x Ziel (y_w der Lage 1 mit 0,187 zu klein), realisiert 4,96x -- die Luecke sitzt im ANWENDUNGSPFAD
+(Gate/BB an 74 % der Besuche, |P1| >= 10x Ziel bei 69 % der Stichproben: das Ziel liegt unter dem Rauschboden des
+Linkaustauschs an Treppenzellen). kipp45 umgekehrt: Modell-tau_w 0,10x Ziel (Eckzelle im Stufenschatten, u_t zu klein).
+Dazu zwei Warnungen, die B63b nicht nannte: x26_ref hat 1,84e9 RHO_CLAMP-Treffer (das Log selbst: "kein belastbares
+Ergebnis"; V3b 2,9e8, ELIBB=0 und kipp0/45 je 0) und die Wiederholstreuung bei 80 ETT ist +-0,05 (kipp0 ref 0,719 gegen
+kraft1 0,670 bei physikalisch identischem Pfad ab t=100), nicht +-0,01.
+Und der V3b-Wert 0,778 ist kein Wandmodell-Erfolg: mittleres Modell-tau_w 0,52e-6 = 6 % des Ziels, der Wert gleicht
+dem Nullziel-Arm (0,741/0,761) -- das Wandmodell steht dort de facto still; V3b aendert an kipp26 den ELIBB-q der
+Lage 2 (0,79 -> 0,52, MLS-Zweig Slot 68 266 -> 53 Mio), nicht die Spalding-Eingabe.
+Kraft-Pfad-Zusatzfehler, der die Richtung von B63b erklaert: faca = 1/|n_a| summiert im Slip-Pfad ueber die
+anwendenden Lagen 1+2 = 2,27 je Periode gegen wahre Rampenflaeche 2,236 (+1,5 %); im Kraft-Pfad wendet auch Lage 3
+an -> 3,40 = +52 % (kipp45: +100 %).
+Plan Weg 1 (Agent): Stufe 0 Klassen-Diagnostik im Kernel (fac_kd: Sum u_t, Y, twe, |P1|, s1, phi1, Gate, Rueckfall je
+Facette, Host-Tabelle je Treppenklasse) -> Stufe 1 Bezugstabellen kipp0/kipp26-V1/kipp26-V3b/kipp45 -> Stufe 2
+Flaechen-Renormierung A_i (Host, bitgleich an kipp0/45) -> Stufe 3 Nachbarabtastung (u_t, y aus der zweiten Fluidzelle
+entlang n; ersetzt den Handwert UTKORR=1,5) -> 8 mm gepaart -> 4 mm.
