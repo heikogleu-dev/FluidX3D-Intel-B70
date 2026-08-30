@@ -2764,7 +2764,11 @@ void main_setup_kanal() {
 			if(n_steps-fac_snap_step<5000ull) print_warning("K2-Pruefung UEBERSPRUNGEN: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000) -- dieser Lauf ist KEIN Abnahmelauf.");
 			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");
 			if(LBM_Domain::s_fac_elibb_pur) print_info("K3 im Pur-Arm uebersprungen (fac_tau_n bleibt konstruktiv 0 -> n_voll-Kriterium gilt nicht; B3-Pruefbefund 3)."); // Pur-Guard wie beim Slot-7-Fix
-			else if(FK.px!=0.0||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x != 0 oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
+			else { // ★ Instrumentenfix 30.08. (Freigabe G): exakte double-Gleichheit als Nullkriterium ist falsch -- x26_ref druckte "-0.00000000",
+				// FK.px war ~1e-12 != 0.0 und der Arm endete mit rc=1 "K3 verletzt" (der alte j4q_t26a4a1 hatte zufaellig exakt -0.0). Toleranz relativ zur Reibung.
+				const double tol_px = 1e-6*fabs(FK.rx)+1e-12;
+				if(fabs(FK.px)>tol_px||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x = "+to_string((float)FK.px)+" (|.| > "+to_string((float)tol_px)+") oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
+				else if(FK.px!=0.0) print_info("K3: Druck_x = "+to_string((float)FK.px)+" innerhalb Toleranz "+to_string((float)tol_px)+" (nicht exakt 0, Rundungsrest der double-Summe)."); }
 		}
 	}
 	// Feld-Hash (FNV-1a ueber die u-Bitmuster) fuer den Bitvergleich der Aequivalenzarme
