@@ -5619,6 +5619,13 @@ static void main_setup_fahrzeug_dd() {
 	const double ber_fen  = (getenv("CFD_BERICHT_FENSTER")==nullptr) ? 0.05 : atof(getenv("CFD_BERICHT_FENSTER")); // Mittelungsfenster [s Physik]
 	std::vector<double> ber_t, ber_cd, ber_cz; double ber_next = -1.0; ulong ber_n_aus=0ull;
 	std::ofstream ber_csv;
+	// ★ AKTIVES SLOT-LOGGING (Heiko 30.08.: "kann man da nicht irgendwie ein aktives Logging
+	// waehrend des Laufs einbauen?"). Anlass: p4_fp16s_voll starb bei Schritt 5381 mit
+	// CL_OUT_OF_RESOURCES, und die Rueckfallquote (Slot 69 / Wirkpfad) war mit ihm verloren --
+	// die Zaehler wurden bisher NUR im Abschlussbericht gelesen. 70 uint vom Geraet kosten
+	// nichts; sie werden jetzt an jedem [BERICHT] mitgelesen, kumuliert UND als Fensterdelta.
+	ulong slot_alt[70]; for(uint i=0u;i<70u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
+	std::ofstream slot_csv;
 	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
 	// "unklaren" Zellen. Die Zaehler sind geometrisch und ueber alle Samples konstant -- der
 	// letzte Stand genuegt; das Kraftgewicht ist nur im Host-Pfad belastbar (FacKraft.ukraft_ok).
@@ -6282,6 +6289,27 @@ static void main_setup_fahrzeug_dd() {
 						ber_csv << "time_s,n,cd_rest_mittel,cd_rest_sd,cz_rest_mittel,cz_rest_sd,warmup\n"; }
 					ber_csv << t_si << "," << nb << "," << mcd << "," << scd << "," << mcz << "," << scz
 					        << "," << (t_si<(double)t_warmup?1:0) << "\n" << std::flush;
+					// ---- Slot-Zaehler JETZT lesen, nicht erst im Abschlussbericht.
+					{	LBM_Domain* d0 = lbm_f.lbm_domain[0];
+						d0->rho_clamp_hits.read_from_device();
+						const uint* H = d0->rho_clamp_hits.data();
+						const ulong wp=(ulong)H[7], r69=(ulong)H[69], s10=(ulong)H[10], s13=(ulong)H[13], s15=(ulong)H[15], s16=(ulong)H[16], s64=(ulong)H[64];
+						auto pz=[](ulong a, ulong b){ return b>0ull ? 100.0*(double)a/(double)b : 0.0; };
+						// Fensterdelta seit dem letzten Bericht -- das ist die AKTUELLE Quote, die kumulierte
+						// traegt den Warmlauf und die Anlaufphase mit.
+						const ulong dwp = slot_alt_da ? wp-slot_alt[7] : wp, d69 = slot_alt_da ? r69-slot_alt[69] : r69;
+						const bool satt = (wp>=0xF0000000ull)||(r69>=0xF0000000ull);
+						print_info("[SLOTS] t = "+to_string((float)t_si,3u)+" s | Wirkpfad "+to_string(wp)+" | Rueckfall[69] "+to_string(r69)
+							+" = "+to_string((float)pz(r69,wp),1u)+" % kumuliert, "+to_string((float)pz(d69,dwp),1u)+" % im Fenster"
+							+" | u_s-Gate "+to_string((float)pz(s10,wp),1u)+" % | ohneTang "+to_string((float)pz(s13,wp),1u)
+							+" % | Rang0 "+to_string((float)pz(s15,wp),1u)+" % | sn-Gate "+to_string((float)pz(s16,wp),1u)+" % | Quergate "+to_string((float)pz(s64,wp),1u)+" %"
+							+(satt?"  ★ GESAETTIGT -- Prozent nicht mehr belastbar":""));
+						if(!slot_csv.is_open()) { slot_csv.open(out_dir+"slots_verlauf.csv"); slot_csv.precision(8);
+							slot_csv << "# Slot-Zaehler je [BERICHT] (30.08.2026). Kumuliert seit Laufstart, t%100-gesampelt; *_fenster = Delta seit dem vorigen Bericht. Quote = Slot/Wirkpfad[7].\n";
+							slot_csv << "time_s,wirkpfad,rueckfall69,quote_kum_pct,quote_fenster_pct,us_gate10,ohnetang13,rang0_15,sn_gate16,quergate64,gesaettigt\n"; }
+						slot_csv << t_si << "," << wp << "," << r69 << "," << pz(r69,wp) << "," << pz(d69,dwp) << "," << s10 << "," << s13 << "," << s15 << "," << s16 << "," << s64 << "," << (satt?1:0) << "\n" << std::flush;
+						for(uint i=0u;i<70u;i++) slot_alt[i]=(ulong)H[i]; slot_alt_da=true;
+					}
 				}
 				ber_next = (floor(t_si/ber_dt)+1.0)*ber_dt;  // an das Raster binden, nicht aufaddieren (kein Drift)
 			}
