@@ -128,7 +128,8 @@ static void zeichne_text(Image* img, const uint x0, const uint y0, const string&
 // Modus 2: alle Solve-Zellen (Wirkpfad minus Slot 9/17). LESEHINWEIS Modus 2 (Pruefbefund B4): der Slip-Solve laeuft
 // dort weiter und s wird verworfen -- Slots 10/12/14/16/64 zaehlen dann, was der Slip-Pfad GETAN HAETTE, nicht was
 // angewandt wurde. R1/R2 haengen nicht von s ab, die Kraft ist davon unberuehrt.
-static void pruefe_kraftpfad(const ulong h70, const ulong h69, const ulong h7, const ulong h9, const ulong h17, const uint modus, const string& ort) {
+static void pruefe_kraftpfad(const ulong h70, const ulong h69, const ulong h7, const ulong h9, const ulong h17, const ulong h71, const uint modus, const string& ort) {
+	if(modus>0u) print_info("["+ort+"] Kraftpfad ANLAUF (t<100, ungegatet, Slot 71): "+to_string(h71)+" Kraftzellen-Ereignisse -- die Anlauf-Transiente ist fuer die t%100-Stichprobe der Slots 69/70 unsichtbar (Bitanker-Befund 30.08.: kipp0 = fac_N genau einmal).");
 	if(modus==0u) { if(h70!=0ull) print_error("["+ort+"] Kraftpfad Slot 70 = "+to_string(h70)+" ohne CFD_FAC_KRAFT -- Zaehler feuert ohne Schalter."); return; }
 	if(h70>=0xF0000000ull) { print_info("["+ort+"] Kraftpfad Slot 70 saettigt -- Identitaet nicht pruefbar."); return; }
 	if(modus==1u) { if(h70!=h69) print_error("["+ort+"] Kraftpfad Slot 70 = "+to_string(h70)+" != Rueckfall Slot 69 = "+to_string(h69)+" -- Modus 1 muss GENAU die Rueckfallzellen tragen.");
@@ -2696,7 +2697,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],LBM_Domain::s_fac_kraft,"Kanal"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // ★ 2026-08-25 Stoerform-Groessenmessung (49..58)
 			const uint* h = &lbm.lbm_domain[0]->rho_clamp_hits[0];
 			ulong so=0ull, sp=0ull; for(uint k=0u; k<5u; k++) { so+=(ulong)h[49u+k]; sp+=(ulong)h[54u+k]; }
@@ -3446,7 +3447,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],LBM_Domain::s_fac_kraft,"Kugel"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -6707,7 +6708,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],nahfeld_kraft,"Nahfeld"); }
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); }
 		if(LBM_Domain::s_fac_elibb_pur) { // ★ Pruefbefund Messlogik-3 (2026-08-25): der Pur-Return sitzt VOR Slot 7 -- das alte Soll kannte den Pur-Modus nicht und print_error (=exit) toetete den projizierten Cd-Pfad. Pur-Soll: Slot 7 = 0, ELIBB-Wirkpfad (Slot 67) > 0.
 			if(wz!=0ull) print_error("Pur-Arm: Slot 7 muesste 0 sein -- Return-Position verschoben?");
 			else if((ulong)df->rho_clamp_hits[67]==0ull) print_error("Pur-Arm: ELIBB-Wirkpfad (Slot 67) ist NULL -- lautloser No-Op.");

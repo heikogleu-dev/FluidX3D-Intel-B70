@@ -322,7 +322,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 72ull); // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] reserviert // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	rho_clamp_hits = Memory<uint>(device, 72ull); // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] Kraftzellen im Anlauf t<100, UNGEGATET (saettigend) // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
 	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
 	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
 	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden

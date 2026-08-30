@@ -2245,6 +2245,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		kraft = (float3)(R1*t1x+R2*t2x, R1*t1y+R2*t2y, R1*t1z+R2*t2z); // = Ziel - P, tangential
 		s1=0.0f; s2=0.0f; sn=0.0f; pass2_an=false;                    // kein Additivterm an Kraftzellen
 		if(t%100ul==0ul&&hits[70]<0xF0000000u) atomic_inc(&hits[70]); // Slot 70: Kraftpfad (saettigend)
+		if(t<100ul&&hits[71]<0xF0000000u) atomic_inc(&hits[71]); // Slot 71: Kraftzellen im ANLAUF (t<100), UNGEGATET -- Bitanker-Befund 30.08.: kipp0 hat am Startschritt an ALLEN Facettenzellen Rueckfall (3720 = fac_N), die t%100-Stichprobe sieht das nicht
 	}
 )+"#endif"+R( // FACETTEN_KRAFT
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;

@@ -5033,3 +5033,16 @@ kraft2 Diskriminator, kipp26 und kipp45 je ref/kraft1/kraft2, 8 mm w_kraft1 gepa
 Offen (Pruefagent): ein Kraft-Akkumulator Sum R1/Sum|R1| im Kernel und ein CPU-Harness
 (werkzeuge/elibb_harness als Basis) wuerden die Wirkung je Zelle belegen; bisher belegt sie
 nur das Feld (A/B Modus 0<->1 am Kanal).
+
+### B63a — Bitanker-Nachtrag (30.08. 17:58): kipp0/KRAFT=1 ist KEIN Bitanker, der Code ist richtig
+x0_kipp0_kraft1 weicht ab Schritt 100 von x0_kipp0_ref ab (Ub +2,6 %, tau_w-Mittel +36 %), obwohl
+Slot 69 = Slot 70 = 0. Deterministisch (CPU 0,071892449 / iGPU 0,071892136 gegen 0,070083). JIT-Dump
+(CFD_DUMP_CL) beider Modi unterscheidet sich NUR in den zwei Defines. Varianten auf der CPU:
+A (Block 3 `fxn += fac_kraft` entfernt) == kraft0 bitgleich; B (kz = false) == kraft0 bitgleich;
+C (Slot 70 ungegatet) = 3720 = fac_N -> jede Facettenzelle war GENAU EINMAL Kraftzelle, am
+Startschritt, wo das Gate an allen Zellen feuert; die t%100-Stichprobe der Slots 69/70 ist dort
+blind. Folge: Modus 1 setzt im Anlauf einen einmaligen Kraft-Kick, wo der Slip-Pfad s=0 (BB) tat.
+Bitanker, der GILT: Define aus == Altbinaer -- x0_kipp0_ref == ve_treibertest byte-identisch.
+Eingebaut: Slot 71 = Kraftzellen im Anlauf t<100, ungegatet, saettigend; pruefe_kraftpfad druckt ihn.
+Lehre: ein t%100-gesampelter Zaehler taugt nicht als Nullbeweis fuer Transienten -- fuer
+"nie gefeuert" braucht es einen ungegateten (saettigenden) Zaehler.
