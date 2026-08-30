@@ -5046,3 +5046,21 @@ Bitanker, der GILT: Define aus == Altbinaer -- x0_kipp0_ref == ve_treibertest by
 Eingebaut: Slot 71 = Kraftzellen im Anlauf t<100, ungegatet, saettigend; pruefe_kraftpfad druckt ihn.
 Lehre: ein t%100-gesampelter Zaehler taugt nicht als Nullbeweis fuer Transienten -- fuer
 "nie gefeuert" braucht es einen ungegateten (saettigenden) Zaehler.
+
+### B63b — Kraft-Leiter abgeschlossen (30.08. 18:46): Weg F ist ein VALIDIERTES NEGATIV
+Alle Waechter gruen (Slot 70 == 69 in Modus 1, == Wirkpfad-9-17 in Modus 2, Define aus bitgleich).
+c_f-Faktor gegen Ziel (Re_tau 5186), 80 ETT, iGPU, je Arm eine Variable:
+  kipp0  : Slip 0,719 | Kraft1 0,670 | Kraft2 0,528   (Rueckfall 0 / 0 / 24 %)
+  kipp26 : Slip 2,227 | Kraft1 3,415 | Kraft2 3,221   (Rueckfall 74 / 78 / 67 %)
+  kipp45 : Slip 1,707 | Kraft1 1,681 | Kraft2 2,157   (Rueckfall 50 / 53 / 92 %)
+  8 mm w_kraft1 gegen w_ref (gepaart, identisches Binaer): cd_rest +0,21...+0,26 (12-18 sigma),
+  cz_rest unveraendert (0,8-1,1 sigma); Rueckfall 44 %, Slot 70 == 69.
+Lesart: der Mechanismus setzt das Wandmodell-Ziel an Rueckfallzellen exakt durch -- und die Reibung
+steigt an der Treppe von 2,2x auf 3,4x des Ziels, am Fahrzeug der Widerstand um 0,21. Reines BB an
+diesen Zellen (Slip-Pfad) war NAEHER am Ziel als das Modell selbst. Der Fehler sitzt damit nicht in
+der Erfuellung (Slip/Klemme/Kraft), sondern im EINGANG des Wandmodells an Treppenzellen: u_t und y_w
+aus einer Zelle, deren wahre Wand 1,5-2,5 Links entfernt liegt (Planungsagent 30.08.: STL im Mittel
+1,78 Links hinter der Voxelwand, Aufdickung +0,97 Zellen am Dach). Konsistent mit B22/B28 (5^3-Fenster
+am Kanal 2,38 -> 1,51) und B56 (Gate feuert als Linkmengen-Eigenschaft).
+Entscheid: CFD_FAC_KRAFT bleibt als Diskriminator im Baum (Default 0), geht NICHT in die Basis;
+SATGATE=1 bleibt 4-mm-Standard (p4_ref gegen p4_satgate0: Cz-Delta -0,30/-0,23/-0,23 an 0,2/0,3/0,4 s).
