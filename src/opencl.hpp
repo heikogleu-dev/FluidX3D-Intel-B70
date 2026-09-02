@@ -683,7 +683,7 @@ private:
 	cl::CommandQueue cl_queue;
 	inline void check_for_errors(const int error) {
 		if(error==-48) print_error("There is no OpenCL kernel with name \""+name+"(...)\" in the OpenCL C code! Check spelling!");
-		if(error<-48&&error>-53) print_error("Parameters for OpenCL kernel \""+name+"(...)\" don't match between C++ and OpenCL C!");
+		if(error<-48&&error>-53) print_error("Parameters for OpenCL kernel \""+name+"(...)\" don't match between C++ and OpenCL C! (CL-Fehlercode "+to_string(error)+": -49 ARG_INDEX, -50 ARG_VALUE, -51 ARG_SIZE, -52 KERNEL_ARGS ungesetzt)"); // 02.09.: Code sichtbar machen -- ohne ihn ist die Fehlersuche Raten
 		if(error==-54) print_error("Workgrop size "+to_string((ulong)cl_range_local.get()[0])+" for OpenCL kernel \""+name+"(...)\" is invalid! Maximum supported workgroup size on "+device->info.name+" is "+to_string(device->info.max_workgroup_size)+".");
 		// FORK: Klartext fuer die drei Fehler, die auf der B70 tatsaechlich vorkommen.
 		if(error==-4) print_error("OpenCL kernel \""+name+"(...)\" failed: CL_MEM_OBJECT_ALLOCATION_FAILURE (-4). Device out of GPU memory.");

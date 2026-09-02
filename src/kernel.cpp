@@ -2431,6 +2431,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_KDIAG"+R(
 	, global float* fac_kd // ★ Klassen-Diagnostik (Position = nach fac_q, Host-add-Reihenfolge)
 )+"#endif"+R( // FACETTEN_KDIAG
+)+"#ifdef SGS_FDWAND"+R(
+	, const global float* fac_wfd // ★ Geistermoden-Fix: w je Facettenzelle aus |S|_FD des Vorschritts (Position = nach fac_kd)
+)+"#endif"+R( // SGS_FDWAND
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
@@ -2632,6 +2635,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	float w = def_w; // LBM relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
 
 )+"#ifdef SUBGRID"+R(
+)+"#ifdef SGS_FDWAND"+R(
+	// ★★ Geistermoden-Fix (B66/B69): an Facettenzellen kommt w aus dem FD-Kernel des Vorschritts
+	// (geistermodenfreies |S|_FD) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert.
+	// SGS_WANDFREI hat VORRANG (Extremtest); Slot 39 zaehlt die Anwendung (t%100 wie ueblich).
+	uint fdw_fid = 0xFFFFFFFFu;
+	{ uxx fbi_; if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS&&f_bbox(n,&fbi_)) fdw_fid = fac_idx[fbi_]; }
+)+"#endif"+R( // SGS_FDWAND
 )+"#ifdef SGS_WANDFREI"+R(
 	// ★★ TEST B der Rauwand-Diagnose (Laufzeitschalter CFD_SGS_WANDFREI, 2026-08-15): kein nu_t in
 	// Zellen mit solidem FLAECHENnachbarn -- entscheidet, ob die gemessene Rauwand (k_s ~ 1 Zelle,
@@ -2648,7 +2658,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(sgs_wand&&t%100ul==0ul) atomic_inc(&rho_clamp_hits[6]); // R2: Wirkpfad-Nachweis (Befund-2-Rest), Slot 6, gegatet wie der WFB-Zaehler
 	if(!sgs_wand)
 )+"#endif"+R( // SGS_WANDFREI
-
+)+"#ifdef SGS_FDWAND"+R(
+	if(fdw_fid!=0xFFFFFFFFu) {
+		w = fac_wfd[fdw_fid];
+		if(t%100ul==0ul&&rho_clamp_hits[39]<0xF0000000u) atomic_inc(&rho_clamp_hits[39]); // Slot 39: FDWAND angewandt
+	} else
+)+"#endif"+R( // SGS_FDWAND
 	{ // Smagorinsky-Lilly subgrid turbulence model, source: https://arxiv.org/pdf/comp-gas/9401004.pdf, in the eq. below (26), it is "tau_0" not "nu_0", and "sqrt(2)/rho" (they call "rho" "n") is missing
 		const float tau0 = 1.0f/w; // source 2: https://youtu.be/V8ydRrdCzl0
 		float Hxx=0.0f, Hyy=0.0f, Hzz=0.0f, Hxy=0.0f, Hxz=0.0f, Hyz=0.0f; // non-equilibrium stress tensor
@@ -3961,6 +3976,41 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	fac_gd[k8+5ul]  += 1.0f;
 	fac_gd[k8+6ul]  += (float)nsolid;
 } // sgs_gdiag()
+
+)+R(kernel void sgs_fdwand(const global float* u, const global uchar* flags,
+	const global ulong* gd_zellen, const uint gd_N, global float* fac_wfd) {
+	// ★★ SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND, 02.09.2026, Heiko-Go "korrigiere bitte das sgs";
+	// Befunde B66/B69: das iMEM-Wandmodell schreibt nicht-hydrodynamische Populationen in fhn, und
+	// Smagorinsky baut daraus seinen Tensor -- Pi/FD = 2,3-3,4 an anwendenden Wandzellen. WALE/Sigma
+	// sind gemessen KEINE Loesung, SGS_WANDFREI kollabiert c_f um Faktor 35). Dieser Kernel berechnet
+	// je Facettenzelle die RELAXATIONSRATE w aus dem GEISTERMODENFREIEN |S|_FD des u-Felds:
+	//   nu_t = (C*Delta)^2 * |S|_FD  (explizit -- die implizite Formel des Hauptkernels ist nur
+	//   noetig, weil |S| aus Pi selbst von tau abhaengt; |S|_FD tut das nicht),
+	//   tau_eff = tau0 + 3*nu_t,  w = 1/tau_eff.
+	// stream_collide liest fac_wfd im NAECHSTEN Schritt (ein Schritt Versatz, dt ~ 1e-5 s physikalisch
+	// irrelevant) -- getrennter Launch nach stream_collide in derselben In-Order-Queue = deterministisch.
+	// Solid-Nachbar: u = 0 (no-slip erster Ordnung), identisch zur g-Diagnose.
+	const uint gid = get_global_id(0);
+	if(gid>=gd_N) return;
+	const uxx n = (uxx)gd_zellen[gid];
+	uxx j[def_velocity_set]; // neighbor indices
+	neighbors(n, j); // calculate neighbor indices
+	float g[3][3];
+	for(uint a=0u; a<3u; a++) {
+		const uxx np=j[2u*a+1u], nm=j[2u*a+2u];
+		const bool sp=(flags[np]&TYPE_BO)==TYPE_S, sm=(flags[nm]&TYPE_BO)==TYPE_S;
+		for(uint i=0u; i<3u; i++) {
+			const float up_ = sp?0.0f:u[(ulong)i*def_N+(ulong)np];
+			const float um_ = sm?0.0f:u[(ulong)i*def_N+(ulong)nm];
+			g[i][a] = 0.5f*(up_-um_);
+		}
+	}
+	float SS=0.0f;
+	for(uint i=0u;i<3u;i++) for(uint a=0u;a<3u;a++) { const float Sia=0.5f*(g[i][a]+g[a][i]); SS=fma(Sia,Sia,SS); }
+	const float snorm_fd = sqrt(2.0f*SS);
+	const float tau0 = 1.0f/def_w;
+	fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // 0.030021 = (C*Delta)^2, C = 0.1733 wie Hauptkernel (0.76421222/(18*sqrt(2)))
+} // sgs_fdwand()
 )+R(kernel void object_torque(const global float* F, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1

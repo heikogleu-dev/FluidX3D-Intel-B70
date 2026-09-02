@@ -268,6 +268,7 @@ bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. l
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
 bool LBM_Domain::s_fac_elibb = false;
+uint LBM_Domain::s_sgs_fdwand = 0u; // ★ 02.09. Geistermoden-Fix
 uint LBM_Domain::s_sgs_gdiag = 0u; // ★ 31.08. g-Diagnose (CFD_SGS_GDIAG)
 uint LBM_Domain::s_fac_messnur = 0u; // ★ 30.08. Mess-Nur-Modus (BB-Physik, Facetten-Instrument)
 uint LBM_Domain::s_fac_nachbar = 0u; // ★ 30.08. Nachbarabtastung des Wandmodell-Eingangs
@@ -416,6 +417,8 @@ void LBM_Domain::allocate(Device& device) {
 		if(fac_elibb_on) { fac_q = Memory<uchar>(device, 18ull); kernel_stream_collide.add_parameters(fac_q); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fac_kdiag_on = s_fac_imem&&s_fac_kdiag>0u; // ★ Klassen-Diagnostik: Konstruktionszustand einfrieren (Signaturposition = nach fac_q)
 		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull); kernel_stream_collide.add_parameters(fac_kd); }
+		fdwand_on = s_sgs_fdwand>0u; // ★ Geistermoden-Fix: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd)
+		if(fdwand_on) { fac_wfd = Memory<float>(device, 1ull); kernel_stream_collide.add_parameters(fac_wfd); } // Platzhalter; alloc_facetten_domain baut und rebindet -- der KOHAERENZ-WAECHTER dort verhindert, dass der Platzhalter je gelesen wird
 	}
 
 	// FORK -- Block-Tiling: tile_slot ist per TS_P der LETZTE Parameter jedes fi-Kernels, muss also NACH
@@ -537,7 +540,8 @@ ulong vram_frei_gemessen() {
 	return 0ull;
 }
 
-void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag) {
+void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand) {
+	if((sgs_fdwand>0u)!=fdwand_on) print_error("SGS_FDWAND-Konfigurationsbruch: env-Parameter ("+to_string((ulong)sgs_fdwand)+") und Konstruktionszustand ("+string(fdwand_on?"an":"aus")+") widersprechen sich -- Emission haengt am Konstruktionszustand, Puffer am Parameter; beide muessen aus DEMSELBEN CFD_SGS_FDWAND stammen (Statik-Lebensdauer-Lehre 02.09.).");
 	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
 	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
 	if(FN==0ull) { print_error("alloc_facetten_domain: F-BBox ist leer."); return; }
@@ -553,7 +557,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
 		                      + (fac_kdiag_on ? 40ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 10 float)
-		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull); // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
+		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull)  // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
+		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:12ull)*aktiv : 0ull); // fac_wfd (4 B) + gd_zellen (8 B), falls nicht schon von gdiag gebaut
 		const ulong mb_fac = bytes_fac/1048576ull;
 		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
 		const ulong belegt = (ulong)device.info.memory_used;
@@ -706,14 +711,26 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(diagz_gebaut&&fac_diag.length()>=19ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
 	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull*aktiv); for(ulong q8=0ull;q8<10ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB, 10 float je Facette, Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
-	if(sgs_gdiag>0u) { // ★ g-DIAGNOSE (31.08., Parameter statt Statik seit 02.09.): fid->Zellindex-Liste + Akkumulator + eigener Kernel.
+	if(sgs_gdiag>0u||sgs_fdwand>0u) { // ★ Liste fid->Zellindex wird von g-Diagnose UND Geistermoden-Fix gebraucht
+		gd_zellen = Memory<ulong>(device, aktiv);
+		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=f.n; } }
+		gd_zellen.write_to_device();
+	}
+	if(sgs_fdwand>0u) { // ★ GEISTERMODEN-FIX (02.09.): fac_wfd bauen, FD-Kernel binden, stream_collide-Rebind unten
+		fac_wfd = Memory<float>(device, aktiv);
+		for(ulong q=0ull;q<aktiv;q++) fac_wfd[q]=1.0f/get_tau(); // = def_w // Init = molekulares w (erster Schritt ohne nu_t an Wandzellen -- dokumentiert harmlos)
+		fac_wfd.write_to_device();
+		kernel_sgs_fdwand = Kernel(device, aktiv, "sgs_fdwand", u, flags, gd_zellen, (uint)aktiv, fac_wfd);
+		if(sparse_on) kernel_sgs_fdwand.add_parameters(tile_slot); // gleiche B-7-Lehre wie sgs_gdiag
+		{ const uint fwix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u);
+		  kernel_stream_collide.set_parameters(fwix, fac_wfd); } // ★ Rebind NACH dem Neubau -- der Rebind stand zuerst VOR dem Move-Assignment und band den gleich darauf ZERSTOERTEN Platzhalter (CL -52 beim ersten Enqueue; exakt die DIAGZ-Use-after-free-Lektion, 02.09. erneut bezahlt)
+		print_info("SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND): w an "+to_string(aktiv)+" Facettenzellen aus |S|_FD (u-Feld, geistermodenfrei) statt aus dem Pi-Tensor; FD-Kernel je Schritt nach stream_collide (ein Schritt Versatz, deterministisch), Wirkpfad Slot 39.");
+	}
+	if(sgs_gdiag>0u) { // ★ g-DIAGNOSE (31.08., Parameter statt Statik seit 02.09.): Akkumulator + eigener Kernel (Liste oben).
 		// KEIN Eingriff in stream_collide, keine Signaturaenderung, kein JIT-Define -- der Kernel ist
 		// immer kompiliert und wird nur hier gebunden und spaeter explizit gerufen. Default-Bitgleichheit
 		// ist damit trivial (Schalter aus = weder Puffer noch Launch).
 		gdiag_on = true;
-		gd_zellen = Memory<ulong>(device, aktiv);
-		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=f.n; } }
-		gd_zellen.write_to_device();
 		fac_gd = Memory<float>(device, 8ull*aktiv);
 		for(ulong q8=0ull;q8<8ull*aktiv;q8++) fac_gd[q8]=0.0f;
 		fac_gd.write_to_device();
@@ -726,9 +743,9 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
 }
 
-void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag) {
+void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand) {
 	if(get_D()!=1u) { print_error("CFD_FACETTEN ist nur fuer eine Domaene gebaut (dd = zwei getrennte Instanzen)."); return; }
-	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap, sgs_gdiag); // 02.09.: Parameter WIRKLICH durchreichen (der Regex-Umbau hatte diese Zeile verfehlt -- Lauf 3 ist am neuen No-Op-Waechter LAUT gescheitert, genau dafuer ist er da)
+	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap, sgs_gdiag, sgs_fdwand); // 02.09.: BEIDE Parameter wirklich durchreichen (der Regex-Umbau hatte diese Zeile verfehlt -- Lauf 3 ist am neuen No-Op-Waechter LAUT gescheitert, genau dafuer ist er da)
 }
 
 void LBM_Domain::finalize_sparse_tiles() {
@@ -786,6 +803,7 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 	// verlaesst sich darauf, dass t ein monotoner Schrittzaehler < 2^62 bleibt (t>>62 == 0).
 	if(t>=(1ull<<62)) print_error("enqueue_stream_collide: t >= 2^62 -- die Remat-Invariante (t>>62==0) waere verletzt.");
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz).enqueue_run();
+	if(fdwand_on&&fac_wfd.length()>1ull) kernel_sgs_fdwand.enqueue_run(); // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;
@@ -1188,6 +1206,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_messnur>0u) ? (string)"\n	#define FACETTEN_MESSNUR" : (string)"") // ★ 30.08. BB-Physik, nur messen
 	+((s_facetten&&s_fac_imem&&s_fac_nachbar>0u) ? (string)"\n	#define FACETTEN_NACHBAR" : (string)"") // ★ 30.08. Eingang aus der zweiten Fluidzelle
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik
+	+((s_facetten&&s_sgs_fdwand>0u) ? (string)"\n	#define SGS_FDWAND" : (string)"") // ★ 02.09. Geistermoden-Fix (braucht Facetten fuer fac_idx, nicht zwingend iMEM -- wirkt auch im MESSNUR/BB-Arm)
 	+((s_facetten&&s_fac_imem&&s_fac_elibb) ? (string)"\n	#define FACETTEN_ELIBB" : (string)"") // ★ B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	+((s_facetten&&s_fac_imem&&s_fac_elibb_pur) ? (string)"\n	#define FACETTEN_ELIBB_PUR" : (string)"") // ★ Pur-Arm: NUR Geometrie-Blende (CFD_FAC_ELIBB=2)
 	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")
