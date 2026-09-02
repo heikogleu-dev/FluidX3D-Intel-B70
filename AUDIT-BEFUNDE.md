@@ -5207,3 +5207,20 @@ ist BESTAETIGT. Befunde und Fixes:
 Offen aus dem Bericht: NACHBAR ist weiterhin nur statisch geprueft (nie JIT-kompiliert) -- vor dem
 ersten Einsatz CPU-JIT-Rauchtest; gdiag misst Pi eine Kollision NACH der Injektion, der Faktor 2,3
 ist damit eher eine UNTERGRENZE der Geistermoden-Aufblaehung.
+
+### B69 — g-Diagnose am 8-mm-FAHRZEUG: die Kanalbefunde uebertragen sich (02.09. 21:51, w_gdiag, ee96e02)
+719.574 Wandzellen, 150 Samples je Zelle, Basis + einzige Abweichung CFD_SGS_GDIAG=1 (rc=0):
+  dominante Klasse (5 Links, y_w 0,50 -- achsparallele Flaechen, 228k Zellen): Pi/FD = 2,33
+  uebrige Klassen (Ecken 8-9 Links, Kanten, freie Lagen):                      Pi/FD = 1,18-1,72
+  WALE/FD = 0,01-0,04 | Sigma/FD = 0,002-0,006 | Omega/S = 0,89-1,00 ueberall
+DREI ANTWORTEN: (1) Die Geistermoden-Aufblaehung des Smagorinsky-Tensors ist am Fahrzeug REAL und hat
+die Kanal-Groessenordnung -- Faktor 2,33 in der dominanten Klasse (Kanal eben: 3,39 bei Rueckfall 0 %;
+am Fahrzeug wendet das Modell wegen 43 % Rueckfall seltener an, konsistent mit dem kipp26-Muster
+"weniger Anwendung, weniger Geistermoden"). (2) WALE/Sigma sind auch am Fahrzeug erledigt (1-4 % von
+Smagorinsky -- reine Scherung dominiert, Omega/S ~ 0,9-1,0). (3) Der chirurgische Fix -- nu_t an
+Facettenzellen aus |S|_FD (u-Feld) statt |S|_Pi -- haette am Fahrzeug in der Hauptwandklasse den
+Hebel ~2,3x auf die wandnahe nu_t; die Mechanik dafuer existiert (gdiag-Kernel schreibt, stream_collide
+liest einen Schritt versetzt). Das ist der Baukandidat der naechsten Sitzung, mit Planungs- und
+Pruefagenten-Kette und der Kanalleiter als Abnahme (kipp0 darf nicht kollabieren).
+Lehrgeld dieser Messung: VIER Anlaeufe (zwei Statik-Lebensdauer-Fallen, ein verschluckter Parameter,
+den der frisch eingebaute No-Op-Waechter fing) -- der Waechter hat sich am dritten Anlauf bezahlt gemacht.
