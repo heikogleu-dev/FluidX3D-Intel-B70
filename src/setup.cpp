@@ -2685,7 +2685,7 @@ void main_setup_kanal() {
 	std::vector<Facette> FF; // Funktionsscope: der Klassenbericht am Laufende braucht die Liste (Weg-1 Stufe 0)
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
 		FF = baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, kipp>0u?"Torus-Kipp":"Kanal", kipp>0u);
-		lbm.alloc_facetten(FF);
+		lbm.alloc_facetten(FF, nullptr, env_u("CFD_SGS_GDIAG", 0u)); // Parameter statt Statik (02.09.)
 		// F2/F7: Facettenzahl ist geometrisch exakt abzaehlbar -- harte Pruefung faengt jeden
 		// vergessenen z-Wrap mechanisch (Formelblatt Schritt 5).
 		// GESAMTzahl (aktiv + markiert) ist die geometrische F2-Invariante -- fac_N allein zaehlt nur
@@ -3416,7 +3416,7 @@ void main_setup_kugel() {
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
-		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr);
+		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr, env_u("CFD_SGS_GDIAG", 0u));
 	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
@@ -4790,7 +4790,7 @@ static void main_setup_fahrzeug_dd() {
 	else print_info("Geschwindigkeits-Einlass Fernfeld AUS (CFD_FERN_VI=0, gemessener Default): rho bleibt am Einlass festgenagelt, der Rand reflektiert -- bekannt und angesagt.");
 	lbm_f.finalize_sparse_tiles();
 	lbm_c.finalize_sparse_tiles();
-	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
+	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr, env_u("CFD_SGS_GDIAG", 0u)); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) lbm_c.alloc_facetten(FFc); // P8: alloc_facetten_domain nutzt die INSTANZ-F-BBox von lbm_c (Fahrzeug+4 in Grobzellen, oben gesetzt) -- der Wachhund "Facette ausserhalb der F-BBox" prueft die Deckung hart
 
 	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN

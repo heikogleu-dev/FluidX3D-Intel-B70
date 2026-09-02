@@ -537,7 +537,7 @@ ulong vram_frei_gemessen() {
 	return 0ull;
 }
 
-void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap) {
+void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag) {
 	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
 	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
 	if(FN==0ull) { print_error("alloc_facetten_domain: F-BBox ist leer."); return; }
@@ -553,7 +553,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
 		                      + (fac_kdiag_on ? 40ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 10 float)
-		                      + (s_sgs_gdiag>0u ? 40ull*aktiv : 0ull); // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
+		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull); // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
 		const ulong mb_fac = bytes_fac/1048576ull;
 		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
 		const ulong belegt = (ulong)device.info.memory_used;
@@ -706,7 +706,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(diagz_gebaut&&fac_diag.length()>=19ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
 	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull*aktiv); for(ulong q8=0ull;q8<10ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB, 10 float je Facette, Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
-	if(s_sgs_gdiag>0u) { // ★ g-DIAGNOSE (31.08.): fid->Zellindex-Liste + Akkumulator + eigener Kernel.
+	if(sgs_gdiag>0u) { // ★ g-DIAGNOSE (31.08., Parameter statt Statik seit 02.09.): fid->Zellindex-Liste + Akkumulator + eigener Kernel.
 		// KEIN Eingriff in stream_collide, keine Signaturaenderung, kein JIT-Define -- der Kernel ist
 		// immer kompiliert und wird nur hier gebunden und spaeter explizit gerufen. Default-Bitgleichheit
 		// ist damit trivial (Schalter aus = weder Puffer noch Launch).
@@ -725,7 +725,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
 }
 
-void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap) {
+void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag) {
 	if(get_D()!=1u) { print_error("CFD_FACETTEN ist nur fuer eine Domaene gebaut (dd = zwei getrennte Instanzen)."); return; }
 	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap);
 }
