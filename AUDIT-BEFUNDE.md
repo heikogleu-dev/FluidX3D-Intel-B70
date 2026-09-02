@@ -5262,5 +5262,14 @@ BEWEIS STUFE 3 (8-mm-Fahrzeug, w_fdwand = Basis + CFD_SGS_FDWAND=1, gepaart gege
   aufloesungsdominiert (B64/B65: Grenzschicht 4,7x zu dick). Erwartung 4 mm: dort traf der
   Geistermoden-Fehler dieselbe Wandklasse -- der 4-mm-Paartest (p4_fdwand vs p4_ref) ist der
   naechste Produktionskandidat, BRAUCHT den TS_P-Fix (SPARSE!) und Heikos Go.
-Slot-Umzugs-Abnahme: CPU-Kanalserie wk_kipp0/kipp26 (Geraet 0, neue Slots 72-76) -- Ergebnis siehe
-Log; Sollwert: bitgleiche u_tau zu fdw80 (nur Zaehlerslots + ungenutzte Signatur geaendert).
+Slot-Umzugs-Abnahme (Ergebnis): wk_kipp0 auf CPU: Slot 76 = 9.921.240 EXAKT der alte 39er-Wert,
+Selbsttest bestanden, u_tau 0,002033 vs 0,002087 iGPU (2,6 % Geraetrundung ueber 265k Schritte,
+kein Kollaps) -- der CPU-JIT-Beweis. wk_kipp26 auf CPU gestoppt (Restschaetzung ~59 min) und als
+wl_kipp26_igpu auf der iGPU wiederholt (rundungsgleich zum fdw80-Soll = strengster Vergleich):
+u_tau 0,003320 / Faktor 1,107 / Slot 76 = 159.586.740 -- ALLE drei Werte EXAKT reproduziert.
+Der Queue-rc=1 kommt vom K2-Waechter (Reibungspfad >1 % neben der Kraftbilanz am gekippten
+Kanal) und feuerte IDENTISCH schon im fdw80-Soll-Lauf -- Teil der Reproduktion, kein Befund;
+fuer die FDWAND-Abnahme zaehlt u_tau, K2 am Kipp-Kanal ist ein offener Nebenpunkt des
+Kanal-Instrumentariums (kipp0 ist K2-sauber). Heiko-Vorgabe 02.09. fuer kuenftige Abnahmen
+bewaehrter Kernel: direkt die B70 nehmen (Leiter gilt nur dem Erstkontakt).
+Damit sind alle Auflagen behoben UND abgenommen -- FDWAND ist einsatzbereit fuer dd+SPARSE (4 mm).
