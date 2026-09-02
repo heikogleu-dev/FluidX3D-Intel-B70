@@ -727,7 +727,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 
 void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag) {
 	if(get_D()!=1u) { print_error("CFD_FACETTEN ist nur fuer eine Domaene gebaut (dd = zwei getrennte Instanzen)."); return; }
-	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap);
+	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap, sgs_gdiag); // 02.09.: Parameter WIRKLICH durchreichen (der Regex-Umbau hatte diese Zeile verfehlt -- Lauf 3 ist am neuen No-Op-Waechter LAUT gescheitert, genau dafuer ist er da)
 }
 
 void LBM_Domain::finalize_sparse_tiles() {
