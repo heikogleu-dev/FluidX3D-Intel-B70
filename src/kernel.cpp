@@ -1911,7 +1911,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// "reine BB"-Arm war an kipp26 in Wahrheit Blende-BB. Jetzt ist MESS-NUR exakt reines Bounce-Back,
 	// auch mit ELIBB-Emission. Slot 7 (Wirkpfad-Soll) und Slot 38 (MESSNUR-Wirkpfad; Umzug von 23,
 	// Pruefbefund B-3: 20-26 gehoeren boden_eq/einlass_eq/schale_blend ueber den diag-Alias) zaehlen hier.
-	if(t%100ul==0ul) { atomic_inc(&hits[7]); atomic_inc(&hits[38]); }
+	if(t%100ul==0ul) { atomic_inc(&hits[7]); atomic_inc(&hits[75]); } // Slot 75 (B70)
 	return (float3)(0.0f,0.0f,0.0f);
 )+"#endif"+R( // FACETTEN_MESSNUR
 )+"#ifdef FACETTEN_ELIBB"+R(
@@ -1969,9 +1969,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(utb>1e-6f) {
 				ut_ab = utb;
 				yw_ab = yw + (c(ib)*nx+c(def_velocity_set+ib)*ny+c(2u*def_velocity_set+ib)*nz); // Wandabstand der Abtastzelle
-				if(t%100ul==0ul) atomic_inc(&hits[35]); // Slot 35 (Umzug von 20, B-3): Nachbarabtastung angewandt
-			} else if(t%100ul==0ul) atomic_inc(&hits[37]); // Slot 37 (Umzug von 22, B-3): Nachbar gefunden, steht aber still (Schatten reicht weiter)
-		} else if(t%100ul==0ul) atomic_inc(&hits[36]); // Slot 36 (Umzug von 21, B-3): kein Fluidnachbar in Normalenrichtung -- eigene Zelle
+				if(t%100ul==0ul) atomic_inc(&hits[72]); // Slot 72 (2. Umzug 02.09., B70: 35-39 sind SGS_DIAG-Wandlagen-Bins): Nachbarabtastung angewandt
+			} else if(t%100ul==0ul) atomic_inc(&hits[74]); // Slot 74 (B70): Nachbar gefunden, steht aber still (Schatten reicht weiter)
+		} else if(t%100ul==0ul) atomic_inc(&hits[73]); // Slot 73 (B70): kein Fluidnachbar in Normalenrichtung -- eigene Zelle
 	}
 )+"#endif"+R( // FACETTEN_NACHBAR
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
@@ -2661,7 +2661,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef SGS_FDWAND"+R(
 	if(fdw_fid!=0xFFFFFFFFu) {
 		w = fac_wfd[fdw_fid];
-		if(t%100ul==0ul&&rho_clamp_hits[39]<0xF0000000u) atomic_inc(&rho_clamp_hits[39]); // Slot 39: FDWAND angewandt
+		if(t%100ul==0ul&&rho_clamp_hits[76]<0xF0000000u) atomic_inc(&rho_clamp_hits[76]); // Slot 76 (B70; 39 war der oberste SGS_DIAG-Wandlagen-Bin): FDWAND angewandt
 	} else
 )+"#endif"+R( // SGS_FDWAND
 	{ // Smagorinsky-Lilly subgrid turbulence model, source: https://arxiv.org/pdf/comp-gas/9401004.pdf, in the eq. below (26), it is "tau_0" not "nu_0", and "sqrt(2)/rho" (they call "rho" "n") is missing
@@ -3978,7 +3978,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // sgs_gdiag()
 
 )+R(kernel void sgs_fdwand(const global float* u, const global uchar* flags,
-	const global ulong* gd_zellen, const uint gd_N, global float* fac_wfd) {
+	const global ulong* gd_zellen, const uint gd_N, global float* fac_wfd TS_P) {
 	// ★★ SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND, 02.09.2026, Heiko-Go "korrigiere bitte das sgs";
 	// Befunde B66/B69: das iMEM-Wandmodell schreibt nicht-hydrodynamische Populationen in fhn, und
 	// Smagorinsky baut daraus seinen Tensor -- Pi/FD = 2,3-3,4 an anwendenden Wandzellen. WALE/Sigma

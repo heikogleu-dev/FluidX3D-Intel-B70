@@ -5224,3 +5224,43 @@ liest einen Schritt versetzt). Das ist der Baukandidat der naechsten Sitzung, mi
 Pruefagenten-Kette und der Kanalleiter als Abnahme (kipp0 darf nicht kollabieren).
 Lehrgeld dieser Messung: VIER Anlaeufe (zwei Statik-Lebensdauer-Fallen, ein verschluckter Parameter,
 den der frisch eingebaute No-Op-Waechter fing) -- der Waechter hat sich am dritten Anlauf bezahlt gemacht.
+
+### B70 — FDWAND gebaut, geprueft, dreistufig bewiesen; Slot-Freiheits-Grep zum ZWEITEN Mal zu schwach (02.09., 7953a3a ff.)
+Der Geistermoden-Fix (CFD_SGS_FDWAND): eigener FD-Kernel sgs_fdwand rechnet je Schritt nach
+stream_collide w = 1/(tau0 + 3*(C*Delta)^2*|S|_FD) an allen Facettenzellen (u-Feld, zentrale
+Differenzen, Solid->u=0); stream_collide liest es im naechsten Schritt via f_bbox->fac_idx statt des
+Pi-Smagorinsky. Deterministisch (in-order, 1 Schritt Versatz), SGS_WANDFREI hat Vorrang.
+BEWEIS STUFE 1 (Pruefagent, GELB): Physik, Determinismus, Indizierung, Formel-Aequivalenz
+(0,76421222 = 18*sqrt(2)*(C*Delta)^2, implizite Form ist exakt die Quadratik-Loesung) BESTAETIGT.
+Vier Auflagen, alle behoben:
+  (a) Slot 39 war der OBERSTE SGS_DIAG-WANDLAGEN-BIN. Mein Freiheits-Grep suchte Literale --
+      SGS_DIAG indiziert aber BERECHNET (30u+b, 35u+bw, 40u+bw, 45u+...): 30-48 sind komplett belegt,
+      dazu 49-58 Stoerform, 60-63 SGS-Guo. Die B68-Behauptung "35-48 verifiziert frei" war FALSCH --
+      dieselbe Fallenklasse wie B-3, zum zweiten Mal bezahlt. Fix: rho_clamp_hits 72 -> 80 Slots,
+      NACHBAR -> 72/73/74, MESSNUR -> 75, FDWAND -> 76 (77-79 frei). Die fdw80-Kanalabnahme und
+      w_fdwand liefen OHNE CFD_SGS_DIAG -- die Kollision traf keine Messung (verifiziert: Slot-39-Wert
+      exakt fac_N*Samples, eine Kontamination waere nicht exakt).
+  (b) sgs_fdwand-Signatur ohne TS_P, Host haengt unter sparse_on tile_slot an -> dd+SPARSE waere
+      an CL_INVALID_KERNEL_ARGS gestorben. TS_P ergaenzt (symmetrisch zu sgs_gdiag).
+  (c) MESSNURxFDWAND jetzt angesagt (der Arm ist dann kein reines BB mehr).
+  (d) s_sgs_fdwand im SUBGRID-Waechterblock (ohne SUBGRID waere der Hook still tot).
+  Dazu bezahlt: Rebind VOR Memory-Neubau band den zerstoerten Platzhalter (CL -52, DIAGZ-Lektion
+  erneut) -> Rebind in den Neubau-Block; opencl.hpp nennt CL-Fehlercodes jetzt im Klartext.
+BEWEIS STUFE 2 (Kanalleiter, iGPU, fdw80-Serie): kipp26 u_tau Ist/Ziel 0,778 -> 1,107 (Fehlbetrag
+halbiert, Vorzeichen dreht: leicht zu viel statt deutlich zu wenig); kipp0 0,719 -> 0,696 -- KEIN
+Kollaps (der WANDFREI-Fehlschlag c_f-Faktor-35 tritt nicht auf). Wirkpfad Slot exakt.
+BEWEIS STUFE 3 (8-mm-Fahrzeug, w_fdwand = Basis + CFD_SGS_FDWAND=1, gepaart gegen w_ref, rc=0):
+  Wirkpfad: 180.613.074 = 719.574 Facettenzellen x 251 Samples EXAKT -- jede Zelle, jedes Fenster.
+  RHO_CLAMP: Nahfeld 5,427M vs 5,437M (-0,2 %), Fernfeld 88,8k vs 88,9k -- keine neuen Ausreisser.
+  Kraefte (cd/cz_druck_rest, gepaarte 100-ms-Fenster): cd +0,040...+0,059 (max +2,7 sigma),
+  cz -0,005...-0,056 (unter 1 sigma) -- moderat, kein Umkippen.
+  Dach (fx_band/fx_profil2, Zeitmittel 300/450/500 ms, x=2,50 m): ut1 erste Fluidzelle +25 %
+  (2,00 -> 2,50 m/s; x=2,70: +36 %), Formfaktor H 2,00 -> 1,77 (voelliger, turbulenter),
+  negfrac(x=2,70) 0,091 -> 0,000 (liegt wieder an). Der ABLOESEPUNKT selbst bleibt bei 8 mm
+  praktisch unveraendert (2,346 -> 2,338 m; OF13-Soll 3,63 m): FDWAND heilt die wandnahe
+  Impulsbilanz (das war sein Auftrag -- Geistermoden-Faktor 2,33 raus), die Dachabloesung bleibt
+  aufloesungsdominiert (B64/B65: Grenzschicht 4,7x zu dick). Erwartung 4 mm: dort traf der
+  Geistermoden-Fehler dieselbe Wandklasse -- der 4-mm-Paartest (p4_fdwand vs p4_ref) ist der
+  naechste Produktionskandidat, BRAUCHT den TS_P-Fix (SPARSE!) und Heikos Go.
+Slot-Umzugs-Abnahme: CPU-Kanalserie wk_kipp0/kipp26 (Geraet 0, neue Slots 72-76) -- Ergebnis siehe
+Log; Sollwert: bitgleiche u_tau zu fdw80 (nur Zaehlerslots + ungenutzte Signatur geaendert).
