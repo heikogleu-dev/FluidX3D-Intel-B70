@@ -5137,3 +5137,34 @@ Cz-Grobsprosse unbrauchbar solange er steht. (b) Kohaerente 151-Hz-Linie mit 60-
 Kraftfluktuation, trifft keine Boxmode. (c) tau -> 0,5 hat praktisch keine Volumenviskositaet
 (Schalldaempfung 1,9e-6 je Umlauf, 5,4 Mio RHO_CLAMP-Treffer bei 8 mm) -- echter Defekt, aber
 Stabilitaets- und nicht Abloeseursache (ARBEITSLISTE D1).
+
+### B66 — g-Diagnose gebaut und gemessen: WALE/Sigma erledigt, die Geistermoden sind real (31.08.-02.09.)
+NEU (Commit b3d385f): CFD_SGS_GDIAG -- sparser Messkernel ueber die Wandzellenliste (kein Eingriff in
+Physik oder Hauptkernel; Selbsttest gegen 5 double-Referenztensoren; Paritaetsfestigkeit ueber die
+Sum-cc-Invarianz; CFD_KANAL_STOER=0 liefert das ungestoerte Reichardt-Profil als analytischen Testfall,
+dort exakt WALE/FD = Sigma/FD = 0,000 und Omega/S = 1,000; GDIAG an/aus byte-identisch).
+ERGEBNIS (80 ETT, iGPU, Serie wg_gdiag, je ~2700-5000 Samples je Zelle):
+  kipp0 (eben):   iMEM Pi/FD = 3,39 | BB (MESSNUR) 1,47 | WALE/FD 2e-5..1e-3 | Sigma/FD 1e-4..4e-4 | Om/S 0,995-0,999
+  kipp26 (Treppe, NORMQUELLE=1), Lagen 1/4/8 Links:
+                  iMEM Pi/FD = 1,13 / 1,89 / 1,35 | BB 1,09 / 1,62 / 1,13 | WALE/FD und Sigma/FD ueberall ~1e-3 | Om/S ~0,99
+DREI SCHLUESSE:
+(1) WALE/SIGMA SIND ALS WANDZELLEN-HEILMITTEL ERLEDIGT, gemessen statt gebaut: die reale wandnahe
+    Stroemung ist auch eingeschwungen praktisch reine Scherung (Om/S ~ 0,99); beide Sensoren liefern
+    1e-3 bis 1e-5 des Smagorinsky-Werts, waeren also faktisch SGS_WANDFREI -- und der ist am Kanal mit
+    c_f-Kollaps Faktor 35 gescheitert (AUDIT:607). Die Monte-Carlo-Abschaetzung des Pruefagenten
+    (WALE ~ 1,6x Smagorinsky bei Stoerung 1,1) beschrieb die reale Struktur nicht -- seine eigene
+    Einschraenkung ("Obergrenze, Vorzugsausrichtung senkt") war der wahre Fall.
+(2) DIE GEISTERMODEN SIND REAL UND ISOLIERT: an der ebenen Wand, wo das Wandmodell an JEDER Zelle
+    anwendet (Rueckfall 0 %), blaeht es den fneq-Tensor um Faktor 2,3 gegenueber BB auf (3,39/1,47) --
+    Smagorinsky setzt dort also gut das Doppelte der nu_t, die die echte Stroemung rechtfertigt.
+    An der Treppe (Rueckfall 69 %) ist der Aufschlag nur 1,04-1,20 -- konsistent: weniger Anwendung,
+    weniger Geistermoden. Der BB-Grundueberschuss 1,47 reproduziert die 1,49 von AUDIT:2219.
+(3) NAECHSTER KANDIDAT (nicht gebaut): an Facettenzellen |S| fuer den SGS aus dem u-Feld (FD) statt
+    aus Pi beziehen -- entfernt NUR den Geistermoden-Anteil, laesst die legitime Log-Bereichs-nu_t
+    stehen (im Gegensatz zu SGS_WANDFREI). Umsetzung nach dem Pruefagenten-Muster: der gdiag-Kernel
+    schreibt nu_t je Wandzelle, stream_collide liest es einen Schritt versetzt (deterministisch,
+    +1,2 %). Vorher auf 8 mm am Fahrzeug messen, ob Pi/FD dort dieselbe Groessenordnung hat.
+NEBENBEFUNDE: K2 disqualifiziert MESSNUR-Arme ordnungsgemaess (Reibungspfad konstruktiv leer) --
+Guard mit Ansage nachgezogen (wie Pur/K3); kipp26-K2-Verletzung mit iMEM ist der bekannte Zustand
+(0,8853 am 28.08.), fuer die physikfreie Diagnose ohne Belang. NORMQUELLE-Waechter feuert an kipp0
+zu Recht (V3b == PCA an der ebenen Wand) -- kipp0-Arme laufen ohne den Schalter.

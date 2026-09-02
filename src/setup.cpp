@@ -2877,6 +2877,7 @@ void main_setup_kanal() {
 			// K2 ist ein STATIONARITAETS-Kriterium -- im Transientenfenster (<5000 Schritte) wird es
 			// angesagt uebersprungen statt einen legitimen Kurztest zu killen (R3-Nachschliff).
 			if(n_steps-fac_snap_step<5000ull) print_warning("K2-Pruefung UEBERSPRUNGEN: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000) -- dieser Lauf ist KEIN Abnahmelauf.");
+			else if(LBM_Domain::s_fac_messnur>0u) print_info("K2 im MESS-NUR-Arm uebersprungen (das Wandmodell wendet nichts an, der Reibungspfad ist konstruktiv leer -- 31.08./02.09., gleiche Logik wie der Pur-Guard bei K3).");
 			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");
 			if(LBM_Domain::s_fac_elibb_pur) print_info("K3 im Pur-Arm uebersprungen (fac_tau_n bleibt konstruktiv 0 -> n_voll-Kriterium gilt nicht; B3-Pruefbefund 3)."); // Pur-Guard wie beim Slot-7-Fix
 			else { // ★ Instrumentenfix 30.08. (Freigabe G): exakte double-Gleichheit als Nullkriterium ist falsch -- x26_ref druckte "-0.00000000",
