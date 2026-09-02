@@ -5168,3 +5168,17 @@ NEBENBEFUNDE: K2 disqualifiziert MESSNUR-Arme ordnungsgemaess (Reibungspfad kons
 Guard mit Ansage nachgezogen (wie Pur/K3); kipp26-K2-Verletzung mit iMEM ist der bekannte Zustand
 (0,8853 am 28.08.), fuer die physikfreie Diagnose ohne Belang. NORMQUELLE-Waechter feuert an kipp0
 zu Recht (V3b == PCA an der ebenen Wand) -- kipp0-Arme laufen ohne den Schalter.
+
+### B67 — Membran-Defekt der 8-mm-Sprosse: bestaetigt, Ursache im STL lokalisiert (02.09.)
+GEGENGEPRUEFT (unabhaengige Rechnung, flags direkt aus feld_nah_000300ms.vtk): w_bb hat exakt
+2857 Solid-Zellen auf y = 0 mit Fluid bei y = +-dx (x 2,90-4,33 m, z 0,74-1,16 m, 6,5 % der
+Symmetrieebenen-Solids); p4_bb hat 8. Zahl fuer Zahl identisch mit dem Agentenbefund vom 30.08.
+URSACHE LOKALISIERT: scenes/vehicle.stl (133.766 Dreiecke, Halbmodell-Spiegelung) enthaelt
+51 SPLITTER-DREIECKE fast vollstaendig in der Ebene |y| < 1,8 mm, Gesamtflaeche nur 0,0003 m2,
+Region x_STL 0,72-2,00 / z 0,73-1,15 -- mit XOFF 2,2063 ist das x_v2 2,93-4,21 m: EXAKT die
+Membranregion. Wahrscheinlicher Mechanismus: die Naht-Splitter stoeren die Paritaet des
+Ray-Castings der Voxelierung entlang y=0; bei 8 mm kippen 2857 Zellen auf Solid, bei 4 mm 8.
+FOLGEN: (a) Cz-Vergleiche 8 gegen 4 mm sind kontaminiert, solange die Naht steht; delta_90 am
+Dach (x <= 2,8, off-centre) ist frei davon. (b) Fix-Kandidat: die 51 Splitter aus dem STL
+entfernen (offensichtlicher Muell) -- ABER das aendert die 8-mm-Geometrie und damit alle
+8-mm-Bezugswerte: neue Referenzgeneration, nur mit Heikos Entscheid.
