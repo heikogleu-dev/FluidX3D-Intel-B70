@@ -5273,3 +5273,46 @@ fuer die FDWAND-Abnahme zaehlt u_tau, K2 am Kipp-Kanal ist ein offener Nebenpunk
 Kanal-Instrumentariums (kipp0 ist K2-sauber). Heiko-Vorgabe 02.09. fuer kuenftige Abnahmen
 bewaehrter Kernel: direkt die B70 nehmen (Leiter gilt nur dem Erstkontakt).
 Damit sind alle Auflagen behoben UND abgenommen -- FDWAND ist einsatzbereit fuer dd+SPARSE (4 mm).
+
+### B71 — DIE FEHLENDE FERN-SEITE DER DUAL-B70-RECHNUNG (02.09., Heiko-Rueckfrage)
+Heiko: "zu dem dual b70 plan fehlen die far box abmasse -- b19 muesste doch in x+ gekuerzt werden."
+BEIDES TRIFFT ZU. B16/B16b/B18/B19 rechnen ausschliesslich die NAHFELD-Seite (VRAM je B70); die
+Fernbox kommt dort nur als Nebensatz vor. Nachgetragen, gerechnet gegen setup.cpp:4165/4166
+(n_cells, CFD_FAR_L*) und die Geraeteanker setup.cpp:4136 (B70 4648 MLUPs, iGPU 594 MLUPs).
+
+FERNBOX PHYSISCH -- in ALLEN Varianten unveraendert 12,272 x 7,664 x 8,816 m (x -2,662..9,610,
+y +-3,832, z 0..8,816). Nur die RASTERUNG folgt dx_c = ratio*dx_f:
+  Variante      dx_c    Fern-Gitter        Zellen   iGPU-VRAM  Grobschritt
+  heute/B18   16,0 mm   768 x 480 x 552    203,5 M   10,4 GB     0,3426 s   (unveraendert!)
+  B19         15,0 mm   819 x 512 x 589    247,0 M   12,7 GB     0,4158 s   (+21,4 %)
+BALANCE je grobem Schritt (Nah = Zellen/Karte / 4648 x 4 feine Schritte, Halo-Aufschlag 15 % aus
+der Vorpruefung 21.08. -- ANNAHME, auf dieser Maschine NICHT gemessen):
+  heute 1 Karte    Nah 0,4378 s | Fern 0,3426 s | 1,28 | iGPU 22 % Leerlauf (Profiler: 96,1 % conc.)
+  B18 4,00 mm      Nah 0,5180 s | Fern 0,3426 s | 1,51 | iGPU 34 % Leerlauf
+  B19 3,75 mm      Nah 0,5600 s | Fern 0,4158 s | 1,35 | iGPU 26 % Leerlauf
+  B19 x+ 0,45 L    Nah 0,5433 s | Fern 0,4158 s | 1,31 | iGPU 23 % Leerlauf  <- fast heutige Balance
+ZWEI FOLGERUNGEN, die in B18/B19 fehlten:
+(1) Die FERNBOX braucht KEINE x+-Kuerzung. Bei dx_c 15 mm waechst sie von selbst um 21,4 % und
+    fuellt damit genau den Leerlauf, den die zweite B70 aufreisst -- sie ist kein Flaschenhals
+    (0,416 gegen 0,543-0,560 s). Das ist der Unterschied zum 3,5-mm-Plan vom 21.08.: dort zwang
+    ratio 4 auf dx_c 14 mm (+49 % Fernzellen, 511 gegen 507 ms = 101 %), DA war die Kuerzung des
+    Fern-Nachlaufs um 2,5 m noetig. Bei 15 mm ist sie es nicht.
+(2) Die x+-KUERZUNG DES NAHFELDS ist trotzdem der beste der drei B19-Sparwege -- und zwar aus zwei
+    Gruenden statt einem: sie spart am meisten VRAM (88,2 % gegen 88,6 % bei y-Verzicht und 89,1 %
+    bei z+-Verzicht) UND sie zieht als einzige die Balance zurueck auf 1,31, also praktisch den
+    heutigen Wert. Meine muendliche Empfehlung "z+ 1050 ist der billigste" war damit zu eng
+    gedacht: sie sah nur den Rand, nicht die Kadenz. KORREKTUR: bei 3,75 mm ist x+ 0,45 L der
+    Weg, nicht z+ 1050.
+VORBEHALT UNVERAENDERT: der Halo-Speicher UND die Halo-Laufzeit der Domaenenzerlegung sind auf
+dieser Maschine nicht gemessen; die 15 % sind eine Annahme. Und der 0,5-L-Nachlauf selbst ist
+weiterhin unbelegt -- logs/n_wake_serie.txt (drei 8-mm-Arme, eine Variable CFD_NEAR_LX) liegt
+fertig da und ist NIE GELAUFEN. Ohne ihn ist jede x+-Zahl in B18/B19/B71 eine Annahme.
+
+IST-ZUSTAND ZUM VERGLEICH (p4_ref-Log, 4-mm-Produktion, dual-domain B70+iGPU):
+  NAHFELD  1689 x 661 x 465 @ 4,00 mm = 519,1 M | 29.672 MB B70 (Schlupf 487 MB)
+    Box 6,752 x 2,640 x 1,856 m; Abstaende ab Huelle x- 326 | x+ 1990 (0,45 L) | y +-401 | z+ 651 mm
+  FERNFELD  768 x 480 x 552 @ 16,0 mm = 203,5 M | 10.705 MB iGPU
+    Box 12,272 x 7,664 x 8,816 m; Abstaende x- 2662 | x+ 5174 (1,17 L) | y +-2913 | z+ 7611 mm
+    Versperrung 2,74 % (OF13 1,93 %)
+  Der Sprung, den Dual-B70 kauft, ist also am NAHFELD-RAND: y +-401 -> 898..1004 mm,
+  z+ 651 -> 1102..1208 mm, x+ 0,45 -> 0,50 L. Die Fernbox bleibt, wo sie ist.
