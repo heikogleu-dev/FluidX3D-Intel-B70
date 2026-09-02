@@ -202,6 +202,7 @@ public:
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_fac_alpha;
 	static bool s_fac_elibb;
+	static uint s_sgs_gdiag;   // ★ 31.08. g-DIAGNOSE (CFD_SGS_GDIAG=1): sparser Messkernel ueber die Facettenzellen -- |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle akkumuliert; fasst Physik nicht an
 	static uint s_fac_messnur; // ★ 30.08. CFD_FAC_MESSNUR: Facetten bauen und MESSEN, im Kernel aber NICHTS anwenden -- BB-Physik mit Facetten-Instrument (Aepfel-mit-Aepfeln-Bezug fuer BB-Vergleiche)
 	static uint s_fac_nachbar; // ★ 30.08. CFD_FAC_NACHBAR: Wandmodell-EINGANG aus der zweiten Fluidzelle entlang der Normale (Stufenschatten-Fix, Weg-1 Stufe 3)
 	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 8 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche); Host-Tabelle je Treppenklasse
@@ -223,6 +224,8 @@ public:
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
 	bool fac_elibb_on = false; // ★ B2: ELIBB-Konstruktionszustand (eingefroren wie diagz)
+	Memory<ulong> gd_zellen; Memory<float> fac_gd; Kernel kernel_sgs_gdiag; bool gdiag_on = false; // ★ g-Diagnose: fid->Zellindex-Liste, 8-float-Akkumulator je Facette, eigener Kernel (kein Eingriff in stream_collide)
+	void sgs_gdiag_gpu(); // Mess-Enqueue an der Chunk-/Sample-Kadenz (run mit finish)
 	Memory<float> fac_kd; bool fac_kdiag_on = false; // ★ Klassen-Diagnostik-Akkumulator (8 float je Facette), nur mit CFD_FAC_KDIAG; Konstruktionszustand eingefroren
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)
 	bool fac_ema_on = false;

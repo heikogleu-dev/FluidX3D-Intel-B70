@@ -3852,6 +3852,121 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		kf_pcnt[3u*g]=cnt_v[0];   kf_pcnt[3u*g+1u]=cnt_q[0];   kf_pcnt[3u*g+2u]=cnt_u[0];
 	}
 } // kraft_facetten_gpu()
+
+)+R(kernel void sgs_gdiag(const global fpxx* fi, const global float* u, const global uchar* flags,
+	const global ulong* gd_zellen, const uint gd_N, global float* fac_gd, const ulong t,
+	const float fx, const float fy, const float fz, const uint guo_an TS_P) {
+	// ★★ g-DIAGNOSE (31.08.2026, Pruefagenten-Empfehlung "Messung statt Wette", ARBEITSLISTE Vorzeichen-
+	// Einwand). Sparser Kernel ueber die Facettenzellenliste, laeuft NACH einem abgeschlossenen Schritt
+	// (Host-Enqueue an der Chunk-/Sample-Kadenz). Fasst weder w noch f noch u an -- reine Messung.
+	// Je Wandzelle wird akkumuliert:
+	//  [0] |S|_FD    Scherratenbetrag aus dem u-FELD (zentrale Differenzen ueber die 6 Flaechennachbarn,
+	//                Solid-Nachbar: u = 0, no-slip erster Ordnung) -- ein echtes Moment, IMMUN gegen
+	//                Geistermoden des Wandmodells (apply_facette_imem schreibt nicht-hydrodynamische
+	//                Populationen in fhn, und aus fhn baut der SUBGRID-Block seinen Tensor);
+	//  [1] |S|_Pi    dieselbe Groesse aus Pi^neq = Sum cc(f-feq), AUSDRUCKSGLEICH zum SUBGRID-Block
+	//                (inkl. Guo-Korrektur des zweiten Moments und selbstkonsistentem tau_eff) --
+	//                das, was Smagorinsky heute an dieser Zelle wirklich sieht;
+	//  [2] D_WALE    was WALE liefern WUERDE (Nicoud/Ducros-Operator auf dem vollen Gradienten);
+	//  [3] D_Sigma   was Sigma liefern WUERDE (Singulaerwerte von g, Cardano);
+	//  [4] |Omega|_FD Rotationsbetrag (reine Scherung: |Omega| == |S|; die Abweichung davon sagt,
+	//                wie weit die Zelle von reiner Scherung entfernt ist);
+	//  [5] Besuche, [6] Anzahl solider Flaechennachbarn (geometrisch konstant), [7] frei.
+	// PARITAETSFESTIGKEIT: nach dem Streaming koennen die Linkpaare vertauscht liegen (boden_eq-Lehre:
+	// "post-stream-load = Paare vertauscht -> u waere NEGIERT"). Sum cc f ist unter i<->ib INVARIANT
+	// (c*c ist gerade), rho ebenfalls -- deshalb kommt u hier NICHT aus calculate_rho_u, sondern aus dem
+	// u-Feld; das traegt zudem exakt den Guo-Halbschub, mit dem der SUBGRID-Block sein feq bildet.
+	const uint gid = get_global_id(0);
+	if(gid>=gd_N) return;
+	const uxx n = (uxx)gd_zellen[gid];
+	uxx j[def_velocity_set]; // neighbor indices
+	neighbors(n, j); // calculate neighbor indices
+	// ---- voller Gradient g[i][a] = du_i/dx_a; Flaechennachbar-Paare (1,2)=(+x,-x), (3,4)=(+y,-y), (5,6)=(+z,-z)
+	float g[3][3]; uint nsolid=0u;
+	for(uint a=0u; a<3u; a++) {
+		const uxx np=j[2u*a+1u], nm=j[2u*a+2u];
+		const bool sp=(flags[np]&TYPE_BO)==TYPE_S, sm=(flags[nm]&TYPE_BO)==TYPE_S;
+		nsolid += (uint)sp+(uint)sm;
+		for(uint i=0u; i<3u; i++) {
+			const float up_ = sp?0.0f:u[(ulong)i*def_N+(ulong)np];
+			const float um_ = sm?0.0f:u[(ulong)i*def_N+(ulong)nm];
+			g[i][a] = 0.5f*(up_-um_);
+		}
+	}
+	float SS=0.0f, WW=0.0f;
+	for(uint i=0u;i<3u;i++) for(uint a=0u;a<3u;a++) {
+		const float Sia=0.5f*(g[i][a]+g[a][i]), Wia=0.5f*(g[i][a]-g[a][i]);
+		SS=fma(Sia,Sia,SS); WW=fma(Wia,Wia,WW);
+	}
+	const float snorm_fd = sqrt(2.0f*SS), onorm_fd = sqrt(2.0f*WW);
+	// ---- WALE (Sd = sym(g*g) - tr(g*g)/3 * I); x^1.5 = x*sqrt(x), x^2.5 = x*x*sqrt(x), x^1.25 = x*sqrt(sqrt(x))
+	float gg[3][3];
+	for(uint i=0u;i<3u;i++) for(uint a=0u;a<3u;a++) gg[i][a] = g[i][0]*g[0][a]+g[i][1]*g[1][a]+g[i][2]*g[2][a];
+	const float trg2 = (gg[0][0]+gg[1][1]+gg[2][2])*(1.0f/3.0f);
+	float SdSd=0.0f;
+	for(uint i=0u;i<3u;i++) for(uint a=0u;a<3u;a++) {
+		const float Sd = 0.5f*(gg[i][a]+gg[a][i]) - (i==a?trg2:0.0f);
+		SdSd=fma(Sd,Sd,SdSd);
+	}
+	const float d_wale = (SdSd*sqrt(SdSd)) / (SS*SS*sqrt(SS) + SdSd*sqrt(sqrt(SdSd)) + 1e-30f);
+	// ---- Sigma (Singulaerwerte von g = sqrt(Eigenwerte von G = g^T g), Cardano mit Klemmen)
+	float G00=0.0f,G11=0.0f,G22=0.0f,G01=0.0f,G02=0.0f,G12=0.0f;
+	for(uint i=0u;i<3u;i++) { G00=fma(g[i][0],g[i][0],G00); G11=fma(g[i][1],g[i][1],G11); G22=fma(g[i][2],g[i][2],G22);
+		G01=fma(g[i][0],g[i][1],G01); G02=fma(g[i][0],g[i][2],G02); G12=fma(g[i][1],g[i][2],G12); }
+	float l1,l2,l3;
+	{	const float p1 = G01*G01+G02*G02+G12*G12;
+		const float q  = (G00+G11+G22)*(1.0f/3.0f);
+		if(p1<1e-30f) { // (nahezu) diagonal: Eigenwerte = Diagonale, absteigend sortieren
+			l1=fmax(G00,fmax(G11,G22)); l3=fmin(G00,fmin(G11,G22)); l2=G00+G11+G22-l1-l3;
+		} else {
+			const float p2 = (G00-q)*(G00-q)+(G11-q)*(G11-q)+(G22-q)*(G22-q)+2.0f*p1;
+			const float p  = sqrt(p2*(1.0f/6.0f));
+			const float ip = 1.0f/fmax(p,1e-30f);
+			const float B00=(G00-q)*ip, B11=(G11-q)*ip, B22=(G22-q)*ip, B01=G01*ip, B02=G02*ip, B12=G12*ip;
+			float r = 0.5f*(B00*(B11*B22-B12*B12)-B01*(B01*B22-B12*B02)+B02*(B01*B12-B11*B02));
+			r = clamp(r,-1.0f,1.0f);
+			const float phi = acos(r)*(1.0f/3.0f);
+			l1 = q+2.0f*p*cos(phi);
+			l3 = q+2.0f*p*cos(phi+2.0943951f); // + 2*pi/3
+			l2 = 3.0f*q-l1-l3;
+		}
+	}
+	const float s1=sqrt(fmax(l1,0.0f)), s2=sqrt(fmax(l2,0.0f)), s3=sqrt(fmax(l3,0.0f));
+	const float d_sigma = s1>1e-20f ? s3*(s1-s2)*(s2-s3)/(s1*s1) : 0.0f;
+	// ---- Pi^neq ausdrucksgleich zum SUBGRID-Block (rho aus f -- paarinvariant; u aus dem Feld)
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t TS_A);
+	float rhon, dux, duy, duz;
+	calculate_rho_u(fhn, &rhon, &dux, &duy, &duz); // dux..duz VERWERFEN (Paritaetsfalle), nur rhon zaehlt
+	const float uxn=u[n], uyn=u[def_N+(ulong)n], uzn=u[2ul*def_N+(ulong)n];
+	float feq[def_velocity_set];
+	calculate_f_eq(rhon, uxn, uyn, uzn, feq);
+	float Hxx=0.0f, Hyy=0.0f, Hzz=0.0f, Hxy=0.0f, Hxz=0.0f, Hyz=0.0f;
+	for(uint i=1u; i<def_velocity_set; i++) {
+		const float fneqi = fhn[i]-feq[i];
+		const float cxi=c(i), cyi=c(def_velocity_set+i), czi=c(2u*def_velocity_set+i);
+		Hxx=fma(cxi*cxi,fneqi,Hxx); Hyy=fma(cyi*cyi,fneqi,Hyy); Hzz=fma(czi*czi,fneqi,Hzz);
+		Hxy=fma(cxi*cyi,fneqi,Hxy); Hxz=fma(cxi*czi,fneqi,Hxz); Hyz=fma(cyi*czi,fneqi,Hyz);
+	}
+	if(guo_an!=0u) { // Guo-Korrektur des zweiten Moments wie im SUBGRID-Block (SGS_GUO); an Facettenzellen
+		// ist F +0.0f (F-NUR-SOLID), die konstante Volumenkraft fx..fz ist der ganze Beitrag.
+		Hxx=fma(uxn,fx,Hxx); Hyy=fma(uyn,fy,Hyy); Hzz=fma(uzn,fz,Hzz);
+		Hxy=fma(0.5f,uxn*fy+fx*uyn,Hxy); Hxz=fma(0.5f,uxn*fz+fx*uzn,Hxz); Hyz=fma(0.5f,uyn*fz+fy*uzn,Hyz);
+	}
+	const float Q = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz));
+	const float tau0 = 1.0f/def_w;
+	const float tau_eff = 0.5f*(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // selbstkonsistent wie kernel-|S|-Formel
+	const float snorm_pi = 3.0f*sqrt(2.0f*Q)/(2.0f*rhon*tau_eff); // S_ij = -3 Pi_ij/(2 rho tau) -> |S| = 3 sqrt(2 Q)/(2 rho tau)
+	// ---- Akkumulation (racefrei: 1 Work-Item = 1 Facette)
+	const ulong k8 = 8ul*(ulong)gid;
+	fac_gd[k8]      += snorm_fd;
+	fac_gd[k8+1ul]  += snorm_pi;
+	fac_gd[k8+2ul]  += d_wale;
+	fac_gd[k8+3ul]  += d_sigma;
+	fac_gd[k8+4ul]  += onorm_fd;
+	fac_gd[k8+5ul]  += 1.0f;
+	fac_gd[k8+6ul]  += (float)nsolid;
+} // sgs_gdiag()
 )+R(kernel void object_torque(const global float* F, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1

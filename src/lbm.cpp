@@ -268,6 +268,7 @@ bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. l
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
 bool LBM_Domain::s_fac_elibb = false;
+uint LBM_Domain::s_sgs_gdiag = 0u; // ★ 31.08. g-Diagnose (CFD_SGS_GDIAG)
 uint LBM_Domain::s_fac_messnur = 0u; // ★ 30.08. Mess-Nur-Modus (BB-Physik, Facetten-Instrument)
 uint LBM_Domain::s_fac_nachbar = 0u; // ★ 30.08. Nachbarabtastung des Wandmodell-Eingangs
 uint LBM_Domain::s_fac_kdiag = 0u; // ★ 30.08. Klassen-Diagnostik (CFD_FAC_KDIAG)
@@ -551,7 +552,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + (8ull+6ull)*4ull*aktiv  // fac_geo + fac_tau
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
-		                      + (fac_kdiag_on ? 40ull*aktiv : 0ull); // fac_kd (Klassen-Diagnostik, 10 float)
+		                      + (fac_kdiag_on ? 40ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 10 float)
+		                      + (s_sgs_gdiag>0u ? 40ull*aktiv : 0ull); // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
 		const ulong mb_fac = bytes_fac/1048576ull;
 		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
 		const ulong belegt = (ulong)device.info.memory_used;
@@ -704,6 +706,20 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(diagz_gebaut&&fac_diag.length()>=19ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
 	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull*aktiv); for(ulong q8=0ull;q8<10ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB, 10 float je Facette, Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
+	if(s_sgs_gdiag>0u) { // ★ g-DIAGNOSE (31.08.): fid->Zellindex-Liste + Akkumulator + eigener Kernel.
+		// KEIN Eingriff in stream_collide, keine Signaturaenderung, kein JIT-Define -- der Kernel ist
+		// immer kompiliert und wird nur hier gebunden und spaeter explizit gerufen. Default-Bitgleichheit
+		// ist damit trivial (Schalter aus = weder Puffer noch Launch).
+		gdiag_on = true;
+		gd_zellen = Memory<ulong>(device, aktiv);
+		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=f.n; } }
+		gd_zellen.write_to_device();
+		fac_gd = Memory<float>(device, 8ull*aktiv);
+		for(ulong q8=0ull;q8<8ull*aktiv;q8++) fac_gd[q8]=0.0f;
+		fac_gd.write_to_device();
+		kernel_sgs_gdiag = Kernel(device, aktiv, "sgs_gdiag", fi, u, flags, gd_zellen, (uint)aktiv, fac_gd, t, fx, fy, fz, s_sgs_guo?1u:0u);
+		print_info("g-DIAGNOSE (CFD_SGS_GDIAG): "+to_string(aktiv)+" Wandzellen, "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB -- misst |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle; Physik unangetastet.");
+	}
 	facetten_bound = true;
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
 		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
@@ -777,6 +793,10 @@ void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibr
 void LBM_Domain::enqueue_einlass_eq() { // ★ V1-Port apply_inlet_velocity: post-stream Einlass-Equilibrium x=1..nx; No-Op bei n==0
 	if(einlass_eq_n==0u) return;
 	kernel_einlass_eq.set_parameters(2u, t, einlass_eq_u, einlass_eq_n).enqueue_run();
+}
+void LBM_Domain::sgs_gdiag_gpu() { // ★ g-Diagnose: ein Mess-Launch ueber die Wandzellenliste (31.08.)
+	if(!gdiag_on) return;
+	kernel_sgs_gdiag.set_parameters(6u, t).run(); // t aktualisieren; run mit finish (Zero-Copy-Lehre von kraft_facetten_gpu)
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
