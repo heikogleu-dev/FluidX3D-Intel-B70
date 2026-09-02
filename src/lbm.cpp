@@ -725,7 +725,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		if(sparse_on) kernel_sgs_fdwand.add_parameters(tile_slot); // gleiche B-7-Lehre wie sgs_gdiag
 		{ const uint fwix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u);
 		  kernel_stream_collide.set_parameters(fwix, fac_wfd); } // ★ Rebind NACH dem Neubau -- der Rebind stand zuerst VOR dem Move-Assignment und band den gleich darauf ZERSTOERTEN Platzhalter (CL -52 beim ersten Enqueue; exakt die DIAGZ-Use-after-free-Lektion, 02.09. erneut bezahlt)
-		print_info("SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND): w an "+to_string(aktiv)+" Facettenzellen aus |S|_FD (u-Feld, geistermodenfrei) statt aus dem Pi-Tensor; FD-Kernel je Schritt nach stream_collide (ein Schritt Versatz, deterministisch), Wirkpfad Slot 39.");
+		print_info("SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND): w an "+to_string(aktiv)+" Facettenzellen aus |S|_FD (u-Feld, geistermodenfrei) statt aus dem Pi-Tensor; FD-Kernel je Schritt nach stream_collide (ein Schritt Versatz, deterministisch), Wirkpfad Slot 76 (B70).");
 	}
 	if(sgs_gdiag>0u) { // ★ g-DIAGNOSE (31.08., Parameter statt Statik seit 02.09.): Akkumulator + eigener Kernel (Liste oben).
 		// KEIN Eingriff in stream_collide, keine Signaturaenderung, kein JIT-Define -- der Kernel ist
