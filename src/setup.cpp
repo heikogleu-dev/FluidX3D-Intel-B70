@@ -171,6 +171,8 @@ static void sgs_gdiag_selbsttest() {
 // Modellstreit entscheiden: Pi/FD (Geistermoden?), WALE/FD und Sigma/FD (was liefern die Kandidaten?),
 // Omega/S (wie rein ist die Scherung?).
 static void bericht_gdiag(LBM_Domain* D, const std::vector<Facette>& F, const string& out_dir, const string& ort) {
+	if(D!=nullptr&&!D->gdiag_on&&env_u("CFD_SGS_GDIAG",0u)>0u)
+		print_error("["+ort+"] g-Diagnose war ANGEFORDERT (CFD_SGS_GDIAG), an dieser Domaene aber nie alloziert -- stiller No-Op. Statik-Lebensdauer pruefen (B1-Falle: ein spaeteres Parsing hat s_sgs_gdiag ueberschrieben, bevor alloc_facetten_domain lief; genau so am 02.09. den ersten w_gdiag-Lauf verloren)."); // Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler
 	if(D==nullptr||!D->gdiag_on) return;
 	D->fac_gd.read_from_device();
 	struct Agg { ulong n=0ull; double v=0.0, sfd=0.0, spi=0.0, wa=0.0, si=0.0, om=0.0, ns=0.0; };
