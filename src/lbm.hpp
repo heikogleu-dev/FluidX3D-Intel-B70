@@ -205,7 +205,7 @@ public:
 	static uint s_sgs_gdiag;   // ★ 31.08. g-DIAGNOSE (CFD_SGS_GDIAG=1): sparser Messkernel ueber die Facettenzellen -- |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle akkumuliert; fasst Physik nicht an
 	static uint s_fac_messnur; // ★ 30.08. CFD_FAC_MESSNUR: Facetten bauen und MESSEN, im Kernel aber NICHTS anwenden -- BB-Physik mit Facetten-Instrument (Aepfel-mit-Aepfeln-Bezug fuer BB-Vergleiche)
 	static uint s_fac_nachbar; // ★ 30.08. CFD_FAC_NACHBAR: Wandmodell-EINGANG aus der zweiten Fluidzelle entlang der Normale (Stufenschatten-Fix, Weg-1 Stufe 3)
-	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 8 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche); Host-Tabelle je Treppenklasse
+	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 10 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, u_t_abtast, y_abtast); Host-Tabelle je Treppenklasse
 	static bool s_fac_elibb_pur; // Pur-Arm  // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	static float s_fac_qmin;
 	static float s_fac_kappa; // Grazing-Guard

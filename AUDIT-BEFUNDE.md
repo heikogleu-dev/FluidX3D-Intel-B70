@@ -5182,3 +5182,28 @@ FOLGEN: (a) Cz-Vergleiche 8 gegen 4 mm sind kontaminiert, solange die Naht steht
 Dach (x <= 2,8, off-centre) ist frei davon. (b) Fix-Kandidat: die 51 Splitter aus dem STL
 entfernen (offensichtlicher Muell) -- ABER das aendert die 8-mm-Geometrie und damit alle
 8-mm-Bezugswerte: neue Referenzgeneration, nur mit Heikos Entscheid.
+
+### B68 — Pruefagent auf die Diagnose-Diffs: 8 Befunde, alle direkt korrigiert (02.09. abends)
+Verdikte: fd1bcad GELB, b3d385f GELB, 443a41f GRUEN. Die Kernmathematik (Nachbar-Konvention, Paritaet
+aller 6 Tensorkomponenten, Cardano-Klemmen, tau_eff-Ausdrucksgleichheit, fid-Reihenfolge, kein Rennen)
+ist BESTAETIGT. Befunde und Fixes:
+  B-1/B-2 Statik-Lebensdauer + verschluckter Parameter: drei verlorene w_gdiag-Laeufe; behoben ueber
+    env-Parameter-Durchreichung (03242a4, 3bf1ca3) + No-Op-Waechter (8363857), der B-2 selbst fing.
+  B-3 Slots 20-23 kollidierten mit boden_eq/einlass_eq/schale_blend (diag-Alias auf denselben Puffer;
+    mein Freiheits-Grep hatte nur 'hits[' geprueft) -- ein kuenftiger dd-NACHBAR-Arm waere am
+    EINLASS_EQ-Waechter faelschlich gestorben. NACHBAR -> 35/36/37, MESSNUR -> 38 (35-48 verifiziert frei).
+  B-4 MESSNUR stieg NACH der ELIBB-Blende aus -- der "BB"-Arm war an der Treppe Blende-BB. Ausstieg
+    an den Funktionsanfang gezogen; B66-ETIKETTEN-KORREKTUR: die kipp26-"BB"-Zeilen (1,09/1,62/1,13)
+    sind Blende-BB, nicht reines BB; die kipp0-Zahlen stehen (Blende dort Identitaet). Die iMEM-vs-BB-
+    VERHAELTNISSE an kipp26 tragen weiter (beide Arme trugen dieselbe Blende).
+  B-5 Kugel-GDIAG war halb verdrahtet (Puffer + Ankuendigung, aber kein Enqueue/Bericht) -> ehrliche
+    Warnung "nicht verdrahtet", Schalter dort ignoriert.
+  B-6a gdiag-Guo-Term nutzte das beim Alloc eingefrorene fx, der Kanal REGELT fx je Chunk ->
+    set_parameters fuehrt jetzt t UND fx/fy/fz nach. (B66 unberuehrt: alle Arme SGS_GUO=0.)
+  B-7 SPARSE_TILES haette CL_INVALID_KERNEL_ARGS gegeben (tile_slot fehlte) -> add_parameters unter sparse_on.
+  B-8 Unsinnige Kombinationen jetzt angesagt: MESSNURxNACHBAR warn (wirkungslos), xKDIAG warn
+    (Nulltabelle), xKRAFT print_error.
+  Kosmetik: fac_kd-Doku 8 -> 10 float (drei Stellen).
+Offen aus dem Bericht: NACHBAR ist weiterhin nur statisch geprueft (nie JIT-kompiliert) -- vor dem
+ersten Einsatz CPU-JIT-Rauchtest; gdiag misst Pi eine Kollision NACH der Injektion, der Faktor 2,3
+ist damit eher eine UNTERGRENZE der Geistermoden-Aufblaehung.

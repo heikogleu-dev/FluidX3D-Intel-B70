@@ -1897,7 +1897,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , const global float* u // Nachbarabtastung: u der zweiten Fluidzelle entlang der Normale (Feld vom Ende des Vorschritts)
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
-                        , global float* fac_kd // ★ Klassen-Diagnostik: 8 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche), racefrei (1 Zelle = 1 Facette)
+                        , global float* fac_kd // ★ Klassen-Diagnostik: 10 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche), racefrei (1 Zelle = 1 Facette)
 )+"#endif"+R( // FACETTEN_KDIAG
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f,0.0f,0.0f);
@@ -1905,6 +1905,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(fid==0xFFFFFFFFu) return (float3)(0.0f,0.0f,0.0f);
 	const uxx b = 8ul*(uxx)fid;
 	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
+)+"#ifdef FACETTEN_MESSNUR"+R(
+	// ★★ MESS-NUR (CFD_FAC_MESSNUR; Pruefbefund B-4 vom 02.09.): Ausstieg VOR der ELIBB-Blende --
+	// vorher lief die Blende (modifiziert fhn, bucht fac_tau_acc an der Treppe) noch mit, und der
+	// "reine BB"-Arm war an kipp26 in Wahrheit Blende-BB. Jetzt ist MESS-NUR exakt reines Bounce-Back,
+	// auch mit ELIBB-Emission. Slot 7 (Wirkpfad-Soll) und Slot 38 (MESSNUR-Wirkpfad; Umzug von 23,
+	// Pruefbefund B-3: 20-26 gehoeren boden_eq/einlass_eq/schale_blend ueber den diag-Alias) zaehlen hier.
+	if(t%100ul==0ul) { atomic_inc(&hits[7]); atomic_inc(&hits[38]); }
+	return (float3)(0.0f,0.0f,0.0f);
+)+"#endif"+R( // FACETTEN_MESSNUR
 )+"#ifdef FACETTEN_ELIBB"+R(
 	// ★★ REIHENFOLGE-FIX (2026-08-25 abends, nach g7): Blende ZUERST, DANN tastet das Wandmodell
 	// den REKONSTRUIERTEN Zustand ab. Vorher lief abtasten -> solve -> Blende -> Additivterm: der
@@ -1928,21 +1937,6 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
-)+"#ifdef FACETTEN_MESSNUR"+R(
-	// ★★ MESS-NUR (CFD_FAC_MESSNUR, 30.08.2026, Heiko: "wenn du bb und wandmodell gegeneinander
-	// testest musst du auch Aepfel mit Aepfeln vergleichen"). Problem: ein Lauf mit CFD_FACETTEN=0
-	// schreibt KEINE cd_facetten.csv, also musste BB bisher mit object_force gemessen werden --
-	// und das Instrument ist im Wandmodell-Arm phantombehaftet (w_ref: cd 6,76 statt 1,02).
-	// Auch die vorhandenen Modi taugen nicht als BB-Bezug: Nullziel (FACETTEN=4) wendet Slip an
-	// (kipp0: 0,741 gegen Slip 0,719), Modus 2 tauscht die Populationen. Hier deshalb: Facetten
-	// werden gebaut, alloziert und vom Host-Druckpfad (kraft_facetten) ausgewertet, der Kernel
-	// laesst das Feld aber UNANGETASTET -- exakt reines Bounce-Back, gemessen mit dem
-	// Facetten-Instrument. Der Reibungsakkumulator bleibt 0 (es gibt keine Modellreibung);
-	// belastbar ist damit der DRUCKanteil, und der traegt bei Cz 99,5 % (OF13: Cz_p -1,3113
-	// gegen Cz_v +0,0065). Slot 23 zaehlt den Wirkpfad dieses Modus.
-	if(t%100ul==0ul) atomic_inc(&hits[23]);
-	return (float3)(0.0f,0.0f,0.0f);
-)+"#endif"+R( // FACETTEN_MESSNUR
 	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
 	// ★★ NACHBARABTASTUNG (CFD_FAC_NACHBAR, 30.08.2026, Weg-1 Stufe 3). BEFUND, der sie ausloest
 	// (Klassen-Diagnostik CFD_FAC_KDIAG am 26-Grad-Kanal, V3b-Konfiguration): die konkave Eckzelle
@@ -1975,9 +1969,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(utb>1e-6f) {
 				ut_ab = utb;
 				yw_ab = yw + (c(ib)*nx+c(def_velocity_set+ib)*ny+c(2u*def_velocity_set+ib)*nz); // Wandabstand der Abtastzelle
-				if(t%100ul==0ul) atomic_inc(&hits[20]); // Slot 20: Nachbarabtastung angewandt
-			} else if(t%100ul==0ul) atomic_inc(&hits[22]); // Slot 22: Nachbar gefunden, steht aber still (Schatten reicht weiter)
-		} else if(t%100ul==0ul) atomic_inc(&hits[21]); // Slot 21: kein Fluidnachbar in Normalenrichtung -- eigene Zelle
+				if(t%100ul==0ul) atomic_inc(&hits[35]); // Slot 35 (Umzug von 20, B-3): Nachbarabtastung angewandt
+			} else if(t%100ul==0ul) atomic_inc(&hits[37]); // Slot 37 (Umzug von 22, B-3): Nachbar gefunden, steht aber still (Schatten reicht weiter)
+		} else if(t%100ul==0ul) atomic_inc(&hits[36]); // Slot 36 (Umzug von 21, B-3): kein Fluidnachbar in Normalenrichtung -- eigene Zelle
 	}
 )+"#endif"+R( // FACETTEN_NACHBAR
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben

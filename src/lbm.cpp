@@ -718,6 +718,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		for(ulong q8=0ull;q8<8ull*aktiv;q8++) fac_gd[q8]=0.0f;
 		fac_gd.write_to_device();
 		kernel_sgs_gdiag = Kernel(device, aktiv, "sgs_gdiag", fi, u, flags, gd_zellen, (uint)aktiv, fac_gd, t, fx, fy, fz, s_sgs_guo?1u:0u);
+		if(sparse_on) kernel_sgs_gdiag.add_parameters(tile_slot); // Pruefbefund B-7: TS_P haengt an SPARSE_TILES -- ohne dieses Argument stuerbe der erste Launch mit CL_INVALID_KERNEL_ARGS
 		print_info("g-DIAGNOSE (CFD_SGS_GDIAG): "+to_string(aktiv)+" Wandzellen, "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB -- misst |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle; Physik unangetastet.");
 	}
 	facetten_bound = true;
@@ -796,7 +797,7 @@ void LBM_Domain::enqueue_einlass_eq() { // ★ V1-Port apply_inlet_velocity: pos
 }
 void LBM_Domain::sgs_gdiag_gpu() { // ★ g-Diagnose: ein Mess-Launch ueber die Wandzellenliste (31.08.)
 	if(!gdiag_on) return;
-	kernel_sgs_gdiag.set_parameters(6u, t).run(); // t aktualisieren; run mit finish (Zero-Copy-Lehre von kraft_facetten_gpu)
+	kernel_sgs_gdiag.set_parameters(6u, t, fx, fy, fz).run(); // t UND fx/fy/fz aktualisieren (Pruefbefund B-6a: der Kanal REGELT fx je Chunk -- der eingefrorene Startwert verfaelschte den Guo-Term unter SGS_GUO=1); run mit finish
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
