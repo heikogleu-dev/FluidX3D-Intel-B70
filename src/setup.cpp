@@ -2953,6 +2953,44 @@ void main_setup_kanal() {
 // ★ U1-FALLE (HYGIENE-BEFUNDE): lbm.F der Huelle rechnet mit der VOLLEN Domaenengroesse, der
 // Puffer ist BBox-gross. Hier wird deshalb direkt der Domaenenpuffer mit der BBox-Indizierung aus
 // f_bbox() gelesen: fbi = (x-fbx0) + (y-fby0)*fbnx + (z-fbz0)*fbnx*fbny, SoA-Stride F_N.
+// ★ 03.09.2026 F-LISTEN-ZENSUS (CFD_F_LISTE_ZENSUS=1; Default AUS = kein Code, kein Zeitverbrauch,
+// bitgleich). Beantwortet die EINE offene Vorfrage des Speicherpostens B78(b) "F auf Solid-Markerliste":
+// wie lang waere die Liste ueberhaupt? update_force_field (kernel.cpp) schreibt F ausschliesslich an
+// Zellen mit (flags&TYPE_BO)==TYPE_S UND mindestens einem Nicht-Solid unter den 18 D3Q19-Nachbarn
+// (has_fluid_neighbor). Genau dieses Praedikat wird hier gezaehlt -- nicht das 6-Richtungs-Kriterium
+// aus messe_yplus, das eine echte Teilmenge davon ist.
+// EINSCHRAENKUNG, ausdruecklich: der Host wickelt x/y periodisch und ueberspringt z ausserhalb des
+// Gitters, waehrend der Kernel neighbors() in ALLEN Richtungen wickelt. An den z-Raendern weicht das
+// Praedikat deshalb um wenige Zellen ab. Fuer die GROESSENORDNUNGS-Entscheidung (Bauform A gegen B)
+// genuegt das; fuer einen spaeteren Listenbau NICHT -- der gehoert auf das Geraet, mit genau der
+// has_fluid_neighbor-Zeile des Kernels, damit es das Praedikat nur EINMAL gibt.
+void f_listen_zensus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const char* wo) {
+	LBM_Domain* D = L.lbm_domain[0];
+	L.flags.read_from_device();
+	const ulong FN = (ulong)D->fbnx*(ulong)D->fbny*(ulong)D->fbnz;
+	ulong n_solid=0ull, n_wand=0ull;
+	for(uint z=(uint)D->fbz0; z<D->fbz0+D->fbnz; z++) for(uint y=(uint)D->fby0; y<D->fby0+D->fbny; y++) for(uint x=(uint)D->fbx0; x<D->fbx0+D->fbnx; x++) {
+		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
+		if((L.flags[n]&(TYPE_S|TYPE_E))!=TYPE_S) continue; // wortgleich zum Kernel-Gate (TYPE_BO = TYPE_S|TYPE_E = 0x03; TYPE_MS traegt das S-Bit)
+		n_solid++;
+		for(uint i=1u; i<19u; i++) {
+			const int zn=(int)z+FZ_C[i][2]; if(zn<0||zn>=(int)Nz) continue;
+			const uint xn=(uint)((((int)x+FZ_C[i][0])%(int)Nx+(int)Nx)%(int)Nx);
+			const uint yn=(uint)((((int)y+FZ_C[i][1])%(int)Ny+(int)Ny)%(int)Ny);
+			const ulong nn = (ulong)xn + ((ulong)yn + (ulong)zn*(ulong)Ny)*(ulong)Nx;
+			if((L.flags[nn]&(TYPE_S|TYPE_E))!=TYPE_S) { n_wand++; break; }
+		}
+	}
+	const ulong b_heute = 12ull*FN;                       // F als volles BBox-Feld, 3 float je Zelle
+	const ulong b_formA = 12ull*n_solid + 4ull*n_solid;   // Liste ueber ALLE Solidzellen + uint-Index je Zelle
+	const ulong b_formB = 12ull*n_wand  + 8ull*((FN+31ull)/32ull); // Wandliste + Bitmaske/Praefixsumme (dieselbe Maschinerie wie fac_idx)
+	print_info(string("--- F-LISTEN-ZENSUS, ")+wo+" (CFD_F_LISTE_ZENSUS) ---");
+	print_info("  F-BBox "+to_string((ulong)D->fbnx)+"x"+to_string((ulong)D->fbny)+"x"+to_string((ulong)D->fbnz)+" = "+to_string(FN)+" Zellen | F heute "+to_string((ulong)(b_heute/1048576ull))+" MiB");
+	print_info("  Solidzellen in der BBox: "+to_string(n_solid)+" | davon WANDsolid (>=1 Nicht-Solid unter 18 Links): "+to_string(n_wand)+" ("+to_string((float)(100.0*(double)n_wand/(double)max(1ull,n_solid)),2u)+" % der Solidzellen, "+to_string((float)(100.0*(double)n_wand/(double)FN),3u)+" % der BBox)");
+	print_info("  Bauform A (alle Solidzellen + Index): "+to_string((ulong)(b_formA/1048576ull))+" MiB -> Gewinn "+to_string((ulong)((b_heute>b_formA?b_heute-b_formA:0ull)/1048576ull))+" MiB");
+	print_info("  Bauform B (nur Wandsolid + Bitmaske): "+to_string((ulong)(b_formB/1048576ull))+" MiB -> Gewinn "+to_string((ulong)((b_heute>b_formB?b_heute-b_formB:0ull)/1048576ull))+" MiB");
+	print_info("  ENTSCHEIDUNGSREGEL (03.09.): traegt Bauform B unter 1,2 GB, lohnt der Umbau den Eingriff nicht.");
+}
 void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float nu_lat, const float dx, const float dt, const float si_rho, const string& out_dir, const char* wo) {
 	L.update_force_field();
 	LBM_Domain* D = L.lbm_domain[0];
@@ -6657,6 +6695,7 @@ static void main_setup_fahrzeug_dd() {
 	}
 	// ★ Audit-Nacharbeit 14: y+ VOR dem Samples-Waechter messen -- vorher fiel die Messung bei
 	// kurzen Laeufen (<16 Kraft-Samples) mit dem _exit zusammen weg, obwohl sie unabhaengig davon ist.
+	if(env_u("CFD_F_LISTE_ZENSUS", 0u)>0u) f_listen_zensus(lbm_f, fNx, fNy, fNz, "Nahfeld"); // ★ 03.09.: Vorfrage zu B78(b), Default aus
 	if(env_u("CFD_YPLUS", 1u)>0u) { print_info("HINWEIS (WM-Blick C): messe_yplus ist am Fahrzeug DRUCKKONTAMINIERT (tangentiale F-Komponente an Voxeltreppen) -- nur als Anker-Kontinuitaet lesen, nicht absolut."); messe_yplus(lbm_f, fNx, fNy, fNz, nu_lat_f, dx_f, dt_f, si_rho, out_dir, "Nahfeld"); }
 	const bool stat_ok = cd.size()>=16u; // ★ Audit 2/3: Dichteklemme/Fx-Anker liefen hinter dem _exit nie bei Kurzlaeufen
 	if(!stat_ok) print_warning("Zu wenige Samples -- Cd-Statistik entfaellt, Dichteklemme/Fx-Anker laufen trotzdem.");
@@ -6701,9 +6740,27 @@ static void main_setup_fahrzeug_dd() {
 	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h); berichte_dichteklemme(lbm_c, "Fernfeld", h); dichteklemme_fazit(h); }
 	if(stat_ok) {
+	// ★ 03.09.2026 INSTRUMENTEN-ETIKETT (Befund B79). Diese Zeilen stammen aus object_force, also aus
+	// dem Impulsaustausch an den Koerperzellen. Sobald die Facettenkette laeuft, traegt dieser Pfad
+	// PHANTOM-REIBUNG an facettenbehandelten Links -- der Kopf von kraft_zband.csv sagt das seit
+	// jeher, der Report sagte es NICHT und stellte die Zahl trotzdem gegen OF13. Gemessen ueber vier
+	// Laeufe (p4_nb 8,50 | p4_ref 8,88 | w_nb 7,54 | w_fdwand 7,84 gegen OF13 0,599) ist Cd damit um
+	// gut das Vierzehnfache aufgeblasen, und bei 8 mm kippt object_force sogar das VORZEICHEN von Cz
+	// (+0,34 statt negativ). Der gueltige absolute Bezug ist der Facettenpfad in cd_facetten.csv:
+	// cd_druck_rest + cd_reib = 0,5924 gegen OF13 0,599, also -1,1 % (p4_nb).
+	// Die OF13-Prozente werden deshalb nur noch OHNE Facettenkette gedruckt.
+	const bool phantom = env_u("CFD_FACETTEN", 0u)>0u;
 	print_info("Zeitmittel ab "+to_string(t_warmup,3u)+" s ueber "+to_string((uint)cd.size())+" Samples:");
-	print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
-	print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
+	if(phantom) {
+		print_info("  ACHTUNG: die folgenden Cd/Cz stammen aus object_force und sind an facettenbehandelten");
+		print_info("           Links PHANTOMBEHAFTET -- NICHT gegen OF13 stellen, nur als Arm-DIFFERENZ werten.");
+		print_info("           Gueltiger absoluter Bezug: cd_facetten.csv (cd_druck_rest + cd_reib bzw. cz).");
+		print_info("  Cd = "+to_string((float)mcd,4u)+"   (object_force, phantombehaftet)");
+		print_info("  Cz = "+to_string((float)mcz,4u)+"   (object_force, phantombehaftet)");
+	} else {
+		print_info("  Cd = "+to_string((float)mcd,4u)+"   (OpenFOAM 13: 0.599, Abweichung "+to_string((float)(100.0*(mcd/0.599-1.0)),1u)+" %)");
+		print_info("  Cz = "+to_string((float)mcz,4u)+"   (OpenFOAM 13: -1.301, Abweichung "+to_string((float)(100.0*(mcz/-1.301-1.0)),1u)+" %)");
+	}
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      Block-SEM Cd ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cz,k); if(se>=0.0) print_info("      Block-SEM Cz ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); } // WM-Blick C: Cz lief ohne Fehlerbalken -- ehrlich >=0,03, Delta-Cz-0,1-Aussagen sind 2-sigma
 	if(zb>0u&&zb_nn>0ull) { // ★ KRAFT-ZBAND-Endreport (Zeitmittel ab Warmlauf ueber dieselben Samples)
@@ -6715,7 +6772,8 @@ static void main_setup_fahrzeug_dd() {
 		for(uint k : {4u, 8u, 16u}) { const double se=block_sem(zb_cz_rest_reihe,k); if(se>=0.0) print_info("      Block-SEM Cz_rest ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 		print_info("  Selbsttest-Maximum |Band+Rest-Gesamt|/max(|Fx|,|Fz|): "+to_string((float)zb_selftest_max,9u)+" (Soll < 5e-5)");
 	if(zb_selftest_max>=5e-5) print_warning("ZBAND-Selbsttest ueber 5e-5 -- Zerlegung nicht belastbar (float-Atomik-Marge ist 3,5x, das hier ist mehr).");
-		print_info("  Cz_rest vs OF13 -1,301: "+to_string((float)mcz_r,4u)+" (Abweichung "+to_string((float)(100.0*(mcz_r/-1.301-1.0)),1u)+" %)");
+		if(phantom) print_info("  Cz_rest = "+to_string((float)mcz_r,4u)+" (object_force, phantombehaftet -- der OF13-Vergleich stand hier bis 03.09. UNGEKENNZEICHNET und war die Quelle der 'Faktor-2-Diskrepanz' gegen cd_facetten.csv; Befund B79)");
+		else print_info("  Cz_rest vs OF13 -1,301: "+to_string((float)mcz_r,4u)+" (Abweichung "+to_string((float)(100.0*(mcz_r/-1.301-1.0)),1u)+" %)");
 	}
 	} // stat_ok
 	{	// ★ UNTERBODEN-SONDE (Heiko 2026-08-19: Unterboden in ALLEN s5b-Slices tot, arm-unabhaengig).
