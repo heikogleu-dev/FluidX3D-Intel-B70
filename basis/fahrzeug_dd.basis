@@ -1,8 +1,25 @@
-# Basis-Referenz, MASCHINELL erzeugt aus export/baseline_2026-08-27_f4vollumfang/code/LAUF.txt
-# Quelle-Commit: 94a802cdf913f19884943ffa751f97b7a1e88918
+# Basis-Referenz, MASCHINELL erzeugt aus export/p4_nb/code/LAUF.txt
+# Quelle-Commit: e03465660909cde2a2f2c3ae0d84f9b8c87a6cf5
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
-# KORRIGIERT gegen den Lauf: CFD_SLICE_DT 0 -> 0.1 (Baseline hatte 0 = Slices AUS; das war ein Fehler, nicht Absicht)
+# --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---
+# STANDARD GEAENDERT (Heiko-Entscheid 03.09.2026): CFD_SGS_FDWAND 1 und CFD_FAC_NACHBAR 1 sind Basis.
+#   FDWAND (Geistermoden-Fix, B70): 4-mm-Messung p4_fdwand gegen p4_ref, gepaart 235 Punkte --
+#     cd_druck_rest +0,0105 +-0,0030 (3,45 sigma), cz_druck_rest -0,0264 +-0,0046 (5,69 sigma),
+#     beide Richtung OF13. Vorbehalt: p4_ref lief auf Commit 4538753, die Differenz traegt auch
+#     den Code-Abstand (Bitgleichheit der Zwischencommits nur auf CPU/Kanal geprueft).
+#   NACHBAR (Wandmodell-Eingang aus der zweiten Fluidzelle, B72/B74/B75): 4-mm-Messung p4_nb gegen
+#     p4_fdwand, IDENTISCHES Binary, gepaart 301 Punkte -- cd -0,0037 (1,55 sigma), cz +0,0069
+#     (1,69 sigma), also NICHT von Rauschen zu trennen. Bei 8 mm dagegen cd -0,030 bei 9 sigma.
+#     AUFGENOMMEN TROTZ NULLEFFEKT bei 4 mm, und zwar aus einem anderen Grund: NACHBAR ERSETZT den
+#     empirisch geeichten Faktor CFD_FAC_UTKORR durch eine Messung. Der Faktor 1,5 war an EINER
+#     Geometrie (ebener Kanal) und EINER Aufloesung geeicht; die Nachbarabtastung stellt ihn selbst
+#     ein und trifft bei 4 mm dieselben Werte wie bei 8 mm (Hauptklasse 1,98 gegen 2,03, Eckklasse
+#     4,53 gegen 4,35). Ein Handwert weniger, gleiche Ergebnisse.
+#   CFD_FAC_UTKORR BLEIBT 1.5 (Heiko 03.09.): unter NACHBAR wirkt der Faktor nur noch an Zellen
+#     OHNE Fluidnachbarn in Normalenrichtung (Slot 73), am 4-mm-Fahrzeug 1.120.236 von 1,57e9
+#     Entscheiden = 0,07 %. Dort ist er hergeleitet (BB-Deflation der eigenen Zelle, P1 ~ -u/3) und
+#     richtig; ihn auf 1,0 zu setzen wuerde diese 0,07 % schlechter stellen ohne Gegenwert.
 # STANDARD GEAENDERT (Heiko 29.08.2026, zweiter Eintrag): Facettenpfad mit voller Abdeckung.
 #   CFD_FACETTEN_NORMQUELLE 1 : Normale aus der flaechengewichteten Voxelflaechensumme (V3b)
 #   CFD_FACETTEN_YWKLEMME   1 : zu kleines y_w wird auf yw_min GEKLEMMT statt die Zelle zu verwerfen
@@ -31,6 +48,7 @@
 #   obwohl das Feld-VTK geschrieben war. Heiko-Entscheid: nicht die Uhr anfassen, sondern
 #   1 ms laenger laufen. Betrifft p4_v3b und p4_v1 (beide noch mit 0.5) nicht mehr --
 #   deren 500-ms-Slices sind aus den VTK nachgerendert.
+# ACHTUNG, Einheit unbekannt (als modus gefuehrt, bitte einordnen): CFD_FACETTEN_KANTE_KOH, CFD_FACETTEN_NORMQUELLE, CFD_FACETTEN_YWKLEMME
 CFD_BODEN_EQ 2 modus
 CFD_BODEN_EQ_ABSTAND 2 modus
 CFD_BODEN_EQ_DOWN 1 modus
@@ -43,6 +61,7 @@ CFD_FACETTEN_YWKLEMME 1 modus
 CFD_FAC_ALPHA 2 modus
 CFD_FAC_CD_EVERY 1 ausgabe
 CFD_FAC_ELIBB 1 modus
+CFD_FAC_NACHBAR 1 modus
 CFD_FAC_SATGATE 1 modus
 CFD_FAC_UTKORR 1.5 modus
 CFD_FERN_BODEN_EQ 2 modus
@@ -62,6 +81,7 @@ CFD_N2F_SCHALE 0.5 modus
 CFD_NEAR_LY 2.6400 phys
 CFD_NEAR_LZ 1.8560 phys
 CFD_NEAR_VOR_MM 96 phys
+CFD_SGS_FDWAND 1 modus
 CFD_SLICE_DT 0.1 ausgabe
 CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.501 phys
