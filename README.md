@@ -137,8 +137,9 @@ keeping it visible is what stops it being re-proposed.
 
 ### 7 · VRAM
 
-The 4 mm production point (`p4_ref`, 519 M fine cells) sits at **29 672 MB of 32 655** with 487 MB
-slack, so every item here is what makes the case fit at all.
+The 4 mm production point (`p4_ref`, 519 M fine cells) used to sit at **29 672 MB of 32 655** with
+487 MB of slack — measured externally, the reference arm dips to **3 MiB free**. Every item here is
+what makes the case fit at all; the last two together bought back **2.4 GB** at no throughput cost.
 
 | Change | Why | Measured effect |
 |---|---|---|
@@ -147,8 +148,9 @@ slack, so every item here is what makes the case fit at all.
 | **Smoothing index over the facet bounding box** | Full-grid allocation for a quantity that only exists near the surface | **593 MB instead of 1980 MB** |
 | **Two-stage memory plan with a hard pre-flight check** | Running out of VRAM 40 minutes in wastes a slot on a single-GPU machine | The plan predicted the production run **to the megabyte**: 29 673 MB predicted vs 29 672 MB in the run log |
 | **Host-mirror release with guards** (`delete_host_buffer`, 2026-09-03) | Freeing a host mirror left dangling aux pointers and a live zero-copy device buffer — a trap for exactly the VRAM work queued next | All ten transfer overloads now refuse to run on a released mirror; zero-copy release is a hard error. Proven by negative tests, both arms bit-identical to the reference run |
-| **`fac_idx` as a bitmask + block prefix sum** (2026-09-03): one `uint` per force-BBox cell replaced by a packed pair per 32 cells — `fid = base + popcount(mask below own lane)` | 610.8 MiB of VRAM (and the same again in system RAM) for an occupancy of 1.95 % | **572.6 MiB VRAM + 572.6 MiB RAM freed** (facet buffers at 8 mm: 174 → 99 MB). Integer-exact, therefore **bit-identical**, and proven so: CPU 5/5, iGPU 5/5, **B70 8 mm vehicle 19/19 result CSVs byte-identical** to the pre-rebuild run |
-| *Identified and quantified, **not yet built***: F as a wall-solid marker list | Found by the same audit | Worth ~1.78 GiB **only** as a wall-solid list; as a list over all 62.2 M solid cells it collapses to ~883 MiB. The deciding measurement — the actual list length — is the current work |
+| **`fac_idx` as a bitmask + block prefix sum** (2026-09-03): one `uint` per force-BBox cell replaced by a packed pair per 32 cells — `fid = base + popcount(mask below own lane)` | 610.8 MiB of VRAM (and the same again in system RAM) for an occupancy of 1.95 % | Facet buffers at 4 mm **1022 → 449 MB**. Integer-exact, therefore **bit-identical**, and proven so at every rung: CPU 5/5, iGPU 5/5, B70 8 mm 19/19, **4 mm production 17/17** |
+| **F as a wall-solid marker list** (2026-09-03): F allocated only for solid cells that have at least one non-solid neighbour, addressed through the same bitmask machinery | At 4 mm only **3 739 681 of 62 724 296** solid cells are wall cells — F was carrying 12 B for each of 160 M box cells | F **1832 → 81 MiB** (near) and 32 → 3 MiB (far). Bit-identical at every rung; an action-path counter proves every cell the kernel writes has a slot (0 misses) |
+| **Measured at the 4 mm production point** (same binary, one variable per step, all three arms 17/17 byte-identical) | The two levers above, measured rather than computed | Free VRAM (`visible_avail`, sampled externally): **150 → 1160 → 2928 MiB mean**, minima **3 → 740 → 2449 MiB**. The reference arm ran with **3 MiB to spare** — which is why every box extension had failed on memory. Performance index 10700 → 10691 → 10688: **no cost** |
 
 ### 8 · Performance engineering on Battlemage
 
