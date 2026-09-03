@@ -3751,7 +3751,16 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// dichten Pfad nicht existiert. Genau daran haette die behauptete Bit-Neutralitaet scheitern koennen.
 	bool has_fluid_neighbor = false;
 	for(uint i=1u; i<def_velocity_set; i++) has_fluid_neighbor = has_fluid_neighbor || (flags[j[i]]&TYPE_BO)!=TYPE_S;
+)+"#ifdef F_LISTE"+R(
+	// ★ 03.09.: unter der Markerliste hat eine Solidzelle OHNE Fluidnachbarn konstruktiv keinen Slot.
+	// Der Nullschreiber ist dort gegenstandslos -- und er WAR die Quelle von 1,85 Mrd. Treffern auf
+	// Slot 77 im ersten 8-mm-Listenlauf (der Waechter hat also richtig gezaehlt, nur an harmlosen
+	// Zellen). Genau das stand in der Vorpruefung zu diesem Posten: "In Form B muss daraus ein return
+	// werden." Gelesen, nicht umgesetzt -- hier nachgeholt.
+	if(!has_fluid_neighbor) return;
+)+"#else"+R(
 	if(!has_fluid_neighbor) { store3_F(F, f_maske, n, (float3)(0.0f, 0.0f, 0.0f), hits); return; }
+)+"#endif"+R( // F_LISTE
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 	// ★★ 2026-08-25, Pruefbefund 2-A. Vorher: calculate_rho_u ueber ALLE 19 Richtungen, also auch ueber
