@@ -421,7 +421,7 @@ void LBM_Domain::allocate(Device& device) {
 	if(facetten_on) {
 		fac_ema_on = s_fac_imem&&s_fac_ema>0.0f;
 		fac_geo   = Memory<float>(device, 8ull);
-		fac_idx   = Memory<uint>(device, 1ull);
+		fac_idx   = Memory<uint>(device, 2ull); // Bitmaske+Praefixsumme: ein Block (Maske 0 = keine Facette)
 		fac_tau   = Memory<float>(device, 1ull);
 		fac_tau_n = Memory<uint>(device, 1ull);
 		fac_param_pos = kernel_stream_collide.get_number_of_parameters();
@@ -572,7 +572,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	// ★ ZWEITE STUFE der Speicherpruefung (29.08.). Die Konstruktor-Vorpruefung kennt die
 	// Facettenzahl noch nicht -- hier steht sie. Das ist der letzte grosse Posten, und ohne
 	// diese Stufe faellt ein zu grosses Gitter erst nach zehn Minuten Aufbau auf.
-	{	const ulong bytes_fac = 4ull*FN                 // fac_idx
+	{	const ulong bytes_fac = 8ull*((FN+31ull)/32ull) // fac_idx als Bitmaske+Praefixsumme (03.09.: 8 B je 32 Zellen statt 4 B je Zelle)
 		                      + (8ull+6ull)*4ull*aktiv  // fac_geo + fac_tau
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
@@ -599,11 +599,12 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 				+". Gitter verkleinern, Facettenzahl senken oder die Mindestluft bewusst herabsetzen.");
 	}
 	fac_geo   = Memory<float>(device, 8ull*aktiv);
-	fac_idx   = Memory<uint>(device, FN);
+	const ulong FNB = (FN+31ull)/32ull; // Zahl der 32er-Bloecke der F-BBox
+	fac_idx   = Memory<uint>(device, 2ull*FNB); // ★ 03.09.2026: BITMASKE MIT PRAEFIXSUMME statt einem uint je Zelle
 	fac_tau   = Memory<float>(device, 6ull*aktiv); // Layout: [6k]=tw, [6k+1..3]=Wandkraft, [6k+4]=Delta-m, [6k+5]=Normalkontamination (iMEM-Umbau)
 	fac_tau_n = Memory<uint>(device, aktiv);
-	for(ulong i=0ull; i<FN; i++) fac_idx[i] = 0xFFFFFFFFu;
-	ulong k=0ull;
+	for(ulong i=0ull; i<2ull*FNB; i++) fac_idx[i] = 0u; // Maske 0 = keine aktive Facette; Basen kommen im zweiten Durchgang
+	ulong k=0ull, fbi_vor=0ull;
 	for(const Facette& f : F) {
 		if(f.klasse!=0u) continue;
 		const float na = (f.achse==0u) ? fabsf(f.nx) : (f.achse==1u) ? fabsf(f.ny) : fabsf(f.nz);
@@ -621,9 +622,26 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// ★ Invarianten-Waechter (Audit-Entwarnung 2026-08-26): ALLE fac_tau-Buchungen sind
 		// nicht-atomare += und racefrei NUR wegen 1 Zelle = 1 Facette. Wuerde eine spaetere
 		// Aenderung zwei Facetten auf eine Zelle legen, kaeme das Race STILL -- hier hart abfangen.
-		if(fac_idx[fbi]!=0xFFFFFFFFu) { print_error("alloc_facetten_domain: Zelle traegt zwei Facetten -- die racefrei-Invariante (1 Zelle = 1 Facette) waere verletzt."); return; }
-		fac_idx[fbi]=(uint)k;
+		// ★ 03.09.2026 ZWEITE, STAERKERE INVARIANTE: fbi muss STRENG MONOTON wachsen. Nur dann ist
+		// der Rang einer Zelle in fbi-Ordnung gleich dem Zaehlerstand k -- und genau das ist die
+		// Voraussetzung dafuer, dass die popcount-Nummerierung im Kernel dieselben fids liefert wie
+		// dieser Zaehler. Sie gilt heute (setup.cpp baut F in aufsteigender Zellindex-Ordnung, und
+		// fbi ist innerhalb der Box ordnungsgleich zum Zellindex), aber sie ist eine ANNAHME UEBER
+		// FREMDEN CODE: eine spaetere Umsortierung von F wuerde alle fid-indizierten Puffer STILL
+		// verschieben. Deshalb steht hier ein Waechter und kein Kommentar.
+		if(k>0ull&&fbi==fbi_vor) { print_error("alloc_facetten_domain: Zelle traegt zwei Facetten -- die racefrei-Invariante (1 Zelle = 1 Facette) waere verletzt."); return; }
+		if(k>0ull&&fbi<fbi_vor) { print_error("alloc_facetten_domain: F ist nicht nach F-BBox-Index sortiert (fbi "+to_string(fbi)+" nach "+to_string(fbi_vor)+") -- die popcount-Nummerierung im Kernel waere NICHT mehr gleich dieser Zaehlerreihenfolge, alle fid-indizierten Puffer wuerden still verschoben."); return; }
+		fbi_vor = fbi;
+		fac_idx[2ull*(fbi>>5)] |= 1u<<(uint)(fbi&31ull);
 		k++;
+	}
+	// ★ ZWEITER DURCHGANG: exklusive Praefixsumme der Bloecke. fid = base + popcount(Maske unterhalb
+	// der eigenen Lane); der Kernel-Helfer fac_fid() rechnet genau das. Abnahme: die Summe ueber alle
+	// Bloecke MUSS die Facettenzahl treffen -- sonst passen Maske und Zaehlerstand nicht zusammen.
+	{	ulong lauf=0ull;
+		for(ulong b=0ull; b<FNB; b++) { fac_idx[2ull*b+1ull]=(uint)lauf; lauf += (ulong)__builtin_popcount(fac_idx[2ull*b]); }
+		if(lauf!=aktiv) { print_error("alloc_facetten_domain: Bitmaske traegt "+to_string(lauf)+" gesetzte Bits, aber "+to_string(aktiv)+" aktive Facetten wurden gezaehlt -- Maske und fid-Nummerierung sind auseinander."); return; }
+		print_info("fac_idx als Bitmaske+Praefixsumme: "+to_string((ulong)((8ull*FNB)/1048576ull))+" MB fuer "+to_string(FN)+" F-BBox-Zellen (frueher "+to_string((ulong)((4ull*FN)/1048576ull))+" MB), Belegung "+to_string((double)aktiv*100.0/(double)FN,3u)+" %");
 	}
 	fac_N = aktiv;
 	const bool diagz_gebaut = fac_diagz_on; // Audit 2/3: Rebind haengt am KONSTRUKTIONS-Zustand, nicht an der (potentiell umgesetzten) Statik
@@ -938,7 +956,7 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 	// NUR wenn noch nie alloziert (length()==0): ein Move-Assignment auf einen bereits als Kernel-Arg
 	// gebundenen Puffer waere genau der DIAGZ-Use-after-free (Nachpruefer-Lektion in alloc_facetten_domain).
 	if(!facetten_on) {
-		if(fac_idx.length()==0ull)   { fac_idx   = Memory<uint>(device, 1ull);  fac_idx[0]=0xFFFFFFFFu; fac_idx.write_to_device(); }
+		if(fac_idx.length()==0ull)   { fac_idx   = Memory<uint>(device, 2ull);  fac_idx[0]=0u; fac_idx[1]=0u; fac_idx.write_to_device(); } // Bitmaske: Maske 0 = nie ein fid
 		if(fac_tau_n.length()==0ull) { fac_tau_n = Memory<uint>(device, 1ull);  fac_tau_n[0]=0u;        fac_tau_n.write_to_device(); }
 		if(fac_geo.length()==0ull)   { fac_geo   = Memory<float>(device, 8ull); for(ulong q=0ull;q<8ull;q++) fac_geo[q]=0.0f; fac_geo.write_to_device(); }
 	}
@@ -1747,7 +1765,7 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 #ifdef FORCE_FIELD
 	bytes_bekannt += 12ull*F_N;
 #endif // FORCE_FIELD
-	if(LBM_Domain::s_facetten) bytes_bekannt += 4ull*F_N; // fac_idx (lbm.cpp:513) -- die Pruefung kannte es nicht
+	if(LBM_Domain::s_facetten) bytes_bekannt += 8ull*(((ulong)F_N+31ull)/32ull); // fac_idx als Bitmaske+Praefixsumme (03.09.) -- die Pruefung kannte den Posten frueher gar nicht
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
 	// D1: RESERVE. ★ Pruefagent A-1: die Pruefung sieht `device_info.memory`, also den
 	// GESAMTspeicher -- `memory_used` wird hier nicht abgezogen (und Device_Info ist eine Kopie,

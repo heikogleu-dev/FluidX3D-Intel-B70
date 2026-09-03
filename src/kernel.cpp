@@ -878,6 +878,24 @@ void store3_F(global float* F, const uxx n, const float3 v) {
 	uxx fbi; if(!f_bbox(n, &fbi)) return;
 	F[fbi]=v.x; F[def_FBN+(ulong)fbi]=v.y; F[2ul*def_FBN+(ulong)fbi]=v.z;
 }
+
+// FORK 03.09.2026 -- fac_idx ist eine BITMASKE MIT PRAEFIXSUMME, kein volles uint-Feld mehr.
+// Vorher: ein uint je F-BBox-Zelle (4 mm: 160.106.544 Zellen = 610,8 MiB) fuer eine Belegung von
+// 1,95 %. Jetzt: je 32 F-BBox-Zellen ein Paar -- [2b] = Maske (Bit i gesetzt = Zelle 32b+i traegt
+// eine AKTIVE Facette), [2b+1] = Zahl der aktiven Facetten VOR Block b (exklusive Praefixsumme).
+//   fid = base + popcount(maske & Bits unterhalb der eigenen Lane)
+// Das ist ganzzahlig exakt und liefert GENAU dieselbe Nummerierung wie der alte Zaehler, solange
+// fbi streng monoton mit der Facettenreihenfolge waechst. Der Host prueft das hart in
+// alloc_facetten_domain (Waechter, kein Kommentar) -- damit ist der Umbau bit-identisch abnehmbar.
+// KEIN Geschwindigkeitshebel: die eingesparten ~640 MB/Schritt sind gegen den DDF-Verkehr
+// desselben Kernels (>=37,6 GB/Schritt) unter 2 %. Der Posten traegt sich ueber 573 MiB VRAM.
+uint fac_fid(const global uint* fac_idx, const uxx fbi) {
+	const uxx ib = 2ul*(uxx)(fbi>>5);
+	const uint l = (uint)(fbi&31);
+	const uint maske = fac_idx[ib];
+	if(((maske>>l)&1u)==0u) return 0xFFFFFFFFu; // keine oder markierte Facette
+	return fac_idx[ib+1ul] + (uint)popcount(maske & ((1u<<l)-1u));
+}
 )+"#endif"+R( // FORCE_FIELD
 )+"#ifdef SPARSE_TILES"+R(
 // FORK -- Block-Tiling (sparse solid). fi wird nur fuer AKTIVE Tiles alloziert; eine Tile gilt als tot,
@@ -1676,7 +1694,7 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
                    const global float* fac_geo, const global uint* fac_idx,
                    global float* fac_tau_acc, global uint* fac_tau_cnt, global uint* hits, const ulong t) {
 	uxx fbi; if(!f_bbox(n, &fbi)) return;      // ausserhalb der F-BBox gibt es keine Facetten
-	const uint fid = fac_idx[fbi];
+	const uint fid = fac_fid(fac_idx, fbi);
 	if(fid==0xFFFFFFFFu) return;               // keine oder markierte Facette: reiner BB
 	const uxx b = 8ul*(uxx)fid;
 	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
@@ -1901,7 +1919,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FACETTEN_KDIAG
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f,0.0f,0.0f);
-	const uint fid = fac_idx[fbi];
+	const uint fid = fac_fid(fac_idx, fbi);
 	if(fid==0xFFFFFFFFu) return (float3)(0.0f,0.0f,0.0f);
 	const uxx b = 8ul*(uxx)fid;
 	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul], faca=fac_geo[b+4ul];
@@ -2634,7 +2652,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// (geistermodenfreies |S|_FD) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert.
 	// SGS_WANDFREI hat VORRANG (Extremtest); Slot 39 zaehlt die Anwendung (t%100 wie ueblich).
 	uint fdw_fid = 0xFFFFFFFFu;
-	{ uxx fbi_; if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS&&f_bbox(n,&fbi_)) fdw_fid = fac_idx[fbi_]; }
+	{ uxx fbi_; if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS&&f_bbox(n,&fbi_)) fdw_fid = fac_fid(fac_idx, fbi_); }
 )+"#endif"+R( // SGS_FDWAND
 )+"#ifdef SGS_WANDFREI"+R(
 	// ★★ TEST B der Rauwand-Diagnose (Laufzeitschalter CFD_SGS_WANDFREI, 2026-08-15): kein nu_t in
@@ -3827,7 +3845,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 				const uint yn=(uint)((((int)xyz.y+fzc[i][1])%(int)def_Ny+(int)def_Ny)%(int)def_Ny);
 				if(xn<def_FBX0||yn<def_FBY0||(uint)zn<def_FBZ0||xn>=def_FBX0+def_FBNX||yn>=def_FBY0+def_FBNY||(uint)zn>=def_FBZ0+def_FBNZ) continue;
 				const ulong fbi2=(ulong)(xn-def_FBX0)+((ulong)(yn-def_FBY0)+(ulong)((uint)zn-def_FBZ0)*(ulong)def_FBNY)*(ulong)def_FBNX;
-				const uint fid = fac_idx[fbi2];
+				const uint fid = fac_fid(fac_idx, (uxx)fbi2);
 				if(fid==0xFFFFFFFFu||fac_tau_n[fid]==0u) continue;
 				kontaminiert=true;
 				nxm+=fac_geo[8ul*(ulong)fid]; nym+=fac_geo[8ul*(ulong)fid+1ul]; nzm+=fac_geo[8ul*(ulong)fid+2ul];

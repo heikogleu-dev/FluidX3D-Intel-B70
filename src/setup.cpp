@@ -2413,6 +2413,16 @@ struct FacKraft { double px,py,pz, rx,ry,rz; ulong n_voll,n_proj,n_unklar; doubl
 // ★ FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): zband>0 zerlegt NUR den Druckanteil zusaetzlich in
 // Band (z<zband) und Rest (Rest = Gesamt - Band, double). fac_tau (Reibung) traegt keine z-Position --
 // die Reibungszerlegung ist Folgearbeit (fac_geo[6] als z-Traeger). zband==0 ist ausdrucksgleich alt.
+// ★ 03.09.2026 -- fac_idx ist eine Bitmaske mit Blockpraefixsumme (8 B je 32 F-BBox-Zellen statt
+// 4 B je Zelle). AUSDRUCKSGLEICH zum Kernel-Helfer fac_fid() in kernel.cpp; CFD_FAC_GPU_PRUEF
+// vergleicht Host- und GPU-Pfad zahlenscharf, beide muessen deshalb dieselbe Rechnung machen.
+static inline uint fid_aus_maske(const Memory<uint>& idx, const ulong fbi) {
+	const ulong ib = 2ull*(fbi>>5);
+	const uint l = (uint)(fbi&31ull);
+	const uint maske = idx[ib];
+	if(((maske>>l)&1u)==0u) return 0xFFFFFFFFu; // keine oder markierte Facette
+	return idx[ib+1ull] + (uint)__builtin_popcount(maske & ((1u<<l)-1u));
+}
 FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uchar marker,
                         const ulong fenster, const std::vector<double>& snap, const bool z_per=false, const bool flags_aktuell=false, const uint zband=0u) {
 	L.update_force_field();
@@ -2479,7 +2489,7 @@ FacKraft kraft_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz, con
 			const uint xn=wxp((int)x+FZ_C[i][0]), yn=wyp((int)y+FZ_C[i][1]);
 			if(xn<D->fbx0||yn<D->fby0||(uint)zn<D->fbz0||xn>=D->fbx0+D->fbnx||yn>=D->fby0+D->fbny||(uint)zn>=D->fbz0+D->fbnz) continue;
 			const ulong fbi2=(ulong)(xn-D->fbx0)+((ulong)(yn-D->fby0)+(ulong)((uint)zn-D->fbz0)*(ulong)D->fbny)*(ulong)D->fbnx;
-			const uint fid = D->fac_idx[fbi2];
+			const uint fid = fid_aus_maske(D->fac_idx, fbi2);
 			if(fid==0xFFFFFFFFu||D->fac_tau_n[fid]==0u) continue;
 			kontaminiert=true;
 			nxm+=(double)D->fac_geo[8ull*fid]; nym+=(double)D->fac_geo[8ull*fid+1ull]; nzm+=(double)D->fac_geo[8ull*fid+2ull];
