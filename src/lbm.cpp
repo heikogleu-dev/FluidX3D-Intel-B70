@@ -160,9 +160,18 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif // SUBGRID
 	// R2-Nachpruefer: Ansage NACH den harten Abweisern (vorher stand "aktiv" eine Zeile vor dem exit)
 	if(s_sgs_wandfrei) print_info("SGS_WANDFREI aktiv: kein nu_t in Zellen mit solidem Flaechennachbarn (Wirkpfad-Zaehler Slot 6, Report am Laufende).");
+	// ★ 03.09. (Planungsagent-Befund + Pruefagent-Vorschlag 6): der SGS_DIAG-Block lag im else-Zweig des FDWAND-Lesers und war unter
+	// FDWAND an allen Facettenzellen ein stiller No-Op (Bins 35-48 leer). Seit 03.09. nachmittags steht er HINTER dem if/else und
+	// misst das finale w -- die Kombination ist jetzt das Instrument fuer "nu_t IST gegen kappa*y+ SOLL" an Wandzellen.
+	if(s_sgs_diag&&s_sgs_fdwand>0u) print_info("CFD_SGS_DIAG x CFD_SGS_FDWAND: DIAG misst an Facettenzellen das FD-nu_t aus fac_wfd (Block hinter dem if/else seit 03.09.; vorher stiller No-Op der Bins 35-48).");
+	// ★ 03.09. UTKORR-Ansage fuer NACHBAR. Der No-Op-Waechter (NACHBAR/KDIAG ohne iMEM) sitzt an den LESESTELLEN in setup.cpp: dort
+	// wird der Schalter bei fc<3 still auf 0 gesetzt, hier waere er schon unsichtbar (Rauchtest xs_guard_nb_ohne_imem 03.09.: rc=0).
+	if(s_fac_nachbar>0u) print_info("NACHBARABTASTUNG aktiv (CFD_FAC_NACHBAR): Wandmodell-Eingang u_t/y_w aus der zweiten Fluidzelle entlang der Normale (Slot 72 angewandt / 73 kein Fluidnachbar / 74 Nachbar still). CFD_FAC_UTKORR = "+to_string(s_fac_utkorr,3u)+" wirkt NUR an Zellen mit Eigenabtastung -- die 3/2-BB-Deflation gilt am Nachbarn nicht (03.09.).");
 	if(s_fac_ema>0.0f&&s_fac_ema<5e-7f) print_error("CFD_FAC_EMA > 0 aber unter der Emissionsquantisierung (to_string 6 Stellen) -- der Filter froere still auf dem Warmstart ein.");
 	if(s_fac_pema>0.0f&&s_fac_pema<5e-7f) print_error("CFD_FAC_PEMA > 0 aber unter der Emissionsquantisierung -- der Filter froere still ein.");
 	if(s_fac_apg!=0.0f&&fabs(s_fac_apg)<5e-7f) print_error("CFD_FAC_APG zu klein fuer die 6-Stellen-Emission -- wuerde still zu 0.000000 (No-Op-Arm)."); // Gross-Audit N
+	if(s_fac_apg!=0.0f) print_warning("CFD_FAC_APG liest rho der Nachbarzellen im SELBEN stream_collide-Launch -- Laeufe sind NICHT bitreproduzierbar (dieselbe Fehlerklasse wie der NACHBAR-Befund B72, 03.09.; vor einem APG-A/B nach dem fac_nb-Muster auslagern).");
+	if(s_fac_pema>0.0f&&s_fac_nachbar>0u) print_error("PEMA + NACHBAR: die gefilterte Kette (kernel.cpp, utb_wm = utb*def_fac_utkorr) rechnet twe aus dem eigenen gefilterten u mit yw -- die Nachbarabtastung waere dort WIRKUNGSLOS, Slot 72 zaehlte trotzdem (Pruefagent 03.09.). Kombination gesperrt.");
 	if(s_fac_apg!=0.0f&&s_fac_pema>0.0f) print_error("APG + PEMA: die gefilterte Kette verwirft die APG-Korrektur still -- Kombination gesperrt (Tiefen-Audit A1-B3: Sperre jetzt IM Konstruktor, setup-unabhaengig)."); 
 	if(getenv("CFD_SPALDING_IT")&&env_u("CFD_SPALDING_IT",3u)==0u) print_warning("CFD_SPALDING_IT=0 wird auf 1 GEKLEMMT (min 1; Default ohne Env ist 3) -- Gross-Audit N16.");
 	if(env_u("CFD_SPALDING_IT", 0u)>0u&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
@@ -418,6 +427,8 @@ void LBM_Domain::allocate(Device& device) {
 		if(fac_elibb_on) { fac_q = Memory<uchar>(device, 18ull); kernel_stream_collide.add_parameters(fac_q); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fac_kdiag_on = s_fac_imem&&s_fac_kdiag>0u; // ★ Klassen-Diagnostik: Konstruktionszustand einfrieren (Signaturposition = nach fac_q)
 		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull); kernel_stream_collide.add_parameters(fac_kd); }
+		nachbar_on = s_fac_imem&&s_fac_nachbar>0u; // ★ 03.09. deterministische Nachbarabtastung: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd, VOR fac_wfd)
+		if(nachbar_on) { fac_nb = Memory<float>(device, 2ull); kernel_stream_collide.add_parameters(fac_nb); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fdwand_on = s_sgs_fdwand>0u; // ★ Geistermoden-Fix: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd)
 		if(fdwand_on) { fac_wfd = Memory<float>(device, 1ull); kernel_stream_collide.add_parameters(fac_wfd); } // Platzhalter; alloc_facetten_domain baut und rebindet -- der KOHAERENZ-WAECHTER dort verhindert, dass der Platzhalter je gelesen wird
 	}
@@ -558,6 +569,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
 		                      + (fac_kdiag_on ? 40ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 10 float)
+		                      + (nachbar_on ? 8ull*aktiv : 0ull)     // fac_nb (deterministische Nachbarabtastung, 2 float)
 		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull)  // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
 		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:12ull)*aktiv : 0ull); // fac_wfd (4 B) + gd_zellen (8 B), falls nicht schon von gdiag gebaut
 		const ulong mb_fac = bytes_fac/1048576ull;
@@ -712,10 +724,20 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(diagz_gebaut&&fac_diag.length()>=19ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
 	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull*aktiv); for(ulong q8=0ull;q8<10ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB, 10 float je Facette, Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
-	if(sgs_gdiag>0u||sgs_fdwand>0u) { // ★ Liste fid->Zellindex wird von g-Diagnose UND Geistermoden-Fix gebraucht
+	if(sgs_gdiag>0u||sgs_fdwand>0u||nachbar_on) { // ★ Liste fid->Zellindex wird von g-Diagnose, Geistermoden-Fix UND Nachbarabtastung (03.09.) gebraucht
 		gd_zellen = Memory<ulong>(device, aktiv);
 		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=f.n; } }
 		gd_zellen.write_to_device();
+	}
+	if(nachbar_on) { // ★ 03.09. DETERMINISTISCHE NACHBARABTASTUNG: Puffer bauen, Kernel binden, stream_collide-Rebind (fac_wfd-Muster, B70-bewiesen)
+		fac_nb = Memory<float>(device, 2ull*aktiv);
+		for(ulong q=0ull;q<aktiv;q++) { fac_nb[2ull*q]=-1.0f; fac_nb[2ull*q+1ull]=0.0f; } // Init = "kein Wert" -> Eigenzelle (zaehlt als Slot 73); enqueue_initialize fuellt vor dem ersten Schritt
+		fac_nb.write_to_device();
+		kernel_fac_nachbar = Kernel(device, aktiv, "fac_nachbar_ab", u, flags, fac_geo, gd_zellen, (uint)aktiv, fac_nb);
+		if(sparse_on) kernel_fac_nachbar.add_parameters(tile_slot); // B-7-Lehre: TS_P haengt an SPARSE_TILES
+		{ const uint nbix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u);
+		  kernel_stream_collide.set_parameters(nbix, fac_nb); } // Rebind NACH dem Neubau (Platzhalter-Lektion wie fac_wfd)
+		print_info("NACHBARABTASTUNG deterministisch (03.09.): Kernel fac_nachbar_ab je Schritt nach stream_collide liest das FERTIGE u-Feld und schreibt (u_t_abt, y_abt) fuer "+to_string(aktiv)+" Facetten; apply_facette_imem liest den Vorschritt (ein Schritt Versatz wie fac_wfd). Der fruehere Direktzugriff u[nb] im selben Kernel war gemessen nicht bitreproduzierbar (xu_det_mit_a/b, 03.09.).");
 	}
 	if(sgs_fdwand>0u) { // ★ GEISTERMODEN-FIX (02.09.): fac_wfd bauen, FD-Kernel binden, stream_collide-Rebind unten
 		fac_wfd = Memory<float>(device, aktiv);
@@ -723,7 +745,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		fac_wfd.write_to_device();
 		kernel_sgs_fdwand = Kernel(device, aktiv, "sgs_fdwand", u, flags, gd_zellen, (uint)aktiv, fac_wfd);
 		if(sparse_on) kernel_sgs_fdwand.add_parameters(tile_slot); // gleiche B-7-Lehre wie sgs_gdiag
-		{ const uint fwix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u);
+		{ const uint fwix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u)+(nachbar_on?1u:0u); // +nachbar_on (03.09.): fac_nb sitzt VOR fac_wfd
 		  kernel_stream_collide.set_parameters(fwix, fac_wfd); } // ★ Rebind NACH dem Neubau -- der Rebind stand zuerst VOR dem Move-Assignment und band den gleich darauf ZERSTOERTEN Platzhalter (CL -52 beim ersten Enqueue; exakt die DIAGZ-Use-after-free-Lektion, 02.09. erneut bezahlt)
 		print_info("SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND): w an "+to_string(aktiv)+" Facettenzellen aus |S|_FD (u-Feld, geistermodenfrei) statt aus dem Pi-Tensor; FD-Kernel je Schritt nach stream_collide (ein Schritt Versatz, deterministisch), Wirkpfad Slot 76 (B70).");
 	}
@@ -798,13 +820,15 @@ void LBM_Domain::finalize_sparse_tiles() {
 
 void LBM_Domain::enqueue_initialize() { // call kernel_initialize
 	kernel_initialize.enqueue_run();
+	if(nachbar_on&&fac_N>0ull) kernel_fac_nachbar.enqueue_run(); // ★ 03.09. (Pruefagent Pass 2: der Platzhalter hat Laenge 2, length>1 schuetzt hier NICHT -- fac_N wird nur in alloc_facetten_domain gesetzt): Nachbarwerte schon fuer den ERSTEN Schritt (sonst zaehlte t=0 an allen Facetten als Slot 73)
 }
 void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to perform one LBM time step
 	// ★ Invarianten-Waechter (Pruefagent Rang-1-Remat, NIEDRIG-3): der Remat-Block im Kernel
 	// verlaesst sich darauf, dass t ein monotoner Schrittzaehler < 2^62 bleibt (t>>62 == 0).
 	if(t>=(1ull<<62)) print_error("enqueue_stream_collide: t >= 2^62 -- die Remat-Invariante (t>>62==0) waere verletzt.");
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz).enqueue_run();
-	if(fdwand_on&&fac_wfd.length()>1ull) kernel_sgs_fdwand.enqueue_run(); // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
+	if(fdwand_on&&fac_wfd.length()>1ull) kernel_sgs_fdwand.enqueue_run();
+	if(nachbar_on&&fac_N>0ull) kernel_fac_nachbar.enqueue_run(); // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;

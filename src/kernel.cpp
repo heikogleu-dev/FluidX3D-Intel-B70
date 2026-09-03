@@ -1894,7 +1894,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
 )+"#endif"+R( // FACETTEN_ELIBB
 )+"#ifdef FACETTEN_NACHBAR"+R(
-                        , const global float* u // Nachbarabtastung: u der zweiten Fluidzelle entlang der Normale (Feld vom Ende des Vorschritts)
+                        , const global float* fac_nb // ★ 03.09. deterministisch: (u_t_abt, y_abt) je Facette aus dem Kernel fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld); -1 = kein Fluidnachbar, 0 = Nachbar still
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
                         , global float* fac_kd // ★ Klassen-Diagnostik: 10 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche), racefrei (1 Zelle = 1 Facette)
@@ -1946,32 +1946,20 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// tau ~ u^2, also Ziel/Ist 0,04. Abhilfe: den EINGANG (u_t und Wandabstand) aus der zweiten
 	// Fluidzelle ENTLANG DER NORMALE nehmen -- dort steht das Profil frei. Wie bei UTKORR wirkt das
 	// NUR auf Y/u+/u_tau; Tangentialbasis, Klemme tw_max und die Gates bleiben auf dem lokalen ut,
-	// damit Budget und Stabilitaet unveraendert bleiben. u traegt je Scheduling t-1 oder t
-	// (UPDATE_FIELDS schreibt spaeter im selben Kernel) -- fuer einen Profilwert dokumentiert
-	// akzeptabel, dieselbe Konvention wie rho im APG-Block.
+	// damit Budget und Stabilitaet unveraendert bleiben. ★ 03.09.: der Wert kommt aus dem Kernel
+	// fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld, eigener Launch nach stream_collide). Der fruehere
+	// Direktzugriff u[nb] im selben Kernel war gemessen NICHT bitreproduzierbar (xu_det_mit_a/b: cf
+	// 0,00073682648 gegen 0,00073630592 bei identischer Konfiguration; ohne NACHBAR bitgleich).
 	float ut_ab = ut, yw_ab = yw; // Default: eigene Zelle = bisheriges Verhalten
+	bool nachbar_ab = false; // ★ 03.09. (Planungsagent-Auflage): true NUR bei angewandter Nachbarabtastung -- UTKORR ist die 3/2-BB-Deflation der EIGENEN Zelle (P1 ~ -u/3) und darf den Nachbarwert nicht skalieren; ohne FACETTEN_NACHBAR konstant false (bitgleich)
 )+"#ifdef FACETTEN_NACHBAR"+R(
-	{
-		float bestp = 0.5f; uint ib = 0u; // Schwelle: Link muss ueberwiegend in Normalenrichtung zeigen
-		for(uint ia=1u; ia<def_velocity_set; ia++) {
-			if((flags[j[ia]]&TYPE_BO)!=0u) continue; // nur reines Fluid (kein Solid, kein TYPE_E/MS)
-			const float cxa=c(ia), cya=c(def_velocity_set+ia), cza=c(2u*def_velocity_set+ia);
-			const float cl = sqrt(cxa*cxa+cya*cya+cza*cza);
-			const float pr = (cxa*nx+cya*ny+cza*nz)/cl;
-			if(pr>bestp) { bestp=pr; ib=ia; }
-		}
-		if(ib>0u) {
-			const uxx nb = j[ib];
-			const float ubx=u[nb], uby=u[def_N+(ulong)nb], ubz=u[2ul*def_N+(ulong)nb];
-			const float undb = nx*ubx+ny*uby+nz*ubz;
-			const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
-			const float utb = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
-			if(utb>1e-6f) {
-				ut_ab = utb;
-				yw_ab = yw + (c(ib)*nx+c(def_velocity_set+ib)*ny+c(2u*def_velocity_set+ib)*nz); // Wandabstand der Abtastzelle
-				if(t%100ul==0ul) atomic_inc(&hits[72]); // Slot 72 (2. Umzug 02.09., B70: 35-39 sind SGS_DIAG-Wandlagen-Bins): Nachbarabtastung angewandt
-			} else if(t%100ul==0ul) atomic_inc(&hits[74]); // Slot 74 (B70): Nachbar gefunden, steht aber still (Schatten reicht weiter)
-		} else if(t%100ul==0ul) atomic_inc(&hits[73]); // Slot 73 (B70): kein Fluidnachbar in Normalenrichtung -- eigene Zelle
+	{ // ★ 03.09. deterministisch: Werte aus dem Kernel fac_nachbar_ab des Vorschritts -- kein u-Zugriff im selben Launch mehr
+		const float utb = fac_nb[2ul*(ulong)fid];
+		if(utb>1e-6f) {
+			ut_ab = utb; nachbar_ab = true; yw_ab = fac_nb[2ul*(ulong)fid+1ul]; // Wandabstand der Abtastzelle
+			if(t%100ul==0ul) atomic_inc(&hits[72]); // Slot 72 (2. Umzug 02.09., B70: 35-39 sind SGS_DIAG-Wandlagen-Bins): Nachbarabtastung angewandt
+		} else if(utb<0.0f) { if(t%100ul==0ul) atomic_inc(&hits[73]); } // Slot 73 (B70): kein Fluidnachbar in Normalenrichtung -- eigene Zelle
+		else if(t%100ul==0ul) atomic_inc(&hits[74]); // Slot 74 (B70): Nachbar gefunden, steht aber still (Schatten reicht weiter)
 	}
 )+"#endif"+R( // FACETTEN_NACHBAR
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
@@ -1985,7 +1973,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// wirkt NUR auf den Wandmodell-EINGANG (Y, u+, u_tau); die Tangentialbasis und die
 		// Stabilitaetsklemme tw_max laufen weiter auf dem rohen ut. Deklarierter Messarm,
 		// NICHT still eingebaut -- Soll-Faktor der Theorie: 3/2.
-		const float ut_wm = ut_ab*def_fac_utkorr; // ut_ab == ut ohne FACETTEN_NACHBAR (bitgleich)
+		const float ut_wm = nachbar_ab ? ut_ab : ut_ab*def_fac_utkorr; // ★ 03.09.: UTKORR nur an Eigenabtastung (Slot 73/74); am Nachbarn (Slot 72) gilt die BB-Deflation nicht. Ohne FACETTEN_NACHBAR: ut_ab*def_fac_utkorr wie bisher (bitgleich)
 		const float Y  = ut_wm*((2.0f*yw_ab)*def_fac_Y);
 		const float up = wf_spalding_uplus(Y);
 		const float utau = ut_wm/up;
@@ -2431,6 +2419,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_KDIAG"+R(
 	, global float* fac_kd // ★ Klassen-Diagnostik (Position = nach fac_q, Host-add-Reihenfolge)
 )+"#endif"+R( // FACETTEN_KDIAG
+)+"#ifdef FACETTEN_NACHBAR"+R(
+	, const global float* fac_nb // ★ 03.09. deterministische Nachbarabtastung des Vorschritts (Position = nach fac_kd, VOR fac_wfd; Host-add-Reihenfolge im Konstruktor)
+)+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef SGS_FDWAND"+R(
 	, const global float* fac_wfd // ★ Geistermoden-Fix: w je Facettenzelle aus |S|_FD des Vorschritts (Position = nach fac_kd)
 )+"#endif"+R( // SGS_FDWAND
@@ -2490,7 +2481,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		, fac_q
 )+"#endif"+R( // FACETTEN_ELIBB
 )+"#ifdef FACETTEN_NACHBAR"+R(
-		, u
+		, fac_nb
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
 		, fac_kd
@@ -2704,7 +2695,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // SGS_GUO
 		const float Q = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz)); // Q = H*H, turbulent eddy viscosity nut = (C*Delta)^2*|S|, intensity of local strain rate tensor |S|=sqrt(2*S*S)
 		w = 2.0f/(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // 0.76421222 = 18*sqrt(2)*(C*Delta)^2, C = 1/pi*(2/(3*CK))^(3/4) = Smagorinsky-Lilly constant, CK = 3/2 = Kolmogorov constant, Delta = 1 = lattice constant
+	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#ifdef SGS_DIAG"+R(
+	// ★ 03.09. (Pruefagent-Vorschlag 6): DIAG-Block HINTER das FDWAND-if/else gezogen. Er hing nur an w und tau0; im
+	// else-Zweig lag er unter FDWAND fuer alle Facettenzellen brach (Wandlagen-Bins 35-48 leer, stiller No-Op).
+	// Jetzt misst er das FINALE w -- an Facettenzellen also das FD-nu_t aus fac_wfd. tau0 = molekulares tau,
+	// wortgleich zu 1/w VOR dem Smagorinsky-Zweig (def_w ist das molekulare w).
+	{ const float tau0 = 1.0f/def_w;
 		// ★ P0-DIAGNOSTIK (2026-08-23, GRENZSCHICHT-SGS-PLAN.md): nu_t/nu_0 als DEKADEN-
 		// histogramm, Slots 28..32. Ein omega-Histogramm waere hier WERTLOS -- beide Gitter
 		// stehen schon bei omega = 1,9999 (tau0 = 0,500028 nah, 0,500007 fern), die ganze
@@ -2770,8 +2767,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 				if(rv_>=60.0f) atomic_inc(&rho_clamp_hits[45u+(rv_<120.0f?0u:(rv_<240.0f?1u:(rv_<480.0f?2u:3u)))]);
 			}
 		}
+	}
 )+"#endif"+R( // SGS_DIAG
-	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#endif"+R( // SUBGRID
 
 )+"#ifdef SPONGE"+R(
@@ -4011,6 +4008,45 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const float tau0 = 1.0f/def_w;
 	fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // 0.030021 = (C*Delta)^2, C = 0.1733 wie Hauptkernel (0.76421222/(18*sqrt(2)))
 } // sgs_fdwand()
+
+)+R(kernel void fac_nachbar_ab(const global float* u, const global uchar* flags, const global float* fac_geo,
+	const global ulong* gd_zellen, const uint gd_N, global float* fac_nb TS_P) {
+	// ★★ DETERMINISTISCHE NACHBARABTASTUNG (CFD_FAC_NACHBAR, 03.09.2026). Der Direktzugriff u[nb] in
+	// apply_facette_imem lief im Kernel stream_collide, der u im selben Launch schreibt -- gemessen NICHT
+	// bitreproduzierbar (xu_det_mit_a/b: cf 0,00073682648 gegen 0,00073630592; ohne NACHBAR bitgleich).
+	// Jetzt wie fac_wfd: eigener Launch NACH stream_collide auf dem FERTIGEN u-Feld; die Werte gelten fuer
+	// den NAECHSTEN Schritt (ein Schritt Versatz, dt ~ 1e-5 s physikalisch irrelevant). Suche wortgleich
+	// zum bisherigen Inline-Block. Ausgabe je Facette (gid == fid, dieselbe F-Reihenfolge wie fac_idx):
+	//   fac_nb[2f]   = u_t der zweiten Fluidzelle entlang der Normale (>1e-6 -> angewandt, Slot 72),
+	//                  0 = Nachbar gefunden, steht still (Slot 74), -1 = kein Fluidnachbar (Slot 73)
+	//   fac_nb[2f+1] = Wandabstand der Abtastzelle (y_w + c_ib . n)
+	const uint gid = get_global_id(0);
+	if(gid>=gd_N) return;
+	const uxx n = (uxx)gd_zellen[gid];
+	uxx j[def_velocity_set]; // neighbor indices
+	neighbors(n, j); // calculate neighbor indices
+	const uxx b = 8ul*(uxx)gid;
+	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul];
+	float bestp = 0.5f; uint ib = 0u; // Schwelle: Link muss ueberwiegend in Normalenrichtung zeigen
+	for(uint ia=1u; ia<def_velocity_set; ia++) {
+		if((flags[j[ia]]&TYPE_BO)!=0u) continue; // nur reines Fluid (kein Solid, kein TYPE_E/MS)
+		const float cxa=c(ia), cya=c(def_velocity_set+ia), cza=c(2u*def_velocity_set+ia);
+		const float cl = sqrt(cxa*cxa+cya*cya+cza*cza);
+		const float pr = (cxa*nx+cya*ny+cza*nz)/cl;
+		if(pr>bestp) { bestp=pr; ib=ia; }
+	}
+	float utb = -1.0f, ywb = yw;
+	if(ib>0u) {
+		const uxx nb = j[ib];
+		const float ubx=u[nb], uby=u[def_N+(ulong)nb], ubz=u[2ul*def_N+(ulong)nb];
+		const float undb = nx*ubx+ny*uby+nz*ubz;
+		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
+		const float ut2 = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
+		utb = (ut2>1e-6f) ? ut2 : 0.0f;
+		ywb = yw + (c(ib)*nx+c(def_velocity_set+ib)*ny+c(2u*def_velocity_set+ib)*nz);
+	}
+	fac_nb[2ul*(ulong)gid] = utb; fac_nb[2ul*(ulong)gid+1ul] = ywb;
+} // fac_nachbar_ab()
 )+R(kernel void object_torque(const global float* F, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1

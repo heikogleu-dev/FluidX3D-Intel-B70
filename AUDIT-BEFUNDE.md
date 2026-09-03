@@ -4937,6 +4937,26 @@ delta/dx = 10,3 Zellen auf dem Dach: die Abloesung ist nicht aufloesbar, sie wir
 Wandmodell diktiert. Projekteigene Herleitung c_f = 1,502/N² (WANDMODELL.md:108) -- es gibt
 genau EINE Gitterweite, bei der es zufaellig stimmt: dx ~ 6,4 mm. 4 mm liegt darunter.
 
+★★ KORREKTUR 03.09.2026 (Planungsagent + Nachpruefung, FluidX3D-v2 @ e12e4f5): B57s Schluss "das
+Wandmodell setzt sie ein zweites Mal" ist FALSCH. Drei Belege: (1) Algebra -- kernel.cpp:2198
+R1 = -def_fac_tau*twe - P1 und kernel.cpp:2336 phi1 = P1 + G*s; bei geloestem System phi1 = -tau_Ziel
+EXAKT, unabhaengig von BB-Anteil und nu_t. Alle Nebenpfade (SATGATE-Riss, Klemme, Skalar-/LSQ-Rueckfall,
+KRAFT, Paararm 1670) zielsetzend, keiner additiv. (2) Referenz OpenFOAM 13 (/opt/openfoam13,
+nutUWallFunctionFvPatchScalarField.C:57-64): nut auf der PATCH-FLAECHE mit "-1" (Abzug des Vorhandenen),
+Zell-nut bleibt beim SGS -- zwei Flaechen, zwei Traeger, eine Buchung je Flaeche. (3) Messung
+wk_kipp0_cpu (02.09., FDWAND, 3720 aktiv / 0 markiert / Rueckfall 0): Modell-tau_w 4,2323e-6 gegen
+Kraftbilanz u_tau_ist^2 = 4,1331e-6 -> Verhaeltnis 1,024. Im periodischen Kanal ist die Wand die
+einzige Senke; eine Doppelbuchung verlangte ~0,5. Die 1,11 oben ist die Gleichgewichtsidentitaet der
+Konstantspannungsschicht (nu_t/nu_0 = kappa*y+ -> (1+kappa*y+)/(kappa*y+) ~ 1; mit y+ = 177,8 dieses
+Laufs 1,014), kein Fehlerbeleg. Vorzeichen passt dazu: Doppelbuchung machte Reibung ZU GROSS, gemessen
+ist ueberall ZU KLEIN (u_tau-Faktor 0,678-0,696). Folge: ein binaeres "SGS aus, wo Wandmodell anwendet"
+ist an kipp0 (0 Rueckfall) bitgenau SGS_WANDFREI (c_f-Kollaps 9,7e-5, Zeile 607) -- nicht baubar.
+Was bleibt (neu, Agent 03.09.): (a) Restterm im SGS-SENSOR, nicht in der Buchung: sgs_fdwand setzt
+u = 0 am Solid-Nachbarn (kernel.cpp:3999), an iMEM-Zellen hat die Wand aber den Slip u_s ->
+Delta nu_t/nu_t ~ |s1|/u_t, beschraenkt durch das SATGATE-Budget; Messung: CFD_FAC_KDIAG fac_kd[4]/fac_kd[0]
+(Serie xa_kd_*, 03.09.). (b) Stiller No-Op CFD_SGS_DIAG x CFD_SGS_FDWAND: der DIAG-Block liegt im
+else-Zweig des FDWAND-Lesers (kernel.cpp:2666-2707), Wandlagen-Bins 35-48 bleiben an FDWAND-Zellen leer.
+
 ## B58 — Die Voxeltreppe erzwingt die Abloesung, und ELIBB ist dort abgeschaltet (Agent 4)
 u_x in der ersten Fluidzelle entlang der flachen Rampe bricht an JEDER Setzstufe zusammen:
 13 Zusammenbrueche auf 352 mm (i_x 742/758/768/775/781/788/795/804/808/815/820/829, Werte
@@ -5316,3 +5336,36 @@ IST-ZUSTAND ZUM VERGLEICH (p4_ref-Log, 4-mm-Produktion, dual-domain B70+iGPU):
     Versperrung 2,74 % (OF13 1,93 %)
   Der Sprung, den Dual-B70 kauft, ist also am NAHFELD-RAND: y +-401 -> 898..1004 mm,
   z+ 651 -> 1102..1208 mm, x+ 0,45 -> 0,50 L. Die Fernbox bleibt, wo sie ist.
+
+
+### B72 — CFD_FAC_NACHBAR war nicht bitreproduzierbar; deterministisch umgebaut (03.09.2026)
+Messung (CPU Geraet 0, Kanal N=20 kipp0, ETT=4, Serie xu_determinismus_cpu): OHNE NACHBAR zwei identische
+Laeufe bitgleich (facetten_klassen.csv per cmp identisch, Ub_lat 0,072380266). MIT NACHBAR (Stand fd1bcad)
+verschieden: cf 0,00073682648 gegen 0,00073630592, Ub_lat 0,071144169 gegen 0,07114551, alle Klassen-
+akkumulatoren abweichend. Ursache steht seit 30.08. im Code (kernel.cpp, NACHBAR-Block): u[nb] wird in
+apply_facette_imem gelesen, also in stream_collide, das u unter UPDATE_FIELDS im SELBEN Launch schreibt --
+"je Scheduling t-1 oder t", damals als Profilwert akzeptiert. Die Bitgleichheit ist seit 24.08. das
+Abnahmewerkzeug; ein nicht reproduzierbarer Arm ist damit nicht abnehmbar. Umbau nach dem fac_wfd-Muster
+(B70): Kernel fac_nachbar_ab nach stream_collide auf dem fertigen u-Feld, Puffer fac_nb (2 float je Facette:
+u_t_abt oder Kennwert -1 = kein Fluidnachbar / 0 = still; y_abt), Signaturposition nach fac_kd VOR fac_wfd,
+ein Schritt Versatz, Enqueue auch nach initialize (sonst zaehlte t=0 an allen Facetten als Slot 73).
+Nebenbefunde derselben Sitzung: (a) Slots 72/73/74 wurden NIRGENDS im Host ausgelesen -- NACHBAR haette seine
+Wirkung nie im Report bewiesen (Iron Rule); Readout mit No-Op-Abweiser in Kanal- und Nahfeld-Report nachgezogen.
+(b) Der Konstruktor-Waechter "NACHBAR ohne iMEM" war selbst ein No-Op: setup.cpp setzt s_fac_nachbar bei
+CFD_FACETTEN<3 still auf 0 (Rauchtest xs_guard_nb_ohne_imem lief mit rc=0 durch). Waechter an die drei
+Lesestellen verlegt, jetzt fuer NACHBAR und KDIAG. (c) PEMA-Kette umgeht die Nachbarabtastung (twe aus dem
+gefilterten eigenen u mit yw), Slot 72 zaehlte trotzdem -> PEMA x NACHBAR gesperrt (Pruefagent).
+(d) CFD_FAC_UTKORR (3/2-BB-Deflation der EIGENEN Zelle) skalierte auch den Nachbarwert -> nur noch an
+Eigenabtastung (nachbar_ab). Abnahme des Umbaus: Serie xv_det_mit_a/b muss bitgleich sein (Ergebnis s.u.).
+
+### B73 — CFD_SGS_DIAG x CFD_SGS_FDWAND war ein stiller No-Op auf der Wandlage; DIAG-Block verschoben (03.09.2026)
+Planungsagent 03.09.: der SGS_DIAG-Block (kernel.cpp, SUBGRID-Block) lag im else-Zweig des FDWAND-Lesers
+(if fdw_fid gueltig: w = fac_wfd[..]; else: Smagorinsky ... DIAG) -- an FDWAND-Zellen wurde er nie erreicht,
+die Wandlagen-Bins 35-48 blieben leer, die Volumenbins 30-34 verloren die Wandzellen; kein Kombinations-
+waechter in lbm.cpp (nur WANDFREI x DIAG war angesagt). Wer den DIAG-Arm auf der FDWAND-Basis gefahren
+haette, haette nichts gemessen und es nicht gemerkt. Erst als Waechter gebaut (Rauchtest xs_guard_diagfdw:
+rc=1), dann nach Pruefagenten-Vorschlag den Block HINTER das if/else gezogen (er haengt nur an w und tau0;
+tau0 = 1/def_w = molekular, wortgleich zum Wert vor dem Smagorinsky-Zweig): DIAG misst jetzt das finale w
+vor SPONGE, an Facettenzellen also das FD-nu_t. Damit ist DIAG x FDWAND das Instrument fuer "nu_t IST gegen
+kappa*y+ SOLL je Wandklasse" (ARBEITSLISTE Schritt 1b) -- Abnahme: Bins 35-48 nicht leer (Rauchtest
+xv_diag_x_fdwand).
