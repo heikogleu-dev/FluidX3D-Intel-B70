@@ -5420,7 +5420,26 @@ TREPPE (kipp26), tw/Ziel je Klasse (Solid-Links, y_w) -- das ist der Befund:
   (1, 1,08)     0,311     0,628      0,545      2,02      1,75
   (4, 0,71)     0,199     0,399      0,476      2,00      2,39
   (8, 0,18)     0,159     0,297      0,486      1,87      3,06
-  Spannweite     1,96      2,11       1,14
+  Spannweite     1,96      2,11       1,14   (alle drei Klassen)
+  Spannweite     1,26      1,34       1,02   (NUR die angewandten -- siehe Einschraenkung)
+DER BEZUG: tau_ziel = u_tau_Ziel^2 = 0,003^2 = 9,0e-6 Gittereinheiten (setup.cpp:2816 mit utau_lat aus
+:2555, abgeleitet aus Lee & Moser Re_tau 5186). EIN globaler Wert, und das ist der richtige Bezug fuer
+JEDE Klasse: im periodischen Kanal ist die Volumenkraft die einzige Quelle und die Wand die einzige
+Senke, die Stroemung ist homogen, und die schraege Wand bei kipp26 ist PHYSIKALISCH eine glatte Ebene --
+tau_w muss entlang ihr konstant sein. Die Klassen (Linkmenge, y_w 0,18 bis 1,08) sind reine
+Treppen-Artefakte des Gitters. Soll ist damit 1,0 fuer jede Klasse, und jede Streuung zwischen ihnen ist
+Diskretisierungsfehler -- darum ist die SPANNWEITE die aussagekraeftige Groesse, nicht das Mittel.
+EINSCHRAENKUNG (Heikos Rueckfrage 03.09., beim Nachsehen bestaetigt): tw wird auch an RUECKFALLZELLEN
+gebucht (kernel.cpp:2369 -- dieselbe Zeile, die das rueckfall-Flag bucht). Klasse (1, 1,08) hat 100 %
+Rueckfall: dort setzt SATGATE s=0, es bleibt reines BB, das gebuchte tw ist ein "haette"-Wert ohne
+Wirkung. Ueber die Klassen, an denen das Modell wirklich anwendet, lautet die Kennzahl 1,26 | 1,34 |
+1,02 -- die Aussage wird dadurch SCHAERFER: NACHBAR bringt die angewandten Klassen auf 1,02, UTKORR
+verschlechtert sie von 1,26 auf 1,34.
+WAS DIE ABSOLUTE HOEHE NICHT HEISST: alle Werte < 1,0 bedeutet NICHT "zu wenig Reibung insgesamt" -- der
+Gesamt-u_tau-Faktor ist am kipp26 1,164, also 16 % ZU VIEL. Die Differenz traegt die BB-Rauheit an den
+Rueckfallzellen. Ein ideales Wandmodell haette beides: tw/Ziel ~ 1,0 UND Rueckfall ~ 0; wir sind bei
+0,48 und 37-51 %. Am Fahrzeug ist tau_ziel bewusst 0 (setup.cpp:6856) -- dort gibt es kein homogenes
+Ziel und damit keinen ehrlichen Bezug.
 UTKORR multipliziert ALLE Klassen mit demselben Faktor (2,02/2,00/1,87): das Niveau steigt, die
 Verzerrung zwischen den Klassen bleibt (1,96 -> 2,11). NACHBAR korrigiert KLASSENABHAENGIG
 (1,75/2,39/3,06, am staerksten im tiefsten Stufenschatten) und bringt die Klassen auf ein gemeinsames

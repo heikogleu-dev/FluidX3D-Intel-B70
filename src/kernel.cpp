@@ -1957,9 +1957,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float utb = fac_nb[2ul*(ulong)fid];
 		if(utb>1e-6f) {
 			ut_ab = utb; nachbar_ab = true; yw_ab = fac_nb[2ul*(ulong)fid+1ul]; // Wandabstand der Abtastzelle
-			if(t%100ul==0ul) atomic_inc(&hits[72]); // Slot 72 (2. Umzug 02.09., B70: 35-39 sind SGS_DIAG-Wandlagen-Bins): Nachbarabtastung angewandt
-		} else if(utb<0.0f) { if(t%100ul==0ul) atomic_inc(&hits[73]); } // Slot 73 (B70): kein Fluidnachbar in Normalenrichtung -- eigene Zelle
-		else if(t%100ul==0ul) atomic_inc(&hits[74]); // Slot 74 (B70): Nachbar gefunden, steht aber still (Schatten reicht weiter)
+			// ★ 03.09. SAETTIGUNG wie Slot 76: am 4-mm-Fahrzeug laeuft dieser Zaehler auf 3,13 M Facetten x ~501
+			// Stichproben = 1,57e9 = 37 % des uint-Bereichs (Luft nur Faktor 2,7). Ohne Schutz wickelte er bei
+			// laengerem T_END oder feinerem Gitter STILL und der Report meldete eine falsche Prozentzahl.
+			if(t%100ul==0ul&&hits[72]<0xF0000000u) atomic_inc(&hits[72]); // Slot 72: Nachbarabtastung angewandt (saettigend)
+		} else if(utb<0.0f) { if(t%100ul==0ul&&hits[73]<0xF0000000u) atomic_inc(&hits[73]); } // Slot 73: kein Fluidnachbar in Normalenrichtung -- eigene Zelle (saettigend)
+		else if(t%100ul==0ul&&hits[74]<0xF0000000u) atomic_inc(&hits[74]); // Slot 74: Nachbar gefunden, steht aber still (saettigend)
 	}
 )+"#endif"+R( // FACETTEN_NACHBAR
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
