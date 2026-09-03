@@ -1,6 +1,6 @@
 # FACETTEN.md — Leitdokument Facetten-Wandmodell (C1b)
 
-Stand **2026-08-20** (BODEN_EQ-Port + Referenzlage −3 + XL-Audit-Schleife; davor: Stufe 3 + J4 abgeschlossen, Stufe-5-Erstserien gelaufen, Spalding B=5,5-Fix, Bodenband-Messarm; siehe §2/§4 und AUDIT-BEFUNDE.md). Dieses Dokument ist der Einstieg; die acht
+Stand **2026-08-20** (BODEN_EQ-Port + Referenzlage −3 + XL-Audit-Schleife; davor: Stufe 3 + J4 abgeschlossen, Stufe-5-Erstserien gelaufen, Spalding B=5,5-Fix, Bodenband-Messarm; siehe §2/§4 und die internen Prüfunterlagen). Dieses Dokument ist der Einstieg; die acht
 FACETTEN-*-Altdateien sind Archiv (Belegkette, Lesekarte in Abschnitt 5 und FACETTEN-ARCHIV.md).
 Bei Widersprüchen zwischen Altdateien gilt die jüngste Messung — die Auflösungen stehen hier.
 
@@ -178,7 +178,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    liegt 11 % drüber. K4-Ring-Diagnose 2026-08-17 ABGESCHLOSSEN (DIAGZ alle 3 Lagen): kein
    Flicker, keine Rails — Regime-Wechsel entkoppelt→gekoppelt (Snn 1,0→0,141) plus Rang-2-Lage
    ist der strukturelle Preis exakter Erhaltung. OFFEN als Messprogramm: N2-Band-Neueichung
-   mit erhaltungstreuer Referenz vs. Ring-Spalding-Ziel (Details AUDIT-BEFUNDE.md).
+   mit erhaltungstreuer Referenz vs. Ring-Spalding-Ziel (Details in den internen Prüfunterlagen).
 2. **Familienfrage SUSPENDIERT bis zur Saum-fixen Messung**: Kompensationsfamilie (iMEM
    instantan/EMA/PEMA) vs. Ersetzungsansatz (PowerFLOW-artige BB/Specular-Gewichtung) vs.
    Richterwechsel Kugel. Davor noch der billige **Klemmskalen-Messarm** (±4ut): fällt c_f
@@ -189,7 +189,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    Auflösungsleiter kr_dx* konvergiert monoton an den unteren Bandrand (0,436 bei D/dx=37,5;
    Band 0,45–0,5 Achenbach), BB-Basis 0,717 liegt ~55 % drüber, Alt-Arm-Leck skaliert mit der
    Auflösung (13.149 bei DX12) — Facetten+iMEM+α2 ist am Kugelfall belegt REALISTISCHER als BB
-   (Details AUDIT-BEFUNDE.md). REST: Feinkonvergenz/Census als Kür — keine Blockade mehr. Alt:
+   (Details in den internen Prüfunterlagen). REST: Feinkonvergenz/Census als Kür — keine Blockade mehr. Alt:
    Cd-Wertkalibrierung ist jetzt eine Auflösungsfrage — Census (|L|-Verteilung, Kopplungswinkel), feinere DX-Sprosse, beide
    Cd-Wege, Δρ̄-Drift-Band, FP32-Sprosse (FP16C). N3/F12-Band weiter hier.
 4. **Hangauf-Arm I2b** (45°-Torus, Antrieb (0,1,1)/√2): misst die R2-Lücke — nur unter iMEM
@@ -197,7 +197,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
 5. **Fahrzeug Stufe 5 — ERSTSERIE ABGESCHLOSSEN 2026-08-18** (s5b, 500-ms-Deckel):
    Cd 0,797 (BB, fensterrein 0,2–0,5) → **0,728** (Wandmodell, −8,6 % Richtung OF 0,599; Gross-Audit-Korrektur — und mit B=11,11-Spalding gemessen; B=5,5-Neumessung erfolgt: s5d_arm3_b55 Cd 0,732, praktisch identisch), Cz unverändert (C7/APG-These
    bestätigt), y⁺-Median 29,7, Mechanik Ist=Soll bei 1,31 Mrd Ereignissen, Δm-Band geeicht.
-   OFFEN: Normal-Rest-Diagnose (arm-unabhängig −500) VOR Cz-Aussagen; ~~APG-κ-Eichung → 4. Lauf~~ (GESTRICHEN 2026-08-20: APG GEPARKT); Perf-Fixe (Flush/Sync-Bündelung; volles Perf-Audit 2026-08-20 → AUDIT-BEFUNDE.md). ACHTUNG: alle s5b-Zahlen liegen auf Alt-Lage Z_OFFSET 0 (Anker-Verschiebung durch −3-Default, s. §2). Details/To-dos: AUDIT-BEFUNDE.md.
+   OFFEN: Normal-Rest-Diagnose (arm-unabhängig −500) VOR Cz-Aussagen; ~~APG-κ-Eichung → 4. Lauf~~ (GESTRICHEN 2026-08-20: APG GEPARKT); Perf-Fixe (Flush/Sync-Bündelung; volles Perf-Audit 2026-08-20, interne Prüfunterlagen). ACHTUNG: alle s5b-Zahlen liegen auf Alt-Lage Z_OFFSET 0 (Anker-Verschiebung durch −3-Default, s. §2). Details/To-dos: interne Prüfunterlagen.
 6. **Niedrige Audit-Reste (IR3)**: Statik-Symmetrie diagz (s_fac_diagz nicht an allen
    Konstruktorstellen) · Kugel-Report: Slots 10-17 seit b1f2caf/IR3-Abschluss vollstaendig; Rest-Item war stale · cf_m-Normierung am Torus ·
    fac_diag-float-Grenzen (fid-Vergleich als float) · y⁺-Report rechnet am Torus hartkodiert
@@ -243,7 +243,7 @@ Läufen MIT Saum-BB-Löchern — Neubewertung nach der laufenden Wiederholung.
    (knowledge/performance.md-Methodik: messen, nicht Theorie-Audit) nachmessen, BEVOR die
    near→far-Rückkopplung auf dieselbe Schleife aufsetzt; ein echtes Überlappen halbiert ggf.
    den Grobschritt-Anteil und verschiebt die Kosten-Rechnung von Punkt 8+9.
-   **GEKLÄRT (Code-Agent + fdinfo-Livemessung 2026-08-19 nachts):** clFlush existiert weder in
+   **GEKLÄRT (Codeprüfung + fdinfo-Livemessung 2026-08-19 nachts):** clFlush existiert weder in
    V2 noch in V1 — die V1-Überlappung (98,4 % B70, 2,3 % seriell, findings/2026-06-23) beruhte
    schon immer auf NEO-Auto-Submit; Arm-3-Livemessung zeigt auch in V2 Überlappung (B70 95 %,
    iGPU-Bursts). Die ECHTEN B70-Wartefenster sind die Sample-Block-Transfers: kraft_facetten
@@ -345,7 +345,7 @@ NEU in der Schalter-Referenz: CFD_FAC_SATGATE=1 (a-strich, Budget-Riss -> BB-Rue
 10/16 = Rueckfaelle; Stufe-3-Abnahme lief damit).
 
 **Der Weg dorthin (3 Bugs, 3 Werkzeuge):** z-Saum-Geometrie (IR3-Audit, Host-Replikat) ->
-Einzellink-Schur-Flicker (Code-Verdachts-Agent, 546-vs-485-Beleg, relative Schwellen) ->
+Einzellink-Schur-Flicker (gezielte Codeprüfung, 546-vs-485-Beleg, relative Schwellen) ->
 Klemm-Rektifikation (Stabilitaets-Theorem G8 -> Saettigungs-Gate). Jede Stufe mit
 falsifizierbarer Prognose, jede Prognose eingetreten.
 

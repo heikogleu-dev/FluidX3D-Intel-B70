@@ -10,6 +10,9 @@ export/
 logs/
 
 # Interne Arbeits-Markdowns (Heiko 27.08.: gehoeren in den Wissensspeicher, nicht auf GitHub) -- bleiben lokal, nie wieder tracken:
+/AUDIT-BEFUNDE.md
+/UEBERGABE-2026-08-30.md
+/V1-GEGEN-V2.md
 /ARBEITSLISTE.md
 /BAUPLAN-KOPPLUNG.md
 /GRENZSCHICHT-SGS-PLAN.md
@@ -38,3 +41,9 @@ AUFTRAEGE-NACHGELAGERT.md.v1
 # Python-Bytecode der Werkzeuge (03.09.2026)
 __pycache__/
 *.pyc
+
+# Assistenz-/Werkzeugkonfiguration (Heiko 03.09.2026: nicht ins oeffentliche Repo)
+.claude/
+
+# Analyse-Zwischenspeicher der Werkzeuge (03.09.2026)
+*.npz

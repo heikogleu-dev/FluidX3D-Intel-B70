@@ -6,7 +6,7 @@
 # ANLASS: die Nahfeldbox praegt auf fuenf Seiten rho hart aus dem 16-mm-Gitter auf
 # (kernel.cpp apply_kopplung_drive); die Rueckkopplung korrigiert nur u, nie rho. Mit der neuen
 # Box (CFD_NEAR_LZ 1,8560) sitzt die Decke bei z = 1,856 m, also 0,656 m ueber dem Dachscheitel.
-# Zwei Audit-Agenten hielten das fuer zu eng. Die Frage ist mit Daten entscheidbar:
+# Zwei unabhaengige Pruefungen hielten das fuer zu eng. Die Frage ist mit Daten entscheidbar:
 # hinterlaesst die Decke einen ABDRUCK in der Stroemung, oder nicht?
 #
 # WARUM GENAU DIESE EBENE: die OF13-Referenz hat einen fertigen z-Schnitt bei z = 1,836 m

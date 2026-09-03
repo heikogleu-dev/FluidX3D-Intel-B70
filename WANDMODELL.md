@@ -1,6 +1,6 @@
 # Wandmodell und Kanalvalidierung — Wissensstand
 
-Stand 2026-08-09. Zwei Planungen, beide von unabhängigen Agenten **bis auf Codetiefe gegengeprüft**.
+Stand 2026-08-09. Zwei Planungen, beide **bis auf Codetiefe unabhängig gegengeprüft**.
 Beide hatten tragende Fehler, die vor der ersten Codezeile gefunden wurden. Dieses Dokument hält
 fest, was gilt — nicht, was geplant war.
 
@@ -384,5 +384,5 @@ steckt nicht im Mittel, sondern in der **Verteilung**. Genau das ist die Aufgabe
 
 Geht NACHBAR in die Basis, ist `CFD_FAC_UTKORR=1,5` an 99,9 % der Zellen wirkungslos und bleibt
 nur noch Rückfall für Zellen ohne Fluidnachbarn in Normalenrichtung (Slots 73/74). Der Entscheid
-— UTKORR dort auf 1,0 oder auf 1,5 lassen — steht bei Heiko. **Messstand:** B74 in AUDIT-BEFUNDE.md;
+— UTKORR dort auf 1,0 oder auf 1,5 lassen — steht bei Heiko. **Messstand:** Befund B74 der internen Prüfunterlagen (nicht veröffentlicht);
 der direkte Dreipunkt-A/B (ohne beides / UTKORR 1,5 / NACHBAR) läuft als Serie `xd_utkorr_kanal`.

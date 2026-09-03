@@ -313,7 +313,7 @@ Krankheit.
 > Steps, FP16C-/Wand-Rauschen akkumuliert) UND dämpft die geraden Akustik-Moden eh nicht."
 
 **Das war eine gemessene Entscheidung, und ich habe sie als Versäumnis umgedeutet.** In
-`V1-GEGEN-V2.md` steht von mir: „TRT mit Λ = 3/16 aktiv. In V1 vorhanden, aber auskompiliert —
+Im internen V1/V2-Prüfbericht steht von mir: „TRT mit Λ = 3/16 aktiv. In V1 vorhanden, aber auskompiliert —
 toter Code." Auskommentiert hieß hier: geprüft und verworfen.
 
 ## Der A/B, gleiches Gitter, gleiches τ, einziger Unterschied der Operator
