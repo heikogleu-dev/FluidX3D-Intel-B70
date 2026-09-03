@@ -205,6 +205,7 @@ public:
 	static uint s_sgs_fdwand;  // ★ 02.09. SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND=1): w an Facettenzellen aus |S|_FD des u-Felds (FD-Kernel, ein Schritt versetzt) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert (B66/B69)
 	static uint s_sgs_gdiag;   // ★ 31.08. g-DIAGNOSE (CFD_SGS_GDIAG=1): sparser Messkernel ueber die Facettenzellen -- |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle akkumuliert; fasst Physik nicht an
 	static uint s_fac_messnur; // ★ 30.08. CFD_FAC_MESSNUR: Facetten bauen und MESSEN, im Kernel aber NICHTS anwenden -- BB-Physik mit Facetten-Instrument (Aepfel-mit-Aepfeln-Bezug fuer BB-Vergleiche)
+	static uint s_fac_idx_voll; // ★ 03.09. CFD_FAC_IDX_VOLL: fac_idx wieder als volles uint-Feld (Rueckschalter fuer das A/B gegen die Bitmaske)
 	static uint s_f_liste; // ★ 03.09. CFD_F_LISTE: F nur noch an Wandsolidzellen (Markerliste statt BBox-Vollfeld)
 	static uint s_fac_nachbar; // ★ 30.08. CFD_FAC_NACHBAR: Wandmodell-EINGANG aus der zweiten Fluidzelle entlang der Normale (Stufenschatten-Fix, Weg-1 Stufe 3)
 	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 10 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, u_t_abtast, y_abtast); Host-Tabelle je Treppenklasse
@@ -281,6 +282,7 @@ public:
 	// Praefixsumme. Das LETZTE Wort (Index 2*ceil(FBN/32)) traegt die Slotzahl = den Stride von F,
 	// weil der erst nach dem Maskenbau feststeht und deshalb kein Compile-Define sein kann.
 	Memory<uint> f_maske;
+	bool fac_idx_voll_on = false; // Konstruktionszustand eingefroren; true = alte Vollfeld-Bauform von fac_idx
 	bool f_liste_on = false; // Konstruktionszustand eingefroren (Statik-Lebensdauer-Lehre 02.09.)
 	ulong f_slots = 0ull;    // Zahl der Wandsolidzellen = F-Slots; 0 = Vollfeld-Arm
 	uint f_param_sc = 0u, f_param_uf = 0u; // Signaturposition von F in stream_collide bzw. update_fields (fuer den Rebind nach der Neuanlage)

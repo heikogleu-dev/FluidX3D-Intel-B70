@@ -114,6 +114,16 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fbbox[3]>0u && s_fbbox[4]>0u && s_fbbox[5]>0u) {
 		fbx0=s_fbbox[0]; fby0=s_fbbox[1]; fbz0=s_fbbox[2]; fbnx=s_fbbox[3]; fbny=s_fbbox[4]; fbnz=s_fbbox[5];
 	} else { fbx0=0u; fby0=0u; fbz0=0u; fbnx=Nx; fbny=Ny; fbnz=Nz; }
+	// ★ 03.09.2026, TEUER GELERNT: BEIDE folgenden Schalter entscheiden JIT-DEFINES (F_LISTE,
+	// FAC_IDX_VOLL) und muessen deshalb hier stehen, nicht in allocate(). Der OpenCL-Quelltext wird
+	// bei der ERSTEN Kernel-Erzeugung uebersetzt -- das ist kernel_stream_collide in allocate(),
+	// Zeilen VOR dem alten FORCE_FIELD-Block. Dort gesetzt kamen die Defines NIE im Kernel an: der
+	// Host baute die kompakte F-Liste, der Kernel rechnete weiter mit def_FBN als Stride und las weit
+	// ausserhalb des Puffers -- auf der CPU harmlose Nullen, auf der iGPU nichtdeterministischer
+	// Muell mit halbierter Kraft (Befund B80). Dieselbe Falle, die der Kommentar zur F-Bounding-Box
+	// vier Zeilen weiter oben bereits beschreibt.
+	f_liste_on = s_f_liste>0u;
+	fac_idx_voll_on = s_fac_idx_voll>0u;
 	for(uint i=0u; i<6u; i++) s_fbbox[i]=0u; // read-once: eine zweite Domaene erbt die Box nicht
 	// ★ 2026-08-08, beim Bau der Doppel-Domaene gefunden: das Block-Tiling wurde bis hier ueberall direkt
 	// aus den STATISCHEN Schaltern gelesen -- auch in finalize_sparse_tiles(), das erst LANGE nach dem
@@ -281,6 +291,7 @@ bool LBM_Domain::s_fac_elibb = false;
 uint LBM_Domain::s_sgs_fdwand = 0u; // ★ 02.09. Geistermoden-Fix
 uint LBM_Domain::s_sgs_gdiag = 0u; // ★ 31.08. g-Diagnose (CFD_SGS_GDIAG)
 uint LBM_Domain::s_fac_messnur = 0u; // ★ 30.08. Mess-Nur-Modus (BB-Physik, Facetten-Instrument)
+uint LBM_Domain::s_fac_idx_voll = 0u; // ★ 03.09. Rueckschalter auf die fac_idx-Vollfeldform (A/B gegen die Bitmaske)
 uint LBM_Domain::s_f_liste = 0u; // ★ 03.09. CFD_F_LISTE: F nur an Wandsolidzellen
 uint LBM_Domain::s_fac_nachbar = 0u; // ★ 30.08. Nachbarabtastung des Wandmodell-Eingangs
 uint LBM_Domain::s_fac_kdiag = 0u; // ★ 30.08. Klassen-Diagnostik (CFD_FAC_KDIAG)
@@ -373,7 +384,7 @@ void LBM_Domain::allocate(Device& device) {
 	// hier -- sie haengt nur an der F-BBox, die der Konstruktor bereits aufgeloest hat. Nur F selbst
 	// wird im Listenarm als Platzhalter angelegt und in alloc_f_liste ersetzt (fac_idx-Muster): erst
 	// so faellt der Spitzenverbrauch, statt nur der Dauerverbrauch.
-	f_liste_on = s_f_liste>0u;
+	// (f_liste_on und fac_idx_voll_on stehen jetzt im KONSTRUKTOR -- siehe die Begruendung dort.)
 	f_maske = Memory<uint>(device, 2ull*((F_N+31ull)/32ull)+1ull);
 	for(ulong i=0ull; i<f_maske.length(); i++) f_maske[i]=0u;
 	f_maske[2ull*((F_N+31ull)/32ull)] = (uint)F_N; // Stride-Vorbelegung; im Vollfeld-Arm nie gelesen
@@ -664,7 +675,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	// ★ ZWEITE STUFE der Speicherpruefung (29.08.). Die Konstruktor-Vorpruefung kennt die
 	// Facettenzahl noch nicht -- hier steht sie. Das ist der letzte grosse Posten, und ohne
 	// diese Stufe faellt ein zu grosses Gitter erst nach zehn Minuten Aufbau auf.
-	{	const ulong bytes_fac = 8ull*((FN+31ull)/32ull) // fac_idx als Bitmaske+Praefixsumme (03.09.: 8 B je 32 Zellen statt 4 B je Zelle)
+	{	const ulong bytes_fac = (fac_idx_voll_on ? 4ull*FN : 8ull*((FN+31ull)/32ull)) // fac_idx: Vollfeld (4 B je Zelle) oder Bitmaske+Praefixsumme (8 B je 32 Zellen, 03.09.)
 		                      + (8ull+6ull)*4ull*aktiv  // fac_geo + fac_tau
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
@@ -692,10 +703,12 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	}
 	fac_geo   = Memory<float>(device, 8ull*aktiv);
 	const ulong FNB = (FN+31ull)/32ull; // Zahl der 32er-Bloecke der F-BBox
-	fac_idx   = Memory<uint>(device, 2ull*FNB); // ★ 03.09.2026: BITMASKE MIT PRAEFIXSUMME statt einem uint je Zelle
+	// ★ 03.09.2026: Bitmaske+Praefixsumme; CFD_FAC_IDX_VOLL=1 legt die alte Vollfeldform an (A/B-Arm).
+	fac_idx   = Memory<uint>(device, fac_idx_voll_on ? FN : 2ull*FNB);
 	fac_tau   = Memory<float>(device, 6ull*aktiv); // Layout: [6k]=tw, [6k+1..3]=Wandkraft, [6k+4]=Delta-m, [6k+5]=Normalkontamination (iMEM-Umbau)
 	fac_tau_n = Memory<uint>(device, aktiv);
-	for(ulong i=0ull; i<2ull*FNB; i++) fac_idx[i] = 0u; // Maske 0 = keine aktive Facette; Basen kommen im zweiten Durchgang
+	if(fac_idx_voll_on) { for(ulong i=0ull; i<FN; i++) fac_idx[i] = 0xFFFFFFFFu; } // Vollfeldform: NIL-Sentinel wie vor dem 03.09.
+	else { for(ulong i=0ull; i<2ull*FNB; i++) fac_idx[i] = 0u; } // Maske 0 = keine aktive Facette; Basen kommen im zweiten Durchgang
 	ulong k=0ull, fbi_vor=0ull;
 	for(const Facette& f : F) {
 		if(f.klasse!=0u) continue;
@@ -724,17 +737,17 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		if(k>0ull&&fbi==fbi_vor) { print_error("alloc_facetten_domain: Zelle traegt zwei Facetten -- die racefrei-Invariante (1 Zelle = 1 Facette) waere verletzt."); return; }
 		if(k>0ull&&fbi<fbi_vor) { print_error("alloc_facetten_domain: F ist nicht nach F-BBox-Index sortiert (fbi "+to_string(fbi)+" nach "+to_string(fbi_vor)+") -- die popcount-Nummerierung im Kernel waere NICHT mehr gleich dieser Zaehlerreihenfolge, alle fid-indizierten Puffer wuerden still verschoben."); return; }
 		fbi_vor = fbi;
-		fac_idx[2ull*(fbi>>5)] |= 1u<<(uint)(fbi&31ull);
+		if(fac_idx_voll_on) fac_idx[fbi]=(uint)k; else fac_idx[2ull*(fbi>>5)] |= 1u<<(uint)(fbi&31ull);
 		k++;
 	}
 	// ★ ZWEITER DURCHGANG: exklusive Praefixsumme der Bloecke. fid = base + popcount(Maske unterhalb
 	// der eigenen Lane); der Kernel-Helfer fac_fid() rechnet genau das. Abnahme: die Summe ueber alle
 	// Bloecke MUSS die Facettenzahl treffen -- sonst passen Maske und Zaehlerstand nicht zusammen.
-	{	ulong lauf=0ull;
+	if(!fac_idx_voll_on) {	ulong lauf=0ull;
 		for(ulong b=0ull; b<FNB; b++) { fac_idx[2ull*b+1ull]=(uint)lauf; lauf += (ulong)__builtin_popcount(fac_idx[2ull*b]); }
 		if(lauf!=aktiv) { print_error("alloc_facetten_domain: Bitmaske traegt "+to_string(lauf)+" gesetzte Bits, aber "+to_string(aktiv)+" aktive Facetten wurden gezaehlt -- Maske und fid-Nummerierung sind auseinander."); return; }
 		print_info("fac_idx als Bitmaske+Praefixsumme: "+to_string((ulong)((8ull*FNB)/1048576ull))+" MB fuer "+to_string(FN)+" F-BBox-Zellen (frueher "+to_string((ulong)((4ull*FN)/1048576ull))+" MB), Belegung "+to_string((double)aktiv*100.0/(double)FN,3u)+" %");
-	}
+	} else print_warning("CFD_FAC_IDX_VOLL=1: fac_idx laeuft in der ALTEN Vollfeldform ("+to_string((ulong)((4ull*FN)/1048576ull))+" MB statt "+to_string((ulong)((8ull*FNB)/1048576ull))+" MB). Deklarierter A/B-Arm gegen die Bitmaske -- Ergebnisse muessen BITGLEICH sein, nur der Speicher unterscheidet sich.");
 	fac_N = aktiv;
 	const bool diagz_gebaut = fac_diagz_on; // Audit 2/3: Rebind haengt am KONSTRUKTIONS-Zustand, nicht an der (potentiell umgesetzten) Statik
 	if(fac_diagz_on) { // Iron Rule 3: Diagnose-Facette per Zellindex waehlen (CFD_FAC_DIAGZ = n)
@@ -1444,6 +1457,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// Platz: f_maske[2*ceil(def_FBN/32)]. Im Vollfeld-Arm wird er nie gelesen -- dort ist der Stride
 	// def_FBN, wortgleich zum Stand davor, also bit-identisch.
 	+(f_liste_on ? (string)"\n	#define F_LISTE" : (string)"")
+	+(fac_idx_voll_on ? (string)"\n	#define FAC_IDX_VOLL" : (string)"")
 	+(f_liste_on ? (string)"\n	#define F_STRIDE ((ulong)f_maske[2ul*((def_FBN+31ul)/32ul)])"
 	             : (string)"\n	#define F_STRIDE def_FBN")
 #ifndef PARTICLES
@@ -1867,7 +1881,7 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 	bytes_bekannt += 12ull*F_N; // ★ 03.09.: unter CFD_F_LISTE ist das eine OBERGRENZE -- die Slotzahl steht erst
 	                           // nach der Voxelisierung fest, die Vorpruefung laeuft davor. Bewusst konservativ.
 #endif // FORCE_FIELD
-	if(LBM_Domain::s_facetten) bytes_bekannt += 8ull*(((ulong)F_N+31ull)/32ull); // fac_idx als Bitmaske+Praefixsumme (03.09.) -- die Pruefung kannte den Posten frueher gar nicht
+	if(LBM_Domain::s_facetten) bytes_bekannt += (LBM_Domain::s_fac_idx_voll>0u ? 4ull*(ulong)F_N : 8ull*(((ulong)F_N+31ull)/32ull)); // fac_idx als Bitmaske+Praefixsumme (03.09.) -- die Pruefung kannte den Posten frueher gar nicht
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
 	// D1: RESERVE. ★ Pruefagent A-1: die Pruefung sieht `device_info.memory`, also den
 	// GESAMTspeicher -- `memory_used` wird hier nicht abgezogen (und Device_Info ist eine Kopie,

@@ -928,11 +928,15 @@ void store3_F(global float* F, const global uint* f_maske, const uxx n, const fl
 // KEIN Geschwindigkeitshebel: die eingesparten ~640 MB/Schritt sind gegen den DDF-Verkehr
 // desselben Kernels (>=37,6 GB/Schritt) unter 2 %. Der Posten traegt sich ueber 573 MiB VRAM.
 uint fac_fid(const global uint* fac_idx, const uxx fbi) {
+)+"#ifdef FAC_IDX_VOLL"+R(
+	return fac_idx[fbi]; // ★ Rueckschalter CFD_FAC_IDX_VOLL: die alte Vollfeldform, ein uint je Zelle
+)+"#else"+R(
 	const uxx ib = 2ul*(uxx)(fbi>>5);
 	const uint l = (uint)(fbi&31);
 	const uint maske = fac_idx[ib];
 	if(((maske>>l)&1u)==0u) return 0xFFFFFFFFu; // keine oder markierte Facette
 	return fac_idx[ib+1ul] + (uint)popcount(maske & ((1u<<l)-1u));
+)+"#endif"+R( // FAC_IDX_VOLL
 }
 )+"#endif"+R( // FORCE_FIELD
 )+"#ifdef SPARSE_TILES"+R(
