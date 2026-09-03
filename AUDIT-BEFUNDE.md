@@ -5400,6 +5400,21 @@ x=2,50 delta_90 140 -> 132 mm (ZIEL 41 mm NICHT ERREICHT), H 1,77 -> 1,75, ut1 2
   u_t @ 24 mm:       3,066 |          3,266 |      3,466
   u_t @ 32 mm:       3,114 |          3,290 |      3,578
   u_t @ 48 mm:       3,194 |          3,322 |      keine durchgehende Rueckstroemung
+★ KORREKTUR 03.09. nachmittags (eigene Nachpruefung, Heiko-Rueckfrage nach dem Erreichten): DER
+ABLOESEORT OBEN IST NICHT BELASTBAR. Das bericht2-Kriterium sucht den Beginn der DURCHGEHENDEN
+Rueckstroemung bis 3,62 m; am 8-mm-Dach ist das Feld dort aber fleckig, nicht durchgehend. negfrac
+(Anteil rueckwaerts stroemender Proben, 33 Proben) bei x = 3,10/3,25/3,40/3,50/3,55/3,60 m:
+  w_ref     0,788 0,848 0,576 0,697 0,879 0,879
+  w_fdwand  0,758 0,636 0,333 0,697 0,788 0,879
+  w_nb      0,606 0,515 0,455 0,667 0,576 0,485
+ut1 schwankt dort um Null (w_nb +0,57 bei x = 3,60). Ein einzelner Abloesepunkt ist daraus mit 33 Proben
+NICHT bestimmbar -- die Zahlen 3,050/3,450/3,610 m sind Artefakte der Kriteriumssuche am Fensterrand,
+nicht drei gemessene Abloeselagen. WAS BELASTBAR BLEIBT, weil es ein Trend ueber alle sechs Stuetzstellen
+ist: negfrac ist mit NACHBAR durchgehend niedriger (0,45-0,67 gegen 0,58-0,88) und ut1 durchgehend
+positiver (-0,30..+0,57 gegen -1,75..+0,27) -- die wandnahe Stroemung traegt mehr Impuls und stroemt
+seltener zurueck. Fuer eine Abloeselage bei 8 mm braucht es mehr Proben (mehr Zeitpunkte) oder ein
+robusteres Kriterium (cf-Nullstelle statt Rueckstroemungskette).
+
 VERDIKT: NACHBAR ist ein realer, deterministischer, wirkpfad-bewiesener Hebel mit dem Vorzeichen, das alle
 Reibungsmessungen verlangen (Kanal cf +66 %, Abloesung 8 mm spaeter, Rueckstroemung schwaecher, Cd_Druck
 -2,7 %), und ersetzt den gefitteten 3/2-Faktor durch Physik. Das Hauptsymptom delta_90 (Faktor 3-4 gegen 4 mm,
@@ -5448,3 +5463,24 @@ die Endzahl ansieht, haelt die beiden Schalter faelschlich fuer austauschbar. Si
 ebenen Wand. FOLGE fuer den Basis-Entscheid: NACHBAR ersetzt UTKORR nicht nur gleichwertig, es ist an
 der realen (Treppen-)Geometrie das strukturell richtige Werkzeug; UTKORR bleibt sinnvoll als Rueckfall
 fuer Zellen ohne Fluidnachbarn (Slots 73/74, 8-mm-Fahrzeug: 0,1 %).
+
+### B76 — delta_90 war die falsche Zielgroesse; H ist die richtige (03.09.2026)
+Beim Nachrechnen gegen die URSPRUNGSBASIS w_ref (nicht nur gegen den Paarungspartner w_fdwand) auf dem
+8-mm-Dach, 33 Proben je Punkt:
+  x [m]   delta_90 [mm]  w_ref/w_fdwand/w_nb      H (OF13-Ziel 1,18)  w_ref/w_fdwand/w_nb
+  2,30          92 / 124 / 156                        2,08 / 1,92 / 1,76
+  2,50          92 / 140 / 132                        2,00 / 1,77 / 1,75
+  2,70         124 / 124 / 132                        2,01 / 1,76 / 2,03
+  2,90         156 / 188 / 180                        2,12 / 2,09 / 2,25
+  3,10         188 / 196 / 188                        3,10 / 2,65 / 2,65
+delta_90 wird mit FDWAND und NACHBAR GROESSER, H wird durchgehend BESSER. Das ist physikalisch
+konsistent und kein Widerspruch: mehr Wandschubspannung erzeugt eine DICKERE, aber VOLLERE Grenzschicht
+(H = delta*/theta faellt = weniger ausgezehrt). Konsistent mit ut1 (steigt) und negfrac (sinkt).
+FOLGE FUER DIE KRITERIEN: Das Ziel "delta_90 auf den 4-mm-Wert 28-41 mm senken" (ARBEITSLISTE Schritt 1,
+Kandidatenliste 30.08.) war falsch gesetzt. Die 8-mm-Grenzschicht ist dick, WEIL die Voxeltreppe rau ist
+(k/delta 13-20 % gegen 1-3 % im Windkanal) -- und mehr Wandreibung macht sie dicker, nicht duenner. Ein
+Mechanismus, der delta_90 senkt, muesste die REIBUNG senken, und jede Reibungsmessung im Projekt sagt
+"zu wenig" (VORZEICHEN-EINWAND). H ist die Kennzahl, die in die geforderte Richtung zeigt und es auch
+tut: 2,08 -> 1,76 bei x = 2,30, also ein Drittel des Wegs zu OF13 1,18. Meine eigene Bewertung von
+heute Mittag ("delta_90 Ziel nicht erreicht") stand damit auf der falschen Zielgroesse; die Zahl ist
+richtig, ihre Deutung war es nicht.

@@ -26,6 +26,9 @@
 # Aufruf: diff_of13_zslice.py <feld_nah_XXXXXXms.vtk> [out.png] [of13.xy]
 import sys, os, re
 import numpy as np
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import of13_diff_kennzahlen as _kz  # ★ 03.09.: standardisierte Kennzahlen-Ablage (Heiko)
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -125,3 +128,7 @@ out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(os.path
                                                          f"diff_of13_z_{ms}ms.png")
 plt.imsave(out, img)
 print(f"\ngeschrieben: {out}")
+
+# ★ 03.09.2026: standardisierte Kennzahlen-Ablage (Heiko: "bekommst das standardisiert ausgegeben").
+# Bewusst AM ENDE -- out wird erst bei der Bildausgabe gesetzt; w ist das oben maskierte dU.
+_kz.anhaengen(w, "z", float(z_of), vtk, out)

@@ -34,3 +34,7 @@ logs/
 /AUFTRAEGE-NACHGELAGERT.md
 AUFTRAEGE-NACHGELAGERT.md.v1
 /WIEDEREINSTIEG.md
+
+# Python-Bytecode der Werkzeuge (03.09.2026)
+__pycache__/
+*.pyc
