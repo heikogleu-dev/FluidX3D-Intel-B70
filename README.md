@@ -147,7 +147,8 @@ slack, so every item here is what makes the case fit at all.
 | **Smoothing index over the facet bounding box** | Full-grid allocation for a quantity that only exists near the surface | **593 MB instead of 1980 MB** |
 | **Two-stage memory plan with a hard pre-flight check** | Running out of VRAM 40 minutes in wastes a slot on a single-GPU machine | The plan predicted the production run **to the megabyte**: 29 673 MB predicted vs 29 672 MB in the run log |
 | **Host-mirror release with guards** (`delete_host_buffer`, 2026-09-03) | Freeing a host mirror left dangling aux pointers and a live zero-copy device buffer — a trap for exactly the VRAM work queued next | All ten transfer overloads now refuse to run on a released mirror; zero-copy release is a hard error. Proven by negative tests, both arms bit-identical to the reference run |
-| *Identified, quantified, **not yet built***: `fac_idx` as a bitmask + popcount (**~580 MB**, and traffic 640 → 30 MB/step; `fac_idx` is 610.8 MiB at 2.0 % occupancy) and F as a solid-cell marker list (**~1780 MB**) | Both were found by the 2026-09-03 memory audit | Listed here rather than silently dropped: together ~2.4 GB against 487 MB of current slack |
+| **`fac_idx` as a bitmask + block prefix sum** (2026-09-03): one `uint` per force-BBox cell replaced by a packed pair per 32 cells — `fid = base + popcount(mask below own lane)` | 610.8 MiB of VRAM (and the same again in system RAM) for an occupancy of 1.95 % | **572.6 MiB VRAM + 572.6 MiB RAM freed** (facet buffers at 8 mm: 174 → 99 MB). Integer-exact, therefore **bit-identical**, and proven so: CPU 5/5, iGPU 5/5, **B70 8 mm vehicle 19/19 result CSVs byte-identical** to the pre-rebuild run |
+| *Identified and quantified, **not yet built***: F as a wall-solid marker list | Found by the same audit | Worth ~1.78 GiB **only** as a wall-solid list; as a list over all 62.2 M solid cells it collapses to ~883 MiB. The deciding measurement — the actual list length — is the current work |
 
 ### 8 · Performance engineering on Battlemage
 
@@ -200,11 +201,27 @@ Chain result on the 8 mm screening rung: **939 → 1534 MLUPs (+63 %)**, same-en
 | **Machine-generated baseline switch file** (`basis/*.basis`, from the run log, never hand-edited) | Reconstructing a baseline by hand cost eleven switches and a morning of measurements once | The basis is regenerated from a validated run; rationale comments survive regeneration by design |
 | **One variable per run**, criteria written down *before* the run | Mixed measurement arms invalidate results retroactively — you find out only when you go looking for the cause | Screening on the 8 mm rung (~10 min), production at 4 mm only for validated winners |
 
-**Known open points** (kept here on purpose): the ≈ 27 % downforce deficit; one wall-model report
-line contradicts the force CSV by a factor of two and is under investigation — until it is settled,
-no Cz-directed change can be accepted; the wake length of the near-field box is assumed, not
-measured (the series is written and has never been run); and the boundary-layer thickness at 8 mm
-remains resolution-bound — no wall-model switch fixes that.
+**A note on which force instrument is valid** (settled 2026-09-03): `object_force` — the
+momentum exchange over the body cells, i.e. `forces.csv` and the headline `Cd`/`Cz` lines of the run
+report — carries **phantom friction** wherever the facet wall model has modified the links. Its
+absolute values are meaningless: it reports Cd 7.5–8.9 across every run against an OF13 reference of
+0.599, and at 8 mm it even flips the sign of Cz. Only *differences between arms* may be read from
+it. The valid absolute instrument is the facet path in `cd_facetten.csv`. Measured on the 4 mm run
+`p4_nb`, window means from warm-up:
+
+| | Facet path | OpenFOAM 13 | Deviation |
+|---|---|---|---|
+| **Cd** (pressure, band removed + friction) | **0.5924** | 0.599 | **−1.1 %** |
+| **Cz** (same composition) | **−0.8860** | −1.301 | **−31.9 %** |
+
+*Caveat, stated: the friction terms are window means over the facet set without the band split,
+while the pressure terms are band-split — the sum mixes slightly different subsets. Good for the
+order of magnitude, not for a 1 % statement in Cz.*
+
+**Known open points** (kept here on purpose): the **≈ 32 % downforce deficit** — the drag side is
+essentially closed; the wake length of the near-field box is assumed, not measured (the series is
+written and has never been run); and the boundary-layer thickness at 8 mm remains resolution-bound —
+no wall-model switch fixes that.
 
 ## What is implemented (2026-08-27)
 
