@@ -5369,3 +5369,39 @@ tau0 = 1/def_w = molekular, wortgleich zum Wert vor dem Smagorinsky-Zweig): DIAG
 vor SPONGE, an Facettenzellen also das FD-nu_t. Damit ist DIAG x FDWAND das Instrument fuer "nu_t IST gegen
 kappa*y+ SOLL je Wandklasse" (ARBEITSLISTE Schritt 1b) -- Abnahme: Bins 35-48 nicht leer (Rauchtest
 xv_diag_x_fdwand).
+
+
+### B74 — NACHBAR-Leiter gemessen: richtiges Vorzeichen, deterministisch, aber kein delta_90-Hebel (03.09.2026)
+Kette: CPU-Rauchtests 1-4 (Negativtests fuer jeden Waechter, Determinismus-Proben) -> Commit d38acfe ->
+iGPU Volllaeufe (ETT=80) -> B70 8 mm. EINE Variable je Arm: CFD_FAC_NACHBAR=1 (deterministischer Kernel
+fac_nachbar_ab, B72) gegen xa_kd_* (Kanal) bzw. w_fdwand (8 mm); CFD_FAC_KDIAG als bitgleich bewiesener
+Beobachter (xa_kd_kipp0_igpu cf == fdw80_kipp0).
+KANAL kipp0 (ebene Wand, Rueckfall 0, UTKORR 1,0): u_tau-Faktor 0,696 -> 0,920 (Re_tau IST 3608 -> 4773),
+cf_kraftbilanz 1,6527e-3 -> 2,7482e-3 (t_min 0,2; +66 %, 38 sigma; Lee&Moser 3,4424e-3 = 48 % -> 80 %),
+tw/Ziel 0,471 -> 0,788, u_t_abt 0,0581 bei y 1,5 gegen u_t 0,0341 in der Zelle, Slot 72 = 9 921 240 = 100 %,
+DOPPELBUCHUNGS-DETEKTOR 0,9954 [scharf]. KREUZPROBE: der 3/2-Messarm (CFD_FAC_UTKORR=1,5, 25.08., N=20) traf
+0,921 -- Abtastung ausserhalb der BB-deflatierten Zelle und der gefittete Faktor liefern dieselbe Zahl; die
+Deflationstheorie P1 ~ -u/3 traegt, und NACHBAR ist ihre physikalische statt empirische Form.
+KANAL kipp26 (Treppe): Faktor 1,107 -> 1,164; tw/Ziel je Klasse (1,1,08)/(4,0,71)/(8,0,18) 0,31/0,20/0,16 ->
+0,54/0,48/0,49 (Stufenschatten weg: u_t_abt 0,047-0,054 statt 0,016-0,035); Rueckfall% UNVERAENDERT
+100/37,6/51,0 (Rang-Rueckfall ist Geometrie); cf_kraftbilanz 9,87e-3 -> 9,84e-3 (Block-SEM 1,7e-3) -- an der
+Treppe traegt die BB-Rauheit die Senke, das Modellziel aendert den Gesamtwiderstand nicht.
+8 MM (w_nb gegen w_fdwand, B70, 7 min, rc=0, RHO_CLAMP +0,2 %): Slot 72 180 381 607 (99,9 %), 73 = 211 844,
+74 = 3 160; Rueckfall 42,8 % (unveraendert). Hauptklasse (5, 0,50; 228k) u_t 0,0139 -> u_t_abt 0,0282 (x2,0),
+Eckklasse (8, 0,20; 59k) 0,0046 -> 0,0199 (x4,4 = Befund 30.08.). Kraefte gepaart (150 Samples):
+cd_druck_rest 1,1026 -> 1,0723 (-0,030 +-0,003, 9 sigma, -2,7 %), cz_druck_rest -0,144 -> -0,146 (0,2 sigma),
+cd_reib 0,0560 -> 0,0559 (Rauschen; unter NACHBAR wird UTKORR=1,5 an Nachbarzellen konstruktiv umgangen,
+die Abtastung bei y 1,5 ersetzt den Faktor gleichwertig). Grenzschicht (vergleich_nb.py, 33 Proben):
+x=2,50 delta_90 140 -> 132 mm (ZIEL 41 mm NICHT ERREICHT), H 1,77 -> 1,75, ut1 2,50 -> 2,89 m/s, negfrac
+0,212 -> 0,061; x=2,70 gegenlaeufig (negfrac 0 -> 0,27, H 1,76 -> 2,03); x=3,10 Rueckstroemung schwaecher
+(ut1 -1,31 -> -0,30). Abloeseort (bericht2-Kriterium, durchgehende Rueckstroemung bis 3,62 m):
+  u_t @  8 mm: w_ref 3,050 | w_fdwand 3,450 | w_nb 3,610
+  u_t @ 16 mm:       3,050 |          3,410 |      3,594
+  u_t @ 24 mm:       3,066 |          3,266 |      3,466
+  u_t @ 32 mm:       3,114 |          3,290 |      3,578
+  u_t @ 48 mm:       3,194 |          3,322 |      keine durchgehende Rueckstroemung
+VERDIKT: NACHBAR ist ein realer, deterministischer, wirkpfad-bewiesener Hebel mit dem Vorzeichen, das alle
+Reibungsmessungen verlangen (Kanal cf +66 %, Abloesung 8 mm spaeter, Rueckstroemung schwaecher, Cd_Druck
+-2,7 %), und ersetzt den gefitteten 3/2-Faktor durch Physik. Das Hauptsymptom delta_90 (Faktor 3-4 gegen 4 mm,
+auch im reinen BB) bleibt -- wie der Planungsagent aus Kawai & Larsson 2012 vorhergesagt hat (10-15 % LLM,
+nicht Faktor 3). Offen: MESSNUR-Arm (nie gelaufen), APG-Wettlauf (angesagt, nicht umgebaut), 1,8 % phi1/twe.

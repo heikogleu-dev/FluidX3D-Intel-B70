@@ -2882,7 +2882,7 @@ void main_setup_kanal() {
 		{ const double fq_=fac_fn>0.0?fac_fsum/fac_fn:(double)f_akt;
 		  const bool scharf=(kipp==0u&&(ulong)lbm.lbm_domain[0]->rho_clamp_hits[69]==0ull);
 		  if(ntau>0ull&&fq_>0.0) { const double q=(stau/(double)ntau)/(fq_*(double)delta_lat);
-			const string urteil = (q>0.95&&q<1.05) ? "Wand traegt die Senke genau einmal (Zielsetzung)" : (q<0.6 ? "ADDITIV-VERDACHT (Modell traegt nur einen Teil der Senke)" : (!scharf ? "unscharf (Rueckfallzellen tragen BB-Anteil, fehlt im Modellmittel)" : "ABWEICHUNG -- Buchung pruefen"));
+			const string urteil = !scharf ? "unscharf (kipp>0 oder Rueckfallzellen: BB-Anteil fehlt im Modellmittel -- kein Doppelbuchungsmass)" : ((q>0.95&&q<1.05) ? "Wand traegt die Senke genau einmal (Zielsetzung)" : (q<0.6 ? "ADDITIV-VERDACHT (Modell traegt nur einen Teil der Senke)" : "ABWEICHUNG -- Buchung pruefen")); // scharf ZUERST (xb_nb_kipp26: q=0,195 bei 51 % Rueckfall hiess sonst "ADDITIV-VERDACHT")
 			print_info("[Kanal] DOPPELBUCHUNGS-DETEKTOR: <tau_w,Modell>/(f_Fenster*delta) = "+to_string((float)q,4u)+" -> "+urteil+(scharf?" [kipp 0, Rueckfall 0: scharf]":" [kipp>0 oder Rueckfall>0: nur Verlaufsindikator]"));
 		} }
 		// ★ Cd-Pfad-Validierung K2/K3 (FACETTEN-CD-PFAD.md)
