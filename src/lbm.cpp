@@ -626,6 +626,15 @@ void LBM_Domain::alloc_f_liste(const uchar* flags_host, const uint Nx, const uin
 	if(f_slots>=0xFFFFFFFFull) { print_error("alloc_f_liste: mehr Slots als der uint-Praefix traegt."); return; }
 	f_maske[2ull*FNB] = (uint)f_slots; // der Stride, den F_STRIDE im Kernel liest
 	f_maske.write_to_device();
+	// ★ ABNAHME DES STRIDE-TRANSPORTS: der Kernel liest den Stride aus f_maske[2*ceil(def_FBN/32)].
+	// Stimmt dieser Wert nicht, liest load3_F fuer Fy/Fz AUSSERHALB des Puffers -- das faellt auf der
+	// CPU als harmlose Null auf und auf der GPU als nichtdeterministischer Muell. Deshalb hier
+	// zurueckgelesen und geprueft, nicht angenommen.
+	{	f_maske.read_from_device();
+		const uint zurueck = f_maske[2ull*FNB];
+		if((ulong)zurueck!=f_slots) print_error("F-MARKERLISTE: Stride-Transport gescheitert -- geschrieben "+to_string(f_slots)+", vom Geraet zurueckgelesen "+to_string((ulong)zurueck)+". load3_F wuerde fuer Fy/Fz ausserhalb des Puffers lesen.");
+		else print_info("F-MARKERLISTE: Stride-Transport geprueft, Geraet meldet "+to_string((ulong)zurueck)+" Slots zurueck.");
+	}
 	// F in Slotgroesse NEU anlegen und ueberall rebinden (Use-after-free-Lehre: erst anlegen, dann binden)
 	F = Memory<float>(device, f_slots, 3u);
 	for(ulong i=0ull; i<3ull*f_slots; i++) F[i]=0.0f;
