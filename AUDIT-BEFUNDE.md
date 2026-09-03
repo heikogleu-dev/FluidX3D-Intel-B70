@@ -5405,3 +5405,27 @@ Reibungsmessungen verlangen (Kanal cf +66 %, Abloesung 8 mm spaeter, Rueckstroem
 -2,7 %), und ersetzt den gefitteten 3/2-Faktor durch Physik. Das Hauptsymptom delta_90 (Faktor 3-4 gegen 4 mm,
 auch im reinen BB) bleibt -- wie der Planungsagent aus Kawai & Larsson 2012 vorhergesagt hat (10-15 % LLM,
 nicht Faktor 3). Offen: MESSNUR-Arm (nie gelaufen), APG-Wettlauf (angesagt, nicht umgebaut), 1,8 % phi1/twe.
+
+### B75 — Der Dreipunkt-A/B UTKORR gegen NACHBAR: der Unterschied steckt in der VERTEILUNG (03.09.2026)
+Serie logs/xd_utkorr_kanal_serie.txt (iGPU, ETT=80, EINE Variable gegen xa_kd_*: CFD_FAC_UTKORR=1.5).
+Damit liegen drei Punkte auf derselben Konfiguration vor: weder (xa_kd_*) | UTKORR 1,5 (xd_ut_*) |
+NACHBAR (xb_nb_*).
+EBENE WAND (kipp0): u_tau-Faktor 0,696 | 0,910 | 0,920; tw/Ziel 0,471 | 0,810 | 0,788; die eigene Zelle
+sieht 0,0339-0,0341, die zweite 0,0581 bei y 1,5. UTKORR und NACHBAR sind dort GLEICHWERTIG (1 %) --
+Log-Layer-Invarianz (Kawai & Larsson 2012): liegt (u,y) auf dem log-Profil, ist u_tau von der
+Abtasthoehe unabhaengig. Der Faktor 1,70 zwischen erster und zweiter Zelle zerlegt sich in
+BB-Deflation (~1,43) mal echtes Profilwachstum 0,5 -> 1,5 (~1,19).
+TREPPE (kipp26), tw/Ziel je Klasse (Solid-Links, y_w) -- das ist der Befund:
+  Klasse        weder   UTKORR1,5   NACHBAR   xUTKORR   xNACHBAR
+  (1, 1,08)     0,311     0,628      0,545      2,02      1,75
+  (4, 0,71)     0,199     0,399      0,476      2,00      2,39
+  (8, 0,18)     0,159     0,297      0,486      1,87      3,06
+  Spannweite     1,96      2,11       1,14
+UTKORR multipliziert ALLE Klassen mit demselben Faktor (2,02/2,00/1,87): das Niveau steigt, die
+Verzerrung zwischen den Klassen bleibt (1,96 -> 2,11). NACHBAR korrigiert KLASSENABHAENGIG
+(1,75/2,39/3,06, am staerksten im tiefsten Stufenschatten) und bringt die Klassen auf ein gemeinsames
+Niveau (1,96 -> 1,14). Der globale u_tau-Faktor trennt die Arme kaum (1,107 | 1,130 | 1,164) -- wer nur
+die Endzahl ansieht, haelt die beiden Schalter faelschlich fuer austauschbar. Sie sind es nur an der
+ebenen Wand. FOLGE fuer den Basis-Entscheid: NACHBAR ersetzt UTKORR nicht nur gleichwertig, es ist an
+der realen (Treppen-)Geometrie das strukturell richtige Werkzeug; UTKORR bleibt sinnvoll als Rueckfall
+fuer Zellen ohne Fluidnachbarn (Slots 73/74, 8-mm-Fahrzeug: 0,1 %).

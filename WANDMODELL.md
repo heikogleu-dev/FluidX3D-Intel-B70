@@ -360,8 +360,22 @@ P1 ≈ −u/3 trägt, und NACHBAR ist ihre **physikalische statt empirische** Fo
 An der **Treppe** ist die Deflation nicht mehr 2/3, sondern hängt von der Linkmenge und davon ab,
 ob die Zelle im Stufenschatten liegt. Ein globaler Faktor kann das nicht treffen:
 
-- Kanal kipp26, tw/Ziel je Klasse (1, 1,08)/(4, 0,71)/(8, 0,18): **0,31 / 0,20 / 0,16** ohne,
-  **0,54 / 0,48 / 0,49** mit NACHBAR — die Klassen rücken zusammen, statt gemeinsam skaliert zu werden.
+**Der Dreipunkt-A/B am 26-Grad-Kanal (Serie `xd_utkorr_kanal`, 03.09., eine Variable je Arm) zeigt es
+in einer Zahl** — `tw/Ziel` je Treppenklasse, 1,0 wäre perfekt:
+
+| Klasse (Solid-Links, y_w) | weder | UTKORR=1,5 | NACHBAR | ×UTKORR | ×NACHBAR |
+|---|---|---|---|---|---|
+| (1, 1,08) | 0,311 | 0,628 | 0,545 | 2,02 | 1,75 |
+| (4, 0,71) | 0,199 | 0,399 | 0,476 | 2,00 | 2,39 |
+| (8, 0,18) | 0,159 | 0,297 | 0,486 | 1,87 | **3,06** |
+| **Spannweite max/min** | **1,96** | **2,11** | **1,14** | | |
+
+`UTKORR` multipliziert alle Klassen mit **demselben** Faktor (2,02 / 2,00 / 1,87) — das Niveau steigt,
+die **Verzerrung zwischen den Klassen bleibt** (1,96 → 2,11, sogar minimal schlechter). `NACHBAR`
+korrigiert **klassenabhängig** (1,75 / 2,39 / 3,06 — am stärksten dort, wo der Stufenschatten am
+tiefsten ist) und bringt die Klassen damit auf ein gemeinsames Niveau: Spannweite **1,96 → 1,14**.
+Der globale u_τ-Faktor unterscheidet die drei Arme kaum (1,107 / 1,130 / 1,164) — der Unterschied
+steckt nicht im Mittel, sondern in der **Verteilung**. Genau das ist die Aufgabe eines Wandmodells.
 - Am 8-mm-Fahrzeug sieht die Eckklasse (8 Solid-Links, y_w 0,20) in der eigenen Zelle u_t = 0,0046,
   in der zweiten 0,0199. Ein Faktor 1,5 träfe dort um **Faktor 2,9** daneben; Spalding macht daraus
   τ ~ u², also rund **Faktor 8** im Ziel.
