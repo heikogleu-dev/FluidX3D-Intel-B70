@@ -360,6 +360,14 @@ void LBM_Domain::allocate(Device& device) {
 	const ulong F_N = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
 	if(F_N<(ulong)get_N()) print_info("F-BBox: F auf "+to_string(fbnx)+"x"+to_string(fbny)+"x"+to_string(fbnz)
 		+" statt "+to_string((ulong)get_N())+" Zellen -> "+to_string((float)(((ulong)get_N()-F_N)*12ull)/1e9f,2u)+" GB gespart");
+	// ★ FORK 03.09.2026, VERSUCHT UND ZURUECKGENOMMEN: F ohne Host-Spiegel anzulegen (Memory<float>(device,
+	// F_N, 3u, false), fi-Bauform) spart am 4-mm-Nahfeld 1.832 MiB SYSTEM-RAM -- aber nur System-RAM, kein
+	// VRAM. Der Versuch endete im Segfault (rc=139, Rauchtest xz_sparsam_cpu 03.09.), und zwar an zwei
+	// Stellen, die BEIDE den Host-Spiegel brauchen: LBM::initialize() laedt F per enqueue_write_to_device
+	// hoch (lbm.cpp, weiter unten), und der F-Waechter davor prueft die F-NUR-SOLID-Praemisse auf dem Host.
+	// Sauber waere: bei !F_host stattdessen kernel_reset_force_field starten UND den Waechter mit Ansage
+	// ueberspringen. Das sind zwei weitere Eingriffe fuer einen Posten, der auf der B70 kein einziges MB
+	// VRAM bringt -- und der Waechter, den es kostet, ist ein Sicherheitsnetz. Zurueckgestellt.
 	F = Memory<float>(device, F_N, 3u);
 	object_sum = Memory<float>(device, 1u, 4u); // x, y, z, cell count
 	kernel_stream_collide.add_parameters(F);

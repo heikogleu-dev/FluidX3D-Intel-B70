@@ -370,6 +370,7 @@ private:
 		if(d>0x3u) w = s3 = host_buffer+N*0x3ull; if(d>0x7u) s7 = host_buffer+N*0x7ull; if(d>0xBu) sB = host_buffer+N*0xBull; if(d>0xFu) sF = host_buffer+N*0xFull;
 	}
 	inline void allocate_host_buffer(Device& device, const bool allocate_host, const bool allow_zero_copy) {
+		host_buffer_geloescht = false; // ★ FORK 03.09.: Flag gehoert zum PUFFER, nicht zum Objekt -- operator= (Move-Assign) ruft delete_buffers() und wuerde es sonst am NEUEN Puffer stehen lassen (Falle F3 des Planungsagenten).
 		if(allocate_host) {
 			const ulong alignment = allow_zero_copy&&device.info.uses_ram ? 4096ull : 64ull; // host_buffer must be aligned to 4096 Bytes for CL_MEM_USE_HOST_PTR, and to 64 Bytes for optimal enqueueReadBuffer performance on modern CPUs
 			const ulong padding   = allow_zero_copy&&device.info.uses_ram ?   64ull :  0ull; // for CL_MEM_USE_HOST_PTR, 64 Bytes padding is required because device_buffer capacity in this case must be a multiple of 64 Bytes
@@ -422,6 +423,7 @@ private:
 	}
 public:
 	T *x=nullptr, *y=nullptr, *z=nullptr, *w=nullptr; // host buffer auxiliary pointers for multi-dimensional array access (array of structures)
+	bool host_buffer_geloescht = false; // ★ FORK 03.09.: unterscheidet "nie einen Host-Puffer gehabt" (legitim, z.B. fi) von "freigegeben" (Lesen waere ein Fehler)
 	T *s0=nullptr, *s1=nullptr, *s2=nullptr, *s3=nullptr, *s4=nullptr, *s5=nullptr, *s6=nullptr, *s7=nullptr, *s8=nullptr, *s9=nullptr, *sA=nullptr, *sB=nullptr, *sC=nullptr, *sD=nullptr, *sE=nullptr, *sF=nullptr;
 	inline Memory(Device& device, const ulong N, const uint dimensions=1u, const bool allocate_host=true, const bool allocate_device=true, const T value=(T)0, const bool allow_zero_copy=true) {
 		if(!device.is_initialized()) print_error("No Device selected. Call Device constructor.");
@@ -454,6 +456,7 @@ public:
 		d = memory.dimensions();
 		device = memory.device;
 		cl_queue = memory.device->get_cl_queue();
+		host_buffer_geloescht = memory.host_buffer_geloescht; // ★ FORK 03.09.: das Flag gehoert zum uebernommenen Puffer. delete_buffers() oben setzt es auf true; ohne diese Zeile klebte es am NEUEN Puffer und der Waechter feuerte falsch-positiv (im Rauchtest belegt).
 		if(memory.host_buffer_exists) {
 			host_buffer = memory.exchange_host_buffer(nullptr); // transfer host_buffer pointer
 			host_buffer_unaligned = memory.exchange_host_buffer_unaligned(nullptr); // transfer host_buffer_unaligned pointer
@@ -498,11 +501,25 @@ public:
 		}
 	}
 	inline void delete_host_buffer() {
+		// ★ FORK 03.09.2026 (Planungsagent-Befund, ENTMINT): diese Funktion war in der Upstream-Form nur
+		// als Teilschritt von delete_buffers() im Destruktor benutzbar. Wer sie einzeln aufrief, baute
+		// sich drei stille Fallen: (1) host_buffer_unaligned blieb auf dem freigegebenen Block stehen ->
+		// der Destruktor gab ihn ein ZWEITES Mal frei (Double Free NACH dem kompletten Lauf);
+		// (2) die Hilfszeiger x/y/z/w/s0..sF zeigten weiter in freigegebenen Heap -> jedes u.x[n] las
+		// still Muell statt zu sterben; (3) read_from_device() faellt danach durch beide Zweige und
+		// kehrt kommentarlos zurueck -- ein stiller No-Op statt eines lauten Fehlers.
+		// Zero-Copy ist der vierte Fall und der gefaehrlichste: dort IST der Host-Puffer der
+		// Device-Speicher (CL_MEM_USE_HOST_PTR), Freigeben korrumpiert die laufende Rechnung lautlos.
+		if(is_zero_copy&&device_buffer_exists) print_error("delete_host_buffer() auf einem Zero-Copy-Puffer: Host- und Device-Puffer sind DERSELBE Speicher (CL_MEM_USE_HOST_PTR). Freigeben laesst die cl::Buffer auf freigegebenen Heap zeigen -- stille Korruption, kein Absturz.");
 		host_buffer_exists = false;
 		if(!external_host_buffer) {
 			host_buffer = nullptr;
 			delete[] host_buffer_unaligned;
+			host_buffer_unaligned = nullptr; // FEHLTE: sonst Double Free im Destruktor
 		}
+		x=y=z=w=nullptr; // FEHLTEN: sonst liest u.x[n] still freigegebenen Heap
+		s0=s1=s2=s3=s4=s5=s6=s7=s8=s9=sA=sB=sC=sD=sE=sF=nullptr;
+		host_buffer_geloescht = true; // fuer den Waechter in read_from_device/write_to_device
 		if(!device_buffer_exists) {
 			N = 0ull;
 			d = 1u;
@@ -540,6 +557,7 @@ public:
 	inline const T operator()(const ulong i) const { return host_buffer[i]; }
 	inline const T operator()(const ulong i, const uint dimension) const { return host_buffer[i+(ulong)dimension*N]; } // array of structures
 	inline void read_from_device(const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
+		if(host_buffer_geloescht) print_error("read_from_device() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten oder gar nichts bekommen (Upstream kehrt hier kommentarlos zurueck). ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			cl_queue.enqueueReadBuffer(device_buffer, blocking, 0ull, capacity(), (void*)host_buffer, event_waitlist, event_returned);
 		} else if(is_zero_copy&&blocking) {
@@ -554,6 +572,7 @@ public:
 		}
 	}
 	inline void write_to_device(const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
+		if(host_buffer_geloescht) print_error("write_to_device() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten oder gar nichts bekommen (Upstream kehrt hier kommentarlos zurueck). ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			cl_queue.enqueueWriteBuffer(device_buffer, blocking, 0ull, capacity(), (void*)host_buffer, event_waitlist, event_returned);
 		} else if(is_zero_copy&&blocking) {
@@ -561,6 +580,7 @@ public:
 		}
 	}
 	inline void read_from_device(const ulong offset, const ulong length, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
+		if(host_buffer_geloescht) print_error("read_from_device() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten oder gar nichts bekommen (Upstream kehrt hier kommentarlos zurueck). ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			const ulong safe_offset=min(offset, range()), safe_length=min(length, range()-safe_offset);
 			if(safe_length>0ull) cl_queue.enqueueReadBuffer(device_buffer, blocking, safe_offset*sizeof(T), safe_length*sizeof(T), (void*)(host_buffer+safe_offset), event_waitlist, event_returned);
@@ -569,6 +589,7 @@ public:
 		}
 	}
 	inline void write_to_device(const ulong offset, const ulong length, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) {
+		if(host_buffer_geloescht) print_error("write_to_device() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten oder gar nichts bekommen (Upstream kehrt hier kommentarlos zurueck). ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			const ulong safe_offset=min(offset, range()), safe_length=min(length, range()-safe_offset);
 			if(safe_length>0ull) cl_queue.enqueueWriteBuffer(device_buffer, blocking, safe_offset*sizeof(T), safe_length*sizeof(T), (void*)(host_buffer+safe_offset), event_waitlist, event_returned);
@@ -577,6 +598,7 @@ public:
 		}
 	}
 	inline void read_from_device_1d(const ulong x0, const ulong x1, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // read 1D domain from device, either for all vector dimensions (-1) or for a specified dimension
+		if(host_buffer_geloescht) print_error("read_from_device_1d() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten bekommen. ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			const uint i0=(uint)max(0, dimension), i1=dimension<0 ? d : i0+1u;
 			for(uint i=i0; i<i1; i++) {
@@ -589,6 +611,7 @@ public:
 		}
 	}
 	inline void write_to_device_1d(const ulong x0, const ulong x1, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // write 1D domain to device, either for all vector dimensions (-1) or for a specified dimension
+		if(host_buffer_geloescht) print_error("write_to_device_1d() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten bekommen. ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			const uint i0=(uint)max(0, dimension), i1=dimension<0 ? d : i0+1u;
 			for(uint i=i0; i<i1; i++) {
@@ -601,6 +624,7 @@ public:
 		}
 	}
 	inline void read_from_device_2d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong Nx, const ulong Ny, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // read 2D domain from device, either for all vector dimensions (-1) or for a specified dimension
+		if(host_buffer_geloescht) print_error("read_from_device_2d() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten bekommen. ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			for(uint y=y0; y<y1; y++) {
 				const ulong n = x0+y*Nx;
@@ -616,6 +640,7 @@ public:
 		}
 	}
 	inline void write_to_device_2d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong Nx, const ulong Ny, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // write 2D domain to device, either for all vector dimensions (-1) or for a specified dimension
+		if(host_buffer_geloescht) print_error("write_to_device_2d() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten bekommen. ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			for(uint y=y0; y<y1; y++) {
 				const ulong n = x0+y*Nx;
@@ -631,6 +656,7 @@ public:
 		}
 	}
 	inline void read_from_device_3d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong z0, const ulong z1, const ulong Nx, const ulong Ny, const ulong Nz, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // read 3D domain from device, either for all vector dimensions (-1) or for a specified dimension
+		if(host_buffer_geloescht) print_error("read_from_device_3d() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten bekommen. ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			for(uint z=z0; z<z1; z++) {
 				for(uint y=y0; y<y1; y++) {
@@ -648,6 +674,7 @@ public:
 		}
 	}
 	inline void write_to_device_3d(const ulong x0, const ulong x1, const ulong y0, const ulong y1, const ulong z0, const ulong z1, const ulong Nx, const ulong Ny, const ulong Nz, const int dimension=-1, const bool blocking=true, const vector<Event>* event_waitlist=nullptr, Event* event_returned=nullptr) { // write 3D domain to device, either for all vector dimensions (-1) or for a specified dimension
+		if(host_buffer_geloescht) print_error("write_to_device_3d() auf einem Puffer, dessen Host-Spiegel freigegeben wurde -- der Aufrufer haette still Altdaten bekommen. ★ FORK 03.09.2026.");
 		if(host_buffer_exists&&device_buffer_exists&&!is_zero_copy) {
 			for(uint z=z0; z<z1; z++) {
 				for(uint y=y0; y<y1; y++) {

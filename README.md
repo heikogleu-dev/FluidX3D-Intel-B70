@@ -71,6 +71,35 @@ rules ("Iron Rules"):
 5. **Measure on data, never on pictures** — field CSVs and probes, never rendered images. A picture
    shows what the renderer made of it, not what was computed.
 
+## What this fork changes vs. upstream FluidX3D — at a glance (updated 2026-09-03)
+
+Upstream is a general-purpose LBM solver that already runs at 96–100 % of peak memory bandwidth.
+Everything below was added or replaced for one purpose: **resolving forces on a road vehicle at a
+resolution that fits on one workstation GPU, and being able to prove every number.** Figures are
+measured on this machine unless marked otherwise.
+
+| Area | What changed vs. upstream | Why | Measured effect |
+|---|---|---|---|
+| **Wall model** | Cell-based facet chain: TLS surface fit across the voxel staircase → Spalding target → 3×3 momentum solve for a slip velocity (iMEM), with a saturation gate and mass correction | Plain bounce-back on a 4 mm voxel grid is a hydraulically rough wall; the stair-step normal is not the true surface normal | Vehicle Cd 0.818 (BB) → 0.728 (8 mm, arm `s5b`); action path proven at 1.3 G events, is=should exact |
+| | **ELIBB** link-wise geometric boundary on top: Surface-Nets remesh supplies per-link wall distance q; q > ½ branch is the MLS χ-blend, χ = (2q−1)/(τ₀+½) | Sub-cell wall placement instead of stair-step; the predecessor branch was spectrally unstable (λ_krit = 4(2−ω)/(ω−1), derived and measured) | 10.9 M cut links on 2.62 M facets at 4 mm, zero fallbacks; stable to ω → 2, q = 1 |
+| | **Wall-model input from the second fluid cell** (`CFD_FAC_NACHBAR`), replacing an empirically fitted 3/2 factor | The first cell is bounce-back-deflated (P₁ ≈ −u/3) *and* sits in the stair shadow; the fitted factor was calibrated on one geometry at one resolution | Channel u_τ factor **0.696 → 0.920** (c_f +66 %, 38 σ). Per-class scatter of tw/target across stair classes **1.26 → 1.02** — a global factor made it *worse* (1.34) |
+| | Wall-model coverage fix (y_w clamp instead of discard, coherence edge test) | 19.9 % of wall cells had no wall model at all | **19.9 % → 4.5 %** cells without wall model (4 mm: 146 198 of 3 275 383) |
+| **SGS / turbulence** | `CFD_SGS_FDWAND`: ν_t at wall cells from a finite-difference \|S\| of the velocity field instead of the Π-tensor | The wall model writes non-hydrodynamic populations into f; Smagorinsky built its tensor from them — ghost-mode inflation of **2.33×** in the dominant wall class (measured) | Channel kipp26 u_τ factor 0.778 → **1.107**; 8 mm shape factor H 2.00 → **1.77** (OF13 target 1.18), u_t at the first cell +25…36 % |
+| | WALE and Sigma evaluated and **rejected**, van Driest rejected | Measured, not assumed: the wall cells are near-pure shear (\|Ω\|/\|S\| ≈ 0.99) | WALE/FD 1–4 % of Smagorinsky — no lever. van Driest: c_f collapse ×15.9 at the D = 0 limit |
+| | Double-booking of SGS and wall model **disproved**, and a permanent detector added | It was the planned next build step; the premise turned out to be wrong | ⟨τ_w,model⟩ / (f·δ) = **0.995** on the flat channel (an additive double-booking would need ≈ 0.5). Cross-checked against OpenFOAM 13's `nutUWallFunction`, which is built the same way |
+| **Resolution / domains** | Dual-domain: fine 1689 × 661 × 465 @ 4 mm (519 M cells) on the B70, coarse 768 × 480 × 552 @ 16 mm (203 M) on the iGPU, one-way coarse → fine with cubic boundary lift | A single 4 mm box large enough for a correct wind-tunnel blockage does not fit in 32 GB; a small box distorts the pressure field | Coupling costs **0.8 % of step time**; far-field blockage **2.74 %** (OF13 reference 1.93 %) while the near field stays at 4 mm |
+| **Boundary physics** | Moving-floor equilibrium reset, inlet reset + damping zone, tyre-contact force split | The far-field floor ran in a staggered mode (period-2 at τ ≈ 0.5) that killed under-body flow; the floor imprint produced artificial downforce | Freestream streaks −99 %; the tyre imprint was worth ≈ **−0.7 Cz of artificial downforce** — quantified and removed |
+| **Number format** | FP16S (range-shifted) instead of FP16C, measured against an FP32 arm | Both are 2 B/DDF; the question was which one the wall model tolerates | **1373 (FP32) → 1924 (FP16C) → 2246 MLUPS**. FP16S is not only faster but *closer to FP32*: c_z error under FP16C −0.0119 at 2.17 σ, under FP16S +0.0038 at 0.70 σ |
+| **Performance** | GPU-side force reduction instead of PCIe transfers; IGC unroll-budget fix; store_f rematerialisation; F-buffer null-read gate; offline ocloc scratch/spill gate in CI | A grown kernel loop had silently gone memory-resident — every DDF access ran through scratch | Force window **36 % → 1.3 %** of step time; the unroll fix was a measured **100×** on the affected arm (private_size 4256 B → 0); +3.7 % kernel from the null-read gate |
+| **VRAM** | Force field allocated over a bounding box instead of the full grid; smoothing index over the facet BBox; two-stage memory plan with a hard pre-flight check | The constructor pre-check computed `FORCE_FIELD` over the full grid and rejected grids that actually fit | **4.31 GB** saved on F alone; smoothing index 593 MB instead of 1980 MB; the memory plan predicted the run to the megabyte (29 672 MB, 487 MB slack) |
+| **Instrumentation** | 80 action-path counters with is=should assertions, force-path K2/K3 validation, bit-anchor field hash, block-SEM statistics, per-stair-class wall diagnostics, paired 100 ms force comparison | Project rule: a switch without a firing counter is a hard error — in the predecessor fork a central fix had been a silent no-op for a year | Six instruments were found **measuring wrong** and fixed (e.g. a y⁺ histogram off by a factor of 18); several switches were found to be silent no-ops before they were ever used for a result |
+| **Validation** | Paired A/B methodology against OpenFOAM 13 (34 M cells, k-ω-SST, **same STL**), one variable per run, criteria written before the run | Comparing against an earlier version of one's own code proves nothing about physics | Reference Cd 0.599 / Cz −1.301. Current 4 mm: cd_druck_rest 0.537, cz_druck_rest −0.951 — the drag side is close, **the downforce gap of ≈ 27 % is the open problem** |
+
+**Known open points** (kept here on purpose): the downforce deficit above; one wall-model
+report line contradicts the force CSV by a factor of two and is under investigation; the wake
+length of the near-field box is assumed, not measured; and the boundary-layer thickness at 8 mm
+remains resolution-bound — no wall-model switch fixes that.
+
 ## What is implemented (2026-08-27)
 
 - **Dual-domain coupling fine↔coarse** (B70 + iGPU, real parallel scheduling, coupling share ~1 %),
