@@ -307,3 +307,68 @@ ein gitterparalleler z-Wand-Fall, der tote Bodenstreifen damit der erste Fahrzeu
 Verteilung schmal, Bodenstreifen-Zeitreihe flach; (4) Kanal-Turbulenzerhaltung als eigene Frage.
 Am Fahrzeug erzeugt die Geometrie die Turbulenz selbst — der glatte Kanal ist der Härtefall, nicht
 der Normalfall.
+
+---
+
+# Nachtrag 2026-09-03 — Nachbarabtastung (CFD_FAC_NACHBAR) gegen den 3/2-Faktor (CFD_FAC_UTKORR)
+
+Beide Schalter greifen an **derselben Stelle** an: dem Eingang der Spalding-Kette in
+`apply_facette_imem` (src/kernel.cpp). Beide lassen Tangentialbasis, Stabilitätsklemme `tw_max`
+und die SATGATE-Gates unangetastet — sie ändern nur, **welches (u, y)-Paar** das Modell sieht.
+Sie tun aber nicht dasselbe.
+
+## Die Kette, um die es geht
+
+```
+Y      = ut_wm * (2*yw_ab) * def_fac_Y     mit def_fac_Y = 0,5/nu   →   Y = u * y / nu
+u+     = wf_spalding_uplus(Y)
+u_tau  = ut_wm / u+
+tau_w  = rho * u_tau²
+```
+
+`Y` ist die Spalding-Variable, also die **Reynoldszahl des Abtastpunkts**. In sie geht der
+Wandabstand `yw_ab` **linear** ein — genau darin liegt der Unterschied.
+
+## Was jeder Schalter tut
+
+| | `CFD_FAC_UTKORR=1.5` | `CFD_FAC_NACHBAR=1` |
+|---|---|---|
+| Geschwindigkeit | `ut_wm = 1,5 · u_t(eigene Zelle)` | `ut_wm = u_t(zweite Fluidzelle)` |
+| Wandabstand | **bleibt `y_w`** (ebene Wand: 0,5) | wird mitgeführt: `y_w + c_ib·n` (ebene Wand: 1,5) |
+| Herkunft der Zahl | **empirisch geeicht** (Theorie 3/2 für die BB-Deflation, gemessen 1/0,70 = 1,43; 1,5 als bester A/B-Wert vom 25.08.) | **gemessen** — das Modell liest das Profil dort, wo es nicht deflatiert ist |
+| Ortsabhängigkeit | **konstant**, überall derselbe Faktor | **je Zelle verschieden** (gemessen am 8-mm-Fahrzeug, `w_nb`: Hauptklasse (5, 0,50) ×2,0; Eckklasse (8, 0,20) ×4,4) |
+| Determinismus | unkritisch (Skalar) | erforderte den eigenen Kernel `fac_nachbar_ab` (B72) |
+| Wirkung, wenn beide gesetzt | wirkt nur noch, wo NACHBAR **nicht** greift (Slots 73/74; 8 mm: 0,1 % der Entscheide) | hat Vorrang |
+
+## Warum beide an der ebenen Wand fast dasselbe liefern
+
+Das ist kein Zufall, sondern die Aussage von Kawai & Larsson (2012): **liegt das Paar (u, y) auf
+dem logarithmischen Profil, ist das daraus bestimmte u_tau von der Abtasthöhe unabhängig.**
+
+- `NACHBAR` nimmt ein **echtes** Paar: (u₂, y=1,5). Gemessen (`xb_nb_kipp0_igpu`): u_t_abt 0,0581
+  bei y_abt 1,5, während die eigene Zelle 0,0341 bei y 0,5 sieht — Verhältnis **1,70**, das sich
+  aus BB-Deflation (≈1,43) und echtem Profilwachstum von y 0,5 auf 1,5 (≈1,19) zusammensetzt.
+- `UTKORR` nimmt ein **konstruiertes** Paar: (1,5·u₁, y=0,5). Das liegt nur dann auf dem Profil,
+  wenn die Deflation exakt 2/3 beträgt.
+
+Ergebnis am ebenen Kanal N=20: u_tau-Faktor **0,920** (NACHBAR, `xb_nb_kipp0_igpu`, 03.09.) gegen
+**0,921** (UTKORR=1,5, Serie g10, 25.08.). Zwei Wege, dieselbe Zahl — die Deflationstheorie
+P1 ≈ −u/3 trägt, und NACHBAR ist ihre **physikalische statt empirische** Form.
+
+## Wo sie auseinanderlaufen
+
+An der **Treppe** ist die Deflation nicht mehr 2/3, sondern hängt von der Linkmenge und davon ab,
+ob die Zelle im Stufenschatten liegt. Ein globaler Faktor kann das nicht treffen:
+
+- Kanal kipp26, tw/Ziel je Klasse (1, 1,08)/(4, 0,71)/(8, 0,18): **0,31 / 0,20 / 0,16** ohne,
+  **0,54 / 0,48 / 0,49** mit NACHBAR — die Klassen rücken zusammen, statt gemeinsam skaliert zu werden.
+- Am 8-mm-Fahrzeug sieht die Eckklasse (8 Solid-Links, y_w 0,20) in der eigenen Zelle u_t = 0,0046,
+  in der zweiten 0,0199. Ein Faktor 1,5 träfe dort um **Faktor 2,9** daneben; Spalding macht daraus
+  τ ~ u², also rund **Faktor 8** im Ziel.
+
+## Konsequenz für die Basis
+
+Geht NACHBAR in die Basis, ist `CFD_FAC_UTKORR=1,5` an 99,9 % der Zellen wirkungslos und bleibt
+nur noch Rückfall für Zellen ohne Fluidnachbarn in Normalenrichtung (Slots 73/74). Der Entscheid
+— UTKORR dort auf 1,0 oder auf 1,5 lassen — steht bei Heiko. **Messstand:** B74 in AUDIT-BEFUNDE.md;
+der direkte Dreipunkt-A/B (ohne beides / UTKORR 1,5 / NACHBAR) läuft als Serie `xd_utkorr_kanal`.
