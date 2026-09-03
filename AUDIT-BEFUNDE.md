@@ -934,6 +934,17 @@ RANG 1 (HOCH, bitidentisch, COMPILER-BELEGT): store_f-Adress-Rematerialisierung.
   der Faktor-2,14-Abstand zur 572-GB/s-Kugelreferenz war NICHT der Spill allein -- die
   Kugel faehrt einen leichteren Kernel; Restluecke = Arbeit pro Zelle (naechste Hebel:
   F-Null-Read, FP16S). Auto-Large-GRF (Rang 4) ist mit Spill 0 voraussichtlich obsolet.
+RANG 2 -- ★ ERLEDIGT SEIT 30.08.2026 (Commit 4404f28), diese Zeilen sind STALE (Befund Agent 2,
+  03.09.): FP16S IST aktiv (defines.hpp:21), FP16C ist auskommentiert. Gemessen wurde nicht die
+  prognostizierte Instruktionszahl, sondern der Durchsatz: FP32 1373 | FP16C 1924 | FP16S 2246 MLUPS
+  (8 mm, je eine Variable), also +17 % gegenueber FP16C statt der prognostizierten -20,5 % Instr.
+  UND FP16S war GENAUER als FP16C: gepaart gegen den FP32-Arm ist cz_druck_rest unter FP16C
+  -0,0119 bei 2,17 sigma (Vorzeichentest 100/150 = 4,08 sigma, also systematisch), unter FP16S
+  +0,0038 bei 0,70 sigma (69/150 = Zufall). Erklaerung (Hypothese, im Commit vermerkt): FP16C hat
+  nur 4 Exponentenbits und wird unter 6,1e-5 subnormal -- im Kleinwertbereich, in dem R1/R2 des
+  iMEM-Solvers leben, schlaegt Dynamikbereich die Mantisse. RESTSCHULD: die von FACETTEN-IMEM.md:153
+  geforderte FP32-Sprosse lief am 8-mm-FAHRZEUG, nicht an der KUGEL, und nicht auf 4 mm.
+  Der urspruengliche Text von damals:
 RANG 2 (HOCH, physikaendernd, NUR mit Heiko-Ansage): FP16S statt FP16C.
   FP16C-Konverter = 40,7 % des Instruktionsstroms des Nicht-Facetten-Pfads (19 h2f + 19 f2h
   a ~23 Instr./Zelle, kein natives cvt fuer 1-4-11); FP16S nutzt native hf-Konversion:
@@ -5484,3 +5495,96 @@ Mechanismus, der delta_90 senkt, muesste die REIBUNG senken, und jede Reibungsme
 tut: 2,08 -> 1,76 bei x = 2,30, also ein Drittel des Wegs zu OF13 1,18. Meine eigene Bewertung von
 heute Mittag ("delta_90 Ziel nicht erreicht") stand damit auf der falschen Zielgroesse; die Zahl ist
 richtig, ihre Deutung war es nicht.
+
+### B77 — Die Formatachse ist ausgereizt: unter FP16 ist nichts zu holen (03.09.2026)
+Agent-Befund mit drei unabhaengigen Gruenden, einer davon gemessen.
+(a) MESSUNG (30.08., Commit 4404f28): der einzige statistisch signifikante formatinduzierte Fehler
+war cz_druck_rest unter FP16C, -0,0119 bei 2,17 sigma. Cz ist der wandmodell-dominierte Koeffizient;
+cd blieb bei 0,97 bzw. 1,91 sigma. Ein Unterschied von EINEM Mantissenbit war an dieser Groesse
+bereits aufloesbar -- das Wandmodell ist bei 16 bit der Anschlag, nicht die Stroemung.
+(b) MECHANIK (FACETTEN-IMEM.md:153): R1/R2 sind Differenzen fast gleicher Register, das
+Quantisierungsrauschen geht x3 in s1, und "q_i selbst ist klein gegen die DDF-Aufloesung". Bei
+FP16S sind das 9,8e-4 relativ auf der Stoerform f^ = f - w_i. Ein E4M3-Format haette 3 Mantissenbits
+= 12,5 % relativ (Faktor 128 groeber), E5M2 25 %, int8 mit Blockskalierung 3,9e-3 des BLOCKmaximums.
+s1 waere dort reines Rauschen.
+(c) LITERATUR: Lehmann et al., Phys. Rev. E 106, 015308 (2022), DOI 10.1103/PhysRevE.106.015308 --
+die Quelle von FP16S/FP16C selbst -- geht NICHT unter 16 bit. Drei gezielte Suchen fanden keine
+Arbeit, die ein produktiv benutztes Sub-16-bit-Format fuer LBM-DDFs belegt (kein Nichtexistenzbeweis,
+aber auf dieser Suchtiefe nichts). Was es gibt, ist eine andere Hebelklasse: verlustbehaftete
+Blockkompression (DWT, arXiv:2302.09883) -- die kollidiert mit demselben iMEM-Anschlag.
+(d) Und der Gewinn waere ohnehin halb so gross wie er aussieht: die DDFs sind 38 der 55 B/Zelle,
+8 bit brachten 36 statt 55 B = -35 %, nicht -69 %.
+FALLEN fuer jeden kuenftigen Formatzweig (aus dem Code): setup.cpp:6834-6840 setzt die Schwelle des
+N2F-Rundungstests per #ifdef-Kette hart (ein neues Format ohne eigenen Zweig faellt in #else =
+FP32-Schwelle 1,2e-7 und der Test schlaegt grundlos fehl); lbm.cpp:1253-1266 braucht VIER Zeilen
+(fpxx, fpxx_copy, load, store) -- fpxx_copy ist getrennt, weil die Multi-GPU-Transferkernel roh
+bitkopieren, wer nur fpxx setzt korrumpiert die Halo-Uebertragung STILL.
+
+### B78 — Speicheraudit 4 mm: wo die 30 GB wirklich liegen (03.09.2026, vier Agenten)
+Auftrag Heiko: "ob wir nicht Speicherplatz pro Zelle massiv verringern koennen bzw ob wir vom d3q19
+wirklich alles voll benutzen". ALLOKATIONSTABELLE bit-genau gegen logs/p4_nb.log verifiziert (29.065 MB
+und 1.022 MB exakt reproduziert): fi 18.813 | u 5.941 | rho 1.980 | F 1.832 | flags 495 |
+Facettenpuffer 1.022 (davon fac_idx 610,8 MiB = 60 %). EFFEKTIV 58,71 B/Zelle, nicht 55 -- F und
+fac_idx liegen ueber die F-BBox (160,1 M von 519,1 M Zellen = 30,8 %).
+
+ACHSE 1 -- ZAHLENFORMAT: AUSGEREIZT. FP16S ist seit 4404f28 aktiv und gemessen der Endpunkt (siehe
+B77). Unter 16 bit kollidiert jede Quantisierung mit dem iMEM-Solver.
+
+ACHSE 2 -- GESCHWINDIGKEITSSATZ: KEIN HEBEL, in beide Richtungen widerlegt.
+  Alle 19 Richtungen sind in Benutzung (jede Heissschleife ueber def_velocity_set).
+  D3Q15 (-13,6 % = 4,15 GB): hat KEINE Flaechendiagonalen (6 Achsen + 8 Raumdiagonalen). Unser
+  fac_paar-Idiom setzt getrennte x-/y-Paare auf disjunkten Links voraus; jeder D3Q15-Ecklink traegt
+  x- UND y-Tangentialimpuls zugleich. Das Wandmodell waere nicht zu portieren, sondern neu zu
+  erfinden. Dazu bricht ein Satzwechsel heute schon beim Uebersetzen ab (#error in defines.hpp:39
+  fuer REGULARIZED_BOUNDARIES, das hier AN ist; drei print_error in lbm.cpp:128-130).
+  D3Q27 (+27,3 % = 8,3 GB): fuegt 8 RAUMdiagonalen hinzu, nicht 12 Flaechendiagonalen -- die hat
+  D3Q19 bereits. GEMESSENE Rang-Zerlegung am 8-mm-Fahrzeug (logs/b8_1b_w3ff.log, alle Slots
+  t%100-gegatet, 64.766.832 klassifizierte Besuche): Rang 2 voll 57,3 % | Slot 13 ohneTang 36,4 %,
+  davon Slot 27 (ELIBB-heilbar) 35,3 % und c-parallel-n nur 1,04 % | Slot 15 Rang0-gekoppelt 5,66 %
+  | Slot 12 Skalar 0,64 %. Die dominante Klasse (35,3 %) ist NICHT linkarm: sie hat rohe
+  Tangentialmomente und verliert sie im ALPHA2-DOWNDATE -- ein algorithmischer Verlust, den kein
+  Geschwindigkeitssatz heilt. Strukturell durch mehr Links adressierbar sind nur 6,7 %, und dort
+  hebt D3Q27 Rang 0 auf Rang 1, nicht auf Rang 2 (Rechnung an der 45-Grad-Kante). An der EBENEN Wand
+  aendert D3Q27 die Momente ueberhaupt nicht: G11 = 1/3 unter beiden Saetzen. VERDIKT: D3Q27 bleibt
+  ein Speicherposten und wird kein Physik-Hebel.
+
+ACHSE 3 -- DIE EIGENTLICHEN POSTEN (alle im eigenen Code, alle ohne Physikaenderung):
+  (a) rho + u sind fuer ~99 % der Zellen SCHREIBNUR -- 7.921 MB, jeden Schritt geschrieben, nie
+      gelesen. Kein Kernel liest sie in der Produktionskonfiguration als Vollgitter-Stencil im
+      Fluidinneren; der einzige u-Nachbarstencil (deriv_reg) ist auf TYPE-E begrenzt, der einzige
+      rho-Nachbarstencil (APG) ist AUS. Umbau riskant (Schreibpfad im heissesten Kernel, Slices, VTK).
+  (b) F von der F-BBox auf eine Solid-Markerliste: ~1.780 MB. stream_collide fasst F GAR NICHT an
+      (F-NUR-SOLID ist Default) -- der heisseste Kernel bleibt unangetastet, das Listen-Idiom
+      existiert (gd_zellen/sgs_fdwand/fac_nachbar_ab), Nebengewinn ~1,92 GB weniger Traffic je
+      Schritt. RISIKO: object_force summiert als Grid-Stride ueber volles N in fester Reihenfolge
+      (Determinismus, lbm.cpp:367) -- eine Liste aendert die Summationsreihenfolge und bricht die
+      Bitgleichheit. Als A/B anzusagen, nicht still zu nehmen.
+  (c) fac_idx (610,8 MiB fuer 2,0 % Belegung) als Bitmaske + Block-Praefixsumme: ~29 MiB, und der
+      Traffic faellt von 640 auf 30 MB je Schritt (2 koaleszierte Loads + popcount statt 4 B/Zelle).
+      VORHER ZU BEWEISEN: fac_idx vergibt fid in F-VEKTOR-Reihenfolge (lbm.cpp:600), popcount in
+      ZELLINDEX-Reihenfolge -- sind die nicht identisch, sind alle fid-indizierten Puffer permutiert.
+  (d) HOST-SPIEGEL 11.270 MiB System-RAM: delete_host_buffer() existiert (opencl.hpp:500) und wird
+      im ganzen Projekt NIRGENDS aufgerufen. fac_idx hat host-seitig kein einziges read_from_device().
+
+ACHSE 4 -- STRUKTURELL: ★ AKTENFEHLER KORRIGIERT. Der Eintrag "SPARSE_TILES kann im Fahrzeugfall gar
+nicht wirken" ist FALSCH. Die Sperre lbm.cpp:443 prueft get_D()>1, also die FluidX3D-INTERNE
+Domaenenzerlegung -- der dd-Fall baut aber ZWEI getrennte LBM-Instanzen mit je einem Geraet und
+get_D()==1, und setup.cpp:4814/4815 ruft finalize_sparse_tiles() fuer BEIDE auf. Der Mechanismus ist
+im Fahrzeugfall also nicht gesperrt, sondern nur nie gelaufen. Erwartung (gerechnet, nicht gemessen):
+1,0-1,5 GiB bei T=8 gegen -28 bis -40 % Durchsatz; Solidanteil 62.201.072 Zellen = 11,98 %. Der Lauf
+druckt die exakte Zahl selbst ([SPARSE]-Zeile) -- ein einziger 8-mm-Lauf ersetzt jede Schaetzung.
+SYMMETRIE-HALBDOMAENE (-50 %): AUSDRUECKLICH NICHT EMPFOHLEN, und der Grund ist ein Loch in der
+Aktenlage: export/*/forces.csv hat den Kopf time_s,Fx_N,Fz_N,Cd,Cz,Fx_far_N -- es gibt KEIN Fy und
+KEIN Cy. Die y-Asymmetrie wurde im ganzen Projekt NIE gemessen. Dazu: bei stumpfen Heckformen ist der
+Nachlauf bistabil-asymmetrisch (Fachstand, auf dieser Maschine unbestaetigt), die Mittelebene ist die
+Messebene ALLER Diagnosen, und Halb- gegen Volldomaene ist prinzipiell nicht A/B-faehig.
+BOX-ZUSCHNITT: kein belegter Spielraum -- x- ist am Minimum, x+ ist unbelegt (die Wake-Serie liegt
+fertig da, ist nie gelaufen UND haette mit Armen 0,45/0,63/0,81 L die Speicherfrage gar nicht
+beantwortet), und fuer y und z+ fordert die eigene B71-Analyse das GEGENTEIL (groesser fuer Dual-B70).
+Kosten je 100 mm: x 403 MiB | y beidseitig 2.060 MiB | z+ 1.464 MiB.
+
+EMPFEHLUNG: (b) + (c) = ~2.360 MB VRAM ohne Physikaenderung, gegen 487 MB Schlupf im letzten
+4-mm-Lauf. Danach (d) fuer den System-RAM. SPARSE nur, wenn ein Fall sonst nicht passt -- 4 % Speicher
+fuer 30-40 % Laufzeit ist als Auflosungshebel wertlos, als Passt/passt-nicht-Reserve real.
+OHNE GPU-LAUF NACHZURUESTEN: Cy/Fy in forces.csv (object_force summiert fy bereits) -- schliesst die
+Symmetriefrage sachlich ab, statt sie offen zu lassen.
