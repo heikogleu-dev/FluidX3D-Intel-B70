@@ -870,13 +870,51 @@ bool f_bbox(const uxx n, uxx* fbi) {
 	*fbi = (uxx)(xyz.x-def_FBX0)+(uxx)(xyz.y-def_FBY0)*def_FBNX+(uxx)(xyz.z-def_FBZ0)*(uxx)def_FBNX*(uxx)def_FBNY;
 	return true;
 }
-float3 load3_F(const global float* F, const uxx n) {
-	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f, 0.0f, 0.0f);
-	return (float3)(F[fbi], F[def_FBN+(ulong)fbi], F[2ul*def_FBN+(ulong)fbi]);
+// FORK 03.09.2026 -- F-MARKERLISTE (JIT-Define F_LISTE, Laufzeitschalter CFD_F_LISTE, Default AUS).
+// GEMESSEN am 8-mm-Fahrzeug (CFD_F_LISTE_ZENSUS): von 20.805.960 F-BBox-Zellen sind 8.233.611 solid,
+// aber nur 849.790 davon WANDsolid (>=1 Nicht-Solid unter den 18 D3Q19-Links) -- 4,08 % der Box.
+// Genau diese Zellen schreibt update_force_field; alle anderen tragen konstruktiv F=0. F als volles
+// BBox-Feld kostet deshalb am 4-mm-Fahrzeug 1.832 MiB fuer eine Belegung von rund zwei Prozent.
+// Mit Liste: 3 float je Wandsolidzelle + dieselbe Bitmasken/Praefix-Maschinerie wie fac_idx.
+//
+// DIE MASKE IST BEWUSST EINE OBERMENGE. Der Host baut sie (alloc_f_liste) und wickelt x/y periodisch,
+// waehrend der Kernel neighbors() in ALLEN Richtungen wickelt. Eine Zelle, die der Kernel schreibt,
+// aber der Host nicht in der Maske haette, waere ein STILLER Kraftverlust -- deshalb nimmt der Host
+// im Zweifel mehr auf (ein paar ungenutzte Slots kosten nichts). Die Gegenrichtung faengt der
+// Wirkpfad-Zaehler: jeder store3_F ohne Slot zaehlt Slot 77 hoch, Soll ist 0 am Laufende.
+//
+// Der Maskenpuffer ist IMMER Parameter dieser Funktionen, auch wenn F_LISTE aus ist -- dann wird er
+// nicht gelesen. Das haelt die Parameterlisten der fuenf F-Kernel ueber beide Arme konstant und
+// vermeidet die Signaturversatz-Fehlerklasse, die dieses Projekt am 02.09. zweimal bezahlt hat.
+bool f_slot(const global uint* f_maske, const uxx n, uxx* slot) {
+	uxx fbi; if(!f_bbox(n, &fbi)) return false;
+)+"#ifdef F_LISTE"+R(
+	const uxx ib = 2ul*(uxx)(fbi>>5);
+	const uint maske = f_maske[ib];
+	const uint l = (uint)(fbi&31);
+	if(((maske>>l)&1u)==0u) return false; // keine Wandsolidzelle: kein Slot, F ist dort konstruktiv 0
+	*slot = (uxx)(f_maske[ib+1ul] + popcount(maske & ((1u<<l)-1u)));
+)+"#else"+R(
+	*slot = fbi; // Vollfeld-Arm: Slot = BBox-Index, wortgleich zum Stand vor dem 03.09.
+)+"#endif"+R( // F_LISTE
+	return true;
 }
-void store3_F(global float* F, const uxx n, const float3 v) {
-	uxx fbi; if(!f_bbox(n, &fbi)) return;
-	F[fbi]=v.x; F[def_FBN+(ulong)fbi]=v.y; F[2ul*def_FBN+(ulong)fbi]=v.z;
+float3 load3_F(const global float* F, const global uint* f_maske, const uxx n) {
+	uxx s; if(!f_slot(f_maske, n, &s)) return (float3)(0.0f, 0.0f, 0.0f);
+	const ulong st = F_STRIDE;
+	return (float3)(F[s], F[st+(ulong)s], F[2ul*st+(ulong)s]);
+}
+void store3_F(global float* F, const global uint* f_maske, const uxx n, const float3 v, global uint* hits) {
+	uxx s;
+	if(!f_slot(f_maske, n, &s)) {
+)+"#ifdef F_LISTE"+R(
+		// Nur echt, wenn die Zelle IN der Box liegt: ausserhalb ist das Verwerfen der alte, richtige Pfad.
+		uxx fbi_; if(f_bbox(n, &fbi_) && hits[77]<0xF0000000u) atomic_inc(&hits[77]); // Wirkpfad-Waechter: Soll 0
+)+"#endif"+R( // F_LISTE
+		return;
+	}
+	const ulong st = F_STRIDE;
+	F[s]=v.x; F[st+(ulong)s]=v.y; F[2ul*st+(ulong)s]=v.z;
 }
 
 // FORK 03.09.2026 -- fac_idx ist eine BITMASKE MIT PRAEFIXSUMME, kein volles uint-Feld mehr.
@@ -2415,7 +2453,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
-	, const global float* F // argument order is important
+	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
 )+"#ifdef SURFACE"+R(
 	, const global float* mass // argument order is important
@@ -2561,7 +2599,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FORCE_FIELD"+R(
 )+"#ifndef F_NUR_SOLID"+R(
 	{ // separate block to avoid variable name conflicts
-		const float3 Fn = load3_F(F, n); // FORK: bbox-bewusst
+		const float3 Fn = load3_F(F, f_maske, n); // FORK: bbox-bewusst
 		fxn += Fn.x; fyn += Fn.y; fzn += Fn.z;
 	}
 )+"#endif"+R( // F_NUR_SOLID
@@ -3177,7 +3215,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )
 +R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
-	, const global float* F // argument order is important
+	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
 )+"#ifdef TEMPERATURE"+R(
 	, const global fpxx* gi, global float* T // argument order is important
@@ -3214,7 +3252,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+"#ifdef FORCE_FIELD"+R(
 )+"#ifndef F_NUR_SOLID"+R(
 	{ // separate block to avoid variable name conflicts
-		const float3 Fn = load3_F(F, n); // FORK: bbox-bewusst
+		const float3 Fn = load3_F(F, f_maske, n); // FORK: bbox-bewusst
 		fxn += Fn.x; fyn += Fn.y; fzn += Fn.z;
 	}
 )+"#endif"+R( // F_NUR_SOLID
@@ -3689,7 +3727,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // schale_blend()
 
 )+"#ifdef FORCE_FIELD"+R(
-)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F, const global float* u, global uint* hits TS_P) { // calculate force from the fluid on solid boundaries from fi directly
+)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F, const global uint* f_maske, const global float* u, global uint* hits TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_force_field() on halo
 )+"#ifdef SPARSE_TILES"+R(
@@ -3709,7 +3747,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// dichten Pfad nicht existiert. Genau daran haette die behauptete Bit-Neutralitaet scheitern koennen.
 	bool has_fluid_neighbor = false;
 	for(uint i=1u; i<def_velocity_set; i++) has_fluid_neighbor = has_fluid_neighbor || (flags[j[i]]&TYPE_BO)!=TYPE_S;
-	if(!has_fluid_neighbor) { store3_F(F, n, (float3)(0.0f, 0.0f, 0.0f)); return; }
+	if(!has_fluid_neighbor) { store3_F(F, f_maske, n, (float3)(0.0f, 0.0f, 0.0f), hits); return; }
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
 	// ★★ 2026-08-25, Pruefbefund 2-A. Vorher: calculate_rho_u ueber ALLE 19 Richtungen, also auch ueber
@@ -3741,12 +3779,12 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+"#ifdef MOVING_BOUNDARIES"+R(
 	if(bewegt&&hits[59]<0xF0000000u) atomic_inc(&hits[59]); // Wirkpfad, saettigend: update_force_field laeuft NICHT jeden Schritt, eine t%100-Gatung waere im ungeeigneten Takt strukturell null
 )+"#endif"+R( // MOVING_BOUNDARIES
-	store3_F(F, n, (float3)(Fx, Fy, Fz)); // FORK: bbox-bewusst // 2x, weil fi an Solidzellen zurueckgeworfen werden
+	store3_F(F, f_maske, n, (float3)(Fx, Fy, Fz), hits); // FORK: bbox-bewusst // 2x, weil fi an Solidzellen zurueckgeworfen werden
 } // update_force_field()
-)+R(kernel void reset_force_field(global float* F) { // reset force field
+)+R(kernel void reset_force_field(global float* F, const global uint* f_maske, global uint* hits) { // reset force field
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N) return; // execute reset_force_field() also on halo
-	store3_F(F, n, (float3)(0.0f, 0.0f, 0.0f)); // FORK: bbox-bewusst
+	store3_F(F, f_maske, n, (float3)(0.0f, 0.0f, 0.0f), hits); // FORK: bbox-bewusst
 } // reset_force_field()
 )+R(kernel void object_center_of_mass(const global uchar* flags, const uchar flag_marker, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
@@ -3773,7 +3811,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		atomic_add((volatile global uint*)&object_sum[3], local_cells);
 	}
 } // object_center_of_mass()
-)+R(kernel void object_force(const global float* F, const global uchar* flags, const uchar flag_marker, global float* of_part) {
+)+R(kernel void object_force(const global float* F, const global uint* f_maske, const global uchar* flags, const uchar flag_marker, global float* of_part) {
 	// ★★ 2026-08-25, DETERMINISMUS. Vorher: je Arbeitsgruppe ein atomic_add_f auf object_sum --
 	// die Additionsreihenfolge haengt an der Scheduling-Reihenfolge, Gleitkomma-Addition ist nicht
 	// assoziativ, also lieferten bitgleiche Laeufe verschiedene Cd/Cz in den letzten Stellen. Das
@@ -3784,7 +3822,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const ulong gid = (ulong)get_global_id(0), gs = (ulong)get_global_size(0); // ★ Pruefbefund 1-b: als uxx wickelt die Schleife im 65536-Fenster unter der uxx-Grenze zur Endlosschleife
 	local float3 cache[cl_workgroup_size];
 	float3 s = (float3)(0.0f, 0.0f, 0.0f);
-	for(ulong n=gid; n<(ulong)def_N; n+=gs) if(flags[(uxx)n]==flag_marker) s += load3_F(F, (uxx)n); // feste Reihenfolge je Work-Item
+	for(ulong n=gid; n<(ulong)def_N; n+=gs) if(flags[(uxx)n]==flag_marker) s += load3_F(F, f_maske, (uxx)n); // feste Reihenfolge je Work-Item
 	cache[lid] = s;
 	barrier(CLK_LOCAL_MEM_FENCE); // ★ war CLK_GLOBAL_MEM_FENCE -- der falsche Speicher fuer ein local-Array
 	for(uint st=1u; st<cl_workgroup_size; st*=2u) {
@@ -3793,14 +3831,14 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	}
 	if(lid==0u) { const uint g=get_group_id(0); of_part[3u*g]=cache[0].x; of_part[3u*g+1u]=cache[0].y; of_part[3u*g+2u]=cache[0].z; }
 } // object_force()
-)+R(kernel void object_force_zband(const global float* F, const global uchar* flags, const uchar flag_marker, const uint z_lo, const uint z_hi, global float* of_part) {
+)+R(kernel void object_force_zband(const global float* F, const global uint* f_maske, const global uchar* flags, const uchar flag_marker, const uint z_lo, const uint z_hi, global float* of_part) {
 	// FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): woertliche Kopie von object_force mit z-Band-Praedikat
 	// [z_lo,z_hi). coordinates() ist DOMAENENLOKAL -- der LBM-Wrapper erzwingt D=1.
 	const uint lid = get_local_id(0);
 	const ulong gid = (ulong)get_global_id(0), gs = (ulong)get_global_size(0); // ★ Pruefbefund 1-b: als uxx wickelt die Schleife im 65536-Fenster unter der uxx-Grenze zur Endlosschleife
 	local float3 cache[cl_workgroup_size];
 	float3 s = (float3)(0.0f, 0.0f, 0.0f);
-	for(ulong n=gid; n<(ulong)def_N; n+=gs) if(flags[(uxx)n]==flag_marker&&coordinates((uxx)n).z>=z_lo&&coordinates((uxx)n).z<z_hi) s += load3_F(F, (uxx)n);
+	for(ulong n=gid; n<(ulong)def_N; n+=gs) if(flags[(uxx)n]==flag_marker&&coordinates((uxx)n).z>=z_lo&&coordinates((uxx)n).z<z_hi) s += load3_F(F, f_maske, (uxx)n);
 	cache[lid] = s;
 	barrier(CLK_LOCAL_MEM_FENCE);
 	for(uint st=1u; st<cl_workgroup_size; st*=2u) {
@@ -3815,7 +3853,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	for(uint g=0u; g<n_groups; g++) { sx+=of_part[3u*g]; sy+=of_part[3u*g+1u]; sz+=of_part[3u*g+2u]; }
 	object_sum[0]=sx; object_sum[1]=sy; object_sum[2]=sz;
 } // object_force_final()
-)+R(kernel void kraft_facetten_gpu(const global float* F, const global ulong* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
+)+R(kernel void kraft_facetten_gpu(const global float* F, const global uint* f_maske, const global ulong* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
 	// FORK kraft_facetten-GPU: Druckanteil des Facetten-Cd-Pfads ohne Host-F-Transfer. Range =
 	// Markerzellen-Indexliste (der Host baut sie in der Dreifachschleifen-Scan-Reihenfolge der
 	// F-BBox). Klassifikation voll/projiziert/unklar und Projektion AUSDRUCKSGLEICH zum Host-Pfad
@@ -3835,7 +3873,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		const uint3 xyz = coordinates(n);
 		uxx fbi;
 		if(f_bbox(n, &fbi)) { // Markerzellen liegen konstruktiv in der F-BBox; der Test bleibt als Waechter
-			const float Fx=F[fbi], Fy=F[def_FBN+(ulong)fbi], Fz=F[2ul*def_FBN+(ulong)fbi]; // wortgleich zu load3_F
+			const float3 Fv = load3_F(F, f_maske, n); const float Fx=Fv.x, Fy=Fv.y, Fz=Fv.z; // ★ 03.09.: statt handgeschriebenem BBox-Zugriff jetzt UEBER load3_F -- die F-Markerliste haette den Zwilling sonst stumm falsch indiziert (die Duplikat-Falle, die object_torque am 08.08. schon einmal ausgeloest hat)
 			float nxm=0.0f, nym=0.0f, nzm=0.0f; bool kontaminiert=false;
 			if(fac_on!=0u) for(uint i=1u; i<19u; i++) { // fac_on==0: Nachbarschleife entfaellt, alles zaehlt als voll (object_force-Semantik auf der Liste)
 				// x/y-Wrap, z-Klemme bzw. z_per-Wrap und F-BBox-Clip AUSDRUCKSGLEICH zu setup.cpp (def_FB* statt D->fb*)
@@ -4068,7 +4106,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	}
 	fac_nb[2ul*(ulong)gid] = utb; fac_nb[2ul*(ulong)gid+1ul] = ywb;
 } // fac_nachbar_ab()
-)+R(kernel void object_torque(const global float* F, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
+)+R(kernel void object_torque(const global float* F, const global uint* f_maske, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
 	local float3 cache[cl_workgroup_size];
@@ -4077,7 +4115,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// las das weit hinter dem Puffer. Latent, weil object_torque von keinem Setup gerufen wird -- aber
 	// es ist eine Falle fuer den Tag, an dem jemand Momente auswertet. Alle uebrigen F-Zugriffe des
 	// Forks waren bereits auf load3_F umgestellt, nur dieser eine nicht.
-	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? cross(position(coordinates(n))-(float3)(cx, cy, cz), load3_F(F, n)) : (float3)(0.0f, 0.0f, 0.0f);
+	cache[lid] = n<(uxx)def_N&&flags[n]==flag_marker ? cross(position(coordinates(n))-(float3)(cx, cy, cz), load3_F(F, f_maske, n)) : (float3)(0.0f, 0.0f, 0.0f);
 	barrier(CLK_GLOBAL_MEM_FENCE);
 	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
 		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];

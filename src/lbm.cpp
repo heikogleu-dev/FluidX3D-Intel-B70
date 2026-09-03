@@ -281,6 +281,7 @@ bool LBM_Domain::s_fac_elibb = false;
 uint LBM_Domain::s_sgs_fdwand = 0u; // ★ 02.09. Geistermoden-Fix
 uint LBM_Domain::s_sgs_gdiag = 0u; // ★ 31.08. g-Diagnose (CFD_SGS_GDIAG)
 uint LBM_Domain::s_fac_messnur = 0u; // ★ 30.08. Mess-Nur-Modus (BB-Physik, Facetten-Instrument)
+uint LBM_Domain::s_f_liste = 0u; // ★ 03.09. CFD_F_LISTE: F nur an Wandsolidzellen
 uint LBM_Domain::s_fac_nachbar = 0u; // ★ 30.08. Nachbarabtastung des Wandmodell-Eingangs
 uint LBM_Domain::s_fac_kdiag = 0u; // ★ 30.08. Klassen-Diagnostik (CFD_FAC_KDIAG)
 bool LBM_Domain::s_fac_elibb_pur = false; // Pur-Arm (Isolationsmessung) // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
@@ -368,19 +369,35 @@ void LBM_Domain::allocate(Device& device) {
 	// Sauber waere: bei !F_host stattdessen kernel_reset_force_field starten UND den Waechter mit Ansage
 	// ueberspringen. Das sind zwei weitere Eingriffe fuer einen Posten, der auf der B70 kein einziges MB
 	// VRAM bringt -- und der Waechter, den es kostet, ist ein Sicherheitsnetz. Zurueckgestellt.
-	F = Memory<float>(device, F_N, 3u);
+	// ★ 03.09.2026 F-MARKERLISTE (CFD_F_LISTE). Der Maskenpuffer hat seine ENDGUELTIGE Groesse schon
+	// hier -- sie haengt nur an der F-BBox, die der Konstruktor bereits aufgeloest hat. Nur F selbst
+	// wird im Listenarm als Platzhalter angelegt und in alloc_f_liste ersetzt (fac_idx-Muster): erst
+	// so faellt der Spitzenverbrauch, statt nur der Dauerverbrauch.
+	f_liste_on = s_f_liste>0u;
+	f_maske = Memory<uint>(device, 2ull*((F_N+31ull)/32ull)+1ull);
+	for(ulong i=0ull; i<f_maske.length(); i++) f_maske[i]=0u;
+	f_maske[2ull*((F_N+31ull)/32ull)] = (uint)F_N; // Stride-Vorbelegung; im Vollfeld-Arm nie gelesen
+	f_maske.write_to_device();
+	if(f_liste_on) {
+		F = Memory<float>(device, 1ull, 3u); // Platzhalter -- alloc_f_liste legt ihn in Slotgroesse neu an
+		print_info("F-MARKERLISTE (CFD_F_LISTE, 03.09.): F wird nur fuer WANDsolidzellen alloziert. Bis alloc_f_liste laeuft, steht hier ein 1-Element-Platzhalter.");
+	} else {
+		F = Memory<float>(device, F_N, 3u);
+	}
 	object_sum = Memory<float>(device, 1u, 4u); // x, y, z, cell count
-	kernel_stream_collide.add_parameters(F);
-	kernel_update_fields.add_parameters(F);
-	kernel_update_force_field = Kernel(device, N, "update_force_field", fi, flags, t, F, u, rho_clamp_hits); // ★ 2026-08-25 u + hits fuer den Bewegtwand-Term (Slot 59)
-	kernel_reset_force_field = Kernel(device, N, "reset_force_field", F);
+	f_param_sc = kernel_stream_collide.get_number_of_parameters();
+	kernel_stream_collide.add_parameters(F, f_maske);
+	f_param_uf = kernel_update_fields.get_number_of_parameters();
+	kernel_update_fields.add_parameters(F, f_maske);
+	kernel_update_force_field = Kernel(device, N, "update_force_field", fi, flags, t, F, f_maske, u, rho_clamp_hits); // ★ 2026-08-25 u + hits fuer den Bewegtwand-Term (Slot 59)
+	kernel_reset_force_field = Kernel(device, N, "reset_force_field", F, f_maske, rho_clamp_hits);
 	kernel_object_center_of_mass = Kernel(device, N, "object_center_of_mass", flags, (uchar)0u, object_sum);
 	of_groups = 1024u; // ★ 2026-08-25 feste Gittergroesse statt N -- Determinismus, s. Kernel-Kommentar
 	of_part = Memory<float>(device, 3ull*(ulong)of_groups);
-	kernel_object_force = Kernel(device, (ulong)of_groups*(ulong)WORKGROUP_SIZE, "object_force", F, flags, (uchar)0u, of_part);
-	kernel_object_force_zband = Kernel(device, (ulong)of_groups*(ulong)WORKGROUP_SIZE, "object_force_zband", F, flags, (uchar)0u, 0u, 0u, of_part); // FORK Kraft-Zerlegung: Aufrufe sequenziell
+	kernel_object_force = Kernel(device, (ulong)of_groups*(ulong)WORKGROUP_SIZE, "object_force", F, f_maske, flags, (uchar)0u, of_part);
+	kernel_object_force_zband = Kernel(device, (ulong)of_groups*(ulong)WORKGROUP_SIZE, "object_force_zband", F, f_maske, flags, (uchar)0u, 0u, 0u, of_part); // FORK Kraft-Zerlegung: Aufrufe sequenziell
 	kernel_object_force_final = Kernel(device, (ulong)WORKGROUP_SIZE, "object_force_final", of_part, of_groups, object_sum);
-	kernel_object_torque = Kernel(device, N, "object_torque", F, flags, (uchar)0u, 0.0f, 0.0f, 0.0f, object_sum);
+	kernel_object_torque = Kernel(device, N, "object_torque", F, f_maske, flags, (uchar)0u, 0.0f, 0.0f, 0.0f, object_sum);
 #endif // FORCE_FIELD
 
 #ifdef MOVING_BOUNDARIES
@@ -560,6 +577,72 @@ ulong vram_frei_gemessen() {
 	return 0ull;
 }
 
+// ★ 03.09.2026 F-MARKERLISTE -- Maske bauen, F in Slotgroesse neu anlegen, alle Leser rebinden.
+// Wird aus dem Setup gerufen, NACHDEM die Geometrie steht und BEVOR initialize() laeuft (dasselbe
+// Fenster wie alloc_facetten_domain). Das Praedikat ist wortgleich zu update_force_field: solid UND
+// mindestens ein Nicht-Solid unter den 18 D3Q19-Links.
+// DIE MASKE IST ABSICHTLICH EINE OBERMENGE. Der Host wickelt x/y periodisch und ueberspringt z
+// ausserhalb des Gitters, der Kernel wickelt neighbors() in allen Richtungen. Eine Zelle, die der
+// Kernel schreibt und der Host nicht in der Maske haette, waere ein STILLER Kraftverlust -- deshalb
+// nimmt der Host im Zweifel MEHR auf: jede Solidzelle, die in IRGENDEINER Auslegung einen
+// Nicht-Solid-Nachbarn haette, bekommt einen Slot. Ein paar ungenutzte Slots kosten nichts.
+// Die Gegenrichtung faengt der Wirkpfad-Zaehler Slot 77 (store3_F ohne Slot), Soll 0 am Laufende.
+void LBM_Domain::alloc_f_liste(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz) {
+	if(!f_liste_on) return;
+	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
+	const ulong FNB = (FN+31ull)/32ull;
+	static const int FZ18[18][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
+		{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+	for(ulong i=0ull; i<2ull*FNB; i++) f_maske[i]=0u;
+	ulong n_solid=0ull, n_wand=0ull;
+	for(uint zb=0u; zb<fbnz; zb++) for(uint yb=0u; yb<fbny; yb++) for(uint xb=0u; xb<fbnx; xb++) {
+		const uint x=fbx0+xb, y=fby0+yb, z=fbz0+zb;
+		const ulong n = (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+		if((flags_host[n]&(TYPE_S|TYPE_E))!=TYPE_S) continue; // Host-Maske fuer TYPE_BO (device-seitig 0x03)
+		n_solid++;
+		bool wand=false;
+		for(uint i=0u; i<18u&&!wand; i++) {
+			const int zn0=(int)z+FZ18[i][2];
+			// OBERMENGE: liegt der Nachbar ausserhalb des Gitters in z, gilt die Zelle als Wandzelle
+			// (der Kernel wickelt dort und koennte einen Nicht-Solid treffen -- wir raten zugunsten
+			// eines Slots, nie dagegen).
+			if(zn0<0||zn0>=(int)Nz) { wand=true; break; }
+			const uint xn=(uint)((((int)x+FZ18[i][0])%(int)Nx+(int)Nx)%(int)Nx);
+			const uint yn=(uint)((((int)y+FZ18[i][1])%(int)Ny+(int)Ny)%(int)Ny);
+			const ulong nn=(ulong)xn+((ulong)yn+(ulong)zn0*(ulong)Ny)*(ulong)Nx;
+			if((flags_host[nn]&(TYPE_S|TYPE_E))!=TYPE_S) wand=true;
+		}
+		if(!wand) continue;
+		n_wand++;
+		const ulong fbi=(ulong)xb+((ulong)yb+(ulong)zb*(ulong)fbny)*(ulong)fbnx;
+		f_maske[2ull*(fbi>>5)] |= 1u<<(uint)(fbi&31ull);
+	}
+	{	ulong lauf=0ull;
+		for(ulong b=0ull; b<FNB; b++) { f_maske[2ull*b+1ull]=(uint)lauf; lauf += (ulong)__builtin_popcount(f_maske[2ull*b]); }
+		if(lauf!=n_wand) { print_error("alloc_f_liste: Maske traegt "+to_string(lauf)+" Bits, gezaehlt wurden "+to_string(n_wand)+" Wandsolidzellen."); return; }
+		f_slots = lauf;
+	}
+	if(f_slots==0ull) { print_error("alloc_f_liste: keine einzige Wandsolidzelle in der F-BBox -- das Setup hat keinen Koerper, oder die Box sitzt falsch."); return; }
+	if(f_slots>=0xFFFFFFFFull) { print_error("alloc_f_liste: mehr Slots als der uint-Praefix traegt."); return; }
+	f_maske[2ull*FNB] = (uint)f_slots; // der Stride, den F_STRIDE im Kernel liest
+	f_maske.write_to_device();
+	// F in Slotgroesse NEU anlegen und ueberall rebinden (Use-after-free-Lehre: erst anlegen, dann binden)
+	F = Memory<float>(device, f_slots, 3u);
+	for(ulong i=0ull; i<3ull*f_slots; i++) F[i]=0.0f;
+	F.write_to_device();
+	kernel_stream_collide.set_parameters(f_param_sc, F);
+	kernel_update_fields.set_parameters(f_param_uf, F);
+	kernel_update_force_field.set_parameters(3u, F);
+	kernel_reset_force_field.set_parameters(0u, F);
+	kernel_object_force.set_parameters(0u, F);
+	kernel_object_force_zband.set_parameters(0u, F);
+	kernel_object_torque.set_parameters(0u, F);
+	const ulong b_alt = 12ull*FN, b_neu = 12ull*f_slots + 4ull*(2ull*FNB+1ull);
+	print_info("F-MARKERLISTE: "+to_string(n_wand)+" Wandsolidzellen von "+to_string(n_solid)+" Solidzellen in "
+		+to_string(FN)+" BBox-Zellen ("+to_string((float)(100.0*(double)n_wand/(double)FN),3u)+" %); F "
+		+to_string((ulong)(b_alt/1048576ull))+" -> "+to_string((ulong)(b_neu/1048576ull))+" MiB inkl. Maske, gespart "
+		+to_string((ulong)((b_alt>b_neu?b_alt-b_neu:0ull)/1048576ull))+" MiB (VRAM UND System-RAM). Wirkpfad-Waechter: Slot 77 muss am Laufende 0 sein.");
+}
 void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand) {
 	if((sgs_fdwand>0u)!=fdwand_on) print_error("SGS_FDWAND-Konfigurationsbruch: env-Parameter ("+to_string((ulong)sgs_fdwand)+") und Konstruktionszustand ("+string(fdwand_on?"an":"aus")+") widersprechen sich -- Emission haengt am Konstruktionszustand, Puffer am Parameter; beide muessen aus DEMSELBEN CFD_SGS_FDWAND stammen (Statik-Lebensdauer-Lehre 02.09.).");
 	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
@@ -909,7 +992,7 @@ void LBM_Domain::enqueue_object_force(const uchar flag_marker) { // add up force
 	enqueue_update_force_field(); // update force field if it is not yet up-to-date
 	// Kein Nullen mehr noetig: object_force_final schreibt mit "=", und jeder Teilsummen-Slot wird
 	// von seiner Arbeitsgruppe jeden Lauf unbedingt geschrieben (Muster po_final_mean, 849b14f).
-	kernel_object_force.set_parameters(2u, flag_marker).enqueue_run();
+	kernel_object_force.set_parameters(3u, flag_marker).enqueue_run(); // ★ 03.09.: Index 2 -> 3, f_maske sitzt seit der F-Markerliste zwischen F und flags
 	kernel_object_force_final.enqueue_run();
 	object_sum.enqueue_read_from_device();
 }
@@ -917,7 +1000,7 @@ void LBM_Domain::enqueue_object_force_zband(const uchar flag_marker, const uint 
 	enqueue_update_force_field(); // update force field if it is not yet up-to-date
 	// Kein Nullen mehr noetig: object_force_final schreibt mit "=", und jeder Teilsummen-Slot wird
 	// von seiner Arbeitsgruppe jeden Lauf unbedingt geschrieben (Muster po_final_mean, 849b14f).
-	kernel_object_force_zband.set_parameters(2u, flag_marker, z_lo, z_hi).enqueue_run();
+	kernel_object_force_zband.set_parameters(3u, flag_marker, z_lo, z_hi).enqueue_run(); // ★ 03.09.: Index 2 -> 3 (f_maske)
 	kernel_object_force_final.enqueue_run();
 	object_sum.enqueue_read_from_device();
 }
@@ -927,7 +1010,7 @@ void LBM_Domain::enqueue_object_torque(const float3& rotation_center, const ucha
 	object_sum.y[0] = 0.0f;
 	object_sum.z[0] = 0.0f;
 	object_sum.enqueue_write_to_device();
-	kernel_object_torque.set_parameters(2u, flag_marker, rotation_center.x, rotation_center.y, rotation_center.z).enqueue_run();
+	kernel_object_torque.set_parameters(3u, flag_marker, rotation_center.x, rotation_center.y, rotation_center.z).enqueue_run(); // ★ 03.09.: Index 2 -> 3 (f_maske)
 	object_sum.enqueue_read_from_device();
 }
 // ★ kraft_facetten-GPU-Reduktion (Muster init_pressure_outlet/set_pressure_outlet_faces): Liste der
@@ -960,7 +1043,7 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 		if(fac_tau_n.length()==0ull) { fac_tau_n = Memory<uint>(device, 1ull);  fac_tau_n[0]=0u;        fac_tau_n.write_to_device(); }
 		if(fac_geo.length()==0ull)   { fac_geo   = Memory<float>(device, 8ull); for(ulong q=0ull;q<8ull;q++) fac_geo[q]=0.0f; fac_geo.write_to_device(); }
 	}
-	kernel_m = Kernel(device, liste_n, "kraft_facetten_gpu", F, liste_m, (uint)liste_n,
+	kernel_m = Kernel(device, liste_n, "kraft_facetten_gpu", F, f_maske, liste_m, (uint)liste_n,
 		fac_idx, fac_tau_n, fac_geo, facetten_on?1u:0u, z_per?1u:0u, psum_m, pcnt_m);
 }
 void LBM_Domain::kraft_facetten_gpu(double& px, double& py, double& pz, ulong& n_voll, ulong& n_proj, ulong& n_unklar, const bool band_slot) {
@@ -1345,6 +1428,15 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+"\n	#define def_FBNY "+to_string(fbny)+"u"
 	+"\n	#define def_FBNZ "+to_string(fbnz)+"u"
 	+"\n	#define def_FBN "+to_string((ulong)fbnx*(ulong)fbny*(ulong)fbnz)+"ul"
+	// ★ 03.09.2026 F-MARKERLISTE (F_LISTE). Der Stride von F -- die Zahl der Slots -- steht erst nach
+	// dem Maskenbau fest, also NACH dem Konstruktor und damit nach device_defines(). Er kann deshalb
+	// kein Define sein. Statt dafuer einen weiteren Kernelparameter durch fuenf Signaturen zu faedeln
+	// (die Fehlerklasse vom 02.09.), steht er IM MASKENPUFFER, an einem aus def_FBN berechenbaren
+	// Platz: f_maske[2*ceil(def_FBN/32)]. Im Vollfeld-Arm wird er nie gelesen -- dort ist der Stride
+	// def_FBN, wortgleich zum Stand davor, also bit-identisch.
+	+(f_liste_on ? (string)"\n	#define F_LISTE" : (string)"")
+	+(f_liste_on ? (string)"\n	#define F_STRIDE ((ulong)f_maske[2ul*((def_FBN+31ul)/32ul)])"
+	             : (string)"\n	#define F_STRIDE def_FBN")
 #ifndef PARTICLES
 	// F-Null-Read-Gate: Default AN. PARTICLES-Guard hart im Praeprozessor -- spread_force
 	// schriebe F an Fluidzellen, das Gate waere still falsch (Wirkpfad-Absicherung Bein 2).
@@ -1763,7 +1855,8 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 #endif // FORCE_FIELD
 	ulong bytes_bekannt = N_dom*b_ohne_F;
 #ifdef FORCE_FIELD
-	bytes_bekannt += 12ull*F_N;
+	bytes_bekannt += 12ull*F_N; // ★ 03.09.: unter CFD_F_LISTE ist das eine OBERGRENZE -- die Slotzahl steht erst
+	                           // nach der Voxelisierung fest, die Vorpruefung laeuft davor. Bewusst konservativ.
 #endif // FORCE_FIELD
 	if(LBM_Domain::s_facetten) bytes_bekannt += 8ull*(((ulong)F_N+31ull)/32ull); // fac_idx als Bitmaske+Praefixsumme (03.09.) -- die Pruefung kannte den Posten frueher gar nicht
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
@@ -1909,7 +2002,14 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 	// bevor F aufs Geraet geht. Faengt den einzigen realistischen kuenftigen Verletzer
 	// (host-seitiges Saeen von Fluid-Volumenkraeften a la Upstream-Doku). Bewusst STRENGER
 	// als die Lesemenge (prueft auch Gas-/Halozellen) -- fail-safe-Richtung (Pruefagent NIEDRIG-1).
-	if(f_nur_solid_an()) {
+	// ★ 03.09.2026 F-MARKERLISTE: unter CFD_F_LISTE ist die Praemisse STRUKTURELL wahr -- an
+	// Nicht-Wandsolidzellen gibt es gar keinen Speicherplatz mehr, den jemand belegen koennte.
+	// Der Waechter hat dort nichts mehr zu pruefen. Er faellt aber nicht ersatzlos: an seine
+	// Stelle tritt der Wirkpfad-Zaehler Slot 77 (store3_F ohne Slot, Soll 0 am Laufende) und die
+	// Bit-Abnahme der Maske in alloc_f_liste.
+	if(f_nur_solid_an()&&lbm_domain[0]->f_liste_on) {
+		print_info("F-Waechter uebersprungen: unter der F-Markerliste ist die F-NUR-SOLID-Praemisse strukturell wahr (kein Speicher an Nicht-Wandsolid). Ersatz: Wirkpfad-Zaehler Slot 77, Soll 0.");
+	} else if(f_nur_solid_an()) {
 		ulong geprueft = 0ull;
 		for(uint d=0u; d<get_D(); d++) {
 			LBM_Domain* dom = lbm_domain[d];
@@ -1925,6 +2025,8 @@ void LBM::initialize() { // write all data fields to device and call kernel_init
 		print_info("F-Waechter: "+to_string(geprueft)+" F-BBox-Zellen geprueft, F an Nicht-Solid ueberall 0 -- F-NUR-SOLID-Praemisse haelt.");
 	}
 #endif // PARTICLES
+	for(uint d=0u; d<get_D(); d++) if(lbm_domain[d]->f_liste_on&&lbm_domain[d]->f_slots==0ull)
+		print_error("CFD_F_LISTE war gesetzt, aber alloc_f_liste ist an Domaene "+to_string(d)+" NIE GELAUFEN -- F steht noch auf dem 1-Element-Platzhalter. Dieser Fall (Setup ruft alloc_f_liste nicht) waere ein stiller Totalausfall der Kraftrechnung.");
 	for(uint d=0u; d<get_D(); d++) lbm_domain[d]->F.enqueue_write_to_device();
 	communicate_F();
 #endif // FORCE_FIELD
