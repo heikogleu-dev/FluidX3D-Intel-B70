@@ -43,7 +43,18 @@ nicht zur Basis-Zellmenge. X als „(B) rein" ist so NICHT gegeben. Konsequenz f
   Besuche instabil werden (vgl. SATGATE=0: Klemme ×5.500). Wenn das passiert, ist das selbst ein Befund: der rohe Operator liefert
   an genau den Zellen unphysikalische s, die das Downdate schützte.
 - Vorher **Kreuztabelle nach Gate-Ursache** (raw-Gate 10 / 16 / Rang) für [95] mitzählen, sonst bleibt „Gates" Vermutung.
-- Die **Diff-Prüfung von Arm X ist NICHT erfolgt** (Prüfagent am Session-Limit gestorben). Vor jedem weiteren X-Lauf nachholen.
+- **Diff-Prüfung von Arm X (zweiter Anlauf, 20:20): NICHTS GEFUNDEN.** Block A zeichengleich zur ALPHA2-Basis, Präprozessor
+  paarig, 69-Buchung hinter dem Merge, Soll +94 exakt (126.241.015 = 53.195.580 + 71.607.565 + 1.437.870).
+- **[95]-Ursache bewiesen:** am Kanal [16]=0, [64]=0, [13]=0 → [95] liegt vollständig in SATGATE-[10]. Der rohe 2×2-Solve
+  bedient die schwache Mittelrichtung c̄=S1/S0 (Steifigkeit ~Dd·B², dett knapp über 1e-4·Gt11·Gt22) → Slip reißt das Budget;
+  der Schatten-Skalar setzt s2=0 und passiert. **Das ist eine Konditionierungsaussage über den rohen Operator**, nicht nur Buchhaltung.
+- **Modus 4 (Ersetzen statt ODER) NICHT bauen:** er wäre „SATGATE aus" für genau diese 8–22 % — ungegatetes |s1|>2·budget·ut
+  und sn=0 (für diese Zellen nie gerechnet). Kein sauberer (B)-Test.
+- **Stattdessen morgen:** (1) `vr_x8` auf der B70 SO WIE X IST — misst (B) auf der SCHNITTMENGE; die beiden Abnahme-Wächter
+  ([95] > 0,5 %, Abdeckung ≠ Soll) sind auf Warnung gestellt und das Binary ist neu gebaut (nur Host, kein Kernel).
+  Konsistenzprobe bleibt: (X−Basis) + (Modus1−X) ≈ +0,176. (2) Kreuztabelle „Gate nach Solve-Zweig" ([81]/[82], lbm.cpp:352
+  seit heute früh als fehlend deklariert) bauen — sie trennt Klasse B (roh exakt ↔ Schatten Schur) von Klasse C (roh Schur-exakt
+  ↔ Schatten Skalar) und beantwortet, ob der rohe Operator an c̄ schlecht konditioniert ist. Das wäre der eigentliche Befund.
 
 ## Läuft / steht bereit
 
