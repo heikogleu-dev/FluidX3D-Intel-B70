@@ -96,6 +96,21 @@ ist der gesamte Cz-Schaden von Modus 1 der c̄-Slip an den neu abgedeckten Zelle
 Erster X-Hash (nach der Hash-Verschiebung): vs_x 17935634836335592429, vs_leiter_x 4168733461996404659. vs_x rc=1 nur durch die
 vorbestehende Kanal-Abnahme K2.
 
+## 23:40 — Zensus-VTK-Export (host-only, `CFD_FAC_ZENSUS_VTK=1`) und Plan für die Nachbar-Messbasis
+
+`export/<Lauf>/zensus_facetten.vtk`: ein Punkt je aktive Facette (GITTERKOORDINATEN der Domäne, nicht Welt), Skalare
+`rang_downdate`, `rang_roh`, `n_wandlinks`, `entkoppelt`, `log10_lmin_lmax`, Vektor `normale`. Zweck (Heiko): optische Diagnose,
+wo Rang fehlt und ob der Nachbar auf derselben Fläche ähnlich orientiert ist. Am 4-mm-Fall ~200 MB → nur auf Anforderung.
+
+**Korrektur meiner Formulierung:** tot ist nur der Rang-Weg *über den Wegfall des Downdates* (Klasse C, 100 %). Der Weg über eine
+**geteilte Messbasis** — Wandlinks der Nachbarzelle auf derselben Fläche in den Solve dieser Zelle einbeziehen, jede Zelle behält Ziel
+und Schlupf — lebt. Bedingung (Heiko): **nie** von einem Nachbarn borgen, dessen Normale anders orientiert ist (spitze Kanten). Die
+Normalen sind statisch, „Nachbar kompatibel" ist also vorab entscheidbar und gehört in dieselbe VTK als Farbe, bevor gebaut wird.
+
+**Perf/VRAM aus der Vorberechnung** (nicht gebaut): Linkmaske (18 Bit) je Facette in die zwei toten `fac_geo`-Felder → null VRAM,
+spart 18 Nachbar-Flag-Loads je Facettenbesuch; Rang-0-Facetten (16 %) könnten den Solve überspringen. Effekt unbekannt — beim
+nächsten 4-mm-Lauf zuerst die **Baseline** (MLUPs, freier VRAM via `werkzeuge/vram_sammler.sh`) mitmessen, dann A/B.
+
 ## Läuft / steht bereit
 
 - `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.

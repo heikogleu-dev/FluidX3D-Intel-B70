@@ -1621,7 +1621,7 @@ static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1
 // (kernel.cpp:2174-2176) vergleicht gegen die Roh-Diagonale in der Basis t1 -- beide Seiten
 // basisabhaengig -- und kann eine Rang-1-Facette zur Laufzeit auf Rang 0 nullen.
 static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, const uint Nx, const uint Ny,
-                                     const uint Nz, const uchar wand_flag, const bool alpha2_an, const string& ort) {
+                                     const uint Nz, const uchar wand_flag, const bool alpha2_an, const string& ort, const string& out_dir=string("")) {
 	if(env_u("CFD_FAC_ZENSUS", 1u)==0u) return;
 	if(FF.empty()) return;
 	auto idxz = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
@@ -1633,6 +1633,12 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	ulong wanderung[3][3]; for(uint i=0u;i<3u;i++) for(uint j=0u;j<3u;j++) wanderung[i][j]=0ull;
 	ulong n_praedikat_diff=0ull, n_kernel_mehr=0ull; ulong links_kernel_ges=0ull, links_host_ges=0ull;
 	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
+	// ★ 04.09. abends (Heiko): VTK-Export der Facetten, eingefaerbt nach Rang -- fuer die optische Diagnose, wo Rang fehlt
+	// und ob der Nachbar auf derselben Flaeche aehnlich orientiert ist (spitze Kanten!). Hinter CFD_FAC_ZENSUS_VTK=1,
+	// weil 3,1 Mio Punkte am 4-mm-Fall ~200 MB sind. Koordinaten = GITTERZELLEN dieser Domaene (nicht Welt).
+	const bool vtk_an = env_u("CFD_FAC_ZENSUS_VTK", 0u)>0u&&!out_dir.empty();
+	std::vector<float> vx, vy, vz, vnx, vny, vnz, vverh; std::vector<int> vrg, vrgroh, vnl, ventk;
+	if(vtk_an) { const size_t r=FF.size(); vx.reserve(r); vy.reserve(r); vz.reserve(r); vnx.reserve(r); vny.reserve(r); vnz.reserve(r); vverh.reserve(r); vrg.reserve(r); vrgroh.reserve(r); vnl.reserve(r); ventk.reserve(r); }
 	for(const Facette& f : FF) {
 		if(f.klasse!=0u) { n_uebersprungen++; continue; } // exakt wie die Allokation (lbm.cpp): nur saubere Facetten bekommen ein fid
 		// ★ D13: Normalenpruefung VOR der Linkschleife -- sonst zaehlen entartete Facetten in n_links/links_kernel_ges, aber nicht im Nenner ges
@@ -1697,6 +1703,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		const uint rg_roh = klassifiziere(Groh, nullptr, nullptr, nullptr);
 		const uint rg = klassifiziere(G, &entkoppelt, &verh, &lmax_e);
 		wanderung[rg_roh][rg]++;
+		if(vtk_an) { vx.push_back((float)x); vy.push_back((float)y); vz.push_back((float)z); vnx.push_back((float)nv[0]); vny.push_back((float)nv[1]); vnz.push_back((float)nv[2]); vverh.push_back((float)(verh>0.0?log10(verh):-12.0)); vrg.push_back((int)rg); vrgroh.push_back((int)rg_roh); vnl.push_back((int)nl_k); ventk.push_back(entkoppelt?1:0); }
 		if(entkoppelt) n_entk++; else n_gek++;
 		n_rang[rg]++;
 		const double lmax = lmax_e; // ★ D13: echter Eigenwert statt Dummy -- 0 < lmax <= 1e-12 landete sonst im Histogramm, obwohl Rang 0
@@ -1740,6 +1747,18 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	}
 	print_info("   Wandlinks je Facette (Kernel-Gate): Mittel "+to_string((float)((double)links_kernel_ges/d),2u)+"; Verteilung:");
 	{	string z=""; for(uint i=0u;i<20u;i++) if(n_links[i]>0ull) z+=(z.empty()?"":", ")+to_string(i)+": "+to_string(n_links[i]); print_info("     "+z); }
+	if(vtk_an&&!vx.empty()) {
+		const string pfad = out_dir+"/zensus_facetten.vtk"; std::ofstream o(pfad);
+		o<<"# vtk DataFile Version 3.0\nZensus Facetten (Gitterkoordinaten "<<ort<<")\nASCII\nDATASET POLYDATA\nPOINTS "<<vx.size()<<" float\n";
+		for(size_t i=0;i<vx.size();i++) o<<vx[i]<<" "<<vy[i]<<" "<<vz[i]<<"\n";
+		o<<"VERTICES "<<vx.size()<<" "<<2*vx.size()<<"\n"; for(size_t i=0;i<vx.size();i++) o<<"1 "<<i<<"\n";
+		o<<"POINT_DATA "<<vx.size()<<"\n";
+		auto sk=[&](const char* nm, const std::vector<int>& v){ o<<"SCALARS "<<nm<<" int 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<v.size();i++) o<<v[i]<<"\n"; };
+		sk("rang_downdate",vrg); sk("rang_roh",vrgroh); sk("n_wandlinks",vnl); sk("entkoppelt",ventk);
+		o<<"SCALARS log10_lmin_lmax float 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<vverh.size();i++) o<<vverh[i]<<"\n";
+		o<<"VECTORS normale float\n"; for(size_t i=0;i<vnx.size();i++) o<<vnx[i]<<" "<<vny[i]<<" "<<vnz[i]<<"\n";
+		print_info("   ZENSUS-VTK: "+pfad+" ("+to_string((ulong)vx.size())+" Facetten; Skalare rang_downdate/rang_roh/n_wandlinks/entkoppelt/log10_lmin_lmax, Vektor normale; Gitterkoordinaten).");
+	}
 	// ★ ZWEI WAHRHEITEN, beziffert statt geheilt: der Facettenbau benutzt flags==wand_flag (am
 	// Fahrzeug 0x41, Fahrbahn ausdruecklich ausgeschlossen), der Kernel zaehlt JEDEN TYPE_S-Nachbarn
 	// als Wandlink -- also auch die Fahrbahn. Am Fahrzeug maskiert das die bewegte Fahrbahn (solche
@@ -3063,7 +3082,7 @@ void main_setup_kanal() {
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
 		FF = baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, kipp>0u?"Torus-Kipp":"Kanal", kipp>0u);
 		lbm.lbm_domain[0]->alloc_f_liste(&lbm.flags[0], Nx, Ny, Nz); // ★ 03.09. F-Markerliste (steigt bei CFD_F_LISTE=0 selbst aus) -- im Kanal verdrahtet, damit der Listenarm auf CPU/iGPU pruefbar ist und nicht zuerst auf der B70 laufen muss
-		lbm.alloc_facetten(FF, nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u)); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, TYPE_S, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Kanal"); // Parameter statt Statik (02.09.)
+		lbm.alloc_facetten(FF, nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u)); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, TYPE_S, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Kanal", out_dir); // Parameter statt Statik (02.09.)
 		// F2/F7: Facettenzahl ist geometrisch exakt abzaehlbar -- harte Pruefung faengt jeden
 		// vergessenen z-Wrap mechanisch (Formelblatt Schritt 5).
 		// GESAMTzahl (aktiv + markiert) ist die geometrische F2-Invariante -- fac_N allein zaehlt nur
@@ -3871,7 +3890,7 @@ void main_setup_kugel() {
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
 		if(env_u("CFD_F_LISTE",0u)>0u) print_error("CFD_F_LISTE ist im KUGELFALL nicht verdrahtet (alloc_f_liste wird dort nicht gerufen) -- der Schalter waere ein stiller No-Op mit 1-Element-F. Fall verdrahten oder Schalter weglassen.");
-		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr, 0u, 0u); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Kugel"); if(env_u("CFD_SGS_FDWAND",0u)>0u) print_warning("CFD_SGS_FDWAND ist im KUGELFALL NICHT verdrahtet -- Schalter wird ignoriert."); if(env_u("CFD_SGS_GDIAG",0u)>0u) print_warning("CFD_SGS_GDIAG ist im KUGELFALL NICHT verdrahtet (kein Mess-Enqueue, kein Bericht -- Pruefbefund B-5). Schalter wird ignoriert; Verdrahtung bei Bedarf nachziehen.");
+		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr, 0u, 0u); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Kugel", out_dir); if(env_u("CFD_SGS_FDWAND",0u)>0u) print_warning("CFD_SGS_FDWAND ist im KUGELFALL NICHT verdrahtet -- Schalter wird ignoriert."); if(env_u("CFD_SGS_GDIAG",0u)>0u) print_warning("CFD_SGS_GDIAG ist im KUGELFALL NICHT verdrahtet (kein Mess-Enqueue, kein Bericht -- Pruefbefund B-5). Schalter wird ignoriert; Verdrahtung bei Bedarf nachziehen.");
 	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
@@ -5272,7 +5291,7 @@ static void main_setup_fahrzeug_dd() {
 	// (F-BBox 286x123x80), aber Konsistenz ist keine Geschmacksfrage: beide Domaenen oder keine.
 	lbm_c.lbm_domain[0]->alloc_f_liste(&lbm_c.flags[0], cNx, cNy, cNz);
 	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u)); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
-	if(env_u("CFD_FACETTEN", 0u)>0u) zensus_statische_klassen(lbm_f, FFn, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Nahfeld");
+	if(env_u("CFD_FACETTEN", 0u)>0u) zensus_statische_klassen(lbm_f, FFn, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Nahfeld", get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) lbm_c.alloc_facetten(FFc); // ★ K1 GEPRUEFT 04.09. abends: s_sgs_fdwand wird fuer lbm_c weiter oben BEWUSST genullt (Messarme im Fernfeld aus) -> fdwand_on=false, Default 0 ist konsistent. Der Audit-Befund "M3" beruhte auf einem aelteren Stand; env durchzureichen haette den Abbruch erst EINGEBAUT // P8: alloc_facetten_domain nutzt die INSTANZ-F-BBox von lbm_c (Fahrzeug+4 in Grobzellen, oben gesetzt) -- der Wachhund "Facette ausserhalb der F-BBox" prueft die Deckung hart
 
 	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN
