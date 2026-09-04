@@ -129,7 +129,7 @@ static void zeichne_text(Image* img, const uint x0, const uint y0, const string&
 // Ein fehlender Zaehler hat also nicht nur eine Messung verhindert, sondern eine falsche erzeugt.
 // Seit Slot 78/79 ist die Kaskade lueckenlos und schliesst sich gegen den Wirkpfad. Und weil der
 // Ausloeser ein NENNERFEHLER war, druckt diese Zeile jeden Anteil MIT seinem Nenner.
-static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur) {
+static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur, const bool pinv) {
 	const ulong wp=(ulong)H[7], s9=(ulong)H[9], s17=(ulong)H[17];
 	if(wp==0ull) return;
 	// ★ 04.09.2026, am ersten Einsatz gelernt: unter MESS-NUR steigt apply_facette_imem VOR der
@@ -145,18 +145,46 @@ static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur)
 		return;
 	}
 	const ulong s12=(ulong)H[12], s13=(ulong)H[13], s14=(ulong)H[14], s15=(ulong)H[15];
-	const ulong s78=(ulong)H[78], s79=(ulong)H[79], s27=(ulong)H[27];
+	const ulong s78=(ulong)H[78], s79=(ulong)H[79], s27=(ulong)H[27], s80=(ulong)H[80];
 	const ulong erreicht = wp>(s9+s17) ? wp-s9-s17 : 0ull;
 	const ulong summe = s78+s79+s12+s13+s14+s15;
+	// ★ 04.09.2026 (Host-Audit H1): als einzige der drei Abnahmen hatte diese keinen Wickel-Ausstieg --
+	// pruefe_rueckfall_buchung und pruefe_kraftpfad pruefen beide auf >= 0xF0000000. Wickelt Slot 7,
+	// steht der NENNER klein und die Summe gross: der Waechter meldete dann "KASKADE UNVOLLSTAENDIG"
+	// bei einer voellig intakten Kaskade. summe > wp ist der zuverlaessige Detektor dafuer, denn ohne
+	// Wickel ist die Summe konstruktiv hoechstens der Wirkpfad.
+	if(summe>wp) {
+		print_warning("["+ort+"] SOLVER-KASKADE nicht auswertbar: Summe "+to_string(summe)+" > Wirkpfad "+to_string(wp)
+			+" -- Slot 7 hat den uint-Bereich ueberlaufen. Die Kaskade selbst ist in Ordnung (die Zaehler sind es), nur ihr Nenner nicht."
+			+" Anteile werden deshalb NICHT gedruckt, statt falsche zu drucken. Abhilfe: Lauf kuerzen oder Slot 7 saettigend machen.");
+		return;
+	}
+	if(s78>=0xF0000000ull||s79>=0xF0000000ull) {
+		print_warning("["+ort+"] SOLVER-KASKADE: Slot 78/79 sind GESAETTIGT (>= 0xF0000000), 12/13/14/15 wickeln dagegen -- gemischte Zaehlweise."
+			+" Die Anteile darunter sind Untergrenzen, die Schluss-Identitaet ist nicht mehr aussagekraeftig.");
+	}
 	const double n = (double)wp;
 	print_info("["+ort+"] SOLVER-KASKADE (Anteile je am WIRKPFAD "+to_string(wp)+", nicht an einer Teilmenge):");
 	print_info("   exakt entkoppelt [78] "+to_string(s78)+" ("+to_string((float)(100.0*(double)s78/n),2u)+" %)"
 		+" | exakt gekoppelt [79] "+to_string(s79)+" ("+to_string((float)(100.0*(double)s79/n),2u)+" %)");
 	print_info("   Skalar entkoppelt [12] "+to_string(s12)+" ("+to_string((float)(100.0*(double)s12/n),2u)+" %)"
-		+" | Skalar gekoppelt [14] "+to_string(s14)+" ("+to_string((float)(100.0*(double)s14/n),2u)+" %)  -- BEIDE angewandt, KEIN Vollrang");
+		+" | "+(pinv?string("Pseudoinverse"):string("Skalar"))+" gekoppelt [14] "+to_string(s14)+" ("+to_string((float)(100.0*(double)s14/n),2u)+" %)  -- BEIDE: Solve-Zweig GEWAEHLT, nicht notwendig angewandt");
 	print_info("   Rang 0 entkoppelt [13] "+to_string(s13)+" ("+to_string((float)(100.0*(double)s13/n),2u)+" %, davon rohe Tangentialmomente [27] "
 		+to_string(s27)+" = "+to_string((float)(100.0*(double)s27/n),2u)+" % des Wirkpfads)"
 		+" | Rang 0 gekoppelt [15] "+to_string(s15)+" ("+to_string((float)(100.0*(double)s15/n),2u)+" %)  -- RUECKFALL, reine Linkgeometrie");
+	// ★ 04.09.2026 (Kernel-Audit M3): die Kaskadenslots 78/79/12/14 inkrementieren VOR QUERGATE[64],
+	// SATGATE[10] und sn-Gate[16]. Ein Besuch, der danach in den Rueckfall kippt, steht in 14 UND in
+	// 10/16/64 UND in 69. "Gewaehlt" ist deshalb nicht "angewandt" -- die alte Zeile behauptete genau
+	// das Etikett, gegen das B83 gebaut wurde. Angewandt = gewaehlt MINUS 10/16/64.
+	print_info("   Lesehinweis: 78/79/12/14 = Solve-Zweig vor den Gates. ANGEWANDT = diese minus Quergate[64] "
+		+to_string((ulong)H[64])+", Sattigungsgate[10] "+to_string((ulong)H[10])+", sn-Gate[16] "+to_string((ulong)H[16])+".");
+	// ★ 04.09.2026 (Kernel-Audit M2): Slot 80 feuerte im Kernel, wurde aber nirgends gelesen -- waehrend
+	// vier print_info woertlich "Wirkpfad Slot 80" versprechen. Ein Schalter ohne BERICHTETEN Zaehler ist
+	// nach Projektregel derselbe harte Fehler wie einer ohne Zaehler: der Arm ist im Binary nicht nachweisbar.
+	if(pinv) {
+		if(s80==0ull) print_error("["+ort+"] CFD_FAC_PINV angefordert, aber Slot 80 = 0 -- die Rang-1-Pseudoinverse wird NIE erreicht (stiller No-Op). Entweder faellt der Vollrangzweig [79] nicht durch, oder die Akzeptanzschwelle tr >= 1e-4*(G11+G22) haelt nicht.");
+		else print_info("   Rang-1-Pseudoinverse [80] "+to_string(s80)+" ("+to_string((float)(100.0*(double)s80/n),2u)+" % des Wirkpfads) -- Teilmenge von [14]; Rest von [14] = "+to_string(s14>s80?s14-s80:(ulong)0)+" (Skalarleiter, nur unter LSQ).");
+	} else if(s80!=0ull) print_error("["+ort+"] Slot 80 = "+to_string(s80)+" OHNE CFD_FAC_PINV -- der Pseudoinversen-Zweig laeuft, obwohl er nicht angefordert wurde.");
 	if(summe!=erreicht) {
 		const ulong d = summe>erreicht ? summe-erreicht : erreicht-summe;
 		const double rel = 100.0*(double)d/(double)(erreicht>0ull?erreicht:1ull);
@@ -767,9 +795,20 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		// von CFD_SGS_DIAG. Gezaehlt wird je Facetten- bzw. Zellbesuch auf jedem 100. Schritt; bei
 		// grossen Gittern wickelt uint. Ein gewickelter Bin sieht klein und harmlos aus -- genau die
 		// Falle, an der die RHO_CLAMP-Zahlen tagelang hingen.
-		ulong mx=0ull; uint mxs=0u;
+		ulong mx=0ull; uint mxs=0u; ulong mx7=0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
-			for(uint sl=0u; sl<68u; sl++) { const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl]; if(v>mx) { mx=v; mxs=sl; } } }
+			for(uint sl=0u; sl<(uint)L.lbm_domain[d]->rho_clamp_hits.length(); sl++) { const ulong v=(ulong)L.lbm_domain[d]->rho_clamp_hits[sl];
+				// ★ 04.09.2026 (Host-Audit H1): die Schleife stand auf 68 und war seit dem 27.08. blind fuer
+				// alles darueber -- 68 (MLS), 69 (Rueckfall), 70/71 (Kraft), 72-79 (NACHBAR/MESSNUR/FDWAND/
+				// F-Liste/Vollrang), 80 (Pseudoinverse). Jetzt bis zur Pufferlaenge.
+				// SLOT 7 IST DIE AUSNAHME: er wickelt am Fahrzeugmassstab KONSTRUKTIV und wird deshalb bei
+				// der Wirkpfad-Abnahme bewusst mod 2^32 gegen sein Soll geprueft. Ihn in dieselbe Toepfe zu
+				// werfen hiesse, einen eingeplanten Wickel per exit(1) zu bestrafen -- gemessen: 4 mm,
+				// 0,301 s Physik -> Slot 7 = 941.884.685 (logs/zh_pinv4.log), die exit(1)-Schwelle liegt
+				// beim 4,1-fachen, also bei rund 1,24 s. Mit der Laufverlaengerung vom selben Tag ist das
+				// erreichbar, und der Abbruch faellt VOR die gesamte Endauswertung.
+				if(sl==7u) { if(v>mx7) mx7=v; continue; }
+				if(v>mx) { mx=v; mxs=sl; } } }
 		// ★ g12-Befund (2026-08-25 nacht): SAETTIGUNG ist der GEWOLLTE Endzustand der saettigenden
 		// Zaehler (Parken ab 0xF0000000) -- der Waechter hat sie als "Wickelgefahr" gemeldet und
 		// per exit(1) drei komplette 8-mm-Laeufe am BERICHT getoetet (die Physik-CSVs ueberlebten).
@@ -778,6 +817,12 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		if(mx>=4026531840ull) print_info(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" GESAETTIGT (>= 0xF0000000) -- Zahl ist eine Untergrenze, kein Wickel.");
 		else if(mx>3865470566ull) print_error(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+", ueber 90 % des uint-Bereichs -- WICKELGEFAHR, alle daraus gerechneten Prozente sind wertlos.");
 		else if(mx>2147483648ull) print_warning(string("  Zaehler ")+wo+": Slot "+to_string(mxs)+" steht bei "+to_string(mx)+" (ueber die Haelfte des uint-Bereichs) -- bei laengerem Lauf wickelt er.");
+		// Slot 7 gesondert: WARNUNG statt exit(1), aber mit der Konsequenz benannt -- er ist der NENNER
+		// der Solver-Kaskade und der Rueckfallquote. Wickelt er, sind nicht die Physik-CSVs falsch,
+		// sondern jeder Prozentsatz, der ihn als Grundgesamtheit benutzt.
+		if(mx7>=4294967296ull||mx7>3865470566ull) print_warning(string("  Zaehler ")+wo+": WIRKPFAD-Slot 7 steht bei "+to_string(mx7)
+			+" und damit nahe am uint-Wickel (2^32 = 4294967296). Die Wirkpfad-ABNAHME haelt (sie vergleicht mod 2^32), aber ALLE ANTEILE mit Slot 7 als Nenner"
+			+" -- Solver-Kaskade, Rueckfallquote, Modellabdeckung -- sind ab dem Wickel wertlos. Kein Abbruch: die Physik und die CSVs sind unberuehrt.");
 	}
 	// ★ 2026-08-25: Ansage der beiden neuen Wirkpfad-Zaehler. Beide gegatet (t%100), also
 	// Stichproben, keine Ereigniszahlen.
@@ -2870,7 +2915,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -3696,7 +3741,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -4241,6 +4286,7 @@ static void main_setup_fahrzeug_dd() {
 		const ulong ns_ = s_ ? (ulong)env_u("CFD_SLICE_NEAR_STEPS", 5000u) : (d_ ? 0ull : 5000ull);
 		const float dt_ = (ns_==0ull&&d_) ? env_f("CFD_SLICE_DT", 0.010f) : 0.0f;
 		if(ns_==0ull&&dt_<=0.0f) print_error("Dieser Lauf schriebe KEINE Slices (CFD_SLICE_DT=0 und CFD_SLICE_NEAR_STEPS ungesetzt/0). Slice-Ausgabe ist Pflicht -- sie kostet praktisch nichts und ohne sie ist der Lauf hinterher nicht ansehbar. CFD_SLICE_DT auf einen positiven Wert setzen (0.1 = alle 100 ms)."); }
+	bool nahfeld_pinv = false; // ★ 04.09. (Kernel-Audit M2): PINV-Zustand der NAHFELD-Domaene -- dieselbe Falle wie nahfeld_satgate, das Static wird unten fuer lbm_c ueberschrieben
 	bool nahfeld_satgate = false; // SATGATE-Zustand der NAHFELD-Domaene (Funktionsscope; gesetzt im Fein-Block, gelesen vom Rueckfall-Detektor am Ende)
 	bool nahfeld_messnur = false; // ★ 03.09. (Pruefagent Pass 2): dito fuer MESSNUR -- der Slot-72-Leser am Ende braucht den NAHFELD-Zustand, die Statik ist dann fuer lbm_c genullt
 	uint nahfeld_kraft = 0u; // ★ Pruefbefund B1 (30.08.): dito fuer den Kraftpfad-Modus -- das Static wird unten fuer lbm_c (Fernfeld, CFD_FERN_FACETTEN) ueberschrieben; ohne Sicherung prueft der Nahfeld-Waechter Modus 0 gegen Slot 70 > 0 und bricht mit exit(1) mitten im Abschlussbericht ab.
@@ -4450,6 +4496,7 @@ static void main_setup_fahrzeug_dd() {
 	  LBM_Domain::s_fac_diagz = -1l;
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im dd-Fall NICHT verdrahtet -- Ketten-Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_pinv = env_u("CFD_FAC_PINV", 0u); if(LBM_Domain::s_fac_pinv>0u&&env_u("CFD_FAC_LSQ",0u)>0u) print_error("CFD_FAC_PINV und CFD_FAC_LSQ schliessen sich aus -- PINV ersetzt denselben Zweig, LSQ waere still wirkungslos (der #elif faellt durch). Einen von beiden waehlen."); if(LBM_Domain::s_fac_pinv>0u) print_info("RANG-1-PSEUDOINVERSE (CFD_FAC_PINV, 04.09.2026): im gekoppelten Zweig ersetzt Moore-Penrose die achsenparallele Skalarleiter -- Division ueber die SPUR (groesster Eigenwert) statt ueber Gt11. Grund: fuer die ebene Voxelwand ist tr(Gt) exakt 1/3 und kippungsunabhaengig, waehrend Gt11 mit der Stroemungsrichtung gegen 0 laeuft und die Akzeptanzschwelle 1e-4 dann Verstaerkung bis 1e4 durchlaesst. Wirkpfad Slot 80; erwartet fallen Slot 10 UND Slot 16, weil der Eigenvektor Sn.v = 0 exakt erfuellt und damit keine Normalkompensation mehr erzeugt wird."); LBM_Domain::s_fac_idx_voll = env_u("CFD_FAC_IDX_VOLL", 0u); if(LBM_Domain::s_fac_idx_voll>0u) print_info("CFD_FAC_IDX_VOLL=1: fac_idx in der ALTEN Vollfeldform -- deklarierter A/B-Arm gegen die Bitmaske (03.09.). Die Ergebnisse MUESSEN bitgleich sein, unterscheiden darf sich nur der Speicher."); LBM_Domain::s_f_liste = env_u("CFD_F_LISTE", 0u); if(LBM_Domain::s_f_liste>0u) print_info("F-MARKERLISTE (CFD_F_LISTE, 03.09.2026, Befunde B78b/B80/B81): F wird nur fuer WANDsolidzellen alloziert -- 8 mm gemessen: Nahfeld 238 -> 14 MiB, Fernfeld 4 -> 0 MiB. ABGENOMMEN ueber alle drei Sprossen bitgleich (CPU 5/5, iGPU 5/5 und dreimal reproduziert, B70 8-mm-Fahrzeug 19/19), Slot 77 = 0. Der urspruengliche Defekt war NICHT die Liste, sondern die Reihenfolge: die JIT-Defines entstanden vor dem Setzen der Schalter (B81)."); if(LBM_Domain::s_f_liste>0u&&!f_nur_solid_an_setup()) print_error("CFD_F_LISTE braucht CFD_F_NUR_SOLID (Default an): der Kontrollarm CFD_F_NUR_SOLID=0 liest F an JEDER Fluidzelle, und dort gibt es unter der Markerliste keinen Speicherplatz mehr -- die Kombination waere still falsch."); LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u; LBM_Domain::s_fac_kraft = fc>=3u ? min(2u, env_u("CFD_FAC_KRAFT", 0u)) : 0u; LBM_Domain::s_fac_kdiag = fc>=3u ? env_u("CFD_FAC_KDIAG", 0u) : 0u; if(fc<3u&&(env_u("CFD_FAC_NACHBAR",0u)>0u||env_u("CFD_FAC_KDIAG",0u)>0u)) print_error("CFD_FAC_NACHBAR/CFD_FAC_KDIAG brauchen CFD_FACETTEN=3 (iMEM) -- bei CFD_FACETTEN="+to_string((ulong)fc)+" wuerde der Schalter still auf 0 gesetzt (No-Op-Waechter 03.09.)."); LBM_Domain::s_fac_nachbar = fc>=3u ? env_u("CFD_FAC_NACHBAR", 0u) : 0u; LBM_Domain::s_fac_messnur = fc>=3u ? env_u("CFD_FAC_MESSNUR", 0u) : 0u; LBM_Domain::s_sgs_gdiag = fc>=1u ? env_u("CFD_SGS_GDIAG", 0u) : 0u; LBM_Domain::s_sgs_fdwand = fc>=1u ? env_u("CFD_SGS_FDWAND", 0u) : 0u; if(LBM_Domain::s_sgs_fdwand>0u) { print_info("SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND, 02.09.): an Facettenzellen kommt die SGS-Relaxationsrate aus |S|_FD des u-Felds (FD-Kernel je Schritt, ein Schritt Versatz) statt aus dem wandmodell-kontaminierten Pi-Tensor (B66/B69: Pi/FD 2,3-3,4). Wirkpfad Slot 76 (B70)."); if(env_u("CFD_FAC_MESSNUR",0u)>0u) print_warning("SGS_FDWAND + MESS-NUR: der Arm ist dann NICHT mehr reines Bounce-Back -- das Kollisions-w an Wandzellen kommt aus dem FD-Pfad (bewusste Kombination fuer BB+FDWAND-Messungen, aber nicht mit alten BB-Bezuegen bitvergleichbar)."); if(env_u("CFD_SGS_WANDFREI",0u)>0u) print_warning("SGS_FDWAND + SGS_WANDFREI: WANDFREI hat an Wandzellen VORRANG -- FDWAND ist dort wirkungslos (Slot 76 bleibt 0). Fuer den FDWAND-Arm WANDFREI abschalten."); } if(LBM_Domain::s_sgs_gdiag>0u) { sgs_gdiag_selbsttest(); print_info("g-DIAGNOSE (CFD_SGS_GDIAG, 31.08.): Messkernel ueber die Wandzellen -- |S|_FD (u-Feld, geistermodenfrei), |S|_Pi (fneq, wie Smagorinsky), D_WALE, D_Sigma, |Omega|. Physik unangetastet, Bericht am Laufende."); } if(LBM_Domain::s_fac_messnur>0u&&env_u("CFD_FAC_NACHBAR",0u)>0u) print_warning("MESS-NUR + NACHBAR: die Nachbarabtastung liegt hinter dem MESS-NUR-Ausstieg und ist WIRKUNGSLOS (Slots 72-74 bleiben 0)."); if(LBM_Domain::s_fac_messnur>0u&&env_u("CFD_FAC_KDIAG",0u)>0u) print_warning("MESS-NUR + KDIAG: die Klassen-Diagnostik wird nie akkumuliert -- die Tabelle am Laufende ist eine Nulltabelle."); if(LBM_Domain::s_fac_messnur>0u&&env_u("CFD_FAC_KRAFT",0u)>0u) print_error("MESS-NUR + KRAFT ist unsinnig (kein Wandmodell -> kein Residuum; Modus 2 stuerbe irrefuehrend am Kraftpfad-Pruefer). Kombination aufloesen."); if(LBM_Domain::s_fac_messnur>0u) print_warning("MESS-NUR (CFD_FAC_MESSNUR, 30.08.): der Kernel wendet KEIN Wandmodell an -- die Wand ist reines Bounce-Back. Facetten werden nur gebaut und gemessen, damit der Druckpfad (cd_facetten.csv) als Aepfel-mit-Aepfeln-Bezug zu einem Wandmodell-Arm dient. Der REIBUNGSanteil ist in diesem Arm konstruktiv 0; belastbar ist der Druckanteil (bei Cz 99,5 %). Slot 75 = Wirkpfad (2. Umzug, B70). Die ELIBB-Blende wird unter MESS-NUR seit B-4 ebenfalls uebersprungen -- der Arm ist exakt reines Bounce-Back."); if(LBM_Domain::s_fac_nachbar>0u) print_info("NACHBARABTASTUNG (CFD_FAC_NACHBAR, 30.08.): Wandmodell-Eingang (u_t, Wandabstand) aus der zweiten Fluidzelle entlang der Normale statt aus der Wandzelle -- Stufenschatten-Fix. Slots 72 (angewandt) / 73 (kein Fluidnachbar) / 74 (Nachbar steht still; 2. Umzug 02.09., B70 -- 35-48 gehoeren SGS_DIAG ueber berechnete Indizes)."); if(LBM_Domain::s_fac_kraft>0u) print_info(string("iMEM-KRAFTPFAD (Weg F, 30.08.): Modus ")+to_string(LBM_Domain::s_fac_kraft)+(LBM_Domain::s_fac_kraft==1u?string(" -- Residuum R als Volumenkraft an RUECKFALLZELLEN (statt s=0); Slot 70, Soll == Slot 69."):string(" -- ALLE Facettenzellen per Kraft, Additivterm aus (Diskriminator gegen den Slip-Pfad); Slot 70."))); if(LBM_Domain::s_fac_kraft>0u) print_warning("KRAFTPFAD (Pruefpunkt 8, 30.08.): object_force/forces.csv (Impulsaustausch an Koerperzellen) sieht die Volumenkraft NICHT -- eine Guo-Kraft im Fluid hat keine Newton-3-Reaktion am Koerper. Der Reibungsanteil an Kraftzellen steht allein in der fac_tau-Buchung (cd_reib/cd_rest); object_force-Abgleiche (K4, Fx_far) weichen um genau den Kraftanteil ab."); LBM_Domain::s_fac_elibb = false; LBM_Domain::s_fac_qmin = 0.1f; LBM_Domain::s_fac_lsq = false; LBM_Domain::s_fac_quergate = false; // Statik-Symmetrie (H1)
+	nahfeld_pinv = LBM_Domain::s_fac_pinv>0u; // ★ 04.09. (Kernel-Audit M2): s.o.
 	nahfeld_satgate = LBM_Domain::s_fac_satgate; // ★ Pruefbefund 5a (27.08.): das Static wird unten fuer lbm_c ueberschrieben -- der Nahfeld-Detektor braucht DIESEN Zustand
 	nahfeld_kraft = LBM_Domain::s_fac_kraft; // ★ Pruefbefund B1 (30.08.): gleiche Falle fuer den Kraftpfad
 	nahfeld_messnur = LBM_Domain::s_fac_messnur>0u; // ★ 03.09.: gleiche Falle fuer das MESSNUR-Gating des Slot-72-Lesers
@@ -5908,7 +5955,7 @@ static void main_setup_fahrzeug_dd() {
 	// CL_OUT_OF_RESOURCES, und die Rueckfallquote (Slot 69 / Wirkpfad) war mit ihm verloren --
 	// die Zaehler wurden bisher NUR im Abschlussbericht gelesen. 70 uint vom Geraet kosten
 	// nichts; sie werden jetzt an jedem [BERICHT] mitgelesen, kumuliert UND als Fensterdelta.
-	ulong slot_alt[80]; for(uint i=0u;i<80u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
+	/* ★ 04.09. (Audit): rho_clamp_hits ist seit lbm.cpp:354 96 gross -- Feld und Schleife standen noch auf 80 und schnitten die neuen Slots ab */ ulong slot_alt[96]; for(uint i=0u;i<96u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
 	std::ofstream slot_csv;
 	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
 	// "unklaren" Zellen. Die Zaehler sind geometrisch und ueber alle Samples konstant -- der
@@ -6593,7 +6640,7 @@ static void main_setup_fahrzeug_dd() {
 							slot_csv << "# Slot-Zaehler je [BERICHT] (30.08.2026). Kumuliert seit Laufstart, t%100-gesampelt; *_fenster = Delta seit dem vorigen Bericht. Quote = Slot/Wirkpfad[7].\n";
 							slot_csv << "time_s,wirkpfad,rueckfall69,quote_kum_pct,quote_fenster_pct,us_gate10,ohnetang13,rang0_15,sn_gate16,quergate64,kraft70,gesaettigt\n"; }
 						slot_csv << t_si << "," << wp << "," << r69 << "," << pz(r69,wp) << "," << pz(d69,dwp) << "," << s10 << "," << s13 << "," << s15 << "," << s16 << "," << s64 << "," << (ulong)H[70] << "," << (satt?1:0) << "\n" << std::flush;
-						for(uint i=0u;i<80u;i++) slot_alt[i]=(ulong)H[i]; slot_alt_da=true;
+						for(uint i=0u;i<96u;i++) slot_alt[i]=(ulong)H[i]; slot_alt_da=true;
 					}
 				}
 				ber_next = (floor(t_si/ber_dt)+1.0)*ber_dt;  // an das Raster binden, nicht aufaddieren (kein Drift)
@@ -6710,11 +6757,31 @@ static void main_setup_fahrzeug_dd() {
 			if(access(ziel_datei.c_str(), F_OK)==0) {
 				double ziel_ms = 0.0;
 				{ std::ifstream zf(ziel_datei); zf >> ziel_ms; }
-				std::remove(ziel_datei.c_str());
 				const ulong neu = (ziel_ms>0.0) ? (ulong)((float)(0.001*ziel_ms)/dt_c + 0.5f) : 0ull;
-				if(!(ziel_ms>0.0)) print_warning("[ZIEL] "+ziel_datei+" enthielt keine positive Zahl -- ignoriert. Erwartet wird die neue Endzeit in Millisekunden, z. B. \"echo 501 > "+ziel_datei+"\".");
+				// ★ 04.09.2026 (Host-Audit M4): das Loeschen stand VOR der Pruefung. access() sieht die von
+				// "echo" per O_CREAT|O_TRUNC bereits angelegte, aber noch nicht beschriebene Datei; der Lauf
+				// las dann 0, warnte -- und hatte die Datei schon geloescht. Die Verlaengerung war damit
+				// still weg, obwohl der Bediener sie korrekt geschrieben hat. Jetzt: nur nach erfolgreichem
+				// Parsen entfernen, sonst beim naechsten Sample erneut versuchen.
+				if(ziel_ms>0.0) std::remove(ziel_datei.c_str());
+				if(!(ziel_ms>0.0)) print_warning("[ZIEL] "+ziel_datei+" war noch leer oder enthielt keine positive Zahl -- unveraendert stehengelassen, der naechste Sample-Punkt liest erneut. Erwartet wird die neue Endzeit in Millisekunden, z. B. \"echo 501 > "+ziel_datei+"\".");
 				else if(neu<=n_outer) print_warning("[ZIEL] "+to_string((float)ziel_ms,1u)+" ms entspricht "+to_string(neu)+" groben Schritten und ist nicht laenger als die aktuelle Planung ("+to_string(n_outer)+") -- ignoriert. Verkuerzen geht ueber "+stop_datei+".");
 				else {
+					// ★ 04.09.2026 (Host-Audit H1): die Verlaengerung gegen die ZAEHLERLAST pruefen. Slot 7 ist
+					// der Nenner jeder Modellabdeckungs-Angabe und wickelt bei fac_N * ceil(n*ratio/100) >= 2^32.
+					// Das Soll ist hier ohne Geraetelesung ausrechenbar (dieselbe Formel wie in der Abnahme).
+					{	const ulong facN = lbm_f.lbm_domain[0]->fac_N;
+						if(facN>0ull) {
+							const ulong s7 = facN*(ulong)((neu*(ulong)ratio+99ull)/100ull);
+							if(s7>=4294967296ull) {
+								const ulong n_max = (4294967295ull/facN)*100ull/(ulong)ratio;
+								print_warning("[ZIEL] ACHTUNG: bei "+to_string((float)ziel_ms,1u)+" ms erreicht der Wirkpfad-Zaehler (Slot 7) "+to_string(s7)
+									+" und ueberlaeuft den uint-Bereich (2^32). Physik, CSVs und Kraefte bleiben davon unberuehrt -- aber jeder ANTEIL mit Slot 7 als Nenner"
+									+" (Solver-Kaskade, Rueckfallquote, Modellabdeckung) ist danach wertlos. Ohne Wickel bleibt der Lauf bis rund "
+									+to_string((float)(1000.0*(double)n_max*(double)dt_c),0u)+" ms. Die Verlaengerung wird trotzdem ausgefuehrt.");
+							}
+						}
+					}
 					const ulong alt = n_outer; n_outer = neu;
 					print_info("[ZIEL] Lauf verlaengert bei t = "+to_string((float)t_si,4u)+" s: "+to_string(alt)+" -> "+to_string(n_outer)
 						+" grobe Schritte (Endzeit "+to_string((float)ziel_ms,1u)+" ms). ANGESAGT: die VTK-Rotation und der Kopplungs-Pruefpunkt wurden VOR der Schleife aus der urspruenglichen Planung gerechnet und bleiben darauf.");
@@ -7017,7 +7084,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur); }
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).

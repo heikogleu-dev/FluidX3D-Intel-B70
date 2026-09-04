@@ -896,7 +896,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	}
 	facetten_bound = true;
 	print_info("Facetten gebunden: "+to_string(aktiv)+" aktiv, "+to_string(ausgeschlossen)+" markiert (BB bleibt), Indexfeld "
-		+to_string((float)(FN*4ull)/1048576.0f,1u)+" MB, Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
+		+to_string((float)(fac_idx_voll_on ? 4ull*FN : 8ull*((FN+31ull)/32ull))/1048576.0f,1u)+(fac_idx_voll_on?" MB (Vollfeld)":" MB (Bitmaske+Praefixsumme)")+", Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
 }
 
 void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand) {

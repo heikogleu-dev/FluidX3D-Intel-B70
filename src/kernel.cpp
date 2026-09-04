@@ -2317,10 +2317,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	}
 )+"#elif defined(FACETTEN_LSQ)"+R(
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R1); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // ★ 04.09.: res2 stand auf fabs(Gt22*s2-R2) und war IDENTISCH NULL -- dieser Zweig erfuellt Gleichung 2 exakt, das Residuum steht in Gleichung 1. QUERGATE war fuer ihn konstruktiv blind.
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1, selben Tag): hier stand kurzzeitig -R1. Das mischt die LINKE Seite von Gl. 2 mit der RECHTEN von Gl. 1 und faellt mit s1=0 auf |R2-R1| zusammen -- unabhaengig von Gt UND s. res2 ist per Definition das Gl.-2-Residuum (QUERGATE = Restfehler in Querrichtung t2), und im LSQ-Zweig ist es echt von null verschieden. Ein Mass fuer die Gl.-1-Luecke braucht eine EIGENE Groesse res1 mit eigenem Slot, nicht diese hier.
 )+"#else"+R(
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R1); if(t%100ul==0ul) atomic_inc(&hits[14]); } // ★ 04.09.: res2 war identisch null, s.o.
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1): res2 ist hier IDENTISCH NULL, und das ist RICHTIG -- der Zweig erfuellt Gl. 2 exakt, also ist das Gl.-2-Residuum null. Dass QUERGATE fuer ihn nie feuert, ist korrektes Verhalten, kein blinder Fleck. Die Gl.-1-Luecke ist eine ANDERE Groesse (s. LSQ-Zweig).
 )+"#endif"+R( // FACETTEN_PINV / FACETTEN_LSQ
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); rueckfall=true; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
