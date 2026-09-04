@@ -82,6 +82,20 @@ behoben, nachgeprüft, sauber. **Bewusst offen:** D9 fac_geo-Stride (24 MB, Bitg
 **Abnahme:** `logs/vt_latent_serie.txt` (iGPU, 6 Arme) — läuft nach vs_kreuz; Kernel-Änderungen sind in den Hash-Armen nicht
 emittiert (S1 KDIAG, S2 QUERGATE, D17 PINV) bzw. nur Bericht (S8) → aus/m1/m2 müssen bitgleich bleiben.
 
+## 23:15 — KREUZTABELLE GEMESSEN: Klasse C zu 100 % (vs_kreuz, iGPU, Binary 6d9dd3e)
+
+0/1/2 bitgleich, vs_x-Altslots exakt wie vq_x, alle Zeilensummen und Nullspalten halten. **[95] nach rohem Zweig: Schur-exakt
+[79] = 100,00 %** — am Kanal mit Basis-Schaltern UND mit der Fahrzeug-Kombination. Die Zellen, an denen der rohe Solve das
+Sättigungsgate reißt, sind ausnahmslos die, die das Downdate von Rang 2 auf Rang 1 senkt: der rohe 2×2-Solve bedient die schwache
+Mittelrichtung c̄ = S1/S0 (Steifigkeit ~Dd·B²), und genau diese Richtung entfernt `G' = G − (6/S0)·S1S1ᵀ`.
+**Das Downdate ist ein Konditionierungsschutz, nicht nur Massenbuchhaltung.** Der Rang-Weg über den Wegfall des Downdates ist damit
+tot — der gewonnene Freiheitsgrad ist die Richtung, die das Modell nicht tragen kann. Abdeckungsgrenze unter konditioniertem Solve
+≈ ALPHA2-Abdeckung (57 % am 8-mm-Fahrzeug). Darüber hinaus nur (A) das Ziel an Eckzellen (Druck vs Reibung in P trennen) oder die
+Linkmenge erweitern (Rang 2 aus echter Geometrie). vs_x8 (B70) bleibt sinnvoll: es misst (B) auf der Schnittmenge — ist (B) ≈ 0,
+ist der gesamte Cz-Schaden von Modus 1 der c̄-Slip an den neu abgedeckten Zellen.
+Erster X-Hash (nach der Hash-Verschiebung): vs_x 17935634836335592429, vs_leiter_x 4168733461996404659. vs_x rc=1 nur durch die
+vorbestehende Kanal-Abnahme K2.
+
 ## Läuft / steht bereit
 
 - `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.
