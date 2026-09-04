@@ -1513,6 +1513,121 @@ static void jacobi3(double M[3][3], double ew[3], double ev[3][3]) {
 // D3Q19-Richtungen 1..18 (Host-Kopie der Kernel-Tabelle; nur fuer den Facettenbau).
 static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
 	{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+// ============================================================================================
+// ★ 04.09.2026 STATISCHER KLASSENZENSUS. Beantwortet VOR dem ersten Zeitschritt, welche Facetten
+// ueberhaupt exakt loesbar sein KOENNEN -- also wo die 42,76 % Rueckfall herkommen und welcher
+// Teil davon durch eine bessere Basiswahl rettbar waere.
+//
+// WAS STATISCH IST (Vorpruefung 04.09. am Quelltext bestaetigt): der 3x3-Tensor G3 = Sum 6 w c c^T
+// ueber die Wandlinks, S0 = Sum w, S1 = Sum w c, das ALPHA2-Downdate G' = G3 - (6/S0) S1 S1^T, die
+// Normale, das Entkopplungs-Gate (Snn und |P_t G' n|^2 sind drehinvariant) und der RANG des
+// Tangentialblocks. Die Wandgeometrie kippt im Lauf nie: TYPE_MS wird nur auf NICHT-Solidzellen
+// gesetzt, eine Solidzelle bleibt TYPE_S.
+// WAS NICHT STATISCH IST: t1 = u_t/|u_t| (kernel.cpp:2060) haengt an der Stroemung. G11, G22, G12
+// einzeln drehen sich mit; nur Rang, Spur und Determinante sind invariant. Deshalb ist der
+// Kaskadentest det >= 1e-4*G11*G22 BASISABHAENGIG (det invariant, G11*G22 = det + G12^2 nicht).
+//
+// DER RANG IST EINE OBERGRENZE, KEIN EXAKTER PROGNOSEWERT: der ALPHA2-Ausloeschungswaechter
+// (kernel.cpp:2174-2176) vergleicht gegen die Roh-Diagonale in der Basis t1 -- beide Seiten
+// basisabhaengig -- und kann eine Rang-1-Facette zur Laufzeit auf Rang 0 nullen.
+static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, const uint Nx, const uint Ny,
+                                     const uint Nz, const uchar wand_flag, const bool alpha2_an, const string& ort) {
+	if(env_u("CFD_FAC_ZENSUS", 1u)==0u) return;
+	if(FF.empty()) return;
+	auto idxz = [&](const uint x, const uint y, const uint z) { return (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx; };
+	// D3Q19-Gewichte, Reihenfolge wie FZ_C: [0]=1/3, [1..6]=1/18, [7..18]=1/36.
+	auto wq = [](const uint i) { return i==0u ? 1.0/3.0 : (i<7u ? 1.0/18.0 : 1.0/36.0); };
+	ulong n_rang[3]={0,0,0}, n_entk=0ull, n_gek=0ull, n_uebersprungen=0ull, n_ohne_link=0ull;
+	ulong n_links[20]; for(uint i=0u;i<20u;i++) n_links[i]=0ull;
+	ulong n_verh[8]; for(uint i=0u;i<8u;i++) n_verh[i]=0ull; // lmin/lmax: <1e-9,<1e-7,<2.5e-5,<1e-3,<1e-2,<0.1,<0.5,>=0.5
+	ulong n_praedikat_diff=0ull, n_kernel_mehr=0ull; ulong links_kernel_ges=0ull, links_host_ges=0ull;
+	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
+	for(const Facette& f : FF) {
+		if(f.klasse!=0u) { n_uebersprungen++; continue; } // exakt wie die Allokation (lbm.cpp): nur saubere Facetten bekommen ein fid
+		const ulong nzelle=f.n; const uint z=(uint)(nzelle/((ulong)Nx*(ulong)Ny));
+		const uint y=(uint)((nzelle/(ulong)Nx)%(ulong)Ny), x=(uint)(nzelle%(ulong)Nx);
+		double G[3][3]={{0,0,0},{0,0,0},{0,0,0}}, S0=0.0, S1[3]={0,0,0}; uint nl_k=0u, nl_h=0u;
+		for(uint i=1u; i<19u; i++) {
+			// Kernel-Form der Nachbarindizierung: ALLE DREI Achsen wickeln (kernel.cpp:1037-1039).
+			const uint xn=(uint)((((int)x+FZ_C[i][0])%(int)Nx+(int)Nx)%(int)Nx);
+			const uint yn=(uint)((((int)y+FZ_C[i][1])%(int)Ny+(int)Ny)%(int)Ny);
+			const uint zn=(uint)((((int)z+FZ_C[i][2])%(int)Nz+(int)Nz)%(int)Nz);
+			const ulong nn=idxz(xn,yn,zn);
+			const bool kernel_link = (L.flags[nn]&(TYPE_S|TYPE_E))==TYPE_S; // GENAU das Gate aus kernel.cpp:2100
+			const bool host_link   = (L.flags[nn]==wand_flag);              // das Gate des Facettenbaus (setup.cpp: ist_wand)
+			if(kernel_link) nl_k++;
+			if(host_link) nl_h++;
+			if(!kernel_link) continue;
+			const double w=wq(i), c[3]={(double)FZ_C[i][0],(double)FZ_C[i][1],(double)FZ_C[i][2]};
+			S0+=w; for(uint a=0u;a<3u;a++) { S1[a]+=w*c[a]; for(uint b=0u;b<3u;b++) G[a][b]+=6.0*w*c[a]*c[b]; }
+		}
+		links_kernel_ges+=nl_k; links_host_ges+=nl_h;
+		if(nl_k!=nl_h) { n_praedikat_diff++; if(nl_k>nl_h) n_kernel_mehr++; }
+		n_links[nl_k<19u?nl_k:19u]++;
+		if(nl_k==0u) { n_ohne_link++; continue; }
+		if(alpha2_an&&S0>0.0) { const double Dd=6.0/S0; for(uint a=0u;a<3u;a++) for(uint b=0u;b<3u;b++) G[a][b]-=Dd*S1[a]*S1[b]; }
+		// Normale und IRGENDEINE Orthonormalbasis der Tangentialebene -- der Rang ist drehinvariant,
+		// die Wahl ist deshalb gleichgueltig (und genau das ist der Punkt: der Kernel waehlt sie aus
+		// der Stroemung, der Rang haengt nicht davon ab).
+		double nv[3]={(double)f.nx,(double)f.ny,(double)f.nz};
+		const double nl=sqrt(nv[0]*nv[0]+nv[1]*nv[1]+nv[2]*nv[2]); if(!(nl>0.0)) { n_uebersprungen++; continue; }
+		for(uint a=0u;a<3u;a++) nv[a]/=nl;
+		double h[3]={0,0,0}; { uint k=0u; double m=fabs(nv[0]); if(fabs(nv[1])<m) { m=fabs(nv[1]); k=1u; } if(fabs(nv[2])<m) k=2u; h[k]=1.0; }
+		double e1[3]={h[1]*nv[2]-h[2]*nv[1], h[2]*nv[0]-h[0]*nv[2], h[0]*nv[1]-h[1]*nv[0]};
+		const double e1l=sqrt(e1[0]*e1[0]+e1[1]*e1[1]+e1[2]*e1[2]); for(uint a=0u;a<3u;a++) e1[a]/=e1l;
+		const double e2[3]={nv[1]*e1[2]-nv[2]*e1[1], nv[2]*e1[0]-nv[0]*e1[2], nv[0]*e1[1]-nv[1]*e1[0]};
+		auto quad=[&](const double* u, const double* v) { double r=0.0; for(uint a=0u;a<3u;a++) for(uint b=0u;b<3u;b++) r+=u[a]*G[a][b]*v[b]; return r; };
+		double A11=quad(e1,e1), A22=quad(e2,e2), A12=quad(e1,e2);
+		const double Snn=quad(nv,nv), Sn1=quad(e1,nv), Sn2=quad(e2,nv);
+		const double kop=Sn1*Sn1+Sn2*Sn2;
+		const bool entkoppelt = (Snn<1e-8)||(kop<=1e-6*Snn*(A11+A22)); // drehinvariant, also statisch entscheidbar
+		if(entkoppelt) n_entk++; else { n_gek++; A11-=Sn1*Sn1/Snn; A22-=Sn2*Sn2/Snn; A12-=Sn1*Sn2/Snn; }
+		const double tr=A11+A22, det=A11*A22-A12*A12;
+		double disc=tr*tr-4.0*det; if(disc<0.0) disc=0.0;
+		const double lmax=0.5*(tr+sqrt(disc)), lmin=0.5*(tr-sqrt(disc));
+		const double verh = (lmax>0.0) ? (lmin>0.0?lmin/lmax:0.0) : -1.0;
+		if(!(lmax>1e-12)) n_rang[0]++;
+		else if(verh<1e-9) n_rang[1]++;
+		else n_rang[2]++;
+		if(lmax>1e-12) {
+			const double v=verh<0.0?0.0:verh;
+			const uint b = v<1e-9?0u:(v<1e-7?1u:(v<2.5e-5?2u:(v<1e-3?3u:(v<1e-2?4u:(v<0.1?5u:(v<0.5?6u:7u))))));
+			n_verh[b]++;
+			if(v>=1e-7&&v<2.5e-5) n_flacker++;
+		}
+	}
+	const ulong ges=n_rang[0]+n_rang[1]+n_rang[2]+n_ohne_link;
+	if(ges==0ull) return;
+	const double d=(double)ges;
+	print_info("["+ort+"] STATISCHER KLASSENZENSUS (vor dem ersten Zeitschritt, "+to_string(ges)+" aktive Facetten, "+to_string(n_uebersprungen)+" ohne fid):");
+	print_info("   Tangentialrang nach"+string(alpha2_an?" ALPHA2-Downdate":" ROHmomenten")+" -- OBERGRENZE fuer den zur Laufzeit erreichbaren Rang:");
+	print_info("     Rang 2 (exakt loesbar MOEGLICH) "+to_string(n_rang[2])+"  ("+to_string((float)(100.0*(double)n_rang[2]/d),2u)+" %)");
+	print_info("     Rang 1 (nur eine Richtung)      "+to_string(n_rang[1])+"  ("+to_string((float)(100.0*(double)n_rang[1]/d),2u)+" %)");
+	print_info("     Rang 0 (nie loesbar)            "+to_string(n_rang[0])+"  ("+to_string((float)(100.0*(double)n_rang[0]/d),2u)+" %)");
+	print_info("     ohne einen einzigen Wandlink    "+to_string(n_ohne_link)+"  ("+to_string((float)(100.0*(double)n_ohne_link/d),2u)+" %)");
+	print_info("   Entkopplungs-Gate (drehinvariant, also statisch): entkoppelt "+to_string(n_entk)+" | gekoppelt "+to_string(n_gek)
+		+"  -- entscheidet, ob Rang 0 als Slot 13 oder Slot 15 erscheint.");
+	print_info("   Eigenwertverhaeltnis lmin/lmax (bestimmt, wie stark die Einstufung von der Stroemungsrichtung abhaengt):");
+	{	const char* g[8]={"< 1e-9  (exakt rang-deffizient)","1e-9 - 1e-7","1e-7 - 2,5e-5  FLACKERFENSTER","2,5e-5 - 1e-3","1e-3 - 1e-2","1e-2 - 0,1","0,1 - 0,5","0,5 - 1  (nahezu isotrop)"};
+		for(uint i=0u;i<8u;i++) if(n_verh[i]>0ull) print_info("     "+string(g[i])+"  "+to_string(n_verh[i])+"  ("+to_string((float)(100.0*(double)n_verh[i]/d),2u)+" %)"); }
+	print_info("   FLACKERN: "+to_string(n_flacker)+" Facetten ("+to_string((float)(100.0*(double)n_flacker/d),2u)
+		+" %) haben Rang 2, fallen aber je nach Stroemungsrichtung durch den Test det >= 1e-4*G11*G22. "
+		+"Sie sind der Anteil, den eine feste Basiswahl (t1 auf den Hauptvektor) in den exakten Zweig heben WUERDE.");
+	print_info("   Wandlinks je Facette (Kernel-Gate): Mittel "+to_string((float)((double)links_kernel_ges/d),2u)+"; Verteilung:");
+	{	string z=""; for(uint i=0u;i<20u;i++) if(n_links[i]>0ull) z+=(z.empty()?"":", ")+to_string(i)+": "+to_string(n_links[i]); print_info("     "+z); }
+	// ★ ZWEI WAHRHEITEN, beziffert statt geheilt: der Facettenbau benutzt flags==wand_flag (am
+	// Fahrzeug 0x41, Fahrbahn ausdruecklich ausgeschlossen), der Kernel zaehlt JEDEN TYPE_S-Nachbarn
+	// als Wandlink -- also auch die Fahrbahn. Am Fahrzeug maskiert das die bewegte Fahrbahn (solche
+	// Zellen werden TYPE_MS und vom Zellgate uebersprungen); bei ruhendem Boden greift die
+	// Maskierung nicht. Angeglichen wird hier NICHTS -- das waere die dritte Wahrheit.
+	if(n_praedikat_diff>0ull) print_warning("["+ort+"] PRAEDIKAT-DIVERGENZ: bei "+to_string(n_praedikat_diff)+" von "+to_string(ges)+" Facetten ("
+		+to_string((float)(100.0*(double)n_praedikat_diff/d),2u)+" %) sieht der KERNEL eine andere Linkmenge als der Facettenbau"
+		+" (Kernel-Gate (flags&0x03)==TYPE_S gegen Bau-Gate flags==0x"+to_string((ulong)wand_flag)+"). Links gesamt Kernel "
+		+to_string(links_kernel_ges)+" gegen Bau "+to_string(links_host_ges)+", davon "+to_string(n_kernel_mehr)
+		+" Facetten mit MEHR Kernel-Links. Normale und y_w stammen aus der Bau-Linkmenge, geloest wird ueber die Kernel-Linkmenge.");
+	else print_info("   Praedikat-Gegenprobe: Kernel-Linkmenge und Bau-Linkmenge sind fuer JEDE Facette deckungsgleich.");
+}
+
 std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const uint Nz,
                                    const uchar wand_flag, const string& out_dir, const char* wo,
                                    const bool z_per=false) { // I2: Torus-Kipp wickelt auch z
@@ -2820,7 +2935,7 @@ void main_setup_kanal() {
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
 		FF = baue_facetten(lbm, Nx, Ny, Nz, TYPE_S, out_dir, kipp>0u?"Torus-Kipp":"Kanal", kipp>0u);
 		lbm.lbm_domain[0]->alloc_f_liste(&lbm.flags[0], Nx, Ny, Nz); // ★ 03.09. F-Markerliste (steigt bei CFD_F_LISTE=0 selbst aus) -- im Kanal verdrahtet, damit der Listenarm auf CPU/iGPU pruefbar ist und nicht zuerst auf der B70 laufen muss
-		lbm.alloc_facetten(FF, nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u)); // Parameter statt Statik (02.09.)
+		lbm.alloc_facetten(FF, nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u)); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, TYPE_S, env_u("CFD_FAC_ALPHA",0u)>=2u, "Kanal"); // Parameter statt Statik (02.09.)
 		// F2/F7: Facettenzahl ist geometrisch exakt abzaehlbar -- harte Pruefung faengt jeden
 		// vergessenen z-Wrap mechanisch (Formelblatt Schritt 5).
 		// GESAMTzahl (aktiv + markiert) ist die geometrische F2-Invariante -- fac_N allein zaehlt nur
@@ -3620,7 +3735,7 @@ void main_setup_kugel() {
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
 		if(env_u("CFD_F_LISTE",0u)>0u) print_error("CFD_F_LISTE ist im KUGELFALL nicht verdrahtet (alloc_f_liste wird dort nicht gerufen) -- der Schalter waere ein stiller No-Op mit 1-Element-F. Fall verdrahten oder Schalter weglassen.");
-		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr, 0u, 0u); if(env_u("CFD_SGS_FDWAND",0u)>0u) print_warning("CFD_SGS_FDWAND ist im KUGELFALL NICHT verdrahtet -- Schalter wird ignoriert."); if(env_u("CFD_SGS_GDIAG",0u)>0u) print_warning("CFD_SGS_GDIAG ist im KUGELFALL NICHT verdrahtet (kein Mess-Enqueue, kein Bericht -- Pruefbefund B-5). Schalter wird ignoriert; Verdrahtung bei Bedarf nachziehen.");
+		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr, 0u, 0u); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), env_u("CFD_FAC_ALPHA",0u)>=2u, "Kugel"); if(env_u("CFD_SGS_FDWAND",0u)>0u) print_warning("CFD_SGS_FDWAND ist im KUGELFALL NICHT verdrahtet -- Schalter wird ignoriert."); if(env_u("CFD_SGS_GDIAG",0u)>0u) print_warning("CFD_SGS_GDIAG ist im KUGELFALL NICHT verdrahtet (kein Mess-Enqueue, kein Bericht -- Pruefbefund B-5). Schalter wird ignoriert; Verdrahtung bei Bedarf nachziehen.");
 	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
@@ -5008,6 +5123,7 @@ static void main_setup_fahrzeug_dd() {
 	// (F-BBox 286x123x80), aber Konsistenz ist keine Geschmacksfrage: beide Domaenen oder keine.
 	lbm_c.lbm_domain[0]->alloc_f_liste(&lbm_c.flags[0], cNx, cNy, cNz);
 	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u)); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
+	if(env_u("CFD_FACETTEN", 0u)>0u) zensus_statische_klassen(lbm_f, FFn, fNx, fNy, fNz, (uchar)(TYPE_S|TYPE_X), env_u("CFD_FAC_ALPHA",0u)>=2u, "Nahfeld");
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) lbm_c.alloc_facetten(FFc); // P8: alloc_facetten_domain nutzt die INSTANZ-F-BBox von lbm_c (Fahrzeug+4 in Grobzellen, oben gesetzt) -- der Wachhund "Facette ausserhalb der F-BBox" prueft die Deckung hart
 
 	// ---------------------------------------------------------------- Randbedingungen NACHZAEHLEN
