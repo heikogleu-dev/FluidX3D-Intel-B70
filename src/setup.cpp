@@ -3301,7 +3301,6 @@ void main_setup_kanal() {
 				else if(FK.px!=0.0) print_info("K3: Druck_x = "+to_string((float)FK.px)+" innerhalb Toleranz "+to_string((float)tol_px)+" (nicht exakt 0, Rundungsrest der double-Summe)."); }
 		}
 	}
-	// Feld-Hash (FNV-1a ueber die u-Bitmuster) fuer den Bitvergleich der Aequivalenzarme
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
 	print_info("Referenz Lee & Moser 5186: U_b+ = 24,104, c_f = 3,4424e-3.");
 	_exit(0);
@@ -6246,7 +6245,7 @@ static void main_setup_fahrzeug_dd() {
 	// CL_OUT_OF_RESOURCES, und die Rueckfallquote (Slot 69 / Wirkpfad) war mit ihm verloren --
 	// die Zaehler wurden bisher NUR im Abschlussbericht gelesen. 70 uint vom Geraet kosten
 	// nichts; sie werden jetzt an jedem [BERICHT] mitgelesen, kumuliert UND als Fensterdelta.
-	/* ★ 04.09. (Audit): rho_clamp_hits ist seit lbm.cpp:354 96 gross; Feld und Schleife auf 96 gezogen. Es wurde KEIN Fehler behoben -- gelesen werden ohnehin nur [7] und [69] (Diff-Pruefung L3), die Aenderung ist Vorsorge */ ulong slot_alt[128]; for(uint i=0u;i<128u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
+	/* ★ 04.09. (Audit): rho_clamp_hits ist seit 05.09. 128 gross (Kreuztabelle 96-116); Feld und Schleife mitgezogen. Es wurde KEIN Fehler behoben -- gelesen werden ohnehin nur [7] und [69] (Diff-Pruefung L3), die Aenderung ist Vorsorge */ ulong slot_alt[128]; for(uint i=0u;i<128u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
 	std::ofstream slot_csv;
 	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
 	// "unklaren" Zellen. Die Zaehler sind geometrisch und ueber alle Samples konstant -- der
