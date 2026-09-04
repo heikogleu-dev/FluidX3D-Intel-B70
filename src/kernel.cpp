@@ -2256,7 +2256,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float kop = Sn1*Sn1+Sn2*Sn2;
 	if(Snn<1e-8f||kop<=1e-6f*Snn*(G11+G22)) {
 	const float det = G11*G22 - G12*G12;  // Degenerationskaskade (Gl. 8, Nachpruefer-Befund 2/3 geschlossen)
-	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det; }
+	if(det>=1e-4f*G11*G22&&G11>=1e-8f&&G22>=1e-8f) { s1=(R1*G22-R2*G12)/det; s2=(R2*G11-R1*G12)/det;
+		// ★ 03./04.09.2026 Slot 78: der EXAKTE entkoppelte Solve. Dieser Zweig war der EINZIGE im ganzen
+		// Solver ohne Zaehler -- und genau das hat den Etikettenfehler in B78 erzeugt: der Vollranganteil
+		// musste per Subtraktion geschaetzt werden, dabei griff ich zum naechstbesten Slot (14) und der ist
+		// der gekoppelte SKALAR-Rueckfall. Ein fehlender Zaehler hat hier nicht nur eine Messung verhindert,
+		// sondern eine FALSCHE erzeugt. Jetzt ist die Kaskade lueckenlos: 78+79+12+13+14+15 == Wirkpfad-Rest.
+		if(t%100ul==0ul&&hits[78]<0xF0000000u) atomic_inc(&hits[78]); }
 	// ★★ 2026-08-25 KLEINSTE-QUADRATE-RUECKFALL (CFD_FAC_LSQ, Default AUS -- Pruefbefund 4-A: es ist eine MODELLAENDERUNG, keine Fehlerkorrektur). Der alte Skalar-Rueckfall
 	// s1 = R1/G11 erzwingt das Ziel in Richtung 1 EXAKT und ignoriert die zweite Gleichung ganz.
 	// Ist G11 fast entartet, wird s1 riesig -- und weil G12 dabei NICHT klein sein muss, schleppt
@@ -2281,7 +2287,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// eps*G11 der Einzellink-Zellen -- 31 % der Kugelfacetten FLACKERTEN ins Rang-2 mit
 	// G~=Rauschen, s=R/1e-8~1e6, Doppelklemme, permanente Injektion (belegt: 546 statt 485
 	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
-	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett; }
+	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett;
+		if(t%100ul==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
 )+"#ifdef FACETTEN_LSQ"+R(
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
 	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } }
@@ -2429,7 +2436,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FACETTEN_ALPHA-Weiche
 	fac_tau_cnt[fid] += 1u;
 )+"#ifdef FACETTEN_KDIAG"+R(
-	{ const uxx k8 = 10ul*(uxx)fid; fac_kd[k8]+=ut; fac_kd[k8+1ul]+=tw; fac_kd[k8+2ul]+=twe; fac_kd[k8+3ul]+=fabs(P1); fac_kd[k8+4ul]+=s1; fac_kd[k8+5ul]+=phi1; fac_kd[k8+6ul]+=(rueckfall?1.0f:0.0f); fac_kd[k8+7ul]+=1.0f; fac_kd[k8+8ul]+=ut_ab; fac_kd[k8+9ul]+=yw_ab; } // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
+	{ const uxx k8 = 12ul*(uxx)fid; fac_kd[k8]+=ut; fac_kd[k8+1ul]+=tw; fac_kd[k8+2ul]+=twe; fac_kd[k8+3ul]+=fabs(P1); fac_kd[k8+4ul]+=s1; fac_kd[k8+5ul]+=phi1; fac_kd[k8+6ul]+=(rueckfall?1.0f:0.0f); fac_kd[k8+7ul]+=1.0f; fac_kd[k8+8ul]+=ut_ab; fac_kd[k8+9ul]+=yw_ab;
+	  // ★ 04.09.2026 [10]/[11]: tw und Besuchszahl NUR ueber ANGEWANDTE Besuche. Grund: fac_tau[6i] (und
+	  // damit y+ in yplus_facetten.csv und die Reportzeile 'Facetten-y+') summiert tw AUCH an
+	  // Rueckfallzellen -- dort ist tw ein 'haette'-Wert, der nie aufgepraegt wurde. Am 8-mm-Fahrzeug
+	  // sind das 42,8 % der Besuche. Jede y+-gestuetzte Aussage erbt diese Kontamination; mit [10]/[11]
+	  // laesst sie sich erstmals BEZIFFERN statt nur vermuten.
+	  fac_kd[k8+10ul]+=(rueckfall?0.0f:tw); fac_kd[k8+11ul]+=(rueckfall?0.0f:1.0f); } // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
 )+"#endif"+R( // FACETTEN_KDIAG
 	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
 )+"#ifdef FACETTEN_DIAGZ"+R(

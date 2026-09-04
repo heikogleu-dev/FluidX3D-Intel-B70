@@ -462,7 +462,7 @@ void LBM_Domain::allocate(Device& device) {
 		fac_elibb_on = s_fac_imem&&s_fac_elibb; // ★ B2: Konstruktionszustand einfrieren (dieselbe Lektion wie diagz)
 		if(fac_elibb_on) { fac_q = Memory<uchar>(device, 18ull); kernel_stream_collide.add_parameters(fac_q); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fac_kdiag_on = s_fac_imem&&s_fac_kdiag>0u; // ★ Klassen-Diagnostik: Konstruktionszustand einfrieren (Signaturposition = nach fac_q)
-		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull); kernel_stream_collide.add_parameters(fac_kd); }
+		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 12ull); kernel_stream_collide.add_parameters(fac_kd); } // 12 seit 04.09.: [10]/[11] = tw und Besuche NUR ueber angewandte (nicht-Rueckfall) Besuche
 		nachbar_on = s_fac_imem&&s_fac_nachbar>0u; // ★ 03.09. deterministische Nachbarabtastung: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd, VOR fac_wfd)
 		if(nachbar_on) { fac_nb = Memory<float>(device, 2ull); kernel_stream_collide.add_parameters(fac_nb); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fdwand_on = s_sgs_fdwand>0u; // ★ Geistermoden-Fix: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd)
@@ -679,7 +679,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + (8ull+6ull)*4ull*aktiv  // fac_geo + fac_tau
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
-		                      + (fac_kdiag_on ? 40ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 10 float)
+		                      + (fac_kdiag_on ? 48ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 12 float seit 04.09.)
 		                      + (nachbar_on ? 8ull*aktiv : 0ull)     // fac_nb (deterministische Nachbarabtastung, 2 float)
 		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull)  // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
 		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:12ull)*aktiv : 0ull); // fac_wfd (4 B) + gd_zellen (8 B), falls nicht schon von gdiag gebaut
@@ -854,7 +854,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(fac_pema_on) { fac_pu = Memory<float>(device, 6ull*aktiv); for(ulong q6=0ull;q6<6ull*aktiv;q6++) fac_pu[q6]=0.0f; fac_pu.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+(fac_ema_on?5u:4u), fac_pu); }
 	if(diagz_gebaut&&fac_diag.length()>=19ull) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u), fac_diag); // unkonditional bei DIAGZ-Emission (auch Hart-Aus: Sentinel-Puffer statt zerstoertem Platzhalter)
 	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
-	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 10ull*aktiv); for(ulong q8=0ull;q8<10ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(40ull*aktiv/1048576ull))+" MB, 10 float je Facette, Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
+	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 12ull*aktiv); for(ulong q8=0ull;q8<12ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(48ull*aktiv/1048576ull))+" MB, 10 float je Facette, Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
 	if(sgs_gdiag>0u||sgs_fdwand>0u||nachbar_on) { // ★ Liste fid->Zellindex wird von g-Diagnose, Geistermoden-Fix UND Nachbarabtastung (03.09.) gebraucht
 		gd_zellen = Memory<ulong>(device, aktiv);
 		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=f.n; } }

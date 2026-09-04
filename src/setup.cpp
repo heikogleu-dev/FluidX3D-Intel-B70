@@ -122,6 +122,38 @@ static void zeichne_text(Image* img, const uint x0, const uint y0, const string&
 		}
 	}
 }
+// ★ 04.09.2026 KASKADEN-ABNAHME (Antwort auf Befund B83). Der EXAKTE Solve -- entkoppelt wie
+// gekoppelt -- war der einzige Zweig der Degenerationskaskade ohne Zaehler. Folge: wer den
+// Vollranganteil wissen wollte, musste ihn per Subtraktion schaetzen, und genau dabei ist mir am
+// 03.09. Slot 14 als "Rang 2 voll" durchgegangen -- der ist aber der gekoppelte SKALAR-Rueckfall.
+// Ein fehlender Zaehler hat also nicht nur eine Messung verhindert, sondern eine falsche erzeugt.
+// Seit Slot 78/79 ist die Kaskade lueckenlos und schliesst sich gegen den Wirkpfad. Und weil der
+// Ausloeser ein NENNERFEHLER war, druckt diese Zeile jeden Anteil MIT seinem Nenner.
+static void pruefe_kaskade(const uint* H, const string& ort) {
+	const ulong wp=(ulong)H[7], s9=(ulong)H[9], s17=(ulong)H[17];
+	if(wp==0ull) return;
+	const ulong s12=(ulong)H[12], s13=(ulong)H[13], s14=(ulong)H[14], s15=(ulong)H[15];
+	const ulong s78=(ulong)H[78], s79=(ulong)H[79], s27=(ulong)H[27];
+	const ulong erreicht = wp>(s9+s17) ? wp-s9-s17 : 0ull;
+	const ulong summe = s78+s79+s12+s13+s14+s15;
+	const double n = (double)wp;
+	print_info("["+ort+"] SOLVER-KASKADE (Anteile je am WIRKPFAD "+to_string(wp)+", nicht an einer Teilmenge):");
+	print_info("   exakt entkoppelt [78] "+to_string(s78)+" ("+to_string((float)(100.0*(double)s78/n),2u)+" %)"
+		+" | exakt gekoppelt [79] "+to_string(s79)+" ("+to_string((float)(100.0*(double)s79/n),2u)+" %)");
+	print_info("   Skalar entkoppelt [12] "+to_string(s12)+" ("+to_string((float)(100.0*(double)s12/n),2u)+" %)"
+		+" | Skalar gekoppelt [14] "+to_string(s14)+" ("+to_string((float)(100.0*(double)s14/n),2u)+" %)  -- BEIDE angewandt, KEIN Vollrang");
+	print_info("   Rang 0 entkoppelt [13] "+to_string(s13)+" ("+to_string((float)(100.0*(double)s13/n),2u)+" %, davon rohe Tangentialmomente [27] "
+		+to_string(s27)+" = "+to_string((float)(100.0*(double)s27/n),2u)+" % des Wirkpfads)"
+		+" | Rang 0 gekoppelt [15] "+to_string(s15)+" ("+to_string((float)(100.0*(double)s15/n),2u)+" %)  -- RUECKFALL, reine Linkgeometrie");
+	if(summe!=erreicht) {
+		const ulong d = summe>erreicht ? summe-erreicht : erreicht-summe;
+		const double rel = 100.0*(double)d/(double)(erreicht>0ull?erreicht:1ull);
+		if(rel>0.5) print_error("["+ort+"] KASKADE UNVOLLSTAENDIG: 78+79+12+13+14+15 = "+to_string(summe)
+			+" gegen Wirkpfad - Skips = "+to_string(erreicht)+" (Abweichung "+to_string((float)rel,2u)
+			+" %). Ein Pfad durch apply_facette_imem wird NICHT gezaehlt -- jede Anteilsangabe aus diesen Slots ist damit unbelegt.");
+		else print_warning("["+ort+"] Kaskade schliesst auf "+to_string((float)rel,3u)+" % (Saettigung/Zaehlfenster) -- Summe "+to_string(summe)+" gegen "+to_string(erreicht)+".");
+	} else print_info("   Abnahme: 78+79+12+13+14+15 = "+to_string(summe)+" == Wirkpfad - Skips[9] - PEMA[17]. Kaskade lueckenlos.");
+}
 // ★ BUCHUNGSSCHLUSS-DETEKTOR (Baustein 2/1, 27.08.): jeder Gate-Rueckfall bucht GENAU EINMAL (Slot 69).
 // Alle beteiligten Zaehler sind t%100-gegatet am selben t und je Besuch exklusiv -> Identitaet
 // 69 == 13+15+64 (+10+16 unter SATGATE; ohne SATGATE sind 10/16 Klemmen, die angewandt buchen).
@@ -204,12 +236,12 @@ static void bericht_gdiag(LBM_Domain* D, const std::vector<Facette>& F, const st
 static void bericht_klassen(LBM_Domain* D, const std::vector<Facette>& F, const string& out_dir, const double tau_ziel, const string& ort) {
 	if(D==nullptr||!D->fac_kdiag_on) return;
 	D->fac_kd.read_from_device();
-	struct Agg { ulong n=0ull; double v=0.0, ut=0.0, tw=0.0, twe=0.0, p1=0.0, s1=0.0, phi=0.0, rf=0.0, uta=0.0, ywa=0.0; };
+	struct Agg { ulong n=0ull; double v=0.0, ut=0.0, tw=0.0, twe=0.0, p1=0.0, s1=0.0, phi=0.0, rf=0.0, uta=0.0, ywa=0.0, twa=0.0, va=0.0; }; // twa/va (04.09.): tw und Besuche NUR ueber angewandte Besuche
 	std::map<std::pair<uint,int>,Agg> M; ulong k=0ull;
-	for(const Facette& f : F) { if(f.klasse!=0u) continue; if(10ull*k+9ull>=D->fac_kd.length()) break;
-		const float* a=&D->fac_kd[10ull*k]; k++;
+	for(const Facette& f : F) { if(f.klasse!=0u) continue; if(12ull*k+11ull>=D->fac_kd.length()) break;
+		const float* a=&D->fac_kd[12ull*k]; k++;
 		Agg& g=M[std::make_pair(f.eigene_links,(int)lround(100.0f*f.yw))];
-		g.n++; g.v+=a[7]; g.ut+=a[0]; g.tw+=a[1]; g.twe+=a[2]; g.p1+=a[3]; g.s1+=a[4]; g.phi+=a[5]; g.rf+=a[6]; g.uta+=a[8]; g.ywa+=a[9]; }
+		g.n++; g.v+=a[7]; g.ut+=a[0]; g.tw+=a[1]; g.twe+=a[2]; g.p1+=a[3]; g.s1+=a[4]; g.phi+=a[5]; g.rf+=a[6]; g.uta+=a[8]; g.ywa+=a[9]; g.twa+=a[10]; g.va+=a[11]; }
 	std::vector<std::pair<std::pair<uint,int>,Agg>> V(M.begin(), M.end());
 	std::sort(V.begin(), V.end(), [](const std::pair<std::pair<uint,int>,Agg>& x, const std::pair<std::pair<uint,int>,Agg>& y){ return x.second.n>y.second.n; });
 	print_info("["+ort+"] KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG): "+to_string(k)+" Facetten in "+to_string((ulong)V.size())+" Klassen (eigene_links, y_w). Mittel je Besuch"+(tau_ziel>0.0?" -- tw/Ziel gegen tau_ziel "+to_string((float)tau_ziel,9u):string(""))+":");
@@ -2826,7 +2858,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal"); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -3650,9 +3682,9 @@ void main_setup_kugel() {
 		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
 		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
-			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
+			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -6943,9 +6975,9 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Facetten-Wirkpfad Nahfeld: "+to_string(wz)+" (Soll "+to_string(soll)+" mod 2^32), tau-Klemme "+to_string((ulong)df->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
-			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
+			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); }
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld"); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -6990,6 +7022,34 @@ static void main_setup_fahrzeug_dd() {
 				print_info("Facetten-y+ (Akkumulator, y_w je Facette): Median "+to_string(yp[yp.size()/2ull],1u)
 					+", q25 "+to_string(yp[yp.size()/4ull],1u)+", q75 "+to_string(yp[(3ull*yp.size())/4ull],1u)
 					+" ueber "+to_string((ulong)yp.size())+" Facetten (BB-Anker: 1122). CSV: yplus_facetten.csv"); }
+			// ★ 04.09.2026 KONTAMINATIONSMASS des y+ (Befund aus dem Rueckfall-Bericht 03.09.).
+			// fac_tau[6i] summiert tw ueber ALLE Besuche -- auch ueber Rueckfallbesuche, wo tw ein
+			// "haette"-Wert ist, der nie aufgepraegt wurde. Am 8-mm-Fahrzeug sind das 42,8 %. Die Zeile
+			// oben (und yplus_facetten.csv) erben das. Mit KDIAG-Slot [10]/[11] steht jetzt daneben das
+			// y+ NUR ueber angewandte Besuche -- die Differenz ist die Kontamination, in einer Zahl.
+			if(df->fac_kdiag_on&&df->fac_kd.length()>=12ull) { df->fac_kd.read_from_device();
+				std::vector<float> ya; ya.reserve(df->fac_N); ulong n_ohne=0ull;
+				std::ofstream acsv(out_dir+"yplus_facetten_angewandt.csv"); acsv << "yplus_angewandt\n";
+				for(ulong i=0ull;i<df->fac_N;i++) {
+					const float va=df->fac_kd[12ull*i+11ull];
+					if(va<=0.0f) { n_ohne++; continue; } // Facette, die NIE angewandt hat -- im kontaminierten y+ steht sie trotzdem drin
+					const float twa=df->fac_kd[12ull*i+10ull]/va;
+					const float ypa=sqrt(fmax(0.0f,twa))*df->fac_geo[8ull*i+3ull]/nu_lat_f;
+					ya.push_back(ypa); acsv << ypa << "\n";
+				}
+				acsv.close();
+				if(!ya.empty()) { std::sort(ya.begin(), ya.end());
+					const float mk=yp.empty()?0.0f:yp[yp.size()/2ull], ma=ya[ya.size()/2ull];
+					print_info("Facetten-y+ NUR ueber ANGEWANDTE Besuche: Median "+to_string(ma,1u)
+						+", q25 "+to_string(ya[ya.size()/4ull],1u)+", q75 "+to_string(ya[(3ull*ya.size())/4ull],1u)
+						+" ueber "+to_string((ulong)ya.size())+" Facetten. CSV: yplus_facetten_angewandt.csv");
+					print_info("  KONTAMINATION: "+to_string(n_ohne)+" von "+to_string(df->fac_N)+" Facetten ("
+						+to_string((float)(100.0*(double)n_ohne/(double)(df->fac_N>0ull?df->fac_N:1ull)),2u)
+						+" %) haben NIE angewandt und stehen trotzdem im kontaminierten y+; Median verschiebt sich "
+						+to_string(mk,1u)+" -> "+to_string(ma,1u)+" ("+to_string((float)(mk>0.0f?100.0*((double)ma/(double)mk-1.0):0.0),1u)+" %).");
+					print_info("  Fuer y+-gestuetzte Aussagen gilt ab sofort die ANGEWANDTE Reihe; die kontaminierte bleibt nur als Anschluss an aeltere Laeufe stehen.");
+				} else print_warning("y+ angewandt: KEINE Facette hat je angewandt -- das waere ein Totalrueckfall und ist zu pruefen.");
+			}
 		}
 		if(fac_pn>0ull) { const double qA=(double)q_inf*A_ref;
 			print_info("Cd-Pfad Nahfeld: Cd_druck = "+to_string((float)((double)units_fine.si_F((float)(fac_px/(double)fac_pn))/qA),4u)
@@ -7004,7 +7064,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Facetten-Wirkpfad Fernfeld (P8): "+to_string(wzc)+" (Soll "+to_string(sollc)+" mod 2^32), tau-Klemme "+to_string((ulong)dc->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)dc->rho_clamp_hits[9])
 			+(env_u("CFD_FERN_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[10])+", Skalar "+to_string((ulong)dc->rho_clamp_hits[12])
-			+", LSQ-Rueckfall "+to_string((ulong)dc->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+" (davon Einzellink-diagonal/ELIBB-heilbar "+to_string((ulong)dc->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
+			+", LSQ-Rueckfall "+to_string((ulong)dc->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)dc->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)dc->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)dc->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)dc->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[16])+", alpha>ut "+to_string((ulong)dc->rho_clamp_hits[18])+" (PEMA/APG im Fernfeld AUS)"):string("")));
 		if(LBM_Domain::s_fac_elibb_pur) { if(wzc!=0ull) print_error("Pur-Arm Fernfeld: Slot 7 muesste 0 sein."); else print_info("Pur-Arm (Fernfeld): Slot 7 = 0 (konstruktiv), ELIBB-Wirkpfad "+to_string((ulong)dc->rho_clamp_hits[67])+"."); }
 		else if(wzc!=(sollc&0xFFFFFFFFull)) print_error("Facetten-Wirkpfad Ist != Soll im Fernfeld -- Lookup oder Bindung defekt (P8).");
