@@ -1957,7 +1957,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , const global float* fac_nb // ★ 03.09. deterministisch: (u_t_abt, y_abt) je Facette aus dem Kernel fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld); -1 = kein Fluidnachbar, 0 = Nachbar still
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
-                        , global float* fac_kd // ★ Klassen-Diagnostik: 10 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche), racefrei (1 Zelle = 1 Facette)
+                        , global float* fac_kd // ★ Klassen-Diagnostik: 12 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, ut_ab, yw_ab, tw_angewandt, besuche_angewandt), racefrei (1 Zelle = 1 Facette)
 )+"#endif"+R( // FACETTEN_KDIAG
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f,0.0f,0.0f);
@@ -2288,7 +2288,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float detts = Gt11s*Gt22s - Gt12s*Gt12s;
 		if(detts>=1e-4f*Gt11s*Gt22s&&Gt11s>=1e-4f*G11s&&Gt22s>=1e-4f*G22s&&Gt11s>=1e-8f&&Gt22s>=1e-8f) { s1s=(R1*Gt22s-R2*Gt12s)/detts; s2s=(R2*Gt11s-R1*Gt12s)/detts; }
 )+"#ifdef FACETTEN_PINV"+R(
-		else if(Gt11s+Gt22s>=1e-4f*(G11s+G22s)&&Gt11s+Gt22s>=1e-8f) { const float tr=Gt11s+Gt22s, it2=1.0f/(tr*tr); s1s=(Gt11s*R1+Gt12s*R2)*it2; s2s=(Gt12s*R1+Gt22s*R2)*it2; res2s=fabs(fma(Gt12s,s1s,Gt22s*s2s)-R2); }
+		else if(Gt11s>=0.0f&&Gt22s>=0.0f&&Gt11s+Gt22s>=1e-4f*(G11s+G22s)&&Gt11s+Gt22s>=1e-8f) { const float tr=Gt11s+Gt22s, it2=1.0f/(tr*tr); s1s=(Gt11s*R1+Gt12s*R2)*it2; s2s=(Gt12s*R1+Gt22s*R2)*it2; res2s=fabs(fma(Gt12s,s1s,Gt22s*s2s)-R2); }
 )+"#elif defined(FACETTEN_LSQ)"+R(
 		else if(Gt11s>=1e-4f*G11s&&Gt11s>=1e-8f) { const float d=fma(Gt11s,Gt11s,Gt12s*Gt12s); s1s=(d>0.0f)?(Gt11s*R1+Gt12s*R2)/d:0.0f; s2s=0.0f; res2s=fabs(Gt12s*s1s-R2); }
 		else if(Gt22s>=1e-4f*G22s&&Gt22s>=1e-8f) { const float d=fma(Gt22s,Gt22s,Gt12s*Gt12s); s2s=(d>0.0f)?(Gt12s*R1+Gt22s*R2)/d:0.0f; s1s=0.0f; res2s=fabs(fma(Gt12s,s1s,Gt22s*s2s)-R2); }
@@ -2299,7 +2299,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		else a2_rueckfall=true;
 		}
 )+"#ifdef FACETTEN_QUERGATE"+R(
-		if(!a2_rueckfall&&res2s>def_fac_tau*twe) a2_rueckfall=true;
+		if(!a2_rueckfall&&def_fac_tau>0.0f&&res2s>def_fac_tau*twe) a2_rueckfall=true;
 )+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 		if(!a2_rueckfall&&(fabs(s1s)>2.0f*def_fac_budget*ut||fabs(s2s)>def_fac_budget*ut)) a2_rueckfall=true;
@@ -2369,7 +2369,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// das sn-Gate (Slot 16) verliert seinen kuenstlichen Ausloeser.
 	// Der Vollrangzweig oben bleibt Zeichen fuer Zeichen unangetastet -- die ebene Wand (kipp0 laeuft
 	// entkoppelt) bleibt damit bitgleich.
-	else if(Gt11+Gt22>=1e-4f*(G11+G22)&&Gt11+Gt22>=1e-8f) {
+	else if(Gt11>=0.0f&&Gt22>=0.0f&&Gt11+Gt22>=1e-4f*(G11+G22)&&Gt11+Gt22>=1e-8f) { // ★ D17: PSD-Haertung -- Rundungsnegative aus dem Schur-Komplement nicht "invertieren"
 		const float tr=Gt11+Gt22, it2=1.0f/(tr*tr);
 		s1=(Gt11*R1+Gt12*R2)*it2; s2=(Gt12*R1+Gt22*R2)*it2;
 		res2=fabs(fma(Gt12,s1,Gt22*s2)-R2);
@@ -2392,7 +2392,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// die ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen,
 	// den niemand bestellt hat. Ein exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
 )+"#ifdef FACETTEN_QUERGATE"+R(
-	if(!rueckfall&&res2>def_fac_tau*twe) { if(t%100ul==0ul) { atomic_inc(&hits[64]); if(zweig>0u) atomic_inc(&hits[103u+zweig]); } rueckfall=true; } // Slot 64
+	if(!rueckfall&&def_fac_tau>0.0f&&res2>def_fac_tau*twe) { if(t%100ul==0ul) { atomic_inc(&hits[64]); if(zweig>0u) atomic_inc(&hits[103u+zweig]); } rueckfall=true; } // Slot 64 -- ★ S2: def_fac_tau>0 als Gate-Vorbedingung, sonst ist der Nullziel-Arm ein Nullschwellen-Gate
 )+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
@@ -2523,7 +2523,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// Wandzellen je Schritt, der bei omega ~ 2 ueberrelaxiert. GEMESSEN am 8-mm-Fahrzeug (vo_f08_m2):
 		// Geschwindigkeitsklemme 14.659.833 gegen 1.570 in der Basis (x9.300), f_0 <= 0 bei 2,0 % der
 		// Besuche (Slot 93), cz_druck_rest +0,675. Modus 2 ist VERWORFEN; der Zaehler bleibt als Beleg.
-		fhn[0] += beta3; masse_ist = beta3;
+		fhn[0] += beta3; masse_ist = beta3; // D15: masse_ist == beta3 EXAKT -> die Delta-m-Buchung ist hier konstruktiv 0 (kein Messwert; Modus verworfen 04.09.)
 		if(fhn[0]+0.33333334f<=0.0f&&t%100ul==0ul&&hits[93]<0xF0000000u) atomic_inc(&hits[93]); // [93] f_0 nicht mehr positiv
 )+"#else"+R(
 		for(uint i=0u; i<def_velocity_set; i++) { fhn[i] += w(i)*beta3; masse_ist += w(i)*beta3; }
@@ -2613,7 +2613,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifndef FACETTEN_ALPHA2"+R(
 	// Werkzeugfalle Variante 3: get_opencl_c_code() laesst nach #if nur EIN Token zu -- deshalb
 	// verschachtelte ifdef/ifndef statt "#if defined(A) && !defined(B)".
+)+"#ifdef FACETTEN_MASSE_ALLE"+R(
+	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn; // ★ S8 (04.09. abends): unter MASSE_ALLE ist beta3 impulsfrei -- KEIN alpha-Normalimpuls
+)+"#else"+R(
 	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn + alph*(S1x*nx+S1y*ny+S1z*nz); // Stufe 1: alpha-Normalimpuls ehrlich mitzaehlen
+)+"#endif"+R( // FACETTEN_MASSE_ALLE
 )+"#else"+R(
 	fac_tau_acc[a+5ul] += Sn1*s1+Sn2*s2+Snn*sn;           // ALPHA2: via downgedatete Sn/Snn inkl. alpha
 )+"#endif"+R( // FACETTEN_ALPHA2-Weiche
@@ -2628,7 +2632,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	  // Rueckfallzellen -- dort ist tw ein 'haette'-Wert, der nie aufgepraegt wurde. Am 8-mm-Fahrzeug
 	  // sind das 42,8 % der Besuche. Jede y+-gestuetzte Aussage erbt diese Kontamination; mit [10]/[11]
 	  // laesst sie sich erstmals BEZIFFERN statt nur vermuten.
-	  fac_kd[k8+10ul]+=(rueckfall?0.0f:tw); fac_kd[k8+11ul]+=(rueckfall?0.0f:1.0f); } // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
+	  fac_kd[k8+10ul]+=(pass2_an?tw:0.0f); fac_kd[k8+11ul]+=(pass2_an?1.0f:0.0f); } // ★ S1 (04.09. abends): pass2_an statt !rueckfall -- unter KRAFT=2 ist pass2_an ueberall false, rueckfall nicht // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
 )+"#endif"+R( // FACETTEN_KDIAG
 	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
 )+"#ifdef FACETTEN_DIAGZ"+R(
@@ -3000,7 +3004,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float rv_  = nut_/nu0_; // nu0_ > 0 ist Bauvoraussetzung, wird im Host geprueft
 			const uint  b_   = rv_<1.0f ? 0u : (rv_<10.0f ? 1u : (rv_<100.0f ? 2u : (rv_<1000.0f ? 3u : 4u)));
 			atomic_inc(&rho_clamp_hits[30u+b_]);
-			/* ★ WANDNAHE LAGE, Slots 33..37 (2026-08-23). Der Dekadenhistogramm oben mittelt ueber
+			/* ★ WANDNAHE LAGE, Slots 35..39 (2026-08-23). Der Dekadenhistogramm oben mittelt ueber
 			   das GANZE Gitter -- Nachlauf und Freistrom eingeschlossen -- und beantwortet damit
 			   nicht die Frage, um die es geht: traegt die anliegende Grenzschicht ZU VIEL oder ZU
 			   WENIG modellierte Mischung? Der Massstab dafuer ist nicht die molekulare Viskositaet,
@@ -3017,12 +3021,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(wand1_) {
 				const uint bw_ = rv_<5.0f ? 0u : (rv_<15.0f ? 1u : (rv_<30.0f ? 2u : (rv_<60.0f ? 3u : 4u)));
 				atomic_inc(&rho_clamp_hits[35u+bw_]);
-				/* Slots 38..42: dieselbe Lage, aber NUR mit vorwaertsgerichteter Stroemung.
+				/* Slots 40..44: dieselbe Lage, aber NUR mit vorwaertsgerichteter Stroemung.
 				   In abgeloesten Gebieten GEHOERT viel nu_t hin -- sie mitzuzaehlen wuerde den
 				   Ueberdissipations-Befund kuenstlich aufblasen. Dieser Teilsatz ist die
 				   ehrliche Fassung: anliegende Stroemung, wo kappa*y+ ueberhaupt gilt. */
 				if(uxn>0.0f) atomic_inc(&rho_clamp_hits[40u+bw_]);
-				/* Slots 43..46 loesen den nach oben OFFENEN Bin auf. Ohne sie laesst sich nicht
+				/* Slots 45..48 loesen den nach oben OFFENEN Bin auf. Ohne sie laesst sich nicht
 				   sagen, ob eine Senkung von nu_t bei 20 oder bei 200 landet -- und genau davon
 				   haengt ab, ob eine Aenderung der Konstante ueberhaupt in der richtigen
 				   Groessenordnung waere (Pruefbefund 11). */
@@ -3375,7 +3379,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(xx<0||yy<0||xx>=(int)def_Nx||yy>=(int)def_Ny||zz>=(int)def_Nz) continue;
 			if((flags[index((uint3)((uint)xx,(uint)yy,(uint)zz))]&TYPE_BO)==TYPE_S) nah = true;
 		}
-		if(nah) return; // Aufpraegung wuerde adjazente Kraefte kontaminieren (V1-Lehre)
+		if(nah) { if(t%100ul==0ul) atomic_inc(&diag[117]); return; } // ★ S5: Aussparungen zaehlen (Slot 117) -- der Schalter CFD_BODEN_EQ_ABSTAND hatte keinen Wirkpfad
 	}
 	if(t%100ul==0ul) atomic_inc(&diag[20]); // XL-3 M2: Wirkpfad-Nachweis IM Binary (Iron Rule 3; die V1-Vorlage war jahrelang stiller No-Op)
 	uxx j[def_velocity_set]; neighbors(n, j);
