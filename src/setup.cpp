@@ -312,6 +312,38 @@ static void pruefe_kraftpfad(const ulong h70, const ulong h69, const ulong h7, c
 		if(h70!=soll) print_error("["+ort+"] Kraftpfad Slot 70 = "+to_string(h70)+" != Soll 7-9-17 = "+to_string(soll)+" (Wirkpfad "+to_string(h7)+", u_t~0 "+to_string(h9)+", PEMA-u_t~0 "+to_string(h17)+") -- Modus 2 muss GENAU alle Solve-Zellen tragen.");
 		else print_info("["+ort+"] KRAFTPFAD Modus 2: "+to_string(h70)+" Kraftzellen == Wirkpfad-9-17 = "+to_string((float)(h7>0ull?100.0*(double)h70/(double)h7:0.0),1u)+" % des Wirkpfads (alle Solve-Zellen; Rueckfaelle darin "+to_string(h69)+")."); }
 }
+// ★ 04.09.2026 ZIELERFUELLUNG. Beantwortet die Frage, die "Anteil MIT Modell" NICHT beantwortet:
+// wieviel vom Wandschub-Ziel kommt in den angewandten Zellen tatsaechlich an? Die Rang-1-Pseudoinverse
+// erfuellt das Ziel nur in Richtung ihres einen erreichbaren Eigenvektors -- eine Zelle kann als
+// "angewandt" zaehlen und trotzdem nur einen Bruchteil aufpraegen. Slots 81-89, Kernel ~2430.
+static void bericht_zielerfuellung(const uint* H, const ulong wp, const ulong s9, const ulong s17, const ulong s69, const string& ort) {
+	const ulong n=(ulong)H[81];
+	if(n==0ull) { if(wp>0ull) print_warning("["+ort+"] ZIELERFUELLUNG: Slot 81 = 0, obwohl der Wirkpfad "+to_string(wp)+" zaehlt -- das Histogramm wurde nie erreicht (MESS-NUR? frueher Ausstieg?)."); return; }
+	const ulong ohne=(ulong)H[82];
+	ulong b[9], sum=0ull; for(uint i=0u;i<9u;i++) { b[i]=(ulong)H[83u+i]; sum+=b[i]; }
+	const ulong ang=ohne+sum;
+	const double dn=(double)n;
+	print_info("["+ort+"] ZIELERFUELLUNG des Wandmodells (Stichprobe: jeder 100. Schritt, jede 64. Facette):");
+	// Gegenprobe: zwei unabhaengige Instrumente muessen denselben angewandten Anteil sehen.
+	const ulong erreicht = wp>(s9+s17) ? wp-s9-s17 : 0ull;
+	const double q_hist = 100.0*(double)ang/dn;
+	const double q_slot = erreicht>0ull ? 100.0*(double)(erreicht>s69?erreicht-s69:0ull)/(double)erreicht : 0.0;
+	print_info("   angewandt in der Stichprobe: "+to_string(ang)+" von "+to_string(n)+" = "+to_string((float)q_hist,2u)
+		+" %  |  GEGENPROBE aus Slot 7/9/17/69: "+to_string((float)q_slot,2u)+" %");
+	if(fabs(q_hist-q_slot)>2.0) print_warning("   Die beiden Instrumente weichen um "+to_string((float)fabs(q_hist-q_slot),2u)
+		+" Prozentpunkte ab. Sie messen dieselbe Groesse auf verschiedenen Wegen -- eine Abweichung ueber 2 pp heisst, dass eines von beiden nicht misst, was sein Name sagt.");
+	if(ang==0ull) { print_warning("   Kein einziger angewandter Besuch in der Stichprobe -- die Verteilung unten ist leer."); return; }
+	const double da=(double)ang;
+	const char* nam[9] = {"r <= -10       GEGENRICHTUNG, um Dekaden zu stark","-10 < r <= -1  GEGENRICHTUNG, mind. volle Zielstaerke","-1 < r < 0     GEGENRICHTUNG, schwach",
+	                      " 0 <= r < 0,5  stark unter Ziel"," 0,5 - 0,9     unter Ziel"," 0,9 - 1,1     TREFFER",
+	                      " 1,1 - 2,0     ueber Ziel"," 2 - 10        stark ueber Ziel"," r >= 10       um Dekaden zu stark"};
+	print_info("   r = aufgepraegter Tangentialimpuls / Wandschub-Ziel, JE BESUCH (exakt erfuellt => r = 1):");
+	for(uint i=0u;i<9u;i++) print_info("     "+string(nam[i])+"  "+to_string(b[i])+"  ("+to_string((float)(100.0*(double)b[i]/da),2u)+" % der angewandten)");
+	if(ohne>0ull) print_info("     ohne Ziel  (twe = 0)         "+to_string(ohne)+"  ("+to_string((float)(100.0*(double)ohne/da),2u)+" % -- kein Wandschub gefordert, r undefiniert)");
+	print_info("   KERNAUSSAGE: "+to_string((float)(100.0*(double)b[5]/da),2u)+" % der ANGEWANDTEN Besuche treffen ihr Ziel auf +-10 %. "
+		+"Bezogen auf ALLE Wandbesuche sind das "+to_string((float)(100.0*(double)b[5]/dn),2u)+" % -- das ist die Zahl, die 'Anteil mit Modell' ("
+		+to_string((float)q_hist,2u)+" %) NICHT sagt.");
+}
 static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const bool satgate, const string& ort) {
 	const ulong soll = h13+h15+h64+(satgate?h10+h16:0ull);
 	const string formel = string("13+15+64")+(satgate?"+10+16":"");
@@ -2915,7 +2947,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal"); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -3741,7 +3773,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -7084,7 +7116,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv); }
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld"); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).

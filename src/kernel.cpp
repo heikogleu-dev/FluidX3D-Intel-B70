@@ -2427,6 +2427,37 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	phi1 += alph*(S1x*t1x+S1y*t1y+S1z*t1z); phi2 += alph*(S1x*t2x+S1y*t2y+S1z*t2z);
 )+"#endif"+R(
 )+"#endif"+R( // FACETTEN_ALPHA
+	// ★ 04.09.2026 ZIELERFUELLUNG (Slots 81-89). Der Anlass: "Anteil der Wandbehandlungen MIT Modell"
+	// sagt, wieviele Besuche ein Modell BEKOMMEN haben -- nicht, wieviel vom Wandschub-Ziel dabei
+	// ankommt. Die Rang-1-Pseudoinverse erfuellt R nur in Richtung ihres einen erreichbaren
+	// Eigenvektors; der Rest bleibt liegen und wurde bisher von NICHTS gemessen (res2 sieht nur t2).
+	// Gemessen wird r = phi1 / (-def_fac_tau*twe): phi1 ist der tatsaechlich aufgepraegte
+	// Tangentialimpuls (Pass 2 + alpha, unter ALPHA2 sind G/Sn downgedatet, also enthalten), das Ziel
+	// ist -def_fac_tau*twe. Exakte Erfuellung => r == 1.
+	// WARUM JE BESUCH UND NICHT ALS SUMME (Vorpruefagent 04.09., an export/zh_pinv4 nachgerechnet):
+	// phi1 traegt P1 mit, und |P1|/twe liegt am Fahrzeug je Klasse zwischen 25 und 1145. Der Solver
+	// hebt zu ueber 99 % P1 weg. Sum(Ist)/Sum(Soll) ist damit der Quotient zweier winziger Reste
+	// zweier fast gleicher Riesen -- an der 4-mm-Rechnung -12,07 statt 1, und 369 von 440 Klassen
+	// mit umgekehrtem Vorzeichen. Das Verhaeltnis JE BESUCH normiert sich selbst.
+	// Stichprobe wie beim Momenten-Histogramm 2129: t%100 UND jede 64. Facette (uint-Wickel).
+	{	const float zi_ze = def_fac_tau*twe;
+		if(t%100ul==0ul&&((fid*2654435761u)&4227858432u)==0u) {
+			if(hits[81]<0xF0000000u) atomic_inc(&hits[81]); // [81] Nenner: alle gestichprobten Besuche
+			if(pass2_an) {
+				if(zi_ze>0.0f) {
+					const float r_ze = phi1/(-zi_ze);
+					// ★ 04.09. NACHGESCHAERFT nach dem Erstlauf (vc_ziel, Kanal kipp26): der erste Entwurf
+					// hatte EINEN Eimer fuer r<0 und der lief mit 57,3 % voll. Das wirft "leicht in die
+					// Gegenrichtung" mit "um Dekaden daneben" zusammen -- bei |P1|/Ziel zwischen 25 und
+					// 1145 (facetten_klassen.csv) ist genau das der diagnostisch entscheidende Unterschied:
+					// ein nicht weggehobenes P1 erscheint als GROSSER Betrag, eine echte Vorzeichenumkehr
+					// des Wandschubs als kleiner.
+					const uint b_ze = (r_ze<=-10.0f)?0u:((r_ze<=-1.0f)?1u:((r_ze<0.0f)?2u:((r_ze<0.5f)?3u:((r_ze<0.9f)?4u:((r_ze<1.1f)?5u:((r_ze<2.0f)?6u:((r_ze<10.0f)?7u:8u)))))));
+					if(hits[83u+b_ze]<0xF0000000u) atomic_inc(&hits[83u+b_ze]); // [83..91]
+				} else if(hits[82]<0xF0000000u) atomic_inc(&hits[82]); // [82] angewandt, aber kein Ziel (twe==0)
+			}
+		}
+	}
 	float fwx = -(phi1*t1x+phi2*t2x), fwy = -(phi1*t1y+phi2*t2y), fwz = -(phi1*t1z+phi2*t2z);
 )+"#ifdef FACETTEN_ELIBB"+R(
 	// ★★ B3-Pruefbefund 1b (2026-08-25 nacht, HART): P1 wird NACH der Blende gemessen -- das
