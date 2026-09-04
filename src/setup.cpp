@@ -1540,6 +1540,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	ulong n_rang[3]={0,0,0}, n_entk=0ull, n_gek=0ull, n_uebersprungen=0ull, n_ohne_link=0ull;
 	ulong n_links[20]; for(uint i=0u;i<20u;i++) n_links[i]=0ull;
 	ulong n_verh[8]; for(uint i=0u;i<8u;i++) n_verh[i]=0ull; // lmin/lmax: <1e-9,<1e-7,<2.5e-5,<1e-3,<1e-2,<0.1,<0.5,>=0.5
+	ulong wanderung[3][3]; for(uint i=0u;i<3u;i++) for(uint j=0u;j<3u;j++) wanderung[i][j]=0ull;
 	ulong n_praedikat_diff=0ull, n_kernel_mehr=0ull; ulong links_kernel_ges=0ull, links_host_ges=0ull;
 	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
 	for(const Facette& f : FF) {
@@ -1565,6 +1566,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		if(nl_k!=nl_h) { n_praedikat_diff++; if(nl_k>nl_h) n_kernel_mehr++; }
 		n_links[nl_k<19u?nl_k:19u]++;
 		if(nl_k==0u) { n_ohne_link++; continue; }
+		double Groh[3][3]; for(uint a=0u;a<3u;a++) for(uint b=0u;b<3u;b++) Groh[a][b]=G[a][b]; // Rohmomente sichern
 		if(alpha2_an&&S0>0.0) { const double Dd=6.0/S0; for(uint a=0u;a<3u;a++) for(uint b=0u;b<3u;b++) G[a][b]-=Dd*S1[a]*S1[b]; }
 		// Normale und IRGENDEINE Orthonormalbasis der Tangentialebene -- der Rang ist drehinvariant,
 		// die Wahl ist deshalb gleichgueltig (und genau das ist der Punkt: der Kernel waehlt sie aus
@@ -1576,19 +1578,30 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		double e1[3]={h[1]*nv[2]-h[2]*nv[1], h[2]*nv[0]-h[0]*nv[2], h[0]*nv[1]-h[1]*nv[0]};
 		const double e1l=sqrt(e1[0]*e1[0]+e1[1]*e1[1]+e1[2]*e1[2]); for(uint a=0u;a<3u;a++) e1[a]/=e1l;
 		const double e2[3]={nv[1]*e1[2]-nv[2]*e1[1], nv[2]*e1[0]-nv[0]*e1[2], nv[0]*e1[1]-nv[1]*e1[0]};
-		auto quad=[&](const double* u, const double* v) { double r=0.0; for(uint a=0u;a<3u;a++) for(uint b=0u;b<3u;b++) r+=u[a]*G[a][b]*v[b]; return r; };
-		double A11=quad(e1,e1), A22=quad(e2,e2), A12=quad(e1,e2);
-		const double Snn=quad(nv,nv), Sn1=quad(e1,nv), Sn2=quad(e2,nv);
-		const double kop=Sn1*Sn1+Sn2*Sn2;
-		const bool entkoppelt = (Snn<1e-8)||(kop<=1e-6*Snn*(A11+A22)); // drehinvariant, also statisch entscheidbar
-		if(entkoppelt) n_entk++; else { n_gek++; A11-=Sn1*Sn1/Snn; A22-=Sn2*Sn2/Snn; A12-=Sn1*Sn2/Snn; }
-		const double tr=A11+A22, det=A11*A22-A12*A12;
-		double disc=tr*tr-4.0*det; if(disc<0.0) disc=0.0;
-		const double lmax=0.5*(tr+sqrt(disc)), lmin=0.5*(tr-sqrt(disc));
-		const double verh = (lmax>0.0) ? (lmin>0.0?lmin/lmax:0.0) : -1.0;
-		if(!(lmax>1e-12)) n_rang[0]++;
-		else if(verh<1e-9) n_rang[1]++;
-		else n_rang[2]++;
+		// ★ Klassifikation als Lambda: sie laeuft ZWEIMAL -- einmal auf den Rohmomenten, einmal nach dem
+		// ALPHA2-Downdate. Der Unterschied ist genau der Rangverlust, den die ZELLWEISE Massenerhaltung
+		// kostet, getrennt von dem, den die Linkgeometrie selbst mitbringt. Bei einer Einzellink-Facette
+		// ist G' = G3 - (6/S0) S1 S1^T analytisch NULL -- dort zahlt die Nebenbedingung den vollen Rang.
+		auto klassifiziere=[&](const double M[3][3], bool* entk_aus, double* verh_aus) {
+			auto q=[&](const double* u, const double* v) { double r=0.0; for(uint a=0u;a<3u;a++) for(uint b=0u;b<3u;b++) r+=u[a]*M[a][b]*v[b]; return r; };
+			double A11=q(e1,e1), A22=q(e2,e2), A12=q(e1,e2);
+			const double Snn=q(nv,nv), Sn1=q(e1,nv), Sn2=q(e2,nv);
+			const bool ent = (Snn<1e-8)||((Sn1*Sn1+Sn2*Sn2)<=1e-6*Snn*(A11+A22));
+			if(!ent) { A11-=Sn1*Sn1/Snn; A22-=Sn2*Sn2/Snn; A12-=Sn1*Sn2/Snn; }
+			const double tr=A11+A22, det=A11*A22-A12*A12;
+			double disc=tr*tr-4.0*det; if(disc<0.0) disc=0.0;
+			const double lmax=0.5*(tr+sqrt(disc)), lmin=0.5*(tr-sqrt(disc));
+			const double vh = (lmax>0.0) ? (lmin>0.0?lmin/lmax:0.0) : -1.0;
+			if(entk_aus) *entk_aus=ent; if(verh_aus) *verh_aus=vh;
+			return (!(lmax>1e-12)) ? 0u : ((vh<1e-9) ? 1u : 2u);
+		};
+		bool entkoppelt=false; double verh=0.0;
+		const uint rg_roh = klassifiziere(Groh, nullptr, nullptr);
+		const uint rg = klassifiziere(G, &entkoppelt, &verh);
+		wanderung[rg_roh][rg]++;
+		if(entkoppelt) n_entk++; else n_gek++;
+		n_rang[rg]++;
+		const double lmax = (verh>=0.0) ? 1.0 : 0.0; // nur noch fuer die Histogramm-Bedingung unten
 		if(lmax>1e-12) {
 			const double v=verh<0.0?0.0:verh;
 			const uint b = v<1e-9?0u:(v<1e-7?1u:(v<2.5e-5?2u:(v<1e-3?3u:(v<1e-2?4u:(v<0.1?5u:(v<0.5?6u:7u))))));
@@ -1613,6 +1626,17 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	print_info("   FLACKERN: "+to_string(n_flacker)+" Facetten ("+to_string((float)(100.0*(double)n_flacker/d),2u)
 		+" %) haben Rang 2, fallen aber je nach Stroemungsrichtung durch den Test det >= 1e-4*G11*G22. "
 		+"Sie sind der Anteil, den eine feste Basiswahl (t1 auf den Hauptvektor) in den exakten Zweig heben WUERDE.");
+	// ★ DIE ENTSCHEIDENDE TABELLE: wieviel Rang kostet die ZELLWEISE Massenerhaltung?
+	{	ulong verloren=0ull, gleich=0ull;
+		for(uint i=0u;i<3u;i++) for(uint j=0u;j<3u;j++) { if(j<i) verloren+=wanderung[i][j]; else if(j==i) gleich+=wanderung[i][j]; }
+		print_info("   RANGVERLUST DURCH DAS ALPHA2-DOWNDATE (zellweise Massenerhaltung), Rohmomente -> nach Downdate:");
+		for(uint i=0u;i<3u;i++) { string z="";
+			for(uint j=0u;j<3u;j++) z+=(j?"  ":"")+string("->Rang")+to_string(j)+": "+to_string(wanderung[i][j]);
+			print_info("     roh Rang "+to_string(i)+":  "+z); }
+		print_info("     Rang VERLOREN: "+to_string(verloren)+"  ("+to_string((float)(100.0*(double)verloren/d),2u)
+			+" % aller Facetten) -- diese Facetten waeren OHNE die zellweise Massenerhaltung hoeher eingestuft."
+			+" Unveraendert: "+to_string(gleich)+".");
+	}
 	print_info("   Wandlinks je Facette (Kernel-Gate): Mittel "+to_string((float)((double)links_kernel_ges/d),2u)+"; Verteilung:");
 	{	string z=""; for(uint i=0u;i<20u;i++) if(n_links[i]>0ull) z+=(z.empty()?"":", ")+to_string(i)+": "+to_string(n_links[i]); print_info("     "+z); }
 	// ★ ZWEI WAHRHEITEN, beziffert statt geheilt: der Facettenbau benutzt flags==wand_flag (am
