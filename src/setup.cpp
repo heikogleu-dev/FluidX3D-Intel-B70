@@ -129,9 +129,21 @@ static void zeichne_text(Image* img, const uint x0, const uint y0, const string&
 // Ein fehlender Zaehler hat also nicht nur eine Messung verhindert, sondern eine falsche erzeugt.
 // Seit Slot 78/79 ist die Kaskade lueckenlos und schliesst sich gegen den Wirkpfad. Und weil der
 // Ausloeser ein NENNERFEHLER war, druckt diese Zeile jeden Anteil MIT seinem Nenner.
-static void pruefe_kaskade(const uint* H, const string& ort) {
+static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur) {
 	const ulong wp=(ulong)H[7], s9=(ulong)H[9], s17=(ulong)H[17];
 	if(wp==0ull) return;
+	// ★ 04.09.2026, am ersten Einsatz gelernt: unter MESS-NUR steigt apply_facette_imem VOR der
+	// Degenerationskaskade aus (Slot 75 ist der MESSNUR-Wirkpfad) -- alle sechs Kaskadenslots sind
+	// dann konstruktiv null, und mein Waechter hat den Arm za_messnur deshalb hart abgebrochen.
+	// Der Waechter hatte in der Sache recht und in der Regel unrecht. Statt ihn nur auszunehmen,
+	// wird MESS-NUR hier zur EIGENEN Abnahme: die Kaskade MUSS leer sein und Slot 75 MUSS feuern.
+	if(messnur) {
+		const ulong ks=(ulong)H[78]+(ulong)H[79]+(ulong)H[12]+(ulong)H[13]+(ulong)H[14]+(ulong)H[15], s75=(ulong)H[75];
+		if(ks!=0ull) print_error("["+ort+"] MESS-NUR, aber die Solver-Kaskade hat gezaehlt (78+79+12+13+14+15 = "+to_string(ks)+"). Der MESSNUR-Ausstieg greift nicht -- der Arm ist NICHT reines Bounce-Back.");
+		else if(s75==0ull) print_error("["+ort+"] MESS-NUR angefordert, aber Slot 75 = 0 -- stiller No-Op, der Ausstieg wird nie erreicht.");
+		else print_info("["+ort+"] MESS-NUR-ABNAHME: Kaskade konstruktiv leer, Wirkpfad Slot 75 = "+to_string(s75)+" von "+to_string(wp)+" Besuchen ("+to_string((float)(100.0*(double)s75/(double)wp),2u)+" %). Kein Wandmodellimpuls, Facetten nur gemessen.");
+		return;
+	}
 	const ulong s12=(ulong)H[12], s13=(ulong)H[13], s14=(ulong)H[14], s15=(ulong)H[15];
 	const ulong s78=(ulong)H[78], s79=(ulong)H[79], s27=(ulong)H[27];
 	const ulong erreicht = wp>(s9+s17) ? wp-s9-s17 : 0ull;
@@ -2858,7 +2870,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -3684,7 +3696,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -6977,7 +6989,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld"); }
+		{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld"); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
