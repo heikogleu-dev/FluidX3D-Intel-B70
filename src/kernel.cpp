@@ -2250,7 +2250,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	float s1=0.0f, s2=0.0f, sn=0.0f;
 	bool rueckfall=false; // ★ BUCHUNGSSCHLUSS (Baustein 2/1, 27.08.): Rueckfaelle steigen nicht mehr per return aus, sondern buchen mit s=0 (P-only)
 	float res2=0.0f;
-	uint zweig=0u; // ★ KREUZTABELLE 05.09.: Solve-Zweig der REALEN Kaskade, 1=[78] 2=[79] 3=[12] 4=[14]/[80]; nur Zaehler, kein Float
+	uint zweig=0u; // ★ KREUZTABELLE 04.09. abends: Solve-Zweig der REALEN Kaskade, 1=[78] 2=[79] 3=[12] 4=[14]/[80]; nur Zaehler, kein Float
 )+"#ifdef FACETTEN_MASSE_X"+R(
 	// ★ ARM X (CFD_FAC_MASSE_ALLE=3, 04.09.2026): Rueckfall-Entscheid im SCHATTEN wie unter ALPHA2 --
 	// Downdate auf KOPIEN, Entkopplungs-Gate, Kaskade, Schatten-Solve, Gates auf dem Schatten-s. Die

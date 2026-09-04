@@ -386,7 +386,7 @@ static void bericht_zielerfuellung(const uint* H, const ulong wp, const ulong s9
 		+"Bezogen auf ALLE Wandbesuche sind das "+to_string((float)(100.0*(double)b[5]/dn),2u)+" % -- das ist die Zahl, die 'Anteil mit Modell' ("
 		+to_string((float)q_hist,2u)+" %) NICHT sagt.");
 }
-// ★ 05.09.2026 KREUZTABELLE Gate x Solve-Zweig (Slots 96-116). Antwort auf [95] = 8-22 % am Kanal (vq_x): WELCHER
+// ★ 04.09.2026 abends KREUZTABELLE Gate x Solve-Zweig (Slots 96-116). Antwort auf [95] = 8-22 % am Kanal (vq_x): WELCHER
 // Zweig der realen Kaskade liefert das s, das ein Gate reisst? Spalte = Zweig VOR dem Gate (Kernel: uint zweig,
 // gesetzt in 78/79/12/14, gelesen an 10/16/64 und an den X-Zellen 94/95). Abnahme je Zeile: Summe der vier Spalten
 // == Gate-Slot (dieselbe t%100-Stichprobe, dieselbe Kernelzeile). Konstruktive Nullspalten als Selbsttest.
