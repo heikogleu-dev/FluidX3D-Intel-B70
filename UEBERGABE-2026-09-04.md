@@ -70,6 +70,18 @@ Die X-Arme hatten keinen FELD-HASH, weil ein abbrechender Wächter (`print_error
 feuerte. Jetzt wird der Hash direkt nach dem Lauf gedruckt, vor jedem Bericht. Die Berichte ändern u nicht — die Werte
 bleiben identisch, die 0/1/2-Sollhashes von heute gelten weiter. Ab morgen haben auch X-Arme einen Hash.
 
+## 23:00 — Sammelbehebung der latenten Fehler eingecheckt (`b9dab75`), zwei Prüfrunden
+
+26 Punkte aus den vier Audits des Tages: 3 Laufkiller (K2 FACETTEN=1/2-Abbruch in pruefe_kaskade, K3 Pur×MASSE_ALLE/KRAFT/PINV,
+K1 zurückgenommen — Befund galt für einen älteren Stand), 10 stille Fehlmessungen (S1 KDIAG unter KRAFT=2, S2 Nullziel-Quergate,
+S3 Slice-Legacy-Uhr ohne Zähler, S4 ELIBB=1 ohne Nullwächter, S5 BODEN_EQ_ABSTAND ohne Wirkpfad, S6 KDIAG nie alloziert,
+S8 Normalrest unter MASSE_ALLE, S9 Zielerfüllung-Randfälle, D17 PINV-PSD), Rest Doku. Die Diff-Prüfung fand in meiner ersten
+Fassung drei Fehler (Kommentar mitten in der Kernelzeile → QUERGATE-Build tot; K1 hätte den Abbruch eingebaut; S4 unerreichbar) —
+behoben, nachgeprüft, sauber. **Bewusst offen:** D9 fac_geo-Stride (24 MB, Bitgleichheitsbeweis teurer als der Gewinn), S7
+(unverdrahtete Schalter in fahrzeug/fernfeld ansagen), S10 (ALPHA-Soll-Test am Kanal), D4/D6/D8/D11 (Kosmetik).
+**Abnahme:** `logs/vt_latent_serie.txt` (iGPU, 6 Arme) — läuft nach vs_kreuz; Kernel-Änderungen sind in den Hash-Armen nicht
+emittiert (S1 KDIAG, S2 QUERGATE, D17 PINV) bzw. nur Bericht (S8) → aus/m1/m2 müssen bitgleich bleiben.
+
 ## Läuft / steht bereit
 
 - `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.
