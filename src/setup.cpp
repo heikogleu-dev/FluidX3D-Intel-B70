@@ -386,6 +386,45 @@ static void bericht_zielerfuellung(const uint* H, const ulong wp, const ulong s9
 		+"Bezogen auf ALLE Wandbesuche sind das "+to_string((float)(100.0*(double)b[5]/dn),2u)+" % -- das ist die Zahl, die 'Anteil mit Modell' ("
 		+to_string((float)q_hist,2u)+" %) NICHT sagt.");
 }
+// ★ 05.09.2026 KREUZTABELLE Gate x Solve-Zweig (Slots 96-116). Antwort auf [95] = 8-22 % am Kanal (vq_x): WELCHER
+// Zweig der realen Kaskade liefert das s, das ein Gate reisst? Spalte = Zweig VOR dem Gate (Kernel: uint zweig,
+// gesetzt in 78/79/12/14, gelesen an 10/16/64 und an den X-Zellen 94/95). Abnahme je Zeile: Summe der vier Spalten
+// == Gate-Slot (dieselbe t%100-Stichprobe, dieselbe Kernelzeile). Konstruktive Nullspalten als Selbsttest.
+static void bericht_gate_kreuztabelle(const uint* H, const string& ort, const bool x, const bool satgate, const bool messnur) {
+	const ulong wp=(ulong)H[7];
+	if(wp==0ull) return;
+	if(messnur) { ulong s=0ull; for(uint i=96u;i<=116u;i++) s+=(ulong)H[i];
+		if(s!=0ull) print_error("["+ort+"] MESS-NUR, aber die Gate-Kreuztabelle hat gezaehlt ("+to_string(s)+") -- der Ausstieg greift nicht.");
+		else print_info("["+ort+"] Gate-Kreuztabelle unter MESS-NUR konstruktiv leer."); return; }
+	struct Zeile { const char* name; uint gate; uint basis; bool satt; };
+	const Zeile Z[5] = { {satgate?"SATGATE-Rueckfall [10]            ":"u_s-Klemme [10]                   ",10u,96u,false},
+	                     {satgate?"sn-Gate-Rueckfall [16]            ":"s_n-Klemme [16]                   ",16u,100u,false},
+	                     {"Quergate [64]                     ",64u,104u,false},
+	                     {"X: Schatten-RF, roh angewandt [94]",94u,108u,true},
+	                     {"X: roh-RF, Schatten angewandt [95]",95u,112u,true} };
+	const uint nz = x ? 5u : 3u;
+	print_info("["+ort+"] GATE x SOLVE-ZWEIG (t%100; Spalte = Zweig der REALEN Kaskade vor dem Gate, unter MASSE_ALLE der rohe):");
+	print_info("   Zeile                                 N  |  exakt entk.[78]  exakt gek.[79]  Skalar entk.[12]  Skalar/Pinv gek.[14]");
+	bool ok=true;
+	for(uint r=0u; r<nz; r++) {
+		const ulong n=(ulong)H[Z[r].gate];
+		ulong c[4], s=0ull; for(uint k=0u;k<4u;k++) { c[k]=(ulong)H[Z[r].basis+k]; s+=c[k]; }
+		const ulong extra = (Z[r].gate==95u) ? (ulong)H[116] : 0ull;
+		const double dn=(double)(n>0ull?n:1ull);
+		string z=string("   ")+Z[r].name+"  "+to_string(n)+"  |";
+		for(uint k=0u;k<4u;k++) z += "  "+to_string(c[k])+" ("+to_string((float)(100.0*(double)c[k]/dn),2u)+" %)";
+		if(Z[r].gate==95u) z += "  | roh Rang-0 [116] "+to_string(extra);
+		print_info(z);
+		if(n>=0xF0000000ull||(Z[r].satt&&s>=0xF0000000ull)) { print_info("      Zeile gesaettigt -- Identitaet nicht pruefbar."); continue; }
+		if(s+extra!=n) { ok=false; print_error("["+ort+"] KREUZTABELLE: Zeile "+string(Z[r].name)+" summiert auf "+to_string(s+extra)+" != Gate-Slot "+to_string(n)+" -- ein Gate zaehlt an einer Zelle ohne Solve-Zweig, oder die Stichproben decken sich nicht."); }
+		if(Z[r].gate==64u&&(c[0]|c[1])!=0ull) { ok=false; print_error("["+ort+"] KREUZTABELLE: Quergate zaehlt in einem EXAKTEN Zweig ("+to_string(c[0])+"/"+to_string(c[1])+") -- res2 ist dort 0."); }
+		if(Z[r].gate==16u&&(c[0]|c[2])!=0ull) { ok=false; print_error("["+ort+"] KREUZTABELLE: sn-Gate zaehlt in einem ENTKOPPELTEN Zweig ("+to_string(c[0])+"/"+to_string(c[2])+") -- der sn-Block ist dort unerreichbar."); }
+	}
+	if(ok) print_info("   Abnahme: jede Zeile summiert exakt auf ihren Gate-Slot; Nullspalten (Quergate x exakt, sn-Gate x entkoppelt) halten.");
+	if(x) { const ulong n95=(ulong)H[95], c78=(ulong)H[112], c79=(ulong)H[113];
+		if(n95>0ull&&n95<0xF0000000ull) { const double q79=100.0*(double)c79/(double)n95, q78=100.0*(double)c78/(double)n95;
+			print_info("   ARM X [95] nach rohem Zweig: Schur-exakt [79] "+to_string((float)q79,2u)+" % (Klasse C) | 2x2-exakt [78] "+to_string((float)q78,2u)+" % (Klasse B) | Skalar+Rang-0 "+to_string((float)(100.0-q79-q78),2u)+" %"); } }
+}
 static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const bool satgate, const string& ort, const ulong h94=0ull) {
 	// ★ ARM X (04.09., Bauplan V2): der Schatten-Rueckfall [94] bucht in 69, zaehlt aber in keinem Kaskaden-/Gate-Slot.
 	const ulong soll = h13+h15+h64+(satgate?h10+h16:0ull)+h94;
@@ -3146,7 +3185,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal"); bericht_gate_kreuztabelle(H,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -3975,7 +4014,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel"); }
+		{ const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel"); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -6201,7 +6240,7 @@ static void main_setup_fahrzeug_dd() {
 	// CL_OUT_OF_RESOURCES, und die Rueckfallquote (Slot 69 / Wirkpfad) war mit ihm verloren --
 	// die Zaehler wurden bisher NUR im Abschlussbericht gelesen. 70 uint vom Geraet kosten
 	// nichts; sie werden jetzt an jedem [BERICHT] mitgelesen, kumuliert UND als Fensterdelta.
-	/* ★ 04.09. (Audit): rho_clamp_hits ist seit lbm.cpp:354 96 gross; Feld und Schleife auf 96 gezogen. Es wurde KEIN Fehler behoben -- gelesen werden ohnehin nur [7] und [69] (Diff-Pruefung L3), die Aenderung ist Vorsorge */ ulong slot_alt[96]; for(uint i=0u;i<96u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
+	/* ★ 04.09. (Audit): rho_clamp_hits ist seit lbm.cpp:354 96 gross; Feld und Schleife auf 96 gezogen. Es wurde KEIN Fehler behoben -- gelesen werden ohnehin nur [7] und [69] (Diff-Pruefung L3), die Aenderung ist Vorsorge */ ulong slot_alt[128]; for(uint i=0u;i<128u;i++) slot_alt[i]=0ull; bool slot_alt_da=false;
 	std::ofstream slot_csv;
 	// ★ ZENSUS Mehrfachfacetten (27.08.): Zellklassen der Kraftschleife + Kraftgewicht der
 	// "unklaren" Zellen. Die Zaehler sind geometrisch und ueber alle Samples konstant -- der
@@ -6886,7 +6925,7 @@ static void main_setup_fahrzeug_dd() {
 							slot_csv << "# Slot-Zaehler je [BERICHT] (30.08.2026). Kumuliert seit Laufstart, t%100-gesampelt; *_fenster = Delta seit dem vorigen Bericht. Quote = Slot/Wirkpfad[7].\n";
 							slot_csv << "time_s,wirkpfad,rueckfall69,quote_kum_pct,quote_fenster_pct,us_gate10,ohnetang13,rang0_15,sn_gate16,quergate64,kraft70,gesaettigt\n"; }
 						slot_csv << t_si << "," << wp << "," << r69 << "," << pz(r69,wp) << "," << pz(d69,dwp) << "," << s10 << "," << s13 << "," << s15 << "," << s16 << "," << s64 << "," << (ulong)H[70] << "," << (satt?1:0) << "\n" << std::flush;
-						for(uint i=0u;i<96u;i++) slot_alt[i]=(ulong)H[i]; slot_alt_da=true;
+						for(uint i=0u;i<128u;i++) slot_alt[i]=(ulong)H[i]; slot_alt_da=true;
 					}
 				}
 				ber_next = (floor(t_si/ber_dt)+1.0)*ber_dt;  // an das Raster binden, nicht aufaddieren (kein Drift)
@@ -7330,7 +7369,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-				{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld",nahfeld_masse_x?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv); pruefe_masse_alle(H,nahfeld_alpha3,nahfeld_messnur,nahfeld_kraft,"Nahfeld",nahfeld_masse_x); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld"); }
+				{ const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld",nahfeld_masse_x?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv); pruefe_masse_alle(H,nahfeld_alpha3,nahfeld_messnur,nahfeld_kraft,"Nahfeld",nahfeld_masse_x); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld"); bericht_gate_kreuztabelle(H,"Nahfeld",nahfeld_masse_x,nahfeld_satgate,nahfeld_messnur); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).

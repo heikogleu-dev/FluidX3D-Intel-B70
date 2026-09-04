@@ -56,6 +56,14 @@ nicht zur Basis-Zellmenge. X als „(B) rein" ist so NICHT gegeben. Konsequenz f
   seit heute früh als fehlend deklariert) bauen — sie trennt Klasse B (roh exakt ↔ Schatten Schur) von Klasse C (roh Schur-exakt
   ↔ Schatten Skalar) und beantwortet, ob der rohe Operator an c̄ schlecht konditioniert ist. Das wäre der eigentliche Befund.
 
+## 20:55 — Kreuztabelle Gate × Solve-Zweig GEBAUT (Slots 96–116, Puffer 128), Diff-Prüfung läuft
+
+Kernel: `uint zweig` (1=[78] 2=[79] 3=[12] 4=[14]/[80]) an den Kaskadenzweigen, an jedem Gate `hits[Basis+zweig]`; unter X die
+[94]/[95]-Zellen nach rohem Zweig, [116] = [95] mit rohem Rang 0. Host `bericht_gate_kreuztabelle` mit Zeilensummen-Abnahme
+und konstruktiven Nullspalten (Quergate × exakt, sn-Gate × entkoppelt). NUR Zähler — alle Arme müssen bitgleich bleiben.
+**Morgen:** (1) `logs/vs_kreuz_serie.txt` (iGPU, 5 Arme, Soll-Hashes im Kopf) → (2) `logs/vs_x8_serie.txt` (B70) = Arm X am
+Fahrzeug + Tabelle in einem Lauf. Vorhersage Klasse C: [113] ≈ [95]. Start nur, wenn die Diff-Prüfung (läuft) nichts findet.
+
 ## Läuft / steht bereit
 
 - `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.

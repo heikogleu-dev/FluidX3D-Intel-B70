@@ -2250,6 +2250,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	float s1=0.0f, s2=0.0f, sn=0.0f;
 	bool rueckfall=false; // ★ BUCHUNGSSCHLUSS (Baustein 2/1, 27.08.): Rueckfaelle steigen nicht mehr per return aus, sondern buchen mit s=0 (P-only)
 	float res2=0.0f;
+	uint zweig=0u; // ★ KREUZTABELLE 05.09.: Solve-Zweig der REALEN Kaskade, 1=[78] 2=[79] 3=[12] 4=[14]/[80]; nur Zaehler, kein Float
 )+"#ifdef FACETTEN_MASSE_X"+R(
 	// ★ ARM X (CFD_FAC_MASSE_ALLE=3, 04.09.2026): Rueckfall-Entscheid im SCHATTEN wie unter ALPHA2 --
 	// Downdate auf KOPIEN, Entkopplungs-Gate, Kaskade, Schatten-Solve, Gates auf dem Schatten-s. Die
@@ -2321,7 +2322,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// musste per Subtraktion geschaetzt werden, dabei griff ich zum naechstbesten Slot (14) und der ist
 		// der gekoppelte SKALAR-Rueckfall. Ein fehlender Zaehler hat hier nicht nur eine Messung verhindert,
 		// sondern eine FALSCHE erzeugt. Jetzt ist die Kaskade lueckenlos: 78+79+12+13+14+15 == Wirkpfad-Rest.
-		if(t%100ul==0ul&&hits[78]<0xF0000000u) atomic_inc(&hits[78]); }
+		if(t%100ul==0ul&&hits[78]<0xF0000000u) atomic_inc(&hits[78]); zweig=1u; }
 	// ★★ 2026-08-25 KLEINSTE-QUADRATE-RUECKFALL (CFD_FAC_LSQ, Default AUS -- Pruefbefund 4-A: es ist eine MODELLAENDERUNG, keine Fehlerkorrektur). Der alte Skalar-Rueckfall
 	// s1 = R1/G11 erzwingt das Ziel in Richtung 1 EXAKT und ignoriert die zweite Gleichung ganz.
 	// Ist G11 fast entartet, wird s1 riesig -- und weil G12 dabei NICHT klein sein muss, schleppt
@@ -2331,11 +2332,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// laeuft sie gegen R2/G12 statt gegen unendlich. Das Residuum steht dann senkrecht auf dem
 	// Erreichbaren -- das ist die Definition von "so nah am Ziel wie diese Linkmenge es zulaesst".
 )+"#ifdef FACETTEN_LSQ"+R(
-	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
-	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; res2=fabs(G22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } }
+	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } zweig=3u; }
+	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; res2=fabs(G22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } zweig=3u; }
 )+"#else"+R(
-	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t1
-	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); } // Slot 12: Skalar-Fallback t2
+	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); zweig=3u; } // Slot 12: Skalar-Fallback t1
+	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); zweig=3u; } // Slot 12: Skalar-Fallback t2
 )+"#endif"+R( // FACETTEN_LSQ
 	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } rueckfall=true; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten. ★ 03.09.2026 KORRIGIERT: die alte Bezeichnung "die ELIBB-heilbare Klasse" stammt vom 22.08. und ist seit der B2-REVISION vom 25.08. FALSCH. elibb_rekonstruiere iteriert ueber DIESELBE Linkmenge mit demselben Praedikat und aendert nur die WERTE fhn[i] -- G11/G22/G12/S0/S1/Snn sind mit und ohne ELIBB bitgleich, der Rang aendert sich NIE. Empirisch: w_nb lief MIT ELIBB (Slot 67 = 139.185.273) und Slot 27 steht trotzdem bei 15,23 % der Wandbesuche. Heilbar waere die Klasse nur mit der urspruenglich geplanten Blende u_W = u_s gewesen, und genau die wurde am 25.08. zurueckgenommen (sie ist bei q=0,5 die Identitaet, der Wandmodell-impuls waere an jeder ebenen Partie konstruktiv ausgefallen). Der wahre Grund ist Rang: das ALPHA2-Downdate macht aus dem zweiten Moment die KOVARIANZ der Linkrichtungen, bei einem Link ist sie null, und die Massenerhaltung erzwingt dort q_1 = 0 -- unter JEDEM Ansatz
 	} else {
@@ -2347,7 +2348,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// G~=Rauschen, s=R/1e-8~1e6, Doppelklemme, permanente Injektion (belegt: 546 statt 485
 	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
 	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett;
-		if(t%100ul==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
+		if(t%100ul==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); zweig=2u; } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
 )+"#ifdef FACETTEN_PINV"+R(
 	// ★★ 04.09.2026 RANG-1-PSEUDOINVERSE (CFD_FAC_PINV, Default aus). Der gemessene Befund dahinter:
 	// fuer die ebene Voxelwand ist nach dem ALPHA2-Downdate G' = (1/3)(I - n n^T), und die Schur-
@@ -2372,14 +2373,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float tr=Gt11+Gt22, it2=1.0f/(tr*tr);
 		s1=(Gt11*R1+Gt12*R2)*it2; s2=(Gt12*R1+Gt22*R2)*it2;
 		res2=fabs(fma(Gt12,s1,Gt22*s2)-R2);
-		if(t%100ul==0ul) { atomic_inc(&hits[14]); if(hits[80]<0xF0000000u) atomic_inc(&hits[80]); }
+		if(t%100ul==0ul) { atomic_inc(&hits[14]); if(hits[80]<0xF0000000u) atomic_inc(&hits[80]); } zweig=4u;
 	}
 )+"#elif defined(FACETTEN_LSQ)"+R(
-	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1, selben Tag): hier stand kurzzeitig -R1. Das mischt die LINKE Seite von Gl. 2 mit der RECHTEN von Gl. 1 und faellt mit s1=0 auf |R2-R1| zusammen -- unabhaengig von Gt UND s. res2 ist per Definition das Gl.-2-Residuum (QUERGATE = Restfehler in Querrichtung t2), und im LSQ-Zweig ist es echt von null verschieden. Ein Mass fuer die Gl.-1-Luecke braucht eine EIGENE Groesse res1 mit eigenem Slot, nicht diese hier.
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } zweig=4u; } // Slot 14, kleinste Quadrate (s.o.)
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } zweig=4u; } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1, selben Tag): hier stand kurzzeitig -R1. Das mischt die LINKE Seite von Gl. 2 mit der RECHTEN von Gl. 1 und faellt mit s1=0 auf |R2-R1| zusammen -- unabhaengig von Gt UND s. res2 ist per Definition das Gl.-2-Residuum (QUERGATE = Restfehler in Querrichtung t2), und im LSQ-Zweig ist es echt von null verschieden. Ein Mass fuer die Gl.-1-Luecke braucht eine EIGENE Groesse res1 mit eigenem Slot, nicht diese hier.
 )+"#else"+R(
-	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1): res2 ist hier IDENTISCH NULL, und das ist RICHTIG -- der Zweig erfuellt Gl. 2 exakt, also ist das Gl.-2-Residuum null. Dass QUERGATE fuer ihn nie feuert, ist korrektes Verhalten, kein blinder Fleck. Die Gl.-1-Luecke ist eine ANDERE Groesse (s. LSQ-Zweig).
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); zweig=4u; } // Slot 14: gekoppelter Rang-2-Pfad
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); zweig=4u; } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1): res2 ist hier IDENTISCH NULL, und das ist RICHTIG -- der Zweig erfuellt Gl. 2 exakt, also ist das Gl.-2-Residuum null. Dass QUERGATE fuer ihn nie feuert, ist korrektes Verhalten, kein blinder Fleck. Die Gl.-1-Luecke ist eine ANDERE Groesse (s. LSQ-Zweig).
 )+"#endif"+R( // FACETTEN_PINV / FACETTEN_LSQ
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); rueckfall=true; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
@@ -2391,17 +2392,17 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// die ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen,
 	// den niemand bestellt hat. Ein exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
 )+"#ifdef FACETTEN_QUERGATE"+R(
-	if(!rueckfall&&res2>def_fac_tau*twe) { if(t%100ul==0ul) atomic_inc(&hits[64]); rueckfall=true; } // Slot 64
+	if(!rueckfall&&res2>def_fac_tau*twe) { if(t%100ul==0ul) { atomic_inc(&hits[64]); if(zweig>0u) atomic_inc(&hits[103u+zweig]); } rueckfall=true; } // Slot 64
 )+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
 	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
 	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
-	if(!rueckfall&&(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut)) { if(t%100ul==0ul) atomic_inc(&hits[10]); rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
+	if(!rueckfall&&(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut)) { if(t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
 )+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
-	if(!rueckfall&&(s1c!=s1||s2c!=s2)&&t%100ul==0ul) atomic_inc(&hits[10]); // Slot 10: u_s-Klemme (nicht an Rueckfallzellen zaehlen -- Pruefbefund 4a)
+	if(!rueckfall&&(s1c!=s1||s2c!=s2)&&t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } // Slot 10: u_s-Klemme (nicht an Rueckfallzellen zaehlen -- Pruefbefund 4a)
 	s1=s1c; s2=s2c;
 )+"#endif"+R( // FACETTEN_SATGATE
 	// 3x3: sn aus den GEKLEMMTEN s1/s2 (Normal-Nullung haelt auch bei Tangentialklemme, Gl. 23);
@@ -2409,10 +2410,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(!rueckfall&&Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
 		sn = -(Sn1*s1+Sn2*s2)/Snn;
 )+"#ifdef FACETTEN_SATGATE"+R(
-		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) atomic_inc(&hits[16]); rueckfall=true; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
+		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) { atomic_inc(&hits[16]); if(zweig>0u) atomic_inc(&hits[99u+zweig]); } rueckfall=true; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
 )+"#else"+R(
 		const float snc = clamp(sn, -def_fac_budget_sn*ut, def_fac_budget_sn*ut); // Budget-Skalar (1a-Bsn)
-		if(snc!=sn&&t%100ul==0ul) atomic_inc(&hits[16]); // Slot 16: s_n-Klemme
+		if(snc!=sn&&t%100ul==0ul) { atomic_inc(&hits[16]); if(zweig>0u) atomic_inc(&hits[99u+zweig]); } // Slot 16: s_n-Klemme
 		sn = snc;
 )+"#endif"+R( // FACETTEN_SATGATE
 	}
@@ -2423,8 +2424,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Blenden-Korrektur ohne den BB-Anteil, den sie korrigiert). Explizit +0.0f, kein signed-zero-Anker.
 )+"#ifdef FACETTEN_MASSE_X"+R(
 	if(t%100ul==0ul) { // Kreuztabelle roh x Schatten, dieselbe Stichprobe wie Slot 69 und die Kaskade
-		if(a2_rueckfall&&!rueckfall&&hits[94]<0xF0000000u) atomic_inc(&hits[94]); // [94] Schatten RF, roh haette angewandt -> X zwingt auf BB
-		if(rueckfall&&!a2_rueckfall&&hits[95]<0xF0000000u) atomic_inc(&hits[95]); // [95] roh RF, Schatten haette angewandt -> Soll ~0
+		if(a2_rueckfall&&!rueckfall) { if(hits[94]<0xF0000000u) atomic_inc(&hits[94]); if(zweig>0u&&hits[107u+zweig]<0xF0000000u) atomic_inc(&hits[107u+zweig]); } // [94] + [108..111] nach rohem Zweig
+		if(rueckfall&&!a2_rueckfall) { if(hits[95]<0xF0000000u) atomic_inc(&hits[95]); if(zweig>0u) { if(hits[111u+zweig]<0xF0000000u) atomic_inc(&hits[111u+zweig]); } else if(hits[116]<0xF0000000u) atomic_inc(&hits[116]); } // [95] + [112..115] nach rohem Zweig, [116] = roh Rang-0
 	}
 	if(a2_rueckfall) rueckfall=true; // VOR Nullung, pass2_an, kz und beta3
 )+"#endif"+R( // FACETTEN_MASSE_X
