@@ -277,6 +277,7 @@ bool LBM_Domain::s_facetten = false;
 bool LBM_Domain::s_fac_imem = false;
 float LBM_Domain::s_fac_ema = 0.0f;
 float LBM_Domain::s_fac_pema = 0.0f;
+uint LBM_Domain::s_fac_masse_alle = 0u;
 bool LBM_Domain::s_fac_satgate = false;
 uint LBM_Domain::s_boden_eq_n = 0u;
 uint LBM_Domain::s_boden_eq_down = 0u;
@@ -351,7 +352,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 96ull); // 80->96 am 04.09.: [80] Rang-1-Pseudoinverse angewandt (im Bericht, pruefe_kaskade). [81..89] ZIELERFUELLUNG 04.09.: [81] gestichprobte Besuche (Nenner), [82] angewandt ohne Ziel (twe=0), [83..89] Histogramm r = phi1/(-def_fac_tau*twe) je Besuch, Grenzen 0/0,5/0,9/1,1/2/10. Die urspruenglich hier angekuendigte Kreuztabelle 'Gate-Rueckfall nach Solve-Zweig' wurde NIE geschrieben (Audit 04.09.) -- der Satz stand hier, als waere sie gebaut. Sie fehlt weiterhin // 72->80 am 02.09.: Slots 20-71 sind luecklos belegt (30-48 SGS_DIAG-Bins ueber BERECHNETE Indizes 30u+b/35u+bw/40u+bw/45u+..., die ein Literal-Grep nicht sieht -- zweimal bezahlte Lektion B-3/B70); neue Zaehler ab 72 // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] Kraftzellen im Anlauf t<100, UNGEGATET (saettigend) | [72..74] NACHBAR angewandt/kein-Fluid/still | [75] MESSNUR-Wirkpfad | [76] FDWAND angewandt | [77..79] frei // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	rho_clamp_hits = Memory<uint>(device, 96ull); // 80->96 am 04.09.: [80] Rang-1-Pseudoinverse angewandt (im Bericht, pruefe_kaskade). [81..91] ZIELERFUELLUNG 04.09.: [81] gestichprobte Besuche (Nenner), [82] angewandt ohne Ziel (twe=0), [83..91] NEUN Eimer fuer r = phi1/(-def_fac_tau*twe) je Besuch, Grenzen -10/-1/0/0,5/0,9/1,1/2/10 (nach dem Erstlauf von sieben auf neun geschaerft). [92] Wirkpfad CFD_FAC_MASSE_ALLE. [93..95] frei. Die urspruenglich hier angekuendigte Kreuztabelle 'Gate-Rueckfall nach Solve-Zweig' wurde NIE geschrieben (Audit 04.09.) -- der Satz stand hier, als waere sie gebaut. Sie fehlt weiterhin // 72->80 am 02.09.: Slots 20-71 sind luecklos belegt (30-48 SGS_DIAG-Bins ueber BERECHNETE Indizes 30u+b/35u+bw/40u+bw/45u+..., die ein Literal-Grep nicht sieht -- zweimal bezahlte Lektion B-3/B70); neue Zaehler ab 72 // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] Kraftzellen im Anlauf t<100, UNGEGATET (saettigend) | [72..74] NACHBAR angewandt/kein-Fluid/still | [75] MESSNUR-Wirkpfad | [76] FDWAND angewandt | [77..79] frei // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
 	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
 	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
 	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden
@@ -1360,7 +1361,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_ema "+to_string(s_fac_ema,6u)+"f" : (string)"") // EMA nur wenn gesetzt -- ungesetzt bitgleich zum 3x3-ohne-EMA
 	+((s_facetten&&s_fac_imem&&s_fac_satgate) ? (string)"\n	#define FACETTEN_SATGATE" : (string)"") // (a-strich): Klemme -> BB-Rueckfall
 	+((s_facetten&&s_fac_imem&&s_fac_alpha>0u) ? (string)"\n	#define FACETTEN_ALPHA" : (string)"") // J4-alpha: Massenkorrektur, Sum q = 0 je Facette
-	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"")
+	+((s_facetten&&s_fac_imem&&s_fac_alpha>1u&&s_fac_masse_alle==0u) ? (string)"\n	#define FACETTEN_ALPHA2" : (string)"") // das Downdate ist die Buchhaltung der WANDLINK-Verteilung -- unter MASSE_ALLE gibt es sie nicht mehr
+	+((s_facetten&&s_fac_imem&&s_fac_masse_alle>0u) ? (string)"\n	#define FACETTEN_MASSE_ALLE" : (string)"") // ★ 04.09.: Massenkompensation nicht mehr nur ueber die Wandlinks
+	+((s_facetten&&s_fac_imem&&s_fac_masse_alle>=2u) ? (string)"\n	#define FACETTEN_MASSE_F0" : (string)"") // Modus 2: alles auf die Ruhepopulation -- weder Impuls noch zweiter Moment
 	+((s_facetten&&s_fac_imem&&s_fac_messnur>0u) ? (string)"\n	#define FACETTEN_MESSNUR" : (string)"") // ★ 30.08. BB-Physik, nur messen
 	+((s_facetten&&s_fac_imem&&s_fac_nachbar>0u) ? (string)"\n	#define FACETTEN_NACHBAR" : (string)"") // ★ 30.08. Eingang aus der zweiten Fluidzelle
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik

@@ -2407,27 +2407,73 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Sum q = alpha*S0 + 6(S1*u_s) = 0 exakt gilt, egal was Gates und Filter getan haben.
 	// S0 >= w(1) > 0 hier: ohne Wandlink waere der Solver oben mit Rang 0 ausgestiegen.
 	const float alph = -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0;
+)+"#ifdef FACETTEN_MASSE_ALLE"+R(
+	// ★ 04.09. (Diff-Pruefung d6): unter MASSE_ALLE wird beta3 = alph*S0 injiziert, nicht alph. Mit
+	// S0 ~ 0,1..0,3 warnte der Waechter auf einem drei- bis zehnfach zu grossen Wert.
+	if(fabs(-6.0f*(S1x*usx+S1y*usy+S1z*usz))>ut&&t%100ul==0ul) atomic_inc(&hits[18]);
+)+"#else"+R(
 	if(fabs(alph)>ut&&t%100ul==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
+)+"#endif"+R(
+)+"#ifdef FACETTEN_MASSE_ALLE"+R(
+	// ★★ 04.09.2026 STUFE 3: DIESELBE Masse, aber ueber ALLE 19 Links statt nur ueber die Wandlinks.
+	// Der Grund ist der gemessene Preis von Stufe 2: das Downdate kostet 36,26 % der Facetten eine
+	// Rangstufe (statischer Zensus, 8-mm-Fahrzeug: 240.966 Facetten fallen von Rang 2 auf Rang 1,
+	// 19.969 von Rang 1 auf Rang 0). Und das Downdate ist kein Zusatz, sondern die ehrliche
+	// Beschreibung dessen, was die Wandlink-Verteilung anrichtet:
+	//   Stufe 1/2: Sum_Wand w_i alph c_i = alph*S1 = -(6/S0)(S1.u_s) S1   -> genau der Downdate-Term
+	//   Stufe 3:   Sum_alle w_i beta c_i = beta * Sum w_i c_i = 0          -> KEIN Impuls
+	// Massenprobe, exakt und ZELLWEISE (nicht global): Sum q + Sum p = 6(S1.u_s) + beta*Sum w_i
+	// = 6(S1.u_s) - 6(S1.u_s) = 0, weil fuer D3Q19 Sum w_i = 1 gilt (1/3 + 6/18 + 12/36).
+	// Der angewandte Operator ist damit die ROHE Momentenmatrix -- voller Rang, ohne Masseleck.
+	const float beta3 = -6.0f*(S1x*usx+S1y*usy+S1z*usz);
+)+"#endif"+R( // FACETTEN_MASSE_ALLE
 )+"#endif"+R( // FACETTEN_ALPHA
 	if(pass2_an) for(uint i=1u; i<def_velocity_set; i++) { // Pass 2 (pass2_an == !rueckfall ohne KRAFT): q_i = 6 w_i (c_i*u_s) addieren (Gl. 3); Rueckfall: Feld bleibt BITGLEICH BB
 		const uint ib = (i%2u==1u) ? i+1u : i-1u;
 		if((flags[j[ib]]&TYPE_BO)!=TYPE_S) continue;
 		fhn[i] = fma(6.0f*w(i), c(i)*usx+c(def_velocity_set+i)*usy+c(2u*def_velocity_set+i)*usz, fhn[i]);
 )+"#ifdef FACETTEN_ALPHA"+R(
-		fhn[i] += w(i)*alph; // separater Summand: die bestehende fma-Zeile bleibt rundungsidentisch
+)+"#ifndef FACETTEN_MASSE_ALLE"+R(
+		fhn[i] += w(i)*alph; // Stufe 1/2: nur ueber die Wandlinks -- genau das erzeugt den Downdate-Term
+)+"#endif"+R( // !FACETTEN_MASSE_ALLE
 )+"#endif"+R( // FACETTEN_ALPHA
 	}
+)+"#ifdef FACETTEN_MASSE_ALLE"+R(
+	// Ungegatet ueber ALLE Richtungen inklusive i=0 -- Sum w_i = 1 traegt die Masse, Sum w_i c_i = 0
+	// sorgt dafuer, dass dabei kein Impuls entsteht. fhn ist das volle lokale 19er-Feld und geht
+	// vollstaendig durch store_f, fhn[0] eingeschlossen.
+	float masse_ist = 0.0f; // was WIRKLICH verteilt wurde -- Grundlage der Delta-m-Buchung unten
+	if(pass2_an) {
+)+"#if defined(FACETTEN_MASSE_F0)"+R(
+		// ★★ MODUS 2 (04.09.2026, Diff-Pruefung c): die gesamte Kompensation auf die RUHEPOPULATION.
+		// Weil c_0 = 0 ist, traegt sie Masse, aber WEDER Impuls NOCH zweiten Moment -- sie ist die
+		// einzige Verteilung, die keinen anderen Moment anfasst. Modus 1 verteilt mit w_i ueber alle
+		// Richtungen und aendert dabei Sum w_i c_i c_i^T = (1/3) I, also den Spannungstensor; genau
+		// das ist der Kandidat fuer die gemessene cz-Verschlechterung am Fahrzeug (-0,147 -> +0,029).
+		// Preis: die Stoerung sitzt auf EINER Population statt auf allen, relativ also dreifach --
+		// deshalb der Positivitaetszaehler darunter.
+		fhn[0] += beta3; masse_ist = beta3;
+		if(fhn[0]+0.33333334f<=0.0f&&t%100ul==0ul&&hits[93]<0xF0000000u) atomic_inc(&hits[93]); // [93] f_0 nicht mehr positiv
+)+"#else"+R(
+		for(uint i=0u; i<def_velocity_set; i++) { fhn[i] += w(i)*beta3; masse_ist += w(i)*beta3; }
+)+"#endif"+R(
+		if(t%100ul==0ul&&hits[92]<0xF0000000u) atomic_inc(&hits[92]); } // [92] Wirkpfad
+)+"#endif"+R( // FACETTEN_MASSE_ALLE
 	float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn;
 )+"#ifdef FACETTEN_KRAFT"+R(
 	if(kz) { phi1 += R1; phi2 += R2; } // Kraftzelle: Ist = P + Kraft = Ziel (Buchung Ist == Soll, wie im Slip-Pfad)
 )+"#endif"+R( // FACETTEN_KRAFT // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn; unter ALPHA2 sind G/Sn downgedatet -> alpha-Beitrag enthalten)
 )+"#ifdef FACETTEN_ALPHA"+R(
 )+"#ifndef FACETTEN_ALPHA2"+R(
+)+"#ifndef FACETTEN_MASSE_ALLE"+R(
 	// Stufe 1 traegt den alpha-Impuls (alpha*S1) NICHT im Downdate -- fuer die ehrliche Ist-Kraft addieren:
+	// Unter Stufe 3 entfaellt das: die Kompensation ueber alle Links traegt konstruktiv KEINEN Impuls,
+	// und G ist roh, also ist phi1 = P1 + G_roh*s bereits das vollstaendige Ist.
 	phi1 += alph*(S1x*t1x+S1y*t1y+S1z*t1z); phi2 += alph*(S1x*t2x+S1y*t2y+S1z*t2z);
+)+"#endif"+R( // !FACETTEN_MASSE_ALLE
 )+"#endif"+R(
 )+"#endif"+R( // FACETTEN_ALPHA
-	// ★ 04.09.2026 ZIELERFUELLUNG (Slots 81-89). Der Anlass: "Anteil der Wandbehandlungen MIT Modell"
+	// ★ 04.09.2026 ZIELERFUELLUNG (Slots 81-91). Der Anlass: "Anteil der Wandbehandlungen MIT Modell"
 	// sagt, wieviele Besuche ein Modell BEKOMMEN haben -- nicht, wieviel vom Wandschub-Ziel dabei
 	// ankommt. Die Rang-1-Pseudoinverse erfuellt R nur in Richtung ihres einen erreichbaren
 	// Eigenvektors; der Rest bleibt liegen und wurde bisher von NICHTS gemessen (res2 sieht nur t2).
@@ -2476,7 +2522,19 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] Ist-Wandkraft (ungeklemmt == twe*t1; unter PEMA MODELLKRAFT: P gefiltert, P-Fluktuation laeuft als BB durch -- Audit 1/3)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;
 )+"#ifdef FACETTEN_ALPHA"+R(
+)+"#ifdef FACETTEN_MASSE_ALLE"+R(
+	// Stufe 3 kompensiert mit beta3 ueber ALLE Links: Sum q + Sum p = 6(S1.u_s) + beta3*Sum w_i,
+	// und Sum w_i = 1. Der Rest ist wie unter Stufe 1/2 nur noch float-Rauschen -- die Zeile misst
+	// das AUCH hier ehrlich und nicht per Konstruktion null (sie setzt beide Summanden getrennt).
+	// ★ 04.09.2026 KORRIGIERT (Diff-Pruefung M1): hier stand "6*(S1.u_s) + beta3". Weil beta3 exakt
+	// derselbe Float-Ausdruck mit umgekehrtem Vorzeichen ist, war die Summe BITGENAU NULL fuer jeden
+	// Eingabewert -- das Abnahmekriterium "Delta-m bleibt float-ulp" konnte nicht reissen. Gebucht wird
+	// jetzt die TATSAECHLICH verteilte Masse (Sum w_i in float ist 1,0000002384, nicht 1), also der
+	// echte Rest von rund 2,2e-7*beta3 je Besuch.
+	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz) + masse_ist;
+)+"#else"+R(
 	fac_tau_acc[a+4ul] += fma(alph, S0, 6.0f*(S1x*usx+S1y*usy+S1z*usz)); // Delta-m-REST unter alpha: Soll ~float-ulp (Leck-Formel bleibt im #else als A/B-Referenz)
+)+"#endif"+R( // FACETTEN_MASSE_ALLE
 )+"#else"+R(
 	fac_tau_acc[a+4ul] += 6.0f*(S1x*usx+S1y*usy+S1z*usz); // Delta-m-Leck (Gl. 13, komponentenweise)
 )+"#endif"+R( // FACETTEN_ALPHA
