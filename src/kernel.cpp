@@ -2289,13 +2289,39 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
 	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett;
 		if(t%100ul==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
-)+"#ifdef FACETTEN_LSQ"+R(
+)+"#ifdef FACETTEN_PINV"+R(
+	// ★★ 04.09.2026 RANG-1-PSEUDOINVERSE (CFD_FAC_PINV, Default aus). Der gemessene Befund dahinter:
+	// fuer die ebene Voxelwand ist nach dem ALPHA2-Downdate G' = (1/3)(I - n n^T), und die Schur-
+	// Reduktion liefert dett == 0 und tr(Gt) == 1/3 EXAKT -- fuer jede Normale, jeden Azimut. Der
+	// Vollrangzweig faellt korrekt durch. Die Skalarleiter darunter dividiert dann durch Gt11, also
+	// durch den Anteil des WILLKUERLICH gewaehlten Basisvektors t1 (er zeigt entlang der Stroemung)
+	// an der EINEN erreichbaren Richtung: Gt11 = (1/3)*t2z^2/(1-nz^2). Laeuft die Stroemung den Hang
+	// hinauf, geht Gt11 gegen 0, waehrend der groesste Eigenwert konstant 1/3 bleibt. Die Schwelle
+	// 1e-4 laesst damit eine Verstaerkung bis 1e4 durch, unmittelbar vor das harte Gate bei 2*ut.
+	// BELEG (Klassentabelle za_basis, 8 mm): gleiche Linkzahl 5 -- y_w 0,50 gibt 11,7 % Rueckfall bei
+	// s1/ut +0,654, y_w 0,51 gibt 88,9 % bei s1/ut +0,003. 0,01 Wandabstand kippt das Modell.
+	// KUR: Moore-Penrose der symmetrisch-PSD Rang-1-Matrix. Gt = lambda*e*e^T mit lambda = tr, also
+	// Gt^+ = Gt/tr^2 und s = (Gt*R)/tr^2 -- die Division laeuft ueber den GROESSTEN Eigenwert statt
+	// ueber einen Diagonaleintrag. Fuer die dominante Klasse ist tr exakt 1/3 und kippungsunabhaengig;
+	// die 1e4-Verstaerkung verschwindet konstruktiv statt statistisch.
+	// NEBENWIRKUNG auf den zweiten Gate-Block: der Eigenvektor v ~ (t2z, -t1z) erfuellt Sn.v = 0 EXAKT
+	// -- die pseudoinverse Loesung braucht KEINE Normalkompensation. sn wird strukturell klein, und
+	// das sn-Gate (Slot 16) verliert seinen kuenstlichen Ausloeser.
+	// Der Vollrangzweig oben bleibt Zeichen fuer Zeichen unangetastet -- die ebene Wand (kipp0 laeuft
+	// entkoppelt) bleibt damit bitgleich.
+	else if(Gt11+Gt22>=1e-4f*(G11+G22)&&Gt11+Gt22>=1e-8f) {
+		const float tr=Gt11+Gt22, it2=1.0f/(tr*tr);
+		s1=(Gt11*R1+Gt12*R2)*it2; s2=(Gt12*R1+Gt22*R2)*it2;
+		res2=fabs(fma(Gt12,s1,Gt22*s2)-R2);
+		if(t%100ul==0ul) { atomic_inc(&hits[14]); if(hits[80]<0xF0000000u) atomic_inc(&hits[80]); }
+	}
+)+"#elif defined(FACETTEN_LSQ)"+R(
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // Slot 14, kleinste Quadrate (s.o.)
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } }
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R1); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } } // ★ 04.09.: res2 stand auf fabs(Gt22*s2-R2) und war IDENTISCH NULL -- dieser Zweig erfuellt Gleichung 2 exakt, das Residuum steht in Gleichung 1. QUERGATE war fuer ihn konstruktiv blind.
 )+"#else"+R(
 	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); } // Slot 14: gekoppelter Rang-2-Pfad
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(Gt22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); }
-)+"#endif"+R( // FACETTEN_LSQ
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R1); if(t%100ul==0ul) atomic_inc(&hits[14]); } // ★ 04.09.: res2 war identisch null, s.o.
+)+"#endif"+R( // FACETTEN_PINV / FACETTEN_LSQ
 	else { if(t%100ul==0ul) atomic_inc(&hits[15]); rueckfall=true; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
 	// ★★ 2026-08-25 QUERGATE (CFD_FAC_QUERGATE, Default AUS), Antwort auf Pruefbefund 4-A.
