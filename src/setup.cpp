@@ -5627,7 +5627,10 @@ static void main_setup_fahrzeug_dd() {
 	const float t_flush  = (float)(cNx-1u)*dx_c/si_u; // Durchspuelung des FERNfelds (far_x0 kuerzt sich weg)
 	const float t_end    = env_f("CFD_T_END", 2.0f*t_flush);
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
-	const ulong n_outer  = (ulong)(t_end/dt_c + 0.5f);
+	ulong n_outer  = (ulong)(t_end/dt_c + 0.5f); // ★ 04.09.2026 NICHT MEHR const -- die Laufverlaengerung
+	// (CFD_ZIEL_DATEI, s. Zeitschleife) darf ihn waehrend des Laufs anheben. Alles, was VOR der Schleife
+	// aus n_outer gerechnet wird (VTK-Rotation kp, verify_at2), bleibt auf der urspruenglichen Planung --
+	// das ist gewollt und wird beim Verlaengern angesagt.
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
 	// ★ KADENZ-UMBAU (Heiko 27.08.): Ausgabe-Kadenz in NEAR-STEPS statt Sekunden-Uhr. Default 5000
 	// Near-Steps (= 1250 Outer = 50 ms bei 4 mm; gitterschritt-, nicht zeitfest -- bei 8 mm 100 ms).
@@ -5692,9 +5695,12 @@ static void main_setup_fahrzeug_dd() {
 	// liegengebliebene Datei entfernt, sonst stoppt der naechste Lauf sofort nach dem ersten Sample.
 	const string stop_datei = getenv("CFD_STOP_DATEI") ? string(getenv("CFD_STOP_DATEI")) : string("/tmp/cfd_stop");
 	std::remove(stop_datei.c_str());
+	const string ziel_datei = getenv("CFD_ZIEL_DATEI") ? string(getenv("CFD_ZIEL_DATEI")) : string("/tmp/cfd_ziel_ms");
+	std::remove(ziel_datei.c_str()); // wie die Stoppdatei: eine liegengebliebene darf den naechsten Lauf nicht treffen
 	print_info("SAUBERER STOPP: \"touch "+stop_datei+"\" verlaesst die Zeitschleife an der naechsten Sample-Kadenz (alle "
 		+to_string(sample_every)+" grobe Schritte) und laeuft den vollstaendigen Abschlusspfad -- Endauswertung, CSV-Schluss"
 		+(env_u("CFD_VTK_ENDE",0u)>0u?string(" UND VTK-Feld-Dump"):string(" (VTK nur mit CFD_VTK_ENDE=1)"))+". Pfad ueber CFD_STOP_DATEI aenderbar.");
+	print_info("LAUFVERLAENGERUNG: \"echo <ms> > "+ziel_datei+"\" hebt die Endzeit an der naechsten Sample-Kadenz an (nur VERLAENGERN; Verkuerzen geht ueber die Stoppdatei, die den vollen Abschlusspfad laeuft). Pfad ueber CFD_ZIEL_DATEI aenderbar.");
 	const float vtk_dt     = env_f("CFD_VTK_DT", 0.0f);
 	const bool  vtk_ende   = env_u("CFD_VTK_ENDE", 0u)>0u;
 	const uint  vtk_stride = max(1u, env_u("CFD_VTK_STRIDE", 1u));
@@ -6691,6 +6697,28 @@ static void main_setup_fahrzeug_dd() {
 				stop_angefordert = true;
 				print_info("[STOPP] "+stop_datei+" erkannt bei t = "+to_string((float)t_si,4u)+" s (grober Schritt "
 					+to_string((ulong)(outer+1ull))+" von "+to_string(n_outer)+"). Zeitschleife wird regulaer verlassen, Abschlusspfad laeuft.");
+			}
+
+			// ★ 04.09.2026 LAUFVERLAENGERUNG. Der Vorgaengerfork hatte das (/tmp/cfd_target_outer); beim
+			// V2-Neuaufbau ist es nicht mitgekommen -- genau wie die Stoppdatei, die auch erst nachtraeglich
+			// kam. Ohne sie muss die Lauflaenge VOR dem Start erraten werden, und ein zu kurz geratener Lauf
+			// kostet die volle Rechenzeit ein zweites Mal. Am 04.09. selbst passiert: 301 statt der ueblichen
+			// 501 ms, weil ich aus 41-ms-Laeufen hochgerechnet und die festen Aufbaukosten (Voxelierung,
+			// Facettenbau) mitskaliert habe -- die sind aber konstant, nicht proportional.
+			// Inhalt der Datei: neue physikalische ENDZEIT in MILLISEKUNDEN. Nur Verlaengern wird angenommen;
+			// Verkuerzen geht ueber die Stoppdatei, weil die den vollstaendigen Abschlusspfad laeuft.
+			if(access(ziel_datei.c_str(), F_OK)==0) {
+				double ziel_ms = 0.0;
+				{ std::ifstream zf(ziel_datei); zf >> ziel_ms; }
+				std::remove(ziel_datei.c_str());
+				const ulong neu = (ziel_ms>0.0) ? (ulong)((float)(0.001*ziel_ms)/dt_c + 0.5f) : 0ull;
+				if(!(ziel_ms>0.0)) print_warning("[ZIEL] "+ziel_datei+" enthielt keine positive Zahl -- ignoriert. Erwartet wird die neue Endzeit in Millisekunden, z. B. \"echo 501 > "+ziel_datei+"\".");
+				else if(neu<=n_outer) print_warning("[ZIEL] "+to_string((float)ziel_ms,1u)+" ms entspricht "+to_string(neu)+" groben Schritten und ist nicht laenger als die aktuelle Planung ("+to_string(n_outer)+") -- ignoriert. Verkuerzen geht ueber "+stop_datei+".");
+				else {
+					const ulong alt = n_outer; n_outer = neu;
+					print_info("[ZIEL] Lauf verlaengert bei t = "+to_string((float)t_si,4u)+" s: "+to_string(alt)+" -> "+to_string(n_outer)
+						+" grobe Schritte (Endzeit "+to_string((float)ziel_ms,1u)+" ms). ANGESAGT: die VTK-Rotation und der Kopplungs-Pruefpunkt wurden VOR der Schleife aus der urspruenglichen Planung gerechnet und bleiben darauf.");
+				}
 			}
 
 			// ---------------------------------------------------- Leistungsbericht
