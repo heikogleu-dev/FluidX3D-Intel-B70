@@ -111,6 +111,14 @@ Normalen sind statisch, „Nachbar kompatibel" ist also vorab entscheidbar und g
 spart 18 Nachbar-Flag-Loads je Facettenbesuch; Rang-0-Facetten (16 %) könnten den Solve überspringen. Effekt unbekannt — beim
 nächsten 4-mm-Lauf zuerst die **Baseline** (MLUPs, freier VRAM via `werkzeuge/vram_sammler.sh`) mitmessen, dann A/B.
 
+## 00:05 (05.09.) — ABNAHME DER SAMMELBEHEBUNG BESTANDEN (vt_latent, iGPU, Binary b9dab75)
+
+aus / m1 / m2 / X **bitgleich** (113354303738885232 / 3775874723383551782 / 9660637873999918948 / 17935634836335592429) — S8 hat
+nur den Bericht geändert. S9: KRAFT=2-Ausstieg der Zielerfüllung greift, Kraftpfad Modus 2 == Wirkpfad. S2: Nullziel-Arm mit
+QUERGATE=1 → **Slot 64 = 0** (vorher kippte jedes Rundungsresiduum). Zeilensummen/Nullspalten der Kreuztabelle halten in allen Armen.
+vt_x und vt_null_quergate rc=1 nur durch die vorbestehende Kanal-Abnahme K2 (Reibungspfad vs Kraftbilanz) — nicht durch neue Wächter.
+**Binary für den 05.09. ist aus `59aa64c` gebaut** (Sammelbehebung + Zensus-VTK); Queue frei, keine Laufprozesse.
+
 ## Läuft / steht bereit
 
 - `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.
