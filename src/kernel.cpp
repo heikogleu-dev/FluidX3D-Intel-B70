@@ -2249,7 +2249,66 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
 	float s1=0.0f, s2=0.0f, sn=0.0f;
 	bool rueckfall=false; // ★ BUCHUNGSSCHLUSS (Baustein 2/1, 27.08.): Rueckfaelle steigen nicht mehr per return aus, sondern buchen mit s=0 (P-only)
-	float res2=0.0f; // ★ 2026-08-25 Restfehler in QUERrichtung t2 (Ziel dort ist 0); nur die Rueckfaelle fuellen ihn
+	float res2=0.0f;
+)+"#ifdef FACETTEN_MASSE_X"+R(
+	// ★ ARM X (CFD_FAC_MASSE_ALLE=3, 04.09.2026): Rueckfall-Entscheid im SCHATTEN wie unter ALPHA2 --
+	// Downdate auf KOPIEN, Entkopplungs-Gate, Kaskade, Schatten-Solve, Gates auf dem Schatten-s. Die
+	// reale Kaskade darunter loest weiter gegen die ROHEN Momente. Jede Bedingung ist Zeichen fuer
+	// Zeichen die der Basis (2162-2179, 2257-2325, 2335, 2342, 2350-2360). KEIN hits[] hier -- sonst
+	// zaehlt die Kaskade doppelt und die Abnahme 78+79+12+13+14+15 == Wirkpfad bricht.
+	bool a2_rueckfall=false;
+	{
+		float G11s=G11, G22s=G22, G12s=G12, Sn1s=Sn1, Sn2s=Sn2, Snns=Snn;
+		if(S0>0.0f) {
+			const float G11rs=G11s, G22rs=G22s, Snnrs=Snns;
+			const float B1=S1x*t1x+S1y*t1y+S1z*t1z, B2=S1x*t2x+S1y*t2y+S1z*t2z, Bn=S1x*nx+S1y*ny+S1z*nz;
+			const float Dd=6.0f/S0;
+			G11s -= Dd*B1*B1; G22s -= Dd*B2*B2; G12s -= Dd*B1*B2;
+			Sn1s -= Dd*B1*Bn; Sn2s -= Dd*B2*Bn; Snns -= Dd*Bn*Bn;
+			if(G11s<1e-4f*G11rs) { G11s=0.0f; G12s=0.0f; Sn1s=0.0f; }
+			if(G22s<1e-4f*G22rs) { G22s=0.0f; G12s=0.0f; Sn2s=0.0f; }
+			if(Snns<1e-4f*Snnrs) Snns=0.0f;
+		}
+		float s1s=0.0f, s2s=0.0f, res2s=0.0f;
+		const float kops = Sn1s*Sn1s+Sn2s*Sn2s;
+		if(Snns<1e-8f||kops<=1e-6f*Snns*(G11s+G22s)) {
+		const float dets = G11s*G22s - G12s*G12s;
+		if(dets>=1e-4f*G11s*G22s&&G11s>=1e-8f&&G22s>=1e-8f) { s1s=(R1*G22s-R2*G12s)/dets; s2s=(R2*G11s-R1*G12s)/dets; }
+)+"#ifdef FACETTEN_LSQ"+R(
+		else if(G11s>=1e-8f) { const float d=fma(G11s,G11s,G12s*G12s); s1s=(d>0.0f)?(G11s*R1+G12s*R2)/d:0.0f; s2s=0.0f; res2s=fabs(G12s*s1s-R2); }
+		else if(G22s>=1e-8f) { const float d=fma(G22s,G22s,G12s*G12s); s2s=(d>0.0f)?(G12s*R1+G22s*R2)/d:0.0f; s1s=0.0f; res2s=fabs(G22s*s2s-R2); }
+)+"#else"+R(
+		else if(G11s>=1e-8f) { s1s=R1/G11s; s2s=0.0f; res2s=fabs(G12s*s1s-R2); }
+		else if(G22s>=1e-8f) { s1s=0.0f; s2s=R2/G22s; res2s=fabs(G22s*s2s-R2); }
+)+"#endif"+R( // FACETTEN_LSQ
+		else a2_rueckfall=true;
+		} else {
+		const float Gt11s = G11s - Sn1s*Sn1s/Snns, Gt22s = G22s - Sn2s*Sn2s/Snns, Gt12s = G12s - Sn1s*Sn2s/Snns;
+		const float detts = Gt11s*Gt22s - Gt12s*Gt12s;
+		if(detts>=1e-4f*Gt11s*Gt22s&&Gt11s>=1e-4f*G11s&&Gt22s>=1e-4f*G22s&&Gt11s>=1e-8f&&Gt22s>=1e-8f) { s1s=(R1*Gt22s-R2*Gt12s)/detts; s2s=(R2*Gt11s-R1*Gt12s)/detts; }
+)+"#ifdef FACETTEN_PINV"+R(
+		else if(Gt11s+Gt22s>=1e-4f*(G11s+G22s)&&Gt11s+Gt22s>=1e-8f) { const float tr=Gt11s+Gt22s, it2=1.0f/(tr*tr); s1s=(Gt11s*R1+Gt12s*R2)*it2; s2s=(Gt12s*R1+Gt22s*R2)*it2; res2s=fabs(fma(Gt12s,s1s,Gt22s*s2s)-R2); }
+)+"#elif defined(FACETTEN_LSQ)"+R(
+		else if(Gt11s>=1e-4f*G11s&&Gt11s>=1e-8f) { const float d=fma(Gt11s,Gt11s,Gt12s*Gt12s); s1s=(d>0.0f)?(Gt11s*R1+Gt12s*R2)/d:0.0f; s2s=0.0f; res2s=fabs(Gt12s*s1s-R2); }
+		else if(Gt22s>=1e-4f*G22s&&Gt22s>=1e-8f) { const float d=fma(Gt22s,Gt22s,Gt12s*Gt12s); s2s=(d>0.0f)?(Gt12s*R1+Gt22s*R2)/d:0.0f; s1s=0.0f; res2s=fabs(fma(Gt12s,s1s,Gt22s*s2s)-R2); }
+)+"#else"+R(
+		else if(Gt11s>=1e-4f*G11s&&Gt11s>=1e-8f) { s1s=R1/Gt11s; s2s=0.0f; res2s=fabs(Gt12s*s1s-R2); }
+		else if(Gt22s>=1e-4f*G22s&&Gt22s>=1e-8f) { s1s=0.0f; s2s=R2/Gt22s; res2s=fabs(fma(Gt12s,s1s,Gt22s*s2s)-R2); }
+)+"#endif"+R( // FACETTEN_PINV / FACETTEN_LSQ
+		else a2_rueckfall=true;
+		}
+)+"#ifdef FACETTEN_QUERGATE"+R(
+		if(!a2_rueckfall&&res2s>def_fac_tau*twe) a2_rueckfall=true;
+)+"#endif"+R( // FACETTEN_QUERGATE
+)+"#ifdef FACETTEN_SATGATE"+R(
+		if(!a2_rueckfall&&(fabs(s1s)>2.0f*def_fac_budget*ut||fabs(s2s)>def_fac_budget*ut)) a2_rueckfall=true;
+		if(!a2_rueckfall&&Snns>=1e-8f&&(Sn1s*Sn1s+Sn2s*Sn2s)>1e-6f*Snns*(G11s+G22s)) {
+			const float sns = -(Sn1s*s1s+Sn2s*s2s)/Snns;
+			if(fabs(sns)>def_fac_budget_sn*ut) a2_rueckfall=true;
+		}
+)+"#endif"+R( // FACETTEN_SATGATE
+	}
+)+"#endif"+R( // FACETTEN_MASSE_X // ★ 2026-08-25 Restfehler in QUERrichtung t2 (Ziel dort ist 0); nur die Rueckfaelle fuellen ihn
 	// ★ 3x3-Iteration (FACETTEN-IMEM-3X3.md): Entkopplungs-Gate (Gl. 20). Entkoppelt laeuft
 	// WOERTLICH der bisherige 2x2-Pfad (Bitgleichheit der ebenen Waende); gekoppelt wird die
 	// Normalinjektion per Schur-Elimination exakt genullt (I2-Durchfallursache bei 26,6 Grad).
@@ -2362,6 +2421,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Kopfbuchung -dp ist das exakt der wahre Tangentialaustausch -(2*Sum c_t fpre + d_t) -- die
 	// ~40 % Facettenbesuche, die bisher per return NICHTS buchten (K2 -7,4 am 26-Grad-Kanal =
 	// Blenden-Korrektur ohne den BB-Anteil, den sie korrigiert). Explizit +0.0f, kein signed-zero-Anker.
+)+"#ifdef FACETTEN_MASSE_X"+R(
+	if(t%100ul==0ul) { // Kreuztabelle roh x Schatten, dieselbe Stichprobe wie Slot 69 und die Kaskade
+		if(a2_rueckfall&&!rueckfall&&hits[94]<0xF0000000u) atomic_inc(&hits[94]); // [94] Schatten RF, roh haette angewandt -> X zwingt auf BB
+		if(rueckfall&&!a2_rueckfall&&hits[95]<0xF0000000u) atomic_inc(&hits[95]); // [95] roh RF, Schatten haette angewandt -> Soll ~0
+	}
+	if(a2_rueckfall) rueckfall=true; // VOR Nullung, pass2_an, kz und beta3
+)+"#endif"+R( // FACETTEN_MASSE_X
 	if(rueckfall) { s1=0.0f; s2=0.0f; sn=0.0f; }
 	// ★★ ZELLKRAFT STATT SLIP (CFD_FAC_KRAFT, 30.08.2026, Planungsagent Weg F -- IVW-Hybrid nach
 	// Kuwata & Suga). Befund: das Gate feuert, wenn |P1| > 2*G11*ut -- eine Eigenschaft der
@@ -2447,11 +2513,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#if defined(FACETTEN_MASSE_F0)"+R(
 		// ★★ MODUS 2 (04.09.2026, Diff-Pruefung c): die gesamte Kompensation auf die RUHEPOPULATION.
 		// Weil c_0 = 0 ist, traegt sie Masse, aber WEDER Impuls NOCH zweiten Moment -- sie ist die
-		// einzige Verteilung, die keinen anderen Moment anfasst. Modus 1 verteilt mit w_i ueber alle
-		// Richtungen und aendert dabei Sum w_i c_i c_i^T = (1/3) I, also den Spannungstensor; genau
-		// das ist der Kandidat fuer die gemessene cz-Verschlechterung am Fahrzeug (-0,147 -> +0,029).
-		// Preis: die Stoerung sitzt auf EINER Population statt auf allen, relativ also dreifach --
-		// deshalb der Positivitaetszaehler darunter.
+		// einzige Verteilung, die keinen anderen Moment anfasst.
+		// ★ KORRIGIERT 04.09. abends (Planungsagent B1): die Rollen waren hier VERTAUSCHT. Modus 1
+		// addiert p_i = w_i*beta3 = f_eq(rho=beta3, u=0) -- sein zweiter Moment beta3/3*I ist der
+		// GLEICHGEWICHTSDRUCK der zugefuegten Masse, kein Spannungsterm; sein Nichtgleichgewichtsanteil
+		// ist O(beta3*u^2), rund 1e-3 des Slip-Terms. DIESER Modus 2 dagegen traegt relativ zum
+		// Gleichgewicht Pi_neq = -beta3/3*I: ein isotroper Nichtgleichgewichts-Bulk-Mode an ~70 % der
+		// Wandzellen je Schritt, der bei omega ~ 2 ueberrelaxiert. GEMESSEN am 8-mm-Fahrzeug (vo_f08_m2):
+		// Geschwindigkeitsklemme 14.659.833 gegen 1.570 in der Basis (x9.300), f_0 <= 0 bei 2,0 % der
+		// Besuche (Slot 93), cz_druck_rest +0,675. Modus 2 ist VERWORFEN; der Zaehler bleibt als Beleg.
 		fhn[0] += beta3; masse_ist = beta3;
 		if(fhn[0]+0.33333334f<=0.0f&&t%100ul==0ul&&hits[93]<0xF0000000u) atomic_inc(&hits[93]); // [93] f_0 nicht mehr positiv
 )+"#else"+R(
