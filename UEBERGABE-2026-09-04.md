@@ -64,6 +64,12 @@ und konstruktiven Nullspalten (Quergate × exakt, sn-Gate × entkoppelt). NUR Z�
 **Morgen:** (1) `logs/vs_kreuz_serie.txt` (iGPU, 5 Arme, Soll-Hashes im Kopf) → (2) `logs/vs_x8_serie.txt` (B70) = Arm X am
 Fahrzeug + Tabelle in einem Lauf. Vorhersage Klasse C: [113] ≈ [95]. Start nur, wenn die Diff-Prüfung (läuft) nichts findet.
 
+## 21:15 — Feld-Hash vor die Berichte gezogen (Kanal + Kugel, host-only)
+
+Die X-Arme hatten keinen FELD-HASH, weil ein abbrechender Wächter (`print_error` = `exit(1)`) im Bericht vor der Hash-Zeile
+feuerte. Jetzt wird der Hash direkt nach dem Lauf gedruckt, vor jedem Bericht. Die Berichte ändern u nicht — die Werte
+bleiben identisch, die 0/1/2-Sollhashes von heute gelten weiter. Ab morgen haben auch X-Arme einen Hash.
+
 ## Läuft / steht bereit
 
 - `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.
