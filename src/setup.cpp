@@ -3366,13 +3366,57 @@ void main_setup_kanal() {
 		}
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // ★ 2026-08-25 Stoerform-Groessenmessung (49..58)
 			const uint* h = &lbm.lbm_domain[0]->rho_clamp_hits[0];
-			ulong so=0ull, sp=0ull; for(uint k=0u; k<5u; k++) { so+=(ulong)h[49u+k]; sp+=(ulong)h[54u+k]; }
+			ulong so=0ull, sp=0ull, sr=0ull, sz=0ull; for(uint k=0u; k<5u; k++) { so+=(ulong)h[49u+k]; sp+=(ulong)h[54u+k]; sr+=(ulong)h[118u+k]; }
+			for(uint k=0u; k<9u; k++) sz+=(ulong)h[83u+k]; // Zielerfuellung 83..91: gestichprobt UND pass2_an UND Ziel>0
 			if(so>0ull) {
-				string zo="", zp="";
-				const string lab[5] = {"<0.01","0.01-0.1","0.1-1","1-10",">=10"};
-				for(uint k=0u; k<5u; k++) { zo+=lab[k]+":"+to_string(100.0*(double)h[49u+k]/(double)so,1u)+"% "; zp+=lab[k]+":"+to_string(100.0*(double)h[54u+k]/(double)sp,1u)+"% "; }
+				string zo="", zp="", zr="";
+				// ★ 05.09.2026 KORRIGIERT: hier stand EIN Label-Array fuer BEIDE Histogramme. Der Kernel
+				// setzt aber verschiedene Grenzen -- ro_ bei 0,01/0,1/1/10 (kernel.cpp), rp_ bei 1/10/100/1000.
+				// Die P-Betrag-Zeile war damit seit dem 25.08. um ZWEI DEKADEN falsch beschriftet: was als
+				// ★ DATUM PRAEZISIERT (Diff-Pruefung): bei EINFUEHRUNG (c69d18a, 25.08. 09:52) hatten BEIDE
+				// Histogramme dieselben Grenzen und das gemeinsame Label-Array war RICHTIG. Falsch wurde es
+				// erst mit der Grenzverschiebung in e207f71 (25.08. 10:26). logs/z_off_eben.log (09:28) und
+				// logs/z_off_45.log (09:51) sind daher KORREKT beschriftet; betroffen sind die Logs ab
+				// ab2_eben_kontrolle.log (10:27), rund 180 Stueck, darunter vs_aus.log vom 04.09.
+				// Kein Dokument zitiert diese Zahlen (grep ueber *.md/*.txt/*.csv ausserhalb logs/: null Treffer).
+				// "1-10 / >=10" gedruckt wurde, ist in Wahrheit "100-1000 / >=1000". Am Kanal kipp26 las man
+				// so 30,9 % / 69,0 % im Bereich 1..10 statt im Bereich 100..1000 -- ein Faktor 100 in der
+				// Einordnung von |P| gegen das Wandschubziel, und genau die Zahl, an der die Frage haengt,
+				// wie klein der Zielrest gegen P ist.
+				const string labo[5] = {"<0.01","0.01-0.1","0.1-1","1-10",">=10"};
+				const string labp[5] = {"<1","1-10","10-100","100-1000",">=1000"};
+				const string labr[5] = {"<0.001","0.001-0.01","0.01-0.1","0.1-1",">=1"};
+				for(uint k=0u; k<5u; k++) { zo+=labo[k]+":"+to_string(100.0*(double)h[49u+k]/(double)so,1u)+"% "; zp+=labp[k]+":"+to_string(100.0*(double)h[54u+k]/(double)sp,1u)+"% ";
+					if(sr>0ull) zr+=labr[k]+":"+to_string(100.0*(double)h[118u+k]/(double)sr,1u)+"% "; }
 				print_info("  Stoerform-Offset |2*(S1.t)| / |Ziel def_fac_tau*twe|: "+zo);
 				print_info("  P-Betrag         |P| / |Ziel|                       : "+zp);
+				// ★ 05.09. NACHGEBESSERT (Diff-Pruefung M-1/M-2):
+				// M-1 hier stand print_error, und das ist exit(1) MITTEN IM ENDBERICHT (utilities.hpp) --
+				//     der Abbruch laege VOR iMEM-Erhaltung, Wirkpfad-Abnahme und Cd-Pfad. Genau der
+				//     g12-Schaden ("drei komplette 8-mm-Laeufe am BERICHT getoetet"). Fuer einen reinen
+				//     BERICHTSdefekt ist das die falsche Haerte: warnen und die Zahl unterdruecken.
+				// M-2 der ganze Block hing an if(sr>0): waere der Kernel-Zaehler tot (falsche Emission,
+				//     Slot verschoben), fiele er LAUTLOS weg und der Bericht saehe aus wie vor dem 05.09.
+				//     Genau die Klasse Fehler, die dieses Projekt jagt. Jetzt sagt er es.
+				// ★ 05.09. ABNAHME UMGESTELLT (Pruefbefund H-4): der Zaehler steht jetzt im pass2_an-Rumpf der
+				// Zielerfuellung, teilt also KONSTRUKTIV das Guard-Trippel von 83..91 (Stichprobe, pass2_an,
+				// Ziel>0) -- nicht mehr das von 49..53, das ohne pass2_an zaehlt. Die alte Identitaet
+				// sr==so ist damit ungueltig; sie MUSS jetzt gegen 83..91 laufen.
+				if(sr==0ull&&sz>0ull) print_warning("  REST-DRUCKTERM: Slots 118..122 sind ALLE NULL, obwohl die "
+					"Zielerfuellung "+to_string(sz)+" angewandte Besuche zaehlt. Der Zaehler ist tot (Emission, "
+					"Slotverschiebung oder Puffergroesse) -- das ist ein stiller No-Op, kein Messergebnis.");
+				else if(sr!=sz) print_warning("  REST-DRUCKTERM UNGUELTIG: Stichprobe "+to_string(sr)+" != Zielerfuellung "
+					+to_string(sz)+". Beide stehen im SELBEN if-Rumpf und muessen konstruktiv gleich viele Ereignisse"
+					" zaehlen. Die Zeile wird unterdrueckt, statt eine plausible Prozentzahl zu drucken.");
+				else {
+					print_info("  REST-DRUCKTERM   |2*(rho-1)*(S1.t)| / |Ziel|          : "+zr);
+					print_info("   Lesehinweis: 49..53 misst den Term, den die Stoerform WEGNIMMT, als VOLLEN Tangentialbetrag"
+						" und ueber ALLE gestichprobten Besuche (auch die Rueckfaelle). 118..122 misst, was davon IM ZIEL"
+						" VERBLEIBT -- nur die t1-Komponente, und nur an den TATSAECHLICH ANGEWANDTEN Zellen ("+to_string(sz)
+						+" von "+to_string(so)+" = "+to_string(so>0ull?100.0*(double)sz/(double)so:0.0,1u)+" %). Die beiden"
+						" Zeilen sind daher NICHT direkt vergleichbar. Nur die zweite ist ein moeglicher Fehler; steht sie"
+						" unter 0,01, ist die Zielkette an dieser Stelle geschlossen.");
+				}
 			}
 		}
 		if(env_u("CFD_FACETTEN",0u)>=3u) { // Delta-m + Normalkontamination global (Auflage 2: Kanal-Soll exakt 0)

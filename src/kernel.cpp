@@ -2142,6 +2142,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			// offenen obersten Bin -- null Information, und die als "bimodal" gelesene 45-Grad-Verteilung
 			// war ein Saettigungsartefakt. Grenzen dorthin, wo die Daten liegen.
 			atomic_inc(&hits[54u+(rp_<1.0f?0u:(rp_<10.0f?1u:(rp_<100.0f?2u:(rp_<1000.0f?3u:4u))))]);
+			// ★ 05.09.2026 HINWEIS: der Zaehler fuer den RESTANTEIL DES DRUCKTERMS (Slots 118..122) stand
+			// zuerst HIER und wurde nach Pruefbefund H-4 in den Zielerfuellungsblock (~2585) VERLEGT, weil
+			// dieser Block nicht auf pass2_an gegatet ist. Die Herleitung steht dort.
 			} // zi_>0
 		}
 	}
@@ -2571,6 +2574,21 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 					// des Wandschubs als kleiner.
 					const uint b_ze = (r_ze<=-10.0f)?0u:((r_ze<=-1.0f)?1u:((r_ze<0.0f)?2u:((r_ze<0.5f)?3u:((r_ze<0.9f)?4u:((r_ze<1.1f)?5u:((r_ze<2.0f)?6u:((r_ze<10.0f)?7u:8u)))))));
 					if(hits[83u+b_ze]<0xF0000000u) atomic_inc(&hits[83u+b_ze]); // [83..91]
+					// ★ 05.09. REST-DRUCKTERM (Slots 118..122), HIERHER VERLEGT nach Pruefbefund H-4.
+					// Er stand zuerst im Stoerform-Messblock (~2130), und der ist NICHT auf pass2_an gegatet:
+					// am Kanal kipp26 sind nur 26,82 % der gestichprobten Besuche ueberhaupt angewandt, an den
+					// uebrigen 73 % laeuft reines Bounce-Back mit s=0 und der Loeser hebt GAR NICHTS weg.
+					// "In 100 % der Besuche" umfasste damit zu drei Vierteln Zellen, an denen der behauptete
+					// Mechanismus konstruktiv nicht stattfindet. Hier steht er im selben if-Rumpf wie [83..91]
+					// und teilt deren Guard-Trippel (Stichprobe, pass2_an, zi_ze>0) KONSTRUKTIV.
+					// GEMESSEN WIRD: |2*(rho-1)*(S1.t1)| / |def_fac_tau*twe| -- der isotrope Druckanteil, der
+					// nach der Stoerform (fhn = f - w_i) in P1 VERBLEIBT und damit ungemessen im Ziel steht.
+					// Nur die t1-Komponente: in R1 geht ausschliesslich S1.t1 ein, S1.t2 gehoert zu R2 (Ziel 0).
+					// ABNAHME: Summe(118..122) == Summe(83..91), exakt, in jedem Arm.
+					{	const float b1_ze = S1x*t1x+S1y*t1y+S1z*t1z;
+						const float rr_ze = fabs(rhon-1.0f)*fabs(2.0f*b1_ze)/zi_ze;
+						const uint b_rr = rr_ze<0.001f?0u:(rr_ze<0.01f?1u:(rr_ze<0.1f?2u:(rr_ze<1.0f?3u:4u)));
+						if(hits[118u+b_rr]<0xF0000000u) atomic_inc(&hits[118u+b_rr]); }
 				} else if(hits[82]<0xF0000000u) atomic_inc(&hits[82]); // [82] angewandt, aber kein Ziel (twe==0)
 			}
 		}
