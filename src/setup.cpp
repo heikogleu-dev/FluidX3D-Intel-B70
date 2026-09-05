@@ -1655,6 +1655,21 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	double s1t_lsum[20], s1t_lrel[20]; ulong s1t_ln[20];
 	for(uint i=0u;i<20u;i++) { s1t_lsum[i]=0.0; s1t_lrel[i]=0.0; s1t_ln[i]=0ull; }
 	std::vector<float> vs1rel;
+	// ★ 05.09. NACHBESSERUNG (Diff-Pruefung, Befunde M-1 bis M-4). Der erste Nullbeweis hatte vier Loecher:
+	// M-1 er las den Achsnaehe-Eimer 5 (a>=0,99, also bis 8,11 Grad SCHIEF) und nannte ihn "achsparallel";
+	//     die Schwelle 0,02 entspricht 1,15 Grad. Jede Wand zwischen 1,15 und 8,11 Grad haette den Waechter
+	//     gerissen, OHNE dass etwas falsch gerechnet war -- am Fahrzeug liegen 1.201.022 Facetten in dem Eimer.
+	//     Jetzt eigenes Kriterium: amax >= 1-1e-6, also wirklich achsparallel.
+	// M-2 er prueft das MITTEL. Ein Eimer, in dem 99 % exakt 0 und 1 % voellig falsch liegen, besteht ihn.
+	//     Jetzt zusaetzlich das FACETTEN-Maximum -- gegen genau die Fehlerart, fuer die er gebaut ist.
+	// M-3 bei leerem Eimer schwieg er ganz (an kipp26 eingetreten: alle Facetten in Eimer 3, keine
+	//     Nullbeweis-Zeile im Bericht). Jetzt sagt er ausdruecklich, dass er nicht durchfuehrbar war.
+	// M-4 |S1| = 0 (Zelle zwischen zwei gegenueberliegenden Waenden, Linkpaare heben sich bitgenau auf)
+	//     wurde still als "perfekt ausgerichtet" gebucht und zog das Mittel herunter. Jetzt eigener Zaehler,
+	//     und solche Facetten gehen NICHT ins Mittel.
+	double s1t_exsum=0.0, s1t_exmax=0.0; ulong s1t_exn=0ull;   // exakt achsparallel (amax >= 1-1e-6)
+	double s1t_axmax[6]; for(uint i=0u;i<6u;i++) s1t_axmax[i]=0.0; // Facetten-Maximum je Achsnaehe-Eimer
+	double s1t_gmax=0.0; ulong n_s1_null=0ull;                 // globales Facetten-Maximum, |S1|~0-Faelle
 	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
 	// ★ 04.09. abends (Heiko): VTK-Export der Facetten, eingefaerbt nach Rang -- fuer die optische Diagnose, wo Rang fehlt
 	// und ob der Nachbar auf derselben Flaeche aehnlich orientiert ist (spitze Kanten!). Hinter CFD_FAC_ZENSUS_VTK=1,
@@ -1732,11 +1747,21 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			const double s1n_ = S1[0]*nv[0]+S1[1]*nv[1]+S1[2]*nv[2];
 			const double s1q_ = S1[0]*S1[0]+S1[1]*S1[1]+S1[2]*S1[2];
 			const double s1t_ = sqrt(fmax(s1q_-s1n_*s1n_, 0.0)); // Betrag, vorzeichenunabhaengig -> Spiegelung folgenlos
-			const double s1r_ = (s1q_>0.0) ? s1t_/sqrt(s1q_) : 0.0; // = sin(Winkel zwischen n und S1)
-			s1t_axsum[ab]+=s1t_; s1t_axrel[ab]+=s1r_; s1t_axn[ab]++;
-			const uint lb_ = nl_k<20u?nl_k:19u;
-			s1t_lsum[lb_]+=s1t_; s1t_lrel[lb_]+=s1r_; s1t_ln[lb_]++;
-			if(vtk_an) vs1rel.push_back((float)s1r_); }
+			// M-4: |S1|^2 unter 1e-12 heisst Ausloeschung -- der Winkel ist dort UNDEFINIERT, nicht null.
+			// Solche Facetten bekommen im VTK -1 (sichtbar als eigene Klasse) und gehen in KEIN Mittel ein.
+			const bool s1_da = s1q_>1e-12;
+			const double s1r_ = s1_da ? s1t_/sqrt(s1q_) : 0.0; // = sin(Winkel zwischen n und S1)
+			if(!s1_da) n_s1_null++;
+			else {
+				s1t_axsum[ab]+=s1t_; s1t_axrel[ab]+=s1r_; s1t_axn[ab]++;
+				if(s1r_>s1t_axmax[ab]) s1t_axmax[ab]=s1r_;
+				if(s1r_>s1t_gmax) s1t_gmax=s1r_;
+				const uint lb_ = nl_k<20u?nl_k:19u;
+				s1t_lsum[lb_]+=s1t_; s1t_lrel[lb_]+=s1r_; s1t_ln[lb_]++;
+				// M-1: der Nullbeweis braucht WIRKLICH achsparallele Facetten, nicht den 0,99-Eimer.
+				if(amax>=1.0-1e-6) { s1t_exsum+=s1r_; s1t_exn++; if(s1r_>s1t_exmax) s1t_exmax=s1r_; }
+			}
+			if(vtk_an) vs1rel.push_back(s1_da?(float)s1r_:-1.0f); }
 		if(vtk_an) { vx.push_back((float)x); vy.push_back((float)y); vz.push_back((float)z); vnx.push_back((float)nv[0]); vny.push_back((float)nv[1]); vnz.push_back((float)nv[2]); vverh.push_back((float)(verh>0.0?log10(verh):-12.0)); vrg.push_back((int)rg); vrgroh.push_back((int)rg_roh); vnl.push_back((int)nl_k); ventk.push_back(entkoppelt?1:0); }
 		if(entkoppelt) n_entk++; else n_gek++;
 		n_rang[rg]++;
@@ -1798,7 +1823,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		o<<"CELL_DATA "<<vx.size()<<"\n";
 		auto sc=[&](const char* nm, const std::vector<int>& v){ o<<"SCALARS "<<nm<<" int 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<v.size();i++) o<<v[i]<<"\n"; };
 		sc("rang_downdate_z",vrg); sc("rang_roh_z",vrgroh); sc("n_wandlinks_z",vnl);
-		print_info("   ZENSUS-VTK: "+pfad+" ("+to_string((ulong)vx.size())+" Facetten; Skalare rang_downdate/rang_roh/n_wandlinks/entkoppelt/log10_lmin_lmax, Vektor normale; Gitterkoordinaten).");
+		print_info("   ZENSUS-VTK: "+pfad+" ("+to_string((ulong)vx.size())+" Facetten; Skalare rang_downdate/rang_roh/n_wandlinks/entkoppelt/log10_lmin_lmax/achsnaehe/s1_fehlausrichtung (-1 = |S1|~0), Vektor normale; Gitterkoordinaten).");
 	}
 	{	const char* an[6]={"0,577-0,65 (Raumdiagonale)","0,65 -0,75","0,75 -0,85","0,85 -0,95","0,95 -0,99","0,99 -1,00 (achsparallel)"};
 		print_info("   RANG NACH ACHSNAEHE a = max(|nx|,|ny|,|nz|) -- a=1 achsparallel, a=0,577 Raumdiagonale:");
@@ -1816,7 +1841,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			const double rel=s1t_axrel[i]/d, grad=asin(rel<1.0?rel:1.0)*180.0/3.14159265358979;
 			if(rel>s1t_max) s1t_max=rel; s1t_ges+=s1t_axn[i]; s1t_gsum+=s1t_axrel[i];
 			print_info("    a "+string(an2[i])+" n = "+to_string(s1t_axn[i])+" | |S1_t|/|S1| = "+to_string((float)rel,4u)
-				+" ("+to_string((float)grad,1u)+" Grad) | |S1_t| = "+to_string((float)(s1t_axsum[i]/d),5u));
+				+" ("+to_string((float)grad,1u)+" Grad) | max "+to_string((float)s1t_axmax[i],4u)+" | |S1_t| = "+to_string((float)(s1t_axsum[i]/d),5u));
 		}
 		print_info("   DIESELBE GROESSE NACH WANDLINKZAHL (die Achse, auf der der Rang haengt):");
 		for(uint i=0u;i<20u;i++) { if(s1t_ln[i]==0ull) continue; const double d=(double)s1t_ln[i];
@@ -1824,16 +1849,29 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			print_info("    "+to_string(i)+" Links: n = "+to_string(s1t_ln[i])+" | |S1_t|/|S1| = "+to_string((float)rel,4u)
 				+" ("+to_string((float)grad,1u)+" Grad) | |S1_t| = "+to_string((float)(s1t_lsum[i]/d),5u));
 		}
-		// NULLBEWEIS (haert, nicht kosmetisch): an einer ACHSPARALLELEN Wand ist die 5er-Linkmenge tangential
-		// symmetrisch, S1 = (0,0,1/6) exakt, also |S1_t|/|S1| == 0. Der oberste Achsnaehe-Eimer MUSS deshalb
-		// praktisch null liefern. Tut er das nicht, misst entweder die Normale oder diese Zeile falsch --
-		// dann ist die ganze Tabelle wertlos und sagt es hier, statt still eine Zahl zu liefern.
-		if(s1t_axn[5]>0ull) { const double rel5=s1t_axrel[5]/(double)s1t_axn[5];
-			if(rel5>0.02) print_warning("   NULLBEWEIS VERFEHLT: achsparallele Facetten haben |S1_t|/|S1| = "+to_string((float)rel5,4u)
-				+" statt ~0 -- an einer achsparallelen Wand ist S1 exakt normal. Entweder ist die Normale n dort nicht achsparallel,"
-				" oder die Fehlausrichtungsrechnung ist falsch. Die Tabelle daruber ist dann NICHT verwendbar.");
-			else print_info("    NULLBEWEIS: achsparallele Facetten |S1_t|/|S1| = "+to_string((float)rel5,4u)+" (Soll ~0, Symmetrie der 5er-Linkmenge) -- Instrument bestaetigt.");
+		// NULLBEWEIS, nachgebessert nach der Diff-Pruefung (M-1..M-3). An einer WIRKLICH achsparallelen Wand
+		// ist die 5er-Linkmenge {-z, +-x-z, +-y-z} tangential symmetrisch: S1 = (0,0,-(1/18+4/36)) = (0,0,-1/6),
+		// Tangentialanteil exakt 0 -- auch in Gleitkomma, weil sich die +-x- und +-y-Paare bitgenau aufheben.
+		// Geprueft wird deshalb (a) nur amax >= 1-1e-6, nicht der 0,99-Eimer, und (b) das FACETTEN-MAXIMUM,
+		// nicht nur das Mittel: ein Eimer, in dem 99 % exakt 0 und 1 % voellig falsch liegen, hat ein
+		// harmloses Mittel und ist trotzdem kaputt.
+		if(n_s1_null>0ull) print_info("    |S1| ~ 0 (Ausloeschung, Winkel undefiniert): "+to_string(n_s1_null)
+			+" Facetten -- NICHT in den Mittelwerten, im VTK als -1 markiert.");
+		if(s1t_exn==0ull) {
+			print_info("    NULLBEWEIS NICHT DURCHFUEHRBAR: keine exakt achsparallele Facette (amax >= 1-1e-6)"
+				" in diesem Fall. Die Tabelle ist damit UNGEPRUEFT -- sie kann richtig sein, belegt ist es hier nicht.");
+		} else {
+			const double relx=s1t_exsum/(double)s1t_exn;
+			if(relx>1e-4||s1t_exmax>1e-3) print_warning("   NULLBEWEIS VERFEHLT: exakt achsparallele Facetten ("
+				+to_string(s1t_exn)+") haben |S1_t|/|S1| im Mittel "+to_string((float)relx,6u)+", Maximum "
+				+to_string((float)s1t_exmax,6u)+" -- Soll ist BITGENAU 0 (S1 = (0,0,1/6) bei der 5er-Linkmenge)."
+				" Entweder ist n dort nicht achsparallel, oder die Fehlausrichtungsrechnung ist falsch."
+				" Die Tabelle darueber ist dann NICHT verwendbar.");
+			else print_info("    NULLBEWEIS: "+to_string(s1t_exn)+" exakt achsparallele Facetten, |S1_t|/|S1| Mittel "
+				+to_string((float)relx,6u)+", Maximum "+to_string((float)s1t_exmax,6u)+" (Soll bitgenau 0) -- Instrument bestaetigt.");
 		}
+		print_info("    Facetten-MAXIMUM ueber alle Eimer: |S1_t|/|S1| = "+to_string((float)s1t_gmax,4u)
+			+" ("+to_string((float)(asin(s1t_gmax<1.0?s1t_gmax:1.0)*180.0/3.14159265358979),1u)+" Grad)");
 		if(s1t_ges>0ull) print_info("    MITTEL ueber alle Facetten: |S1_t|/|S1| = "+to_string((float)(s1t_gsum/(double)s1t_ges),4u)
 			+" | Maximum eines Achsnaehe-Eimers "+to_string((float)s1t_max,4u));
 	}
