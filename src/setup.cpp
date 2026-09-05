@@ -1638,6 +1638,23 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	ulong n_ax[6][3]; for(uint i=0u;i<6u;i++) for(uint k=0u;k<3u;k++) n_ax[i][k]=0ull;
 	ulong n_axges[6]; ulong l_axsum[6]; for(uint i=0u;i<6u;i++) { n_axges[i]=0ull; l_axsum[i]=0ull; }
 	std::vector<float> vax;
+	// ★ 05.09. FEHLAUSRICHTUNG n gegen die diskrete Linkmengen-Normale S1/|S1|.
+	// ANLASS (gemessen, nicht vermutet): der Stoerform-Offset |2(S1.t1)|/Ziel steht am Kanal kipp26 bei
+	// 100 % der Besuche im obersten Dekadeneimer (>=10), bei kipp0 zu 100 % und bei kipp45 zu 95,7 % im
+	// UNTERSTEN (<0,01). Der Grund ist Symmetrie: bei 0 und 45 Grad ist die Wandlinkmenge tangential
+	// symmetrisch, also S1 || n und S1.t1 == 0 per Konstruktion -- die Kampagne vom 25.08. hat genau die
+	// zwei Winkel abgetastet, bei denen der Effekt nicht auftreten KANN, und daraus "vernachlaessigbar"
+	// geschlossen. Halfway-BB tauscht F = Sum_L 2 c_i f_i; der Code rechnet in der Stoerform f-w_i, also
+	// P_dach = F - 2*S1. Die Tangentialkomponente des fehlenden hydrostatischen Terms 2*S1 ist genau
+	// dann null, wenn S1 || n. Gemessen wird deshalb |S1_t| = sqrt(|S1|^2-(S1.n)^2) und |S1_t|/|S1|.
+	// ★ SIGN-FALLE (der Kommentar bei der Linkschleife warnt davor): dieser Zensus baut die GESPIEGELTE
+	// Linkmenge, S1_Zensus = -S1_Kernel. Alles LINEARE in S1 kippt das Vorzeichen -- |S1_t| und |S1_t|/|S1|
+	// sind Betraege und damit invariant. Deshalb NUR Betraege, nie S1.t1 selbst.
+	double s1t_axsum[6], s1t_axrel[6]; ulong s1t_axn[6];
+	for(uint i=0u;i<6u;i++) { s1t_axsum[i]=0.0; s1t_axrel[i]=0.0; s1t_axn[i]=0ull; }
+	double s1t_lsum[20], s1t_lrel[20]; ulong s1t_ln[20];
+	for(uint i=0u;i<20u;i++) { s1t_lsum[i]=0.0; s1t_lrel[i]=0.0; s1t_ln[i]=0ull; }
+	std::vector<float> vs1rel;
 	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
 	// ★ 04.09. abends (Heiko): VTK-Export der Facetten, eingefaerbt nach Rang -- fuer die optische Diagnose, wo Rang fehlt
 	// und ob der Nachbar auf derselben Flaeche aehnlich orientiert ist (spitze Kanten!). Hinter CFD_FAC_ZENSUS_VTK=1,
@@ -1711,7 +1728,15 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		wanderung[rg_roh][rg]++;
 		{	const double amax = fmax(fabs(nv[0]), fmax(fabs(nv[1]), fabs(nv[2])));
 			const uint ab = amax>=0.99 ? 5u : (amax>=0.95 ? 4u : (amax>=0.85 ? 3u : (amax>=0.75 ? 2u : (amax>=0.65 ? 1u : 0u))));
-			n_ax[ab][rg]++; n_axges[ab]++; l_axsum[ab]+=(ulong)nl_k; if(vtk_an) vax.push_back((float)amax); }
+			n_ax[ab][rg]++; n_axges[ab]++; l_axsum[ab]+=(ulong)nl_k; if(vtk_an) vax.push_back((float)amax);
+			const double s1n_ = S1[0]*nv[0]+S1[1]*nv[1]+S1[2]*nv[2];
+			const double s1q_ = S1[0]*S1[0]+S1[1]*S1[1]+S1[2]*S1[2];
+			const double s1t_ = sqrt(fmax(s1q_-s1n_*s1n_, 0.0)); // Betrag, vorzeichenunabhaengig -> Spiegelung folgenlos
+			const double s1r_ = (s1q_>0.0) ? s1t_/sqrt(s1q_) : 0.0; // = sin(Winkel zwischen n und S1)
+			s1t_axsum[ab]+=s1t_; s1t_axrel[ab]+=s1r_; s1t_axn[ab]++;
+			const uint lb_ = nl_k<20u?nl_k:19u;
+			s1t_lsum[lb_]+=s1t_; s1t_lrel[lb_]+=s1r_; s1t_ln[lb_]++;
+			if(vtk_an) vs1rel.push_back((float)s1r_); }
 		if(vtk_an) { vx.push_back((float)x); vy.push_back((float)y); vz.push_back((float)z); vnx.push_back((float)nv[0]); vny.push_back((float)nv[1]); vnz.push_back((float)nv[2]); vverh.push_back((float)(verh>0.0?log10(verh):-12.0)); vrg.push_back((int)rg); vrgroh.push_back((int)rg_roh); vnl.push_back((int)nl_k); ventk.push_back(entkoppelt?1:0); }
 		if(entkoppelt) n_entk++; else n_gek++;
 		n_rang[rg]++;
@@ -1766,6 +1791,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		sk("rang_downdate",vrg); sk("rang_roh",vrgroh); sk("n_wandlinks",vnl); sk("entkoppelt",ventk);
 		o<<"SCALARS log10_lmin_lmax float 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<vverh.size();i++) o<<vverh[i]<<"\n";
 		o<<"SCALARS achsnaehe float 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<vax.size();i++) o<<vax[i]<<"\n";
+		o<<"SCALARS s1_fehlausrichtung float 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<vs1rel.size();i++) o<<vs1rel[i]<<"\n";
 		o<<"VECTORS normale float\n"; for(size_t i=0;i<vnx.size();i++) o<<vnx[i]<<" "<<vny[i]<<" "<<vnz[i]<<"\n";
 		// ★ 05.09. (Heiko): dieselben Raenge zusaetzlich als CELL_DATA -- in ParaView greift Threshold damit
 		// direkt auf den Vertices, ohne Umweg ueber Punktdaten.
@@ -1780,6 +1806,36 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			print_info("     a "+string(an[i])+"  n = "+to_string(n_axges[i])+" ("+to_string((float)(100.0*d2/d),2u)+" % aller)  |  Rang2 "
 				+to_string((float)(100.0*(double)n_ax[i][2]/d2),1u)+" %  Rang1 "+to_string((float)(100.0*(double)n_ax[i][1]/d2),1u)
 				+" %  Rang0 "+to_string((float)(100.0*(double)n_ax[i][0]/d2),1u)+" %  |  Links "+to_string((float)((double)l_axsum[i]/d2),2u)); }
+	}
+	{	const char* an2[6]={"0,577-0,65 (Raumdiagonale)","0,65 -0,75","0,75 -0,85","0,85 -0,95","0,95 -0,99","0,99 -1,00 (achsparallel)"};
+		print_info("   FEHLAUSRICHTUNG der Facettennormale n gegen die diskrete Linkmengen-Normale S1/|S1|:");
+		print_info("    |S1_t|/|S1| = sin(Winkel). Der Stoerform-Offset, den das Ziel NICHT enthaelt, ist 2*|S1_t| -- er");
+		print_info("    kann nur ueber diesen Winkel in die Schubrichtung kippen. Nach Achsnaehe:");
+		double s1t_max=0.0; ulong s1t_ges=0ull; double s1t_gsum=0.0;
+		for(uint i=0u;i<6u;i++) { if(s1t_axn[i]==0ull) continue; const double d=(double)s1t_axn[i];
+			const double rel=s1t_axrel[i]/d, grad=asin(rel<1.0?rel:1.0)*180.0/3.14159265358979;
+			if(rel>s1t_max) s1t_max=rel; s1t_ges+=s1t_axn[i]; s1t_gsum+=s1t_axrel[i];
+			print_info("    a "+string(an2[i])+" n = "+to_string(s1t_axn[i])+" | |S1_t|/|S1| = "+to_string((float)rel,4u)
+				+" ("+to_string((float)grad,1u)+" Grad) | |S1_t| = "+to_string((float)(s1t_axsum[i]/d),5u));
+		}
+		print_info("   DIESELBE GROESSE NACH WANDLINKZAHL (die Achse, auf der der Rang haengt):");
+		for(uint i=0u;i<20u;i++) { if(s1t_ln[i]==0ull) continue; const double d=(double)s1t_ln[i];
+			const double rel=s1t_lrel[i]/d, grad=asin(rel<1.0?rel:1.0)*180.0/3.14159265358979;
+			print_info("    "+to_string(i)+" Links: n = "+to_string(s1t_ln[i])+" | |S1_t|/|S1| = "+to_string((float)rel,4u)
+				+" ("+to_string((float)grad,1u)+" Grad) | |S1_t| = "+to_string((float)(s1t_lsum[i]/d),5u));
+		}
+		// NULLBEWEIS (haert, nicht kosmetisch): an einer ACHSPARALLELEN Wand ist die 5er-Linkmenge tangential
+		// symmetrisch, S1 = (0,0,1/6) exakt, also |S1_t|/|S1| == 0. Der oberste Achsnaehe-Eimer MUSS deshalb
+		// praktisch null liefern. Tut er das nicht, misst entweder die Normale oder diese Zeile falsch --
+		// dann ist die ganze Tabelle wertlos und sagt es hier, statt still eine Zahl zu liefern.
+		if(s1t_axn[5]>0ull) { const double rel5=s1t_axrel[5]/(double)s1t_axn[5];
+			if(rel5>0.02) print_warning("   NULLBEWEIS VERFEHLT: achsparallele Facetten haben |S1_t|/|S1| = "+to_string((float)rel5,4u)
+				+" statt ~0 -- an einer achsparallelen Wand ist S1 exakt normal. Entweder ist die Normale n dort nicht achsparallel,"
+				" oder die Fehlausrichtungsrechnung ist falsch. Die Tabelle daruber ist dann NICHT verwendbar.");
+			else print_info("    NULLBEWEIS: achsparallele Facetten |S1_t|/|S1| = "+to_string((float)rel5,4u)+" (Soll ~0, Symmetrie der 5er-Linkmenge) -- Instrument bestaetigt.");
+		}
+		if(s1t_ges>0ull) print_info("    MITTEL ueber alle Facetten: |S1_t|/|S1| = "+to_string((float)(s1t_gsum/(double)s1t_ges),4u)
+			+" | Maximum eines Achsnaehe-Eimers "+to_string((float)s1t_max,4u));
 	}
 	// ★ ZWEI WAHRHEITEN, beziffert statt geheilt: der Facettenbau benutzt flags==wand_flag (am
 	// Fahrzeug 0x41, Fahrbahn ausdruecklich ausgeschlossen), der Kernel zaehlt JEDEN TYPE_S-Nachbarn
