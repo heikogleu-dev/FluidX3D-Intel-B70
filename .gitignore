@@ -47,3 +47,4 @@ __pycache__/
 
 # Analyse-Zwischenspeicher der Werkzeuge (03.09.2026)
 *.npz
+/UEBERGABE-*.md
