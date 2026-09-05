@@ -210,7 +210,7 @@ public:
 	static uint s_fac_idx_voll; // ★ 03.09. CFD_FAC_IDX_VOLL: fac_idx wieder als volles uint-Feld (Rueckschalter fuer das A/B gegen die Bitmaske)
 	static uint s_f_liste; // ★ 03.09. CFD_F_LISTE: F nur noch an Wandsolidzellen (Markerliste statt BBox-Vollfeld)
 	static uint s_fac_nachbar; // ★ 30.08. CFD_FAC_NACHBAR: Wandmodell-EINGANG aus der zweiten Fluidzelle entlang der Normale (Stufenschatten-Fix, Weg-1 Stufe 3)
-	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 12 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, u_t_abtast, y_abtast, tw_angewandt, besuche_angewandt); Host-Tabelle je Treppenklasse
+	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 16 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, u_t_abtast, y_abtast, tw_angewandt, besuche_angewandt, 05.09.: Druckrest A, |A|, Ziel B, Geometrie C); Host-Tabelle je Treppenklasse
 	static bool s_fac_elibb_pur; // Pur-Arm  // ★ B1/B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	static float s_fac_qmin;
 	static float s_fac_kappa; // Grazing-Guard
@@ -233,7 +233,7 @@ public:
 	Memory<float> fac_wfd; Kernel kernel_sgs_fdwand; bool fdwand_on = false; // ★ Geistermoden-Fix: w je Facettenzelle (1 float), Konstruktionszustand eingefroren (Emission + Platzhalter im ctor); alloc rebindet ueber den env-Parameter
 	Memory<ulong> gd_zellen; Memory<float> fac_gd; Kernel kernel_sgs_gdiag; bool gdiag_on = false; // ★ g-Diagnose: fid->Zellindex-Liste, 8-float-Akkumulator je Facette, eigener Kernel (kein Eingriff in stream_collide)
 	void sgs_gdiag_gpu(); // Mess-Enqueue an der Chunk-/Sample-Kadenz (run mit finish)
-	Memory<float> fac_kd; bool fac_kdiag_on = false; // ★ Klassen-Diagnostik-Akkumulator (12 float je Facette), nur mit CFD_FAC_KDIAG; Konstruktionszustand eingefroren
+	Memory<float> fac_kd; bool fac_kdiag_on = false; // ★ Klassen-Diagnostik-Akkumulator (16 float je Facette seit 05.09.), nur mit CFD_FAC_KDIAG; Konstruktionszustand eingefroren
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)
 	bool fac_ema_on = false;
 	static float s_fac_tau;  // 1 = voll, 0 = nur Tausch (CFD_FACETTEN=2)

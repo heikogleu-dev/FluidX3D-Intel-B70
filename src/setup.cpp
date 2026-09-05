@@ -316,28 +316,55 @@ static void bericht_gdiag(LBM_Domain* D, const std::vector<Facette>& F, const st
 // Beantwortet je Klasse: welches u_t geht ins Modell, welches Ziel (tw physikalisch, twe angewandt), wie gross ist
 // der Linkaustausch |P1| dagegen, was wird angewandt (s1) und gebucht (phi1), wie oft faellt die Klasse zurueck.
 static void bericht_klassen(LBM_Domain* D, const std::vector<Facette>& F, const string& out_dir, const double tau_ziel, const string& ort) {
-	if(env_u("CFD_FAC_KDIAG",0u)>0u&&env_u("CFD_FACETTEN",0u)>=3u&&(D==nullptr||!D->fac_kdiag_on||D->fac_kd.length()<=12ull)) print_error("["+ort+"] Klassen-Diagnostik war ANGEFORDERT (CFD_FAC_KDIAG), an dieser Domaene aber nie alloziert -- stiller No-Op (S6, B1-Falle)."); // env statt Statik: das Grobgitter ueberschreibt s_fac_kdiag
+	if(env_u("CFD_FAC_KDIAG",0u)>0u&&env_u("CFD_FACETTEN",0u)>=3u&&(D==nullptr||!D->fac_kdiag_on||D->fac_kd.length()<=16ull)) print_error("["+ort+"] Klassen-Diagnostik war ANGEFORDERT (CFD_FAC_KDIAG), an dieser Domaene aber nie alloziert -- stiller No-Op (S6, B1-Falle)."); // env statt Statik: das Grobgitter ueberschreibt s_fac_kdiag
 	if(D==nullptr||!D->fac_kdiag_on) return;
 	D->fac_kd.read_from_device();
-	struct Agg { ulong n=0ull; double v=0.0, ut=0.0, tw=0.0, twe=0.0, p1=0.0, s1=0.0, phi=0.0, rf=0.0, uta=0.0, ywa=0.0, twa=0.0, va=0.0; }; // twa/va (04.09.): tw und Besuche NUR ueber angewandte Besuche
+	struct Agg { ulong n=0ull; double v=0.0, ut=0.0, tw=0.0, twe=0.0, p1=0.0, s1=0.0, phi=0.0, rf=0.0, uta=0.0, ywa=0.0, twa=0.0, va=0.0, A=0.0, absA=0.0, B=0.0, C=0.0; }; // twa/va (04.09.): tw und Besuche NUR ueber angewandte Besuche; A/absA/B/C (05.09.): vorzeichenbehafteter Druckrest, Betragssumme, Ziel, Geometrie -- alle nur ueber angewandte Besuche
 	std::map<std::pair<uint,int>,Agg> M; ulong k=0ull;
-	for(const Facette& f : F) { if(f.klasse!=0u) continue; if(12ull*k+11ull>=D->fac_kd.length()) break;
-		const float* a=&D->fac_kd[12ull*k]; k++;
+	double wA=0.0, wAbs=0.0, wB=0.0, wC=0.0, wV=0.0, wBes=0.0; ulong nb_n=0ull, nb_bruch=0ull; double nb_max=0.0; // Wandsummen + Nullbeweis (05.09.)
+	for(const Facette& f : F) { if(f.klasse!=0u) continue; if(16ull*k+15ull>=D->fac_kd.length()) break; // 16 seit 05.09. -- STILLE TRUNKIERUNG, wenn hier 12 stehen bliebe
+		const float* a=&D->fac_kd[16ull*k]; k++;
 		Agg& g=M[std::make_pair(f.eigene_links,(int)lround(100.0f*f.yw))];
-		g.n++; g.v+=a[7]; g.ut+=a[0]; g.tw+=a[1]; g.twe+=a[2]; g.p1+=a[3]; g.s1+=a[4]; g.phi+=a[5]; g.rf+=a[6]; g.uta+=a[8]; g.ywa+=a[9]; g.twa+=a[10]; g.va+=a[11]; }
+		g.n++; g.v+=a[7]; g.ut+=a[0]; g.tw+=a[1]; g.twe+=a[2]; g.p1+=a[3]; g.s1+=a[4]; g.phi+=a[5]; g.rf+=a[6]; g.uta+=a[8]; g.ywa+=a[9]; g.twa+=a[10]; g.va+=a[11];
+		g.A+=a[12]; g.absA+=a[13]; g.B+=a[14]; g.C+=a[15];
+		wA+=a[12]; wAbs+=a[13]; wB+=a[14]; wC+=a[15]; wV+=a[11]; wBes+=a[7];
+		// ★ NULLBEWEIS A-1 (05.09.): achsparallele Facette MIT 5er-Linkmenge -> S1 = (0,0,+-1/6), t1.n = 0 bitgenau
+		// -> A, |A|, C muessen BITGENAU 0.0f sein. Nur diese Konfiguration (die 53ceb50-Lektion: der 0,99-Eimer
+		// enthaelt 4-Link-Facetten mit zu Recht nichtverschwindendem S1_t). Gezaehlt, nicht gemittelt.
+		{ // ★ Pruefer 05.09. (MITTEL): EXAKT achsparallel, nicht amax>=1-1e-6. Der Kernel liefert b1_kd == 0 nur bei
+		  // exakt nx==ny==0 und |nz|==1 (utz = uz - und*nz = uz - uz = +0 exakt; S1x/S1y heben sich als exakte
+		  // Nullprodukte auf). Eine Normale im Toleranzband haette den Beweis reissen lassen -- Fehlalarm auf richtigen
+		  // Zahlen. An der 8-mm-Kugel ist das Band (0, 1,5 Grad] leer (286 exakt achsparallele), am Fahrzeug ungeprueft.
+		  const bool exakt_achse = (f.nx==0.0f&&f.ny==0.0f&&fabs(f.nz)==1.0f)||(f.ny==0.0f&&f.nz==0.0f&&fabs(f.nx)==1.0f)||(f.nx==0.0f&&f.nz==0.0f&&fabs(f.ny)==1.0f);
+		  if(exakt_achse&&f.eigene_links==5u) { nb_n++; if(a[12]!=0.0f||a[13]!=0.0f||a[15]!=0.0f) { nb_bruch++; const float m_=fmax(fabs(a[13]),fabs(a[15])); if(m_>nb_max) nb_max=m_; } } } }
 	std::vector<std::pair<std::pair<uint,int>,Agg>> V(M.begin(), M.end());
 	std::sort(V.begin(), V.end(), [](const std::pair<std::pair<uint,int>,Agg>& x, const std::pair<std::pair<uint,int>,Agg>& y){ return x.second.n>y.second.n; });
 	print_info("["+ort+"] KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG): "+to_string(k)+" Facetten in "+to_string((ulong)V.size())+" Klassen (eigene_links, y_w). Mittel je Besuch"+(tau_ziel>0.0?" -- tw/Ziel gegen tau_ziel "+to_string((float)tau_ziel,9u):string(""))+":");
 	print_info("  links  y_w     n_fac    Besuche/fac   u_t        u_t_abt    y_abt   tw         twe        |P1|       s1         phi1       Rueckfall%   tw/Ziel  |P1|/twe   s1/u_t"); // s1/u_t (03.09.): Slip relativ zur Zellgeschwindigkeit = Randwert-Inkonsistenz des FD-Sensors (sgs_fdwand setzt u=0 am Solid)
 	std::ofstream fk(out_dir+"facetten_klassen.csv"); fk.precision(7);
 	fk << "# Klassen-Diagnostik ("<<ort<<", CFD_FAC_KDIAG): Mittel je Facettenbesuch, gruppiert nach (eigene_links, y_w auf 0,01); tw_ziel = 0 wenn kein Ziel bekannt\n";
-	fk << "eigene_links,yw,n_fac,besuche_je_fac,ut,ut_abtast,yw_abtast,tw,twe,absP1,s1,phi1,rueckfall_pct,tw_ziel,absP1_twe,s1_ut\n";
+	fk << "eigene_links,yw,n_fac,besuche_je_fac,ut,ut_abtast,yw_abtast,tw,twe,absP1,s1,phi1,rueckfall_pct,tw_ziel,absP1_twe,s1_ut,druckrest_A,druckrest_absA,ziel_B,geom_C,A_ueber_B,A_ueber_absA,A_ueber_C\n"; // A..C (05.09.): Summen je Klasse ueber ANGEWANDTE Besuche; A/B = Anteil des Ziels, der Druckrest ist (vorzeichenbehaftet); A/|A| = 1 systematisch, ~0 hebt sich weg; A/C = mittleres (rho-1)
 	uint zeilen=0u;
 	for(const auto& e : V) { const Agg& g=e.second; const double v=g.v>0.0?g.v:1.0;
 		const double ut=g.ut/v, tw=g.tw/v, twe=g.twe/v, p1=g.p1/v, s1=g.s1/v, phi=g.phi/v, rf=100.0*g.rf/v, tz=tau_ziel>0.0?tw/tau_ziel:0.0, pt=twe!=0.0?p1/fabs(twe):0.0, uta=g.uta/v, ywa=g.ywa/v, su=ut!=0.0?s1/ut:0.0;
-		fk << e.first.first << "," << 0.01*e.first.second << "," << g.n << "," << g.v/(double)g.n << "," << ut << "," << uta << "," << ywa << "," << tw << "," << twe << "," << p1 << "," << s1 << "," << phi << "," << rf << "," << tz << "," << pt << "," << su << "\n";
+		const double aB=g.B!=0.0?g.A/g.B:0.0, aAbs=g.absA>0.0?g.A/g.absA:0.0, aC=g.C!=0.0?g.A/g.C:0.0;
+		fk << e.first.first << "," << 0.01*e.first.second << "," << g.n << "," << g.v/(double)g.n << "," << ut << "," << uta << "," << ywa << "," << tw << "," << twe << "," << p1 << "," << s1 << "," << phi << "," << rf << "," << tz << "," << pt << "," << su << "," << g.A << "," << g.absA << "," << g.B << "," << g.C << "," << aB << "," << aAbs << "," << aC << "\n";
 		if(zeilen++<16u) { char z[320]; snprintf(z, sizeof(z), "  %5u  %5.2f  %8lu  %11.1f  %9.5f  %9.5f  %6.2f  %9.3e  %9.3e  %9.3e  %+9.3e  %+9.3e  %8.1f    %6.3f   %7.2f  %+7.3f", e.first.first, 0.01*e.first.second, (unsigned long)g.n, g.v/(double)g.n, ut, uta, ywa, tw, twe, p1, s1, phi, rf, tz, pt, su); print_info(string(z)); } }
 	fk.close(); print_info("  CSV: "+out_dir+"facetten_klassen.csv ("+to_string((ulong)V.size())+" Klassen)");
+	// ★ 05.09. DRUCKREST-BILANZ ueber die ganze Wand (die Frage aus Pruefbefund H-3, die der Betragszaehler
+	// 118..122 nicht beantworten kann): hebt sich 2(rho-1)(S1.t1) ueber die Wand weg oder steht es systematisch?
+	if(wBes>0.0&&wV==0.0) print_info("["+ort+"] DRUCKREST: keine angewandten Besuche (pass2_an nirgends -- KRAFT=2 oder vollstaendiger Rueckfall); die Bilanz ist konstruktiv leer, kein No-Op-Verdacht."); // Pruefer 05.09. NIEDRIG: unter KRAFT=2 waere die A-4-Warnung ein Fehlalarm
+	else if(wBes>0.0&&wV>0.0&&wA==0.0&&wAbs==0.0&&wB==0.0&&wC==0.0) print_warning("["+ort+"] DRUCKREST: fac_kd[12..15] sind ueber ALLE Facetten exakt 0, obwohl "+to_string((ulong)wV)+" ANGEWANDTE Besuche gezaehlt wurden -- der Akkumulator ist ein stiller No-Op (Emission, Stride oder Kernelblock). Keine Bilanz, kein Befund."); // A-4
+	else if(wV>0.0) {
+		print_info("["+ort+"] DRUCKREST-BILANZ ueber die Wand (nur angewandte Besuche, "+to_string((ulong)wV)+" von "+to_string((ulong)wBes)+" = "+to_string((float)(100.0*wV/wBes),2u)+" %):");
+		print_info("   Sum A = Sum 2(rho-1)(S1.t1) = "+to_string((float)wA,6u)+" | Sum |A| = "+to_string((float)wAbs,6u)+" | Sum B (Ziel) = "+to_string((float)wB,6u)+" | Sum C = Sum 2(S1.t1) = "+to_string((float)wC,6u));
+		print_info("   A/|A| = "+to_string((float)(wAbs>0.0?wA/wAbs:0.0),4u)+" (1 = systematisch, ~0 = hebt sich weg) | A/B = "+to_string((float)(wB!=0.0?wA/wB:0.0),4u)+" (Anteil des Wandschub-Ziels, der in Wahrheit Druckrest ist) | A/C = mittleres (rho-1) = "+to_string((float)(wC!=0.0?wA/wC:0.0),6u));
+		print_info("   Lesehinweis: |A|/|B| gross UND A/|A| nahe 0 = grosser Betrag je Zelle, der sich ueber die Wand aufhebt (Treppenperiode symmetrisch) -- dann kostet er Feld, nicht Kraft. A/|A| nahe 1 = der Druckrest steht systematisch im Ziel.");
+		print_info("   KONVENTION (Pruefer 05.09.): A ist der isotrope Druckanteil IN P1; in R1 = B - P1 steht -A. A/B bezieht sich auf das NOMINELLE Ziel B unter der Annahme, dass der Solve es trifft (an gegateten Besuchen nicht). A/B -> +1: das Ziel wird vom Druckrest gefuellt, der deviatorische Austausch bleibt bei B*(1-A/B); A/B -> -1: der Schub wird verdoppelt.");
+	}
+	if(nb_n>0ull) { if(nb_bruch>0ull) print_warning("["+ort+"] DRUCKREST-NULLBEWEIS VERFEHLT: "+to_string(nb_bruch)+" von "+to_string(nb_n)+" achsparallelen 5-Link-Facetten haben A, |A| oder C != 0.0f (max |A| "+to_string((float)nb_max,3u)+"). Soll ist BITGENAU 0 (S1 = (0,0,1/6), t1.n = 0). Entweder rechnet der Akkumulator falsch, oder n ist dort nicht achsparallel -- die Bilanz oben ist dann NICHT verwendbar.");
+		else print_info("   DRUCKREST-NULLBEWEIS: "+to_string(nb_n)+" achsparallele 5-Link-Facetten, A = |A| = C = 0.0f bitgenau -- Akkumulator bestaetigt."); }
+	else print_info("   DRUCKREST-NULLBEWEIS NICHT DURCHFUEHRBAR: keine achsparallele 5-Link-Facette in diesem Fall -- die Bilanz oben ist UNGEPRUEFT.");
 }
 // ★ KRAFTPFAD-WAECHTER (30.08.): Slot 70 zaehlt Zellen, an denen das Wandmodell-Residuum als
 // Volumenkraft eingetragen wurde. Modus 1: exakt die Rueckfallzellen (== Slot 69). Modus 0: muss 0 sein.
@@ -4054,9 +4081,10 @@ void main_setup_kugel() {
 		baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel-Census");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0);
 	}
+	std::vector<Facette> FF; // ★ 05.09. auf Funktionsebene gehoben: bericht_klassen (Kugel) braucht die Facetten am Laufende, der Block darunter schliesst vor lbm.run().
 	if(env_u("CFD_FACETTEN", 0u)>0u) {
 		const ulong census_v = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
-		std::vector<Facette> FF = baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel");
+		FF = baue_facetten(lbm, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), out_dir, "Kugel");
 		if(env_u("CFD_FACETTEN_DIAG", 0u)==2u) _exit(0); // Schritt-0-Diagnose auch im aktiven Arm
 		const ulong census_n = [&]{ ulong c=0ull; for(ulong n=0ull;n<lbm.get_N();n++) if(lbm.flags[n]==(TYPE_S|TYPE_X)) c++; return c; }();
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
@@ -4230,7 +4258,12 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel"); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u); }
+		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel"); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u);
+			// ★ 05.09. KUGEL: bericht_klassen war hier NIE verdrahtet -- Kanal und Nahfeld rufen es, die Kugel nicht.
+			// Ein Kugelarm mit CFD_FAC_KDIAG=1 haette fac_kd akkumuliert und niemand haette es gelesen (stiller
+			// No-Op, gefunden beim Bau des Druckrest-Akkumulators). tau_ziel = 0: an der Kugel gibt es kein
+			// einzelnes Wandschub-Soll wie am Kanal (utau^2); die Spalte tw_ziel bleibt 0 wie im Nahfeld.
+			bericht_klassen(lbm.lbm_domain[0], FF, out_dir, 0.0, "Kugel"); }
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -7631,13 +7664,13 @@ static void main_setup_fahrzeug_dd() {
 			// "haette"-Wert ist, der nie aufgepraegt wurde. Am 8-mm-Fahrzeug sind das 42,8 %. Die Zeile
 			// oben (und yplus_facetten.csv) erben das. Mit KDIAG-Slot [10]/[11] steht jetzt daneben das
 			// y+ NUR ueber angewandte Besuche -- die Differenz ist die Kontamination, in einer Zahl.
-			if(df->fac_kdiag_on&&df->fac_kd.length()>=12ull) { df->fac_kd.read_from_device();
+			if(df->fac_kdiag_on&&df->fac_kd.length()>=16ull) { df->fac_kd.read_from_device(); // ★ 05.09.: ZWEITER LESER von fac_kd -- Stride 16. Bliebe hier 12, laese jede Facette ab i>=1 die Daten der FALSCHEN Facette mit wachsendem Versatz: keine Trunkierung, sondern eine still verschobene y+-Statistik ohne Absturz und ohne Warnung.
 				std::vector<float> ya; ya.reserve(df->fac_N); ulong n_ohne=0ull;
 				std::ofstream acsv(out_dir+"yplus_facetten_angewandt.csv"); acsv << "yplus_angewandt\n";
 				for(ulong i=0ull;i<df->fac_N;i++) {
-					const float va=df->fac_kd[12ull*i+11ull];
+					const float va=df->fac_kd[16ull*i+11ull];
 					if(va<=0.0f) { n_ohne++; continue; } // Facette, die NIE angewandt hat -- im kontaminierten y+ steht sie trotzdem drin
-					const float twa=df->fac_kd[12ull*i+10ull]/va;
+					const float twa=df->fac_kd[16ull*i+10ull]/va;
 					const float ypa=sqrt(fmax(0.0f,twa))*df->fac_geo[8ull*i+3ull]/nu_lat_f;
 					ya.push_back(ypa); acsv << ypa << "\n";
 				}

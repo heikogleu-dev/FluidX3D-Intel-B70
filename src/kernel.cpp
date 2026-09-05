@@ -1957,7 +1957,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , const global float* fac_nb // ★ 03.09. deterministisch: (u_t_abt, y_abt) je Facette aus dem Kernel fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld); -1 = kein Fluidnachbar, 0 = Nachbar still
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
-                        , global float* fac_kd // ★ Klassen-Diagnostik: 12 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, ut_ab, yw_ab, tw_angewandt, besuche_angewandt), racefrei (1 Zelle = 1 Facette)
+                        , global float* fac_kd // ★ Klassen-Diagnostik: 16 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, ut_ab, yw_ab, tw_angewandt, besuche_angewandt, [12..15] 05.09. Druckrest A / |A| / Ziel B / Geometrie C, alle nur ueber angewandte Besuche), racefrei (1 Zelle = 1 Facette)
 )+"#endif"+R( // FACETTEN_KDIAG
 )+") {"+R(
 	uxx fbi; if(!f_bbox(n, &fbi)) return (float3)(0.0f,0.0f,0.0f);
@@ -2644,13 +2644,30 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FACETTEN_ALPHA-Weiche
 	fac_tau_cnt[fid] += 1u;
 )+"#ifdef FACETTEN_KDIAG"+R(
-	{ const uxx k8 = 12ul*(uxx)fid; fac_kd[k8]+=ut; fac_kd[k8+1ul]+=tw; fac_kd[k8+2ul]+=twe; fac_kd[k8+3ul]+=fabs(P1); fac_kd[k8+4ul]+=s1; fac_kd[k8+5ul]+=phi1; fac_kd[k8+6ul]+=(rueckfall?1.0f:0.0f); fac_kd[k8+7ul]+=1.0f; fac_kd[k8+8ul]+=ut_ab; fac_kd[k8+9ul]+=yw_ab;
+	{ const uxx k8 = 16ul*(uxx)fid; fac_kd[k8]+=ut; fac_kd[k8+1ul]+=tw; fac_kd[k8+2ul]+=twe; fac_kd[k8+3ul]+=fabs(P1); fac_kd[k8+4ul]+=s1; fac_kd[k8+5ul]+=phi1; fac_kd[k8+6ul]+=(rueckfall?1.0f:0.0f); fac_kd[k8+7ul]+=1.0f; fac_kd[k8+8ul]+=ut_ab; fac_kd[k8+9ul]+=yw_ab;
 	  // ★ 04.09.2026 [10]/[11]: tw und Besuchszahl NUR ueber ANGEWANDTE Besuche. Grund: fac_tau[6i] (und
 	  // damit y+ in yplus_facetten.csv und die Reportzeile 'Facetten-y+') summiert tw AUCH an
 	  // Rueckfallzellen -- dort ist tw ein 'haette'-Wert, der nie aufgepraegt wurde. Am 8-mm-Fahrzeug
 	  // sind das 42,8 % der Besuche. Jede y+-gestuetzte Aussage erbt diese Kontamination; mit [10]/[11]
 	  // laesst sie sich erstmals BEZIFFERN statt nur vermuten.
-	  fac_kd[k8+10ul]+=(pass2_an?tw:0.0f); fac_kd[k8+11ul]+=(pass2_an?1.0f:0.0f); } // ★ S1 (04.09. abends): pass2_an statt !rueckfall -- unter KRAFT=2 ist pass2_an ueberall false, rueckfall nicht // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
+	  fac_kd[k8+10ul]+=(pass2_an?tw:0.0f); fac_kd[k8+11ul]+=(pass2_an?1.0f:0.0f);
+	  // ★ 05.09.2026 [12..15] VORZEICHENBEHAFTETER DRUCKREST (Bauplan Teil 1, Pruefbefund H-3). Der Betrags-
+	  // zaehler 118..122 sagt: an 99 % der angewandten Besuche am klemmfreien kipp26 ist |2(rho-1)(S1.t1)|
+	  // >= Ziel. Ob dieser Term sich ueber die Wand WEGHEBT (Treppenperiode symmetrisch, nur rho-Gradienten
+	  // tragen netto) oder SYSTEMATISCH steht, kann ein Betrag nicht sagen. Deshalb hier, je Facette und mit
+	  // Vorzeichen, NUR ueber angewandte Besuche (pass2_an, wie [10]/[11]):
+	  //   [12] A = 2(rho-1)(S1.t1)      der isotrope Druckanteil IN P1; in R1 = B - P1 steht damit -A (Pruefer 05.09., Vorzeichen) (S1 ROH -- das Downdate aendert
+	  //                                  nur G/Sn/Snn; t1 = die Basis, gegen die geloest wurde)
+	  //   [13] |A|                       Betragssumme -- A/Sum|A| nahe 1 = systematisch, nahe 0 = hebt sich weg
+	  //   [14] B = -def_fac_tau*twe      das Wandschubziel, IM KERNEL gebildet (def_fac_tau ist auf 4 Stellen
+	  //                                  gerundet emittiert -- eine Host-Rekonstruktion waere eine zweite Wahrheit)
+	  //   [15] C = 2(S1.t1)              die reine Geometrie; A/C = mittleres (rho-1) je Klasse, unabhaengige Probe
+	  // NULLBEWEIS (Host): achsparallele Facetten MIT 5er-Linkmenge haben S1 = (0,0,+-1/6) und t1.n = 0
+	  // bitgenau -> [12],[13],[15] == 0.0f BITGENAU. Nur diese Konfiguration, nicht der 0,99-Eimer (53ceb50).
+	  { const float b1_kd = S1x*t1x+S1y*t1y+S1z*t1z;
+	    const float a_kd = pass2_an ? 2.0f*(rhon-1.0f)*b1_kd : 0.0f;
+	    fac_kd[k8+12ul]+=a_kd; fac_kd[k8+13ul]+=fabs(a_kd);
+	    fac_kd[k8+14ul]+=(pass2_an?-def_fac_tau*twe:0.0f); fac_kd[k8+15ul]+=(pass2_an?2.0f*b1_kd:0.0f); } } // ★ S1 (04.09. abends): pass2_an statt !rueckfall -- unter KRAFT=2 ist pass2_an ueberall false, rueckfall nicht // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
 )+"#endif"+R( // FACETTEN_KDIAG
 	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
 )+"#ifdef FACETTEN_DIAGZ"+R(
