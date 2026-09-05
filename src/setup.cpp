@@ -1632,6 +1632,12 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	ulong n_verh[8]; for(uint i=0u;i<8u;i++) n_verh[i]=0ull; // lmin/lmax: <1e-9,<1e-7,<2.5e-5,<1e-3,<1e-2,<0.1,<0.5,>=0.5
 	ulong wanderung[3][3]; for(uint i=0u;i<3u;i++) for(uint j=0u;j<3u;j++) wanderung[i][j]=0ull;
 	ulong n_praedikat_diff=0ull, n_kernel_mehr=0ull; ulong links_kernel_ges=0ull, links_host_ges=0ull;
+	// ★ 05.09. (Heiko): verlieren GEKIPPTE/GEKRUEMMTE Flaechen das Wandmodell? Achsnaehe a = max(|nx|,|ny|,|nz|):
+	// a = 1 ist eine achsparallele Flaeche (glatte 5-Link-Zellen), a = 0,577 die Raumdiagonale (groebste Treppe).
+	// Je Bin die Rangverteilung -- damit ist die Frage "Karosseriepanel verliert Rang" eine Zahl, kein Eindruck.
+	ulong n_ax[6][3]; for(uint i=0u;i<6u;i++) for(uint k=0u;k<3u;k++) n_ax[i][k]=0ull;
+	ulong n_axges[6]; ulong l_axsum[6]; for(uint i=0u;i<6u;i++) { n_axges[i]=0ull; l_axsum[i]=0ull; }
+	std::vector<float> vax;
 	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
 	// ★ 04.09. abends (Heiko): VTK-Export der Facetten, eingefaerbt nach Rang -- fuer die optische Diagnose, wo Rang fehlt
 	// und ob der Nachbar auf derselben Flaeche aehnlich orientiert ist (spitze Kanten!). Hinter CFD_FAC_ZENSUS_VTK=1,
@@ -1703,6 +1709,9 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		const uint rg_roh = klassifiziere(Groh, nullptr, nullptr, nullptr);
 		const uint rg = klassifiziere(G, &entkoppelt, &verh, &lmax_e);
 		wanderung[rg_roh][rg]++;
+		{	const double amax = fmax(fabs(nv[0]), fmax(fabs(nv[1]), fabs(nv[2])));
+			const uint ab = amax>=0.99 ? 5u : (amax>=0.95 ? 4u : (amax>=0.85 ? 3u : (amax>=0.75 ? 2u : (amax>=0.65 ? 1u : 0u))));
+			n_ax[ab][rg]++; n_axges[ab]++; l_axsum[ab]+=(ulong)nl_k; if(vtk_an) vax.push_back((float)amax); }
 		if(vtk_an) { vx.push_back((float)x); vy.push_back((float)y); vz.push_back((float)z); vnx.push_back((float)nv[0]); vny.push_back((float)nv[1]); vnz.push_back((float)nv[2]); vverh.push_back((float)(verh>0.0?log10(verh):-12.0)); vrg.push_back((int)rg); vrgroh.push_back((int)rg_roh); vnl.push_back((int)nl_k); ventk.push_back(entkoppelt?1:0); }
 		if(entkoppelt) n_entk++; else n_gek++;
 		n_rang[rg]++;
@@ -1756,8 +1765,21 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		auto sk=[&](const char* nm, const std::vector<int>& v){ o<<"SCALARS "<<nm<<" int 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<v.size();i++) o<<v[i]<<"\n"; };
 		sk("rang_downdate",vrg); sk("rang_roh",vrgroh); sk("n_wandlinks",vnl); sk("entkoppelt",ventk);
 		o<<"SCALARS log10_lmin_lmax float 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<vverh.size();i++) o<<vverh[i]<<"\n";
+		o<<"SCALARS achsnaehe float 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<vax.size();i++) o<<vax[i]<<"\n";
 		o<<"VECTORS normale float\n"; for(size_t i=0;i<vnx.size();i++) o<<vnx[i]<<" "<<vny[i]<<" "<<vnz[i]<<"\n";
+		// ★ 05.09. (Heiko): dieselben Raenge zusaetzlich als CELL_DATA -- in ParaView greift Threshold damit
+		// direkt auf den Vertices, ohne Umweg ueber Punktdaten.
+		o<<"CELL_DATA "<<vx.size()<<"\n";
+		auto sc=[&](const char* nm, const std::vector<int>& v){ o<<"SCALARS "<<nm<<" int 1\nLOOKUP_TABLE default\n"; for(size_t i=0;i<v.size();i++) o<<v[i]<<"\n"; };
+		sc("rang_downdate_z",vrg); sc("rang_roh_z",vrgroh); sc("n_wandlinks_z",vnl);
 		print_info("   ZENSUS-VTK: "+pfad+" ("+to_string((ulong)vx.size())+" Facetten; Skalare rang_downdate/rang_roh/n_wandlinks/entkoppelt/log10_lmin_lmax, Vektor normale; Gitterkoordinaten).");
+	}
+	{	const char* an[6]={"0,577-0,65 (Raumdiagonale)","0,65 -0,75","0,75 -0,85","0,85 -0,95","0,95 -0,99","0,99 -1,00 (achsparallel)"};
+		print_info("   RANG NACH ACHSNAEHE a = max(|nx|,|ny|,|nz|) -- a=1 achsparallel, a=0,577 Raumdiagonale:");
+		for(uint i=0u;i<6u;i++) { if(n_axges[i]==0ull) continue; const double d2=(double)n_axges[i];
+			print_info("     a "+string(an[i])+"  n = "+to_string(n_axges[i])+" ("+to_string((float)(100.0*d2/d),2u)+" % aller)  |  Rang2 "
+				+to_string((float)(100.0*(double)n_ax[i][2]/d2),1u)+" %  Rang1 "+to_string((float)(100.0*(double)n_ax[i][1]/d2),1u)
+				+" %  Rang0 "+to_string((float)(100.0*(double)n_ax[i][0]/d2),1u)+" %  |  Links "+to_string((float)((double)l_axsum[i]/d2),2u)); }
 	}
 	// ★ ZWEI WAHRHEITEN, beziffert statt geheilt: der Facettenbau benutzt flags==wand_flag (am
 	// Fahrzeug 0x41, Fahrbahn ausdruecklich ausgeschlossen), der Kernel zaehlt JEDEN TYPE_S-Nachbarn
