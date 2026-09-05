@@ -1670,6 +1670,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	double s1t_exsum=0.0, s1t_exmax=0.0; ulong s1t_exn=0ull;   // exakt achsparallel (amax >= 1-1e-6)
 	double s1t_axmax[6]; for(uint i=0u;i<6u;i++) s1t_axmax[i]=0.0; // Facetten-Maximum je Achsnaehe-Eimer
 	double s1t_gmax=0.0; ulong n_s1_null=0ull;                 // globales Facetten-Maximum, |S1|~0-Faelle
+	ulong n_ex_nicht5=0ull; // achsparallele Normale, aber KEINE 5er-Linkmenge -- nicht Teil des Nullbeweises
 	ulong n_flacker=0ull; // Rang 2, aber lmin/lmax im Fenster [1e-7, 2,5e-5]: Einstufung kippt mit der Stroemungsrichtung
 	// ★ 04.09. abends (Heiko): VTK-Export der Facetten, eingefaerbt nach Rang -- fuer die optische Diagnose, wo Rang fehlt
 	// und ob der Nachbar auf derselben Flaeche aehnlich orientiert ist (spitze Kanten!). Hinter CFD_FAC_ZENSUS_VTK=1,
@@ -1759,7 +1760,15 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 				const uint lb_ = nl_k<20u?nl_k:19u;
 				s1t_lsum[lb_]+=s1t_; s1t_lrel[lb_]+=s1r_; s1t_ln[lb_]++;
 				// M-1: der Nullbeweis braucht WIRKLICH achsparallele Facetten, nicht den 0,99-Eimer.
-				if(amax>=1.0-1e-6) { s1t_exsum+=s1r_; s1t_exn++; if(s1r_>s1t_exmax) s1t_exmax=s1r_; }
+				// ★ 05.09. ZWEITE NACHBESSERUNG (am 4-mm-Fahrzeug aufgedeckt, Lauf we_fehl4): die erste Fassung
+				// pruefte NUR amax >= 1-1e-6 und setzte damit "achsparallele Normale" mit "flache 5er-Linkmenge"
+				// gleich. Auf echter Geometrie gilt das nicht: 164 Facetten haben eine achsparallele (geglaettete)
+				// Normale, aber eine 4-Link-Menge -- die ist asymmetrisch, S1 hat dort ZU RECHT einen
+				// Tangentialanteil (Maximum 0,196). Der Waechter schlug auf korrekten Daten Alarm.
+				// Der Nullbeweis gilt nur fuer die Konfiguration, fuer die S1 = (0,0,+-1/6) HERGELEITET ist:
+				// achsparallele Normale UND genau die 5 Links {-n, +-t1-n, +-t2-n}. Alles andere wird
+				// getrennt gezaehlt statt in den Beweis geworfen.
+				if(amax>=1.0-1e-6) { if(nl_k==5u) { s1t_exsum+=s1r_; s1t_exn++; if(s1r_>s1t_exmax) s1t_exmax=s1r_; } else n_ex_nicht5++; }
 			}
 			if(vtk_an) vs1rel.push_back(s1_da?(float)s1r_:-1.0f); }
 		if(vtk_an) { vx.push_back((float)x); vy.push_back((float)y); vz.push_back((float)z); vnx.push_back((float)nv[0]); vny.push_back((float)nv[1]); vnz.push_back((float)nv[2]); vverh.push_back((float)(verh>0.0?log10(verh):-12.0)); vrg.push_back((int)rg); vrgroh.push_back((int)rg_roh); vnl.push_back((int)nl_k); ventk.push_back(entkoppelt?1:0); }
@@ -1857,9 +1866,11 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		// harmloses Mittel und ist trotzdem kaputt.
 		if(n_s1_null>0ull) print_info("    |S1| ~ 0 (Ausloeschung, Winkel undefiniert): "+to_string(n_s1_null)
 			+" Facetten -- NICHT in den Mittelwerten, im VTK als -1 markiert.");
+		if(n_ex_nicht5>0ull) print_info("    achsparallele Normale, aber keine 5er-Linkmenge: "+to_string(n_ex_nicht5)
+			+" Facetten -- dort ist ein Tangentialanteil von S1 KORREKT (asymmetrische Linkmenge) und gehoert nicht in den Nullbeweis.");
 		if(s1t_exn==0ull) {
 			print_info("    NULLBEWEIS NICHT DURCHFUEHRBAR: keine exakt achsparallele Facette (amax >= 1-1e-6)"
-				" in diesem Fall. Die Tabelle ist damit UNGEPRUEFT -- sie kann richtig sein, belegt ist es hier nicht.");
+				" mit 5er-Linkmenge in diesem Fall. Die Tabelle ist damit UNGEPRUEFT -- sie kann richtig sein, belegt ist es hier nicht.");
 		} else {
 			const double relx=s1t_exsum/(double)s1t_exn;
 			if(relx>1e-4||s1t_exmax>1e-3) print_warning("   NULLBEWEIS VERFEHLT: exakt achsparallele Facetten ("
