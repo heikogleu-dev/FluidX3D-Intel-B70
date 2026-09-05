@@ -1,135 +1,76 @@
-# Übergabe 04.09.2026 (abends) — Wandmodell-Abdeckung, Stand und nächster Schritt
+# ÜBERGABE — Stand 05.09.2026, 09:15
 
-**Fassung:** FluidX3D-v2, master. Letzter geprüfter Commit `f74f8f9`. Darüber liegt **Arm X** (Commit direkt nach dieser
-Datei, gekennzeichnet UNGEPRÜFT — Diff-Prüfung und iGPU-Serie liefen beim Schreiben noch).
+## ENTSCHIEDEN (05.09., Lauf vs_x8, 8-mm-Fahrzeug, B70, gepaart, 150 Proben)
 
-## Was heute gemessen wurde (8-mm-Fahrzeug, B70, gepaart, 150 Proben, Block-SEM/8; Basis: cz_druck_rest −0,14709, wirksam 56,97 %)
+**Die (A)/(B)-Frage ist beantwortet: 85 % des Cz-Schadens kommen von den neu abgedeckten Zellen, die Injektionsform ist unschuldig.**
 
-| Hebel | Ergebnis | Status |
+| cz_druck_rest | Wert | |
 |---|---|---|
-| PINV | wirksame Abdeckung 56,97 → 45,05 % | widerlegt |
-| SATGATE=0 | Geschwindigkeitsklemme ×5.500 | abgelehnt |
-| ALPHA=0 | Δm +1,36 Mio, cz +0,113 | abgelehnt |
-| Basiswahl t1 | 2 Facetten; t1 ist ohnehin u_t/|u_t|, nicht frei | tot |
-| Globale Massenbilanz | vor dem Bau verworfen (kraftneutral) | tot |
-| **MASSE_ALLE=1** (β3 über alle 19 Links) | wirksam **77,37 %**, aber cz **+0,029** | disqualifiziert |
-| MASSE_ALLE=2 (alles auf f_0) | f_0 ≤ 0 bei 2 % (Slot 93), cz +0,675, Bulk-Mode | verworfen |
-| KRAFT=1 | Fahrzeug NaN bei 0,174 s; als (A)/(B)-Test strukturell ungeeignet | verworfen |
+| Basis (ALPHA2) | −0,14709 | |
+| Arm X (Injektion wie Modus 1, Zellmenge wie Basis) | −0,12087 | **(B) = +0,026, 0,9 σ — im Rauschen** |
+| Modus 1 (alle Links, roher Solve) | +0,02918 | **(A) = +0,150, 5,7 σ — der Schaden** |
+| Summe (B)+(A) = +0,17627 | direkt gemessen +0,17627 | Konsistenzprobe auf die 5. Stelle |
 
-**Instrumente, abgenommen:** Zielerfüllung (Slots 81–91, `r = phi1/(−τ·twe)` je Besuch, physikneutral, Gegenprobe eingebaut);
-statischer Klassenzensus (Rang je Facette vorab, Wanderungsmatrix roh→Downdate). Zensus 8 mm: Downdate kostet 36,26 % der
-Facetten eine Rangstufe; informationsfreier Kern 16,39 % (Einlink).
+**Kreuztabelle Gate × Solve-Zweig am Fahrzeug:** [94] (die Zellen, die X auf BB zwingt und Modus 1 anwendet) = 41.635.995,
+davon **86,33 % roh Schur-exakt [79]**; [95] zu 99,76 % [79]. Instrumente alle grün (Slot 92 == beide angewandt,
+Buchung 69 == Soll, Kaskade lückenlos, Zeilensummen/Nullspalten, Treffer 99,99 %).
 
-**Muster, dreifach belegt:** jede Variante, die gegen die ROHE Momentenmatrix löst, schiebt cz ins Positive (weg von OF13 −1,301).
-Offene Frage: (A) das volle Ziel an den neu abgedeckten Eckzellen ist der Schaden (dort ist P Druck-Schub, kein
-Reibungsaustausch — Klassentabelle: Slip antiparallel zur Strömung) — oder (B) die Injektionsform an den gemeinsamen Zellen.
+**Damit bewiesen:** der Rang, den der Wegfall des Downdates gewinnt, ist ein **Scheinrang** aus der Mittelrichtung c̄ = S1/S0 —
+der Richtung, in der ein Schlupf Masse durch die Wand schiebt statt Impuls zu übertragen. Das Downdate ist ein
+**Konditionierungsschutz**. Nebenbefund: die Injektionsform ändert die *Reibung* messbar (cz_reib −0,008, 11,3 σ), nicht den Druck.
 
-## Arm X — Ergebnis der iGPU-Serie (vq_x_serie, 19:00–20:10), Binary 0de4997
+## 09:30 — ABDECKUNGSFRAGE GESCHLOSSEN: auflösungsunabhängig (wa_zensus4, 4 mm, Minimallauf)
 
-| Arm | Ergebnis |
-|---|---|
-| vq_aus / m1 / m2 | **BITGLEICH** zu vn_* (Hashes 113354303738885232 / 3775874723383551782 / 9660637873999918948) — Schattencode ist ausgeschaltet inert ✓ |
-| vq_x (Kanal, Basis-Schalter) | 69 == Soll(+94) ✓, Kaskade lückenlos ✓, 92 == Wirkpfad−Skips−69 ✓ (33.345.725). **[95] = 13.033.014 = 8,2 % des Wirkpfads** ✗ (Soll < 0,5 %). Abdeckung X 20,90 % gegen Basis 26,82 % |
-| vq_leiter_aus (Fahrzeug-Schalter am Kanal) | rc=1: **K2 verletzt** (Reibungspfad >1 % von der Kraftbilanz) — vorbestehende Kanal-Abnahme, nicht X; angewandt 37,07 %, Treffer 99,98 % |
-| vq_leiter_m1 | rc=0, angewandt 57,67 %, Treffer 100 % |
-| vq_leiter_x | 69/Kaskade/92 ✓, **[95] = 34.560.921 = 21,7 %** ✗, Abdeckung 22,60 % gegen 37,07 % |
+| | 8 mm | 4 mm |
+|---|---|---|
+| aktive Facetten | 719.574 | 3.129.185 (×4,35) |
+| Rang 2 / 1 / 0 (nach Downdate) | 47,20 / 33,63 / 19,17 % | **50,80 / 30,63 / 18,56 %** |
+| **harter Kern** (roh Rang 0 = Einlink) | 16,39 % | **16,11 %** |
+| Rangverlust durch Downdate | 36,26 % | 32,93 % |
+| Flackerfenster / Prädikat-Divergenz | 2 / 0 | 7 / 0 |
 
-**Deutung:** [95] = „roh sagt Rückfall, Schatten hätte angewandt". Rangmäßig ist der Schatten eine Obermenge (das Downdate senkt
-den Rang nur), also kommt [95] aus den **Gates**: der rohe Solve liefert an diesen Zellen ein s, das SATGATE/sn-Gate reißt, der
-ALPHA2-Schatten-Solve nicht. Mein Merge `rueckfall |= a2_rueckfall` (ODER) macht X damit zur **Schnittmenge** beider Abdeckungen,
-nicht zur Basis-Zellmenge. X als „(B) rein" ist so NICHT gegeben. Konsequenz für morgen (Entscheid steht aus, nicht gebaut):
-- **Modus 4 = Ersetzen statt ODER** (`rueckfall = a2_rueckfall`): wo der Schatten anwendet, wird der rohe Solve UNGEGATET
-  angewandt. Das ist der ehrliche (B)-Test auf der Basis-Zellmenge — mit dem Risiko, dass ungegatete rohe Slips an 8–22 % der
-  Besuche instabil werden (vgl. SATGATE=0: Klemme ×5.500). Wenn das passiert, ist das selbst ein Befund: der rohe Operator liefert
-  an genau den Zellen unphysikalische s, die das Downdate schützte.
-- Vorher **Kreuztabelle nach Gate-Ursache** (raw-Gate 10 / 16 / Rang) für [95] mitzählen, sonst bleibt „Gates" Vermutung.
-- **Diff-Prüfung von Arm X (zweiter Anlauf, 20:20): NICHTS GEFUNDEN.** Block A zeichengleich zur ALPHA2-Basis, Präprozessor
-  paarig, 69-Buchung hinter dem Merge, Soll +94 exakt (126.241.015 = 53.195.580 + 71.607.565 + 1.437.870).
-- **[95]-Ursache bewiesen:** am Kanal [16]=0, [64]=0, [13]=0 → [95] liegt vollständig in SATGATE-[10]. Der rohe 2×2-Solve
-  bedient die schwache Mittelrichtung c̄=S1/S0 (Steifigkeit ~Dd·B², dett knapp über 1e-4·Gt11·Gt22) → Slip reißt das Budget;
-  der Schatten-Skalar setzt s2=0 und passiert. **Das ist eine Konditionierungsaussage über den rohen Operator**, nicht nur Buchhaltung.
-- **Modus 4 (Ersetzen statt ODER) NICHT bauen:** er wäre „SATGATE aus" für genau diese 8–22 % — ungegatetes |s1|>2·budget·ut
-  und sn=0 (für diese Zellen nie gerechnet). Kein sauberer (B)-Test.
-- **Stattdessen morgen:** (1) `vr_x8` auf der B70 SO WIE X IST — misst (B) auf der SCHNITTMENGE; die beiden Abnahme-Wächter
-  ([95] > 0,5 %, Abdeckung ≠ Soll) sind auf Warnung gestellt und das Binary ist neu gebaut (nur Host, kein Kernel).
-  Konsistenzprobe bleibt: (X−Basis) + (Modus1−X) ≈ +0,176. (2) Kreuztabelle „Gate nach Solve-Zweig" ([81]/[82], lbm.cpp:352
-  seit heute früh als fehlend deklariert) bauen — sie trennt Klasse B (roh exakt ↔ Schatten Schur) von Klasse C (roh Schur-exakt
-  ↔ Schatten Skalar) und beantwortet, ob der rohe Operator an c̄ schlecht konditioniert ist. Das wäre der eigentliche Befund.
+Achtfache Zellzahl bewegt den harten Kern um **0,28 pp**. Für Einlink-Facetten ist `q_i ≡ 0` eine Identität (c̄ = c₁) —
+kein Verfahren, keine Auflösung. Rang 2 gewinnt 3,6 pp; real, aber es holt die 42,8 % nicht zurück.
 
-## 20:55 — Kreuztabelle Gate × Solve-Zweig GEBAUT (Slots 96–116, Puffer 128) — **Diff-Prüfung 21:25: nichts gefunden**
+## GESCHLOSSEN — Durchgang C ist algebraisch tot (Planung 05.09., im Code gegengeprüft)
 
-Kernel: `uint zweig` (1=[78] 2=[79] 3=[12] 4=[14]/[80]) an den Kaskadenzweigen, an jedem Gate `hits[Basis+zweig]`; unter X die
-[94]/[95]-Zellen nach rohem Zweig, [116] = [95] mit rohem Rang 0. Host `bericht_gate_kreuztabelle` mit Zeilensummen-Abnahme
-und konstruktiven Nullspalten (Quergate × exakt, sn-Gate × entkoppelt). NUR Zähler — alle Arme müssen bitgleich bleiben.
-**Morgen:** (1) `logs/vs_kreuz_serie.txt` (iGPU, 5 Arme, Soll-Hashes im Kopf) → (2) `logs/vs_x8_serie.txt` (B70) = Arm X am
-Fahrzeug + Tabelle in einem Lauf. Vorhersage Klasse C: [113] ≈ [95]. Diff-Prüfung sauber (nur Kommentar-Reste, behoben). Startklar.
+Jede Richtung, die die Nachbar-Union neu beiträgt, erfüllt `m + c_k − c_i ∈ S` **und** `m − c_i ∉ S` — sie ist also eine
+Richtung, in der **diese** Zelle keine Wand hat; `fhn[i]` trägt dort eine Population aus Fluid. Auf der ebenen Wand (47 % der
+Facetten) ist die Union sogar identisch der eigenen Menge. Gegenprobe im Code: jeder `store_f` schreibt in die eigene Zelle,
+es gibt keinen zellfremden DDF-Schreibpfad. Heikos Kantenbedingung hätte genau die Fälle weggeschnitten, in denen überhaupt
+etwas zu holen wäre — Kompatibilität und Rangzugewinn schließen sich aus.
 
-## 21:15 — Feld-Hash vor die Berichte gezogen (Kanal + Kugel, host-only)
+## OFFEN — nur noch das ZIEL (Schicht 3)
 
-Die X-Arme hatten keinen FELD-HASH, weil ein abbrechender Wächter (`print_error` = `exit(1)`) im Bericht vor der Hash-Zeile
-feuerte. Jetzt wird der Hash direkt nach dem Lauf gedruckt, vor jedem Bericht. Die Berichte ändern u nicht — die Werte
-bleiben identisch, die 0/1/2-Sollhashes von heute gelten weiter. Ab morgen haben auch X-Arme einen Hash.
+Die (A)/(B)-Messung nennt den Ort: **an den Eckzellen ist P kein Reibungsaustausch, sondern Druckschub auf rückwärts gewandte
+Stufenflächen** (Klassentabelle: Slip dort antiparallel zur Strömung). Das Modell ersetzt einen Druck durch eine Reibung, und
+das kostet 85 % des Cz-Schadens. Nächster Schritt: P in Druck- und Reibungsanteil zerlegen und nur den deviatorischen Rest
+ersetzen. Der Kernel misst den Druckanteil bereits — Offset-Histogramm Slots 49–58, `2(ρ−1)(S1·t1)`.
 
-## 23:00 — Sammelbehebung der latenten Fehler eingecheckt (`b9dab75`), zwei Prüfrunden
+**Sichtdiagnose für Heiko:** `export/vs_x8/zensus_facetten.vtk` (38 MB) — ein Punkt je Facette, Skalare `rang_downdate`,
+`rang_roh`, `n_wandlinks`, `entkoppelt`, `log10_lmin_lmax`, Vektor `normale`, Gitterkoordinaten. Zeigt, wo Rang fehlt und
+wie die Nachbarn orientiert sind.
 
-26 Punkte aus den vier Audits des Tages: 3 Laufkiller (K2 FACETTEN=1/2-Abbruch in pruefe_kaskade, K3 Pur×MASSE_ALLE/KRAFT/PINV,
-K1 zurückgenommen — Befund galt für einen älteren Stand), 10 stille Fehlmessungen (S1 KDIAG unter KRAFT=2, S2 Nullziel-Quergate,
-S3 Slice-Legacy-Uhr ohne Zähler, S4 ELIBB=1 ohne Nullwächter, S5 BODEN_EQ_ABSTAND ohne Wirkpfad, S6 KDIAG nie alloziert,
-S8 Normalrest unter MASSE_ALLE, S9 Zielerfüllung-Randfälle, D17 PINV-PSD), Rest Doku. Die Diff-Prüfung fand in meiner ersten
-Fassung drei Fehler (Kommentar mitten in der Kernelzeile → QUERGATE-Build tot; K1 hätte den Abbruch eingebaut; S4 unerreichbar) —
-behoben, nachgeprüft, sauber. **Bewusst offen:** D9 fac_geo-Stride (24 MB, Bitgleichheitsbeweis teurer als der Gewinn), S7
-(unverdrahtete Schalter in fahrzeug/fernfeld ansagen), S10 (ALPHA-Soll-Test am Kanal), D4/D6/D8/D11 (Kosmetik).
-**Abnahme:** `logs/vt_latent_serie.txt` (iGPU, 6 Arme) — läuft nach vs_kreuz; Kernel-Änderungen sind in den Hash-Armen nicht
-emittiert (S1 KDIAG, S2 QUERGATE, D17 PINV) bzw. nur Bericht (S8) → aus/m1/m2 müssen bitgleich bleiben.
+**Perf/VRAM (nicht gebaut):** Linkmaske (18 Bit) je Facette in die zwei toten `fac_geo`-Felder → null zusätzlicher VRAM, spart
+18 Nachbar-Flag-Loads je Facettenbesuch; Rang-0-Facetten (16 %) könnten den Solve überspringen. Effekt unbekannt — beim
+nächsten 4-mm-Lauf zuerst Baseline (MLUPs, freier VRAM via `werkzeuge/vram_sammler.sh`), dann A/B.
 
-## 23:15 — KREUZTABELLE GEMESSEN: Klasse C zu 100 % (vs_kreuz, iGPU, Binary 6d9dd3e)
+## Code-Stand
 
-0/1/2 bitgleich, vs_x-Altslots exakt wie vq_x, alle Zeilensummen und Nullspalten halten. **[95] nach rohem Zweig: Schur-exakt
-[79] = 100,00 %** — am Kanal mit Basis-Schaltern UND mit der Fahrzeug-Kombination. Die Zellen, an denen der rohe Solve das
-Sättigungsgate reißt, sind ausnahmslos die, die das Downdate von Rang 2 auf Rang 1 senkt: der rohe 2×2-Solve bedient die schwache
-Mittelrichtung c̄ = S1/S0 (Steifigkeit ~Dd·B²), und genau diese Richtung entfernt `G' = G − (6/S0)·S1S1ᵀ`.
-**Das Downdate ist ein Konditionierungsschutz, nicht nur Massenbuchhaltung.** Der Rang-Weg über den Wegfall des Downdates ist damit
-tot — der gewonnene Freiheitsgrad ist die Richtung, die das Modell nicht tragen kann. Abdeckungsgrenze unter konditioniertem Solve
-≈ ALPHA2-Abdeckung (57 % am 8-mm-Fahrzeug). Darüber hinaus nur (A) das Ziel an Eckzellen (Druck vs Reibung in P trennen) oder die
-Linkmenge erweitern (Rang 2 aus echter Geometrie). vs_x8 (B70) bleibt sinnvoll: es misst (B) auf der Schnittmenge — ist (B) ≈ 0,
-ist der gesamte Cz-Schaden von Modus 1 der c̄-Slip an den neu abgedeckten Zellen.
-Erster X-Hash (nach der Hash-Verschiebung): vs_x 17935634836335592429, vs_leiter_x 4168733461996404659. vs_x rc=1 nur durch die
-vorbestehende Kanal-Abnahme K2.
+- HEAD `1aab3fc`, Binary aus `59aa64c`. Baum sauber, Queue frei.
+- Neu am 04.09.: Zielerfüllungs-Instrument (Slots 81–91), statischer Klassenzensus + Wanderungsmatrix, Kreuztabelle
+  Gate × Solve-Zweig (96–116), Arm X (MASSE_ALLE=3), Zensus-VTK, Sammelbehebung von 26 latenten Fehlern.
+  Alles diff-geprüft, Bitgleichheit der Basisarme belegt.
+- **Neuer latenter Befund (05.09.):** der Basis-Wächter prüft fehlende und abweichende BASIS-Schalter, aber **nicht
+  zusätzliche**. Eine übernommene Vorlagenzeile trug `CFD_FACETTEN_DIAG=2` (Modus „Facetten bauen, Diagnose, `_exit(0)`",
+  setup.cpp:5247) — der Lauf endete still nach dem Facettenbau mit rc=0, der Wächter schwieg. Behebung: jeder Schalter, der
+  weder in der Basis steht noch in `CFD_BASIS_ABWEICHUNG` deklariert ist, mindestens als Warnung melden.
+- **Bewusst offen:** `fac_geo`-Stride (24 MB tot), S7 (unverdrahtete Schalter in fahrzeug/fernfeld ansagen), S10
+  (ALPHA-Soll-Test am Kanal), D4/D6/D8/D11 (Kosmetik).
 
-## 23:40 — Zensus-VTK-Export (host-only, `CFD_FAC_ZENSUS_VTK=1`) und Plan für die Nachbar-Messbasis
+## Verworfene Wege (alle gemessen, nicht vermutet)
 
-`export/<Lauf>/zensus_facetten.vtk`: ein Punkt je aktive Facette (GITTERKOORDINATEN der Domäne, nicht Welt), Skalare
-`rang_downdate`, `rang_roh`, `n_wandlinks`, `entkoppelt`, `log10_lmin_lmax`, Vektor `normale`. Zweck (Heiko): optische Diagnose,
-wo Rang fehlt und ob der Nachbar auf derselben Fläche ähnlich orientiert ist. Am 4-mm-Fall ~200 MB → nur auf Anforderung.
-
-**Korrektur meiner Formulierung:** tot ist nur der Rang-Weg *über den Wegfall des Downdates* (Klasse C, 100 %). Der Weg über eine
-**geteilte Messbasis** — Wandlinks der Nachbarzelle auf derselben Fläche in den Solve dieser Zelle einbeziehen, jede Zelle behält Ziel
-und Schlupf — lebt. Bedingung (Heiko): **nie** von einem Nachbarn borgen, dessen Normale anders orientiert ist (spitze Kanten). Die
-Normalen sind statisch, „Nachbar kompatibel" ist also vorab entscheidbar und gehört in dieselbe VTK als Farbe, bevor gebaut wird.
-
-**Perf/VRAM aus der Vorberechnung** (nicht gebaut): Linkmaske (18 Bit) je Facette in die zwei toten `fac_geo`-Felder → null VRAM,
-spart 18 Nachbar-Flag-Loads je Facettenbesuch; Rang-0-Facetten (16 %) könnten den Solve überspringen. Effekt unbekannt — beim
-nächsten 4-mm-Lauf zuerst die **Baseline** (MLUPs, freier VRAM via `werkzeuge/vram_sammler.sh`) mitmessen, dann A/B.
-
-## 00:05 (05.09.) — ABNAHME DER SAMMELBEHEBUNG BESTANDEN (vt_latent, iGPU, Binary b9dab75)
-
-aus / m1 / m2 / X **bitgleich** (113354303738885232 / 3775874723383551782 / 9660637873999918948 / 17935634836335592429) — S8 hat
-nur den Bericht geändert. S9: KRAFT=2-Ausstieg der Zielerfüllung greift, Kraftpfad Modus 2 == Wirkpfad. S2: Nullziel-Arm mit
-QUERGATE=1 → **Slot 64 = 0** (vorher kippte jedes Rundungsresiduum). Zeilensummen/Nullspalten der Kreuztabelle halten in allen Armen.
-vt_x und vt_null_quergate rc=1 nur durch die vorbestehende Kanal-Abnahme K2 (Reibungspfad vs Kraftbilanz) — nicht durch neue Wächter.
-**Binary für den 05.09. ist aus `59aa64c` gebaut** (Sammelbehebung + Zensus-VTK); Queue frei, keine Laufprozesse.
-
-## Läuft / steht bereit
-
-- `logs/vq_x_serie.txt` (iGPU, 7 Arme): Bitgleichheit 0/1/2 (Soll-Hashes im Kopf), X am Kanal, Leiter mit Fahrzeug-Schaltern.
-- `logs/vr_x8_serie.txt` (B70, 1 Arm): Arm X am Fahrzeug, Basis-Soll 57,21 %. **NICHT starten**, solange [95] am Kanal 8 % ist —
-  der Lauf würde die Abdeckungs-Abnahme reißen. Erst Merge-Entscheid (Modus 4) + Diff-Prüfung. Abnahme im Serienkopf: X−Basis = (B), Modus1−X = (A), Summe ≈ +0,176.
-- Wiederaufnahme: `pgrep -a -x FluidX3D`, `tail logs/queue_status.txt`; Auswertung wie in den Serienköpfen; Bezüge
-  `export/vo_f08_aus`, `export/vm_masse8_an`.
-
-## Regeln, die heute Zeit gekostet haben (Tagesprotokoll ~/llm-middleware/wissensspeicher-tagesprotokoll/2026-09-04.md)
-
-- Diff-Prüfung nach dem Bau war den ganzen Tag übersprungen — nachgeholt: 13 Befunde, 4 mit Abbruchpotenzial.
-- Der Kanal kipp26 ist für Wandmodell-Nebenwirkungen blind (alph=0 an der ebenen Wand). Leitersprosse nur mit
-  Fahrzeug-Schalterkombination.
-- „Anteil mit Modell" ist keine Gütezahl; nur Treffer × Abdeckung, gepaart, mit Cz-Richtung gegen OF13.
+PINV (wirksame Abdeckung 56,97 → 45,05 %) · SATGATE=0 (Klemme ×5.500) · ALPHA=0 (Δm ×12, Cz kippt) · Basiswahl t1
+(2 Facetten; t1 ist ohnehin u_t/|u_t|, nicht frei) · globale Massenbilanz (kraftneutral, vor dem Bau verworfen) ·
+MASSE_ALLE Modus 1 (+20 pp Abdeckung, aber (A)) · Modus 2 / f_0 (Bulk-Mode, f_0 ≤ 0 bei 2 %) · KRAFT=1 (NaN am Fahrzeug;
+als (A)/(B)-Test strukturell ungeeignet) · Modus 4 (wäre SATGATE aus für 8–22 %).
