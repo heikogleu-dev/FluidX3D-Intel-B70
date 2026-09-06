@@ -196,6 +196,15 @@ public:
 	static bool s_fac_imem;  // C1b iMEM-Umbau: CFD_FACETTEN=3/4 (Slip-Velocity-BB) statt 1/2 (Paartausch-Kontrollarm)
 	static float s_fac_ema;  // EMA-Faktor fuer u_s (CFD_FAC_EMA; 0 = aus; WIDERLEGT in J3 -- filtert die falsche Seite, bleibt als A/B-Arm)
 	static float s_fac_pema; // PEMA: beidseitige EINGANGS-Filterung P-quer/u-quer (CFD_FAC_PEMA; Weg A der Analyse)
+	// ★★ 06.09.2026 KINEMATISCHES WANDMODELL (Ponsin & Lozano 2025), CFD_FAC_UW.
+	// Statt einen Impuls zu LOESEN wird die Wandgeschwindigkeit HINGESCHRIEBEN:
+	//   u_w = u_B - u_tau^2*delta_w/(nu+nu_t)   -- der Gradient Wand->Abtastpunkt traegt dann tau_w.
+	// Damit entfallen Momentenmatrix, Rang, Schur, Kaskade und Gates ersatzlos; die Ein-Link-Facetten
+	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
+	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
+	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
+	static uint s_fac_uw;
+	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
 	static bool s_fac_satgate; // (a-strich): Klemme -> BB-Rueckfall-Gate (CFD_FAC_SATGATE; Stabilitaetsanalyse G8)
 	static uint s_fac_kraft;   // ★ 30.08.: CFD_FAC_KRAFT -- Zellkraft statt Slip: 1 = an Rueckfallzellen, 2 = an allen Facettenzellen (Diskriminator); 0 = aus, bitgleich

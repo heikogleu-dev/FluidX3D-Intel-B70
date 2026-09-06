@@ -2249,11 +2249,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		}
 	}
 )+"#endif"+R( // FACETTEN_PEMA
+)+"#ifndef FACETTEN_UW"+R(
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
+)+"#endif"+R( // FACETTEN_UW -- eigener Guard an der URSPRUENGLICHEN Stelle, damit der Kontrollarm bei CFD_FAC_UW=0 QUELLTEXTIDENTISCH bleibt (Pruefbefund M2)
 	float s1=0.0f, s2=0.0f, sn=0.0f;
 	bool rueckfall=false; // ★ BUCHUNGSSCHLUSS (Baustein 2/1, 27.08.): Rueckfaelle steigen nicht mehr per return aus, sondern buchen mit s=0 (P-only)
 	float res2=0.0f;
 	uint zweig=0u; // ★ KREUZTABELLE 04.09. abends: Solve-Zweig der REALEN Kaskade, 1=[78] 2=[79] 3=[12] 4=[14]/[80]; nur Zaehler, kein Float
+)+"#ifndef FACETTEN_UW"+R(
 )+"#ifdef FACETTEN_MASSE_X"+R(
 	// ★ ARM X (CFD_FAC_MASSE_ALLE=3, 04.09.2026): Rueckfall-Entscheid im SCHATTEN wie unter ALPHA2 --
 	// Downdate auf KOPIEN, Entkopplungs-Gate, Kaskade, Schatten-Solve, Gates auf dem Schatten-s. Die
@@ -2442,8 +2445,72 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Budget- oder Positivitaetsfrage, Normalanteil per Konstruktion 0. Modus 1: nur Rueckfallzellen
 	// (kipp0 hat keine -> bitgleich). Modus 2: ALLE Facettenzellen per Kraft, Additivterm aus --
 	// der Diskriminator gegen den Slip-Pfad (0,716 an der ebenen Wand).
+)+"#else"+R(
+	// ★★★ 06.09.2026 KINEMATISCHES WANDMODELL (CFD_FAC_UW, Ponsin & Lozano 2025).
+	// Statt ein Gleichungssystem zu loesen wird die Wandgeschwindigkeit HINGESCHRIEBEN:
+	//   u_w = u_B - u_tau^2 * delta_w / (nu + nu_t)
+	// so dass der aufgeloeste Gradient zwischen Wand und Abtastpunkt genau tau_w = rho*u_tau^2 traegt.
+	// WARUM DAS DIE NICHT-ACHSPARALLELEN ZELLEN ERREICHT: die Sperre an Ein-Link-Facetten war
+	// J || c zusammen mit der Forderung J.n = 0, woraus J = 0 folgt. Diese Forderung gehoerte zum
+	// SOLVE. Hier gibt es keinen Solve mehr, also auch keine Nebenbedingung -- q_i = 6 w_i (c_i.u_w)
+	// ist an einem einzigen Link von null verschieden. Genau so haelt es der Bewegtwand-Zwilling
+	// apply_moving_boundaries (Krueger S. 180), der ebenfalls kein J.n = 0 fordert.
+	// ★★★ WARNUNG 06.09.2026 abends, NACH DER AUDIT-SCHLEIFE: DIESER ARM IST WIDERLEGT.
+	// NICHT BENUTZEN, bevor die Konvention repariert ist. Drei unabhaengige Auditoren, uebereinstimmend:
+	//  (1) Der diskrete Bounce-Back liefert je Schritt den Tangentialfluss G11*(u_B - u_w) = (1/3)*(u_B-u_w),
+	//      NICHT rho*nu_eff*(u_B-u_w)/y_w. Fuer tau_w = rho*u_tau^2 muesste (u_B - u_w) = 3*u_tau^2 sein;
+	//      hier steht u_tau^2*y_w/nu_eff. Verhaeltnis y_w/(3*nu_eff) ~ 269. Kontinuumskonvention in einem
+	//      Platz, dessen Wert die Gitterkonvention bestimmt.
+	//  (2) s1 ist KEINE kinematische Wandgeschwindigkeit, sondern der Koeffizient, der die
+	//      BB-Populationsunwucht P1 wegheben muss (|P1|/twe = 3760). s1_noetig = (twe+|P1|)/G11 = 1,29*u_B
+	//      -- also OBERHALB von u_B. Die Klemme unten schneidet genau den einzigen zulaessigen Bereich ab.
+	//      An der Kugel brauchen 54,2 % der Facetten einen Wert ausserhalb [0, u_B].
+	//  (3) Die eigene Projektdoku hatte es ausgeschlossen: WANDMODELL.md sagt "Abtastung 2 Zellen von der
+	//      Wand" und "Die Ankopplung ueber eine effektive Viskositaet SCHEIDET AUS (Ponsin & Lozano 2025)".
+	//      Gebaut wurde Abtastung IN der Wandzelle und Ankopplung UEBER eine effektive Viskositaet.
+	// Gemessen: Kanal u_tau IST/Ziel 0,816 -> 7,2, Zielerfuellung r = -1281 (Gegenrichtung, 96,2 % der
+	// Besuche); Kugel r <= -10 bei 73,7 %, Normal-Rest x 2,3e5. Die Ein-Link-Klasse, fuer die der Umbau
+	// gemacht wurde, war als reiner BB-Rueckfall bei r = 0,88 und steht mit u_w bei r = -1,87 --
+	// die neue Behandlung ist schlechter als gar keine.
+	// SCOPE-HINWEIS: utau aus der Spalding-Kette lebt in deren eigenem Block (oben) und ist hier NICHT
+	// sichtbar; tw dagegen schon. tw = rhon*utau^2 ist die Definition, also ist die Wurzel exakt
+	// dasselbe u_tau -- inklusive der Stabilitaetsklemme tw_max, was gewollt ist. NICHT twe nehmen:
+	// darin steckt der Flaechenfaktor faca, und u_w ist Kinematik, keine Flaechenbilanz.
+	{	const float utau_uw = sqrt(fmax(tw, 0.0f)/fmax(rhon, 1e-6f));
+		const float yp_uw = utau_uw*yw_ab/def_fac_nu;                 // y+ am Abtastpunkt
+		// MODUS 1 (der einzige gebaute): nu_t aus dem GLEICHGEWICHTSPROFIL, nu_eff/nu = 1 + kappa*y+.
+		// Modus 2 -- nu_t aus dem gemessenen Feld (fac_wfd, Kernel sgs_fdwand kernel.cpp:4281ff) -- ist
+		// bewusst NICHT gebaut: er koppelt an CFD_SGS_FDWAND und waere eine zweite Variable im selben
+		// Schritt. Er braucht ausserdem ein neues Kernelargument (fac_wfd ist hier kein Parameter) und
+		// ist im Kugelfall gar nicht verdrahtet (setup.cpp: FDWAND dort nicht gesetzt). Eigener Schritt.
+		const float rnu_uw = 1.0f + def_fac_uwkappa*yp_uw;
+		// KLEMME, zwingend: bei nu_t -> 0 (SUBGRID aus, SGS_WANDFREI) verlangt die Formel eine
+		// rueckwaerts laufende Wand -- bei y+ = 100 waere u_w = -5*u_B. Die untere Klemme u_w = 0 ist
+		// bitgenau reines Bounce-Back (q_i = 6 w_i (c_i.0) = 0), Klemme und Rueckfall fallen zusammen.
+		// ★ BERICHTIGT 06.09.: die obere Klemme ist KEIN Nullbeweis. duw >= 0 gilt immer, also ist
+		// uw > ut_ab konstruktiv unmoeglich und Slot 125 kann nie feuern -- ein Test, der nicht
+		// fehlschlagen kann, ist keiner. Schlimmer: die RICHTIGE Loesung liegt oberhalb u_B (1,29*u_B),
+		// diese Klemme schneidet also genau den zulaessigen Bereich ab.
+		const float duw = utau_uw*utau_uw*yw_ab/(def_fac_nu*rnu_uw);
+		float uw = ut_ab - duw;
+		if(uw<=0.0f) { uw = 0.0f; if(t%100ul==0ul&&hits[124]<0xF0000000u) atomic_inc(&hits[124]); }
+		if(uw>ut_ab) { uw = ut_ab; if(t%100ul==0ul&&hits[125]<0xF0000000u) atomic_inc(&hits[125]); }
+		s1 = uw; s2 = 0.0f; sn = 0.0f;
+		rueckfall = (uw<=0.0f); // nur die Klemme faellt zurueck -- Rang und Gates gibt es hier nicht
+		if(t%100ul==0ul&&hits[123]<0xF0000000u) atomic_inc(&hits[123]); // Wirkpfad: MUSS feuern
+		{	const float q_uw = (ut_ab>1e-12f) ? uw/ut_ab : 0.0f;         // Histogramm u_w/u_B, 8 Eimer a 0,125
+			const uint b_uw = (uint)fmin(7.0f, fmax(0.0f, floor(8.0f*q_uw)));
+			if(t%100ul==0ul&&hits[128u+b_uw]<0xF0000000u) atomic_inc(&hits[128u+b_uw]); }
+)+"#ifdef FACETTEN_UW_SN"+R(
+		// A/B-Arm: Normalnullung trotz u_w. Dann faellt die Ein-Link-Klasse wie heute zurueck, und die
+		// Differenz der beiden Arme MISST den Preis der Nebenbedingung J.n = 0.
+		if(!rueckfall&&Snn>=1e-8f) sn = -(Sn1*s1)/Snn;
+)+"#endif"+R( // FACETTEN_UW_SN
+	}
+)+"#endif"+R( // FACETTEN_UW
 	bool pass2_an = !rueckfall;
 	float3 kraft = (float3)(0.0f,0.0f,0.0f);
+)+"#ifndef FACETTEN_UW"+R(
 )+"#ifdef FACETTEN_KRAFT"+R(
 	const bool kz = rueckfall || (def_fac_kraft==2u);
 	if(kz) {
@@ -2453,6 +2520,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		if(t<100ul&&hits[71]<0xF0000000u) atomic_inc(&hits[71]); // Slot 71: Kraftzellen im ANLAUF (t<100), UNGEGATET -- Bitanker-Befund 30.08.: kipp0 hat am Startschritt an ALLEN Facettenzellen Rueckfall (3720 = fac_N), die t%100-Stichprobe sieht das nicht
 	}
 )+"#endif"+R( // FACETTEN_KRAFT
+)+"#endif"+R( // FACETTEN_UW -- KRAFT braucht R1/R2, die es unter u_w nicht gibt
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
 )+"#ifdef FACETTEN_EMA"+R(
 	// LATENT (Audit 1/3): unter EMA x SATGATE prueft das Gate die GELOESTEN s, angewandt wird die
@@ -2534,9 +2602,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		if(t%100ul==0ul&&hits[92]<0xF0000000u) atomic_inc(&hits[92]); } // [92] Wirkpfad
 )+"#endif"+R( // FACETTEN_MASSE_ALLE
 	float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn;
+)+"#ifndef FACETTEN_UW"+R(
 )+"#ifdef FACETTEN_KRAFT"+R(
 	if(kz) { phi1 += R1; phi2 += R2; } // Kraftzelle: Ist = P + Kraft = Ziel (Buchung Ist == Soll, wie im Slip-Pfad)
 )+"#endif"+R( // FACETTEN_KRAFT // Ist-Austausch nach Klemme (3x3: inkl. Sn-Beitrag des sn; unter ALPHA2 sind G/Sn downgedatet -> alpha-Beitrag enthalten)
+)+"#endif"+R( // FACETTEN_UW -- kz/R1/R2 existieren unter u_w nicht (Pruefbefund H1)
 )+"#ifdef FACETTEN_ALPHA"+R(
 )+"#ifndef FACETTEN_ALPHA2"+R(
 )+"#ifndef FACETTEN_MASSE_ALLE"+R(

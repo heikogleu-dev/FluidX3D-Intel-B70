@@ -132,12 +132,17 @@ static void zeichne_text(Image* img, const uint x0, const uint y0, const string&
 // ★ 04.09.2026: Wirkpfad-Abnahme fuer CFD_FAC_MASSE_ALLE. Nach Projektregel ist ein Schalter ohne
 // feuernden Zaehler ein harter Fehler -- und die Kaskade allein beweist ihn nicht, weil ihre
 // Verschiebung auch andere Ursachen haben koennte.
-static void pruefe_masse_alle(const uint* H, const bool an, const bool messnur, const uint kraft, const string& ort, const bool x=false) {
+static void pruefe_masse_alle(const uint* H, const bool an, const bool messnur, const uint kraft, const string& ort, const bool x=false, const uint uw=0u) { // ★ 06.09.: uw (Pruefbefund M4)
 	const ulong s92=(ulong)H[92];
 	// ★ 04.09.2026 (Diff-Pruefung H4): unter MESS-NUR kehrt apply_facette_imem lange vor dem
 	// beta3-Block zurueck, und unter CFD_FAC_KRAFT=2 ist pass2_an an JEDER Facettenzelle false.
 	// In beiden Faellen ist Slot 92 = 0 der RICHTIGE Wert -- ein print_error waere dort exit(1)
 	// am Laufende fuer einen voellig korrekten Lauf.
+	// ★★ 06.09. (Pruefbefund M4): unter CFD_FAC_UW faellt Slot 92 auf 0, wenn ALLE Facetten in die
+	// untere u_w-Klemme laufen (u_w = 0 ist bitgenau reines BB, also pass2_an ueberall false). Das ist
+	// dann kein stiller No-Op, sondern ein aussagekraeftiges Messergebnis -- und die zustaendige
+	// Meldung ist die Klemmquote in pruefe_kaskade, nicht ein exit(1) hier.
+	if(an&&uw>0u&&s92==0ull) { print_warning("["+ort+"] MASSE_ALLE angefordert, aber Slot 92 = 0 BEI AKTIVEM CFD_FAC_UW: alle Facetten sind in die untere u_w-Klemme gelaufen (u_w = 0 = reines Bounce-Back), also gibt es nichts zu kompensieren. Kein No-Op, sondern ein Befund -- siehe die Klemmquote in der u_w-Abnahme."); return; }
 	if(an&&(messnur||kraft==2u)) { print_info("["+ort+"] MASSE_ALLE angefordert, aber "+(messnur?string("MESS-NUR"):string("CFD_FAC_KRAFT=2"))+" laeuft: Slot 92 = "+to_string(s92)+" (0 ist hier korrekt, der Pfad wird konstruktiv nicht erreicht)."); return; }
 	if(an&&s92==0ull) print_error("["+ort+"] CFD_FAC_MASSE_ALLE angefordert, aber Slot 92 = 0 -- die Kompensation ueber alle 19 Links wird NIE erreicht (stiller No-Op: Emission? pass2_an?).");
 	else if(!an&&s92!=0ull) print_error("["+ort+"] Slot 92 = "+to_string(s92)+" OHNE CFD_FAC_MASSE_ALLE -- der Pfad laeuft, obwohl er nicht angefordert wurde.");
@@ -170,7 +175,7 @@ static void pruefe_masse_alle(const uint* H, const bool an, const bool messnur, 
 		}
 	}
 }
-static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur, const bool pinv) {
+static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur, const bool pinv, const uint uw) { // ★ 06.09.: uw als PARAMETER, nicht als Static -- im dd-Fall wird LBM_Domain::s_fac_uw fuer das Fernfeld ueberschrieben (Pruefbefund B2)
 	const ulong wp=(ulong)H[7], s9=(ulong)H[9], s17=(ulong)H[17];
 	if(wp==0ull) { if(env_u("CFD_FAC_ELIBB",0u)==2u) print_info("["+ort+"] PUR-ARM: Wirkpfad Slot 7 = 0 ist konstruktiv (Return vor Slot 7); Abnahme ist Slot 67 im ELIBB-Block (K3)."); return; }
 	// ★ 04.09.2026, am ersten Einsatz gelernt: unter MESS-NUR steigt apply_facette_imem VOR der
@@ -183,6 +188,29 @@ static void pruefe_kaskade(const uint* H, const string& ort, const bool messnur,
 		if(ks!=0ull) print_error("["+ort+"] MESS-NUR, aber die Solver-Kaskade hat gezaehlt (78+79+12+13+14+15 = "+to_string(ks)+"). Der MESSNUR-Ausstieg greift nicht -- der Arm ist NICHT reines Bounce-Back.");
 		else if(s75==0ull) print_error("["+ort+"] MESS-NUR angefordert, aber Slot 75 = 0 -- stiller No-Op, der Ausstieg wird nie erreicht.");
 		else print_info("["+ort+"] MESS-NUR-ABNAHME: Kaskade konstruktiv leer, Wirkpfad Slot 75 = "+to_string(s75)+" von "+to_string(wp)+" Besuchen ("+to_string((float)(100.0*(double)s75/(double)wp),2u)+" %). Kein Wandmodellimpuls, Facetten nur gemessen.");
+		return;
+	}
+	// ★★ 06.09.2026 u_w-ABNAHME, wortgleich zum MESSNUR-Muster darueber: unter CFD_FAC_UW gibt es
+	// keinen Solve, also MUSS die Kaskade leer sein und der Wirkpfad Slot 123 MUSS feuern. Ohne
+	// diesen Zweig braeche der Waechter jeden u_w-Lauf am Laufende ab -- und haette in der Regel
+	// unrecht, wie am 04.09. bei MESS-NUR.
+	if(uw>0u) {
+		const ulong ks=(ulong)H[78]+(ulong)H[79]+(ulong)H[12]+(ulong)H[13]+(ulong)H[14]+(ulong)H[15];
+		const ulong gs=(ulong)H[10]+(ulong)H[16]+(ulong)H[64]+(ulong)H[80];
+		const ulong s123=(ulong)H[123], s124=(ulong)H[124], s125=(ulong)H[125];
+		if(ks!=0ull) print_error("["+ort+"] CFD_FAC_UW, aber die Solver-Kaskade hat gezaehlt (78+79+12+13+14+15 = "+to_string(ks)+"). Der u_w-Zweig greift nicht -- es wird noch geloest.");
+		else if(gs!=0ull) print_error("["+ort+"] CFD_FAC_UW, aber die Gates haben gezaehlt (10+16+64+80 = "+to_string(gs)+"). Unter u_w gibt es keine Gates.");
+		else if(s123==0ull) print_error("["+ort+"] CFD_FAC_UW angefordert, aber Slot 123 = 0 -- stiller No-Op, der u_w-Zweig wird nie erreicht.");
+		else if(s125!=0ull) print_error("["+ort+"] CFD_FAC_UW: obere Klemme Slot 125 = "+to_string(s125)+" -- u_w > u_B ist konstruktiv unmoeglich (der Korrekturterm ist nicht negativ). Das ist ein Zeichenfehler, kein Messwert.");
+		else {
+			const double kl = 100.0*(double)s124/(double)s123;
+			print_info("["+ort+"] u_w-ABNAHME: Kaskade und Gates konstruktiv leer, Wirkpfad Slot 123 = "+to_string(s123)+" von "+to_string(wp)+" Besuchen; untere Klemme (u_w = 0, bitgenau reines BB) "+to_string(s124)+" = "+to_string((float)kl,2u)+" %; obere Klemme 0 (Nullbeweis bestanden).");
+			if(kl>20.0) print_warning("["+ort+"] u_w: die untere Klemme traegt "+to_string((float)kl,1u)+" % der Besuche. Ueber 20 % traegt die Klemme den Arm statt der Formel -- Ursache ist meist nu_t ~ 0 (SUBGRID aus) oder ein gemischtes Abtastpaar unter NACHBAR.");
+			ulong hs=0ull; for(uint b=0u; b<8u; b++) hs += (ulong)H[128u+b];
+			if(hs>0ull) { string hz=""; for(uint b=0u; b<8u; b++) hz += (b>0u?" | ":"")+to_string((float)(0.125*b),3u)+"-"+to_string((float)(0.125*(b+1u)),3u)+": "+to_string((float)(100.0*(double)H[128u+b]/(double)hs),1u)+" %";
+				print_info("   u_w/u_B-Verteilung ueber "+to_string(hs)+" Stichproben: "+hz);
+				print_info("   ERWARTUNG aus der Herleitung (u_w/u_B = 1 - 1/(ln(y+) + kappa*B)): 0,83..0,89 ueber y+ 30..285, also Schwerpunkt im Eimer 0,750-0,875."); }
+		}
 		return;
 	}
 	const ulong s12=(ulong)H[12], s13=(ulong)H[13], s14=(ulong)H[14], s15=(ulong)H[15];
@@ -386,8 +414,15 @@ static void pruefe_kraftpfad(const ulong h70, const ulong h69, const ulong h7, c
 // wieviel vom Wandschub-Ziel kommt in den angewandten Zellen tatsaechlich an? Die Rang-1-Pseudoinverse
 // erfuellt das Ziel nur in Richtung ihres einen erreichbaren Eigenvektors -- eine Zelle kann als
 // "angewandt" zaehlen und trotzdem nur einen Bruchteil aufpraegen. Slots 81-89, Kernel ~2430.
-static void bericht_zielerfuellung(const uint* H, const ulong wp, const ulong s9, const ulong s17, const ulong s69, const string& ort) {
+static void bericht_zielerfuellung(const uint* H, const ulong wp, const ulong s9, const ulong s17, const ulong s69, const string& ort, const uint uw) {
 	const ulong n=(ulong)H[81];
+	// ★★ 06.09.2026: unter CFD_FAC_UW wird dieses Histogramm zum ERSTEN MAL eine echte Messung. Im
+	// Solve-Arm ist r = phi1/(-twe) fuer angewandte Vollrang-Zellen eine IDENTITAET (der Solve erzwingt
+	// phi1 = -def_fac_tau*twe); die Streuung kam dort nur aus Gates, Rang 0 und PEMA. Unter u_w nagelt
+	// nichts phi1 fest. Ein niedriger Trefferanteil ist hier also ein BEFUND ueber das Modell, kein
+	// Instrumentenfehler -- und die Eimergrenzen sind auf r ~ 1 geschnitten, liegt der Schwerpunkt bei
+	// 2..3, sagen die oberen beiden Eimer wenig (Pruefagent, Auflage zu Q4).
+	if(uw>0u) print_info("["+ort+"] ZIELERFUELLUNG unter CFD_FAC_UW: r = phi1/(-twe) ist hier eine ECHTE Messung, keine Identitaet wie im Solve-Arm -- ein niedriger Trefferanteil ist ein Befund ueber das Modell, kein Instrumentenfehler. Die Eimergrenzen sind auf r ~ 1 geschnitten.");
 	if(env_u("CFD_FAC_KRAFT",0u)==2u) { print_info("["+ort+"] ZIELERFUELLUNG unter CFD_FAC_KRAFT=2: pass2_an ist ueberall false, Slots 82-91 sind konstruktiv 0 (S9)."); return; }
 	if(n==0ull) { if(wp>0ull) print_warning("["+ort+"] ZIELERFUELLUNG: Slot 81 = 0, obwohl der Wirkpfad "+to_string(wp)+" zaehlt -- das Histogramm wurde nie erreicht (MESS-NUR? frueher Ausstieg?)."); return; }
 	const ulong ohne=(ulong)H[82];
@@ -420,9 +455,12 @@ static void bericht_zielerfuellung(const uint* H, const ulong wp, const ulong s9
 // Zweig der realen Kaskade liefert das s, das ein Gate reisst? Spalte = Zweig VOR dem Gate (Kernel: uint zweig,
 // gesetzt in 78/79/12/14, gelesen an 10/16/64 und an den X-Zellen 94/95). Abnahme je Zeile: Summe der vier Spalten
 // == Gate-Slot (dieselbe t%100-Stichprobe, dieselbe Kernelzeile). Konstruktive Nullspalten als Selbsttest.
-static void bericht_gate_kreuztabelle(const uint* H, const string& ort, const bool x, const bool satgate, const bool messnur) {
+static void bericht_gate_kreuztabelle(const uint* H, const string& ort, const bool x, const bool satgate, const bool messnur, const uint uw) { // ★ 06.09.: uw als Parameter (Pruefbefund B2)
 	const ulong wp=(ulong)H[7];
 	if(wp==0ull) return;
+	if(uw>0u) { ulong s=0ull; for(uint i=96u;i<=116u;i++) s+=(ulong)H[i];
+		if(s!=0ull) print_error("["+ort+"] CFD_FAC_UW, aber die Gate-Kreuztabelle hat gezaehlt ("+to_string(s)+") -- unter u_w gibt es keine Gates, der Zweig greift nicht.");
+		else print_info("["+ort+"] Gate-Kreuztabelle unter CFD_FAC_UW konstruktiv leer (kein Solve, keine Gates)."); return; }
 	if(messnur) { ulong s=0ull; for(uint i=96u;i<=116u;i++) s+=(ulong)H[i];
 		if(s!=0ull) print_error("["+ort+"] MESS-NUR, aber die Gate-Kreuztabelle hat gezaehlt ("+to_string(s)+") -- der Ausstieg greift nicht.");
 		else print_info("["+ort+"] Gate-Kreuztabelle unter MESS-NUR konstruktiv leer."); return; }
@@ -455,10 +493,14 @@ static void bericht_gate_kreuztabelle(const uint* H, const string& ort, const bo
 		if(n95>0ull&&n95<0xF0000000ull) { const double q79=100.0*(double)c79/(double)n95, q78=100.0*(double)c78/(double)n95;
 			print_info("   ARM X [95] nach rohem Zweig: Schur-exakt [79] "+to_string((float)q79,2u)+" % (Klasse C) | 2x2-exakt [78] "+to_string((float)q78,2u)+" % (Klasse B) | Skalar+Rang-0 "+to_string((float)(100.0-q79-q78),2u)+" %"); } }
 }
-static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const bool satgate, const string& ort, const ulong h94=0ull) {
+static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const ulong h124, const uint uw, const bool satgate, const string& ort, const ulong h94=0ull) {
 	// ★ ARM X (04.09., Bauplan V2): der Schatten-Rueckfall [94] bucht in 69, zaehlt aber in keinem Kaskaden-/Gate-Slot.
-	const ulong soll = h13+h15+h64+(satgate?h10+h16:0ull)+h94;
-	const string formel = string("13+15+64")+(satgate?"+10+16":"")+(h94>0ull?"+94(Schatten)":"");
+	// ★★ 06.09.: unter CFD_FAC_UW gibt es weder Kaskade noch Gates -- der EINZIGE Rueckfall ist die
+	// untere u_w-Klemme (Slot 124), und die ist bitgenau reines Bounce-Back. Ohne diesen Zweig meldete
+	// der Waechter "69 != 0" und braeche den Lauf ab.
+	const bool uw_an = uw>0u;
+	const ulong soll = uw_an ? h124 : (h13+h15+h64+(satgate?h10+h16:0ull)+h94);
+	const string formel = uw_an ? string("124 (untere u_w-Klemme = reines BB)") : (string("13+15+64")+(satgate?"+10+16":"")+(h94>0ull?"+94(Schatten)":""));
 	if(h69>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung Slot 69 saettigt ("+to_string(h69)+", Soll "+to_string(soll)+") -- Identitaet nicht pruefbar.");
 	else if(h69!=soll) print_error("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" != Soll "+to_string(soll)+" ("+formel+") -- Rueckfall bucht NICHT genau einmal (Doppelzaehlungs-Detektor).");
 	else print_info("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" == Soll ("+formel+") -- jeder Gate-Rueckfall bucht genau einmal (P-only).");
@@ -1681,6 +1723,46 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	for(uint i=0u;i<6u;i++) { s1t_axsum[i]=0.0; s1t_axrel[i]=0.0; s1t_axn[i]=0ull; }
 	double s1t_lsum[20], s1t_lrel[20]; ulong s1t_ln[20];
 	for(uint i=0u;i<20u;i++) { s1t_lsum[i]=0.0; s1t_lrel[i]=0.0; s1t_ln[i]=0ull; }
+	// ★★ 06.09. STUFE 0 -- VORZEICHENBEHAFTETE KOMPONENTENSUMME VON S1_t (Planungsagent 06.09.).
+	// WOZU: der Druckrest, den das Wandmodell am Tangentialaustausch wegnimmt, ist in KRAFT-Konvention
+	// +2(rho-1)*S1_t (Vorzeichen wie fac_tau_acc; der Impuls INS FLUID hat das umgekehrte -- diese
+	// Verwechslung war der Fehler im ersten Vorschlag). Der geometrische Faktor davon, Sum_f S1_t, ist
+	// REIN STATISCH: er haengt weder von rho noch von u noch von t1/t2 ab. Er laesst sich also hier
+	// ausrechnen, BEVOR irgendein Kernel-Slot gebaut wird. Faellt Sum S1_t,x / Sum |S1_t,x| nahe null,
+	// kann der Term nur noch ueber die rho-Korrelation wirken und der ganze Kernelumbau ist unnoetig.
+	// GESCHLOSSENER KOERPER, UND WARUM DAS HIER NICHT REICHT: auf dem gewickelten Torus gilt
+	// Sum_f S1_f = 0 exakt (je Gitterrichtung ebensoviele Fluid->Solid- wie Solid->Fluid-Uebergaenge)
+	// -- aber NUR ueber die VOLLSTAENDIGE Wandlinkmenge. Diese Summe laeuft ueber die FACETTEN, und die
+	// sind eine echte Teilmenge davon (f.klasse!=0 faellt raus, am Fahrzeug zusaetzlich die Fahrbahn).
+	// Daraus folgt NICHT "der Rest lebt allein von der Fehlausrichtung" -- diese erste Fassung war
+	// falsch (Pruefagent 06.09., Befund B1). Deshalb wird der Schliessungsrest gemessen und gedruckt.
+	// Und auch ein kleiner Rest ist nur NOTWENDIG, nicht hinreichend: |Sum_Luecke S1| kann sich
+	// wegheben, waehrend Sum_Luecke S1_t es nicht tut.
+	// ★ SIGN-FALLE, hier zwingend: der Zensus baut die GESPIEGELTE Linkmenge (S1_Zensus = -S1_Kernel).
+	// Beim Betrag war das folgenlos, bei der Komponentensumme NICHT. Deshalb wird beim Aufsummieren
+	// negiert, sodass s1t_vec die KERNEL-Konvention traegt. Ohne diese Zeile kaeme das Ergebnis mit
+	// falschem Vorzeichen heraus und niemand koennte es dem Zahlenwert ansehen.
+	double s1t_vec[3] = {0.0,0.0,0.0};   // Sum S1_t je Achse, Kernel-Vorzeichen
+	double s1t_vabs[3] = {0.0,0.0,0.0};  // Sum |S1_t| je Achse -- der Nenner fuer den Systematikgrad
+	ulong  s1t_vn = 0ull;                // Facetten, die eingegangen sind (|S1| nicht ausgeloescht)
+	// ★ PRUEFAGENT 06.09., BEFUND B1 (HOCH): das Abzaehlargument "Sum_f S1_f = 0 am geschlossenen
+	// Koerper" gilt fuer DIESE Summe NICHT. Der Zensus ueberspringt f.klasse!=0 (Kugel 8 mm: 608 von
+	// 14042 = 4,3 %), und am Fahrzeug ist wand_flag = 0x41, die Fahrbahn also ausgeschlossen -- eine
+	// ganze z=1-Ebene traegt Kernel-Wandlinks ohne Facetten-Gegenstueck. Ohne den gemessenen
+	// Schliessungsrest waere Sum S1_t nicht als "lebt allein von der Fehlausrichtung" lesbar, sondern
+	// enthielte einen unbekannten einseitigen Anteil. Deshalb wird Sum S1 selbst mitgefuehrt: ist
+	double s1_vec[3] = {0.0,0.0,0.0};    // Sum S1 je Achse, Kernel-Vorzeichen -- der Schliessungsrest
+	// ★ BEFUND B3 (MITTEL): der Druckrest wird nur weggenommen, wo das Modell ANGEWANDT wird. Die
+	// Summe ueber alle Facetten enthaelt die Rang-0-Facetten, an denen nie
+	// etwas weggenommen wird (kipp26: ein Drittel). Deshalb dieselbe Bilanz zusaetzlich ueber die
+	// Teilmenge, die ueberhaupt loesen kann.
+	double s1t_avec[3] = {0.0,0.0,0.0}, s1t_avabs[3] = {0.0,0.0,0.0}; ulong s1t_avn = 0ull;
+	// ★ BEFUND B2 (HOCH): die erste Abnahme war beweisbar wirkungslos -- am Kippkanal sind S1_x UND
+	// n_x exakt 0, dort besteht JEDE Formel den Test, auch eine mit gekipptem Vorzeichen. Der Test,
+	// der das Vorzeichen wirklich trifft: im Zensus zeigt S1 zum Solid (gespiegelte Linkmenge), also
+	// muss S1.n < 0 sein; im Kernel ist es umgekehrt. An Ein-Link-Facetten ist das eine harte
+	// geometrische Tatsache (kipp26 hat davon 10.620).
+	ulong n_sign_n = 0ull, n_sign_bruch = 0ull; double sign_bruch_max = 0.0;
 	std::vector<float> vs1rel;
 	// ★ 05.09. NACHBESSERUNG (Diff-Pruefung, Befunde M-1 bis M-4). Der erste Nullbeweis hatte vier Loecher:
 	// M-1 er las den Achsnaehe-Eimer 5 (a>=0,99, also bis 8,11 Grad SCHIEF) und nannte ihn "achsparallel";
@@ -1786,6 +1868,34 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 				if(s1r_>s1t_gmax) s1t_gmax=s1r_;
 				const uint lb_ = nl_k<20u?nl_k:19u;
 				s1t_lsum[lb_]+=s1t_; s1t_lrel[lb_]+=s1r_; s1t_ln[lb_]++;
+				// STUFE 0: S1_t = S1 - (S1.n) n, komponentenweise, mit umgedrehtem Vorzeichen (Spiegelung).
+				// Das Minus wirkt auf BEIDE Terme der Klammer gemeinsam und damit genau einmal:
+				// S1_Z - s1n_*nv = -S1_K + (S1_K.n)n = -(S1_K - (S1_K.n)n), also st_ = +S1_t in
+				// Kernel-Konvention (Pruefagent 06.09. mit Rechnung bestaetigt).
+				// B3, KORRIGIERT (Pruefagent 06.09., 2. Runde): NUR rg>0. "!entkoppelt" war falsch --
+				// das Entkopplungs-Gate (kernel.cpp:2320) entscheidet nicht, OB geloest wird, sondern
+				// ueber welchen ZWEIG: der entkoppelte Zweig loest sehr wohl (Slot 78, notfalls skalar
+				// Slot 12); Rueckfall ist erst das letzte else (Slot 13). Mit "!entkoppelt" waeren am
+				// 4-mm-Fahrzeug >= 904.630 Facetten (28,9 %) verworfen worden, und zwar geometrisch
+				// EINSEITIG (entkoppelt heisst kleines Snn, also gerade die flachen/achsnahen Partien)
+				// -- bei einer Summe, deren Vorzeichenstruktur das Messobjekt ist.
+				// OBERGRENZE, ausdruecklich: auch rg>0 ist mehr als die angewandte Menge. Strom-
+				// abhaengig kommen dazu Residuum-Gate (Slot 64), Tangentialbudget (10), sn-Budget (16),
+				// a2_rueckfall aus der Schattenloesung, KRAFT=2/MESSNUR/ELIBB=2 (pass2_an ueberall
+				// false) und twe==0. Am kipp26 waren nur 26,82 % der Besuche angewandt (kernel.cpp:2581)
+				// gegen 66,67 % statisch Rang 2 -- die Stroemung nimmt noch einmal rund 60 % weg.
+				const bool angew_ = (rg>0u);
+				for(uint c_=0u;c_<3u;c_++) {
+					const double st_ = -(S1[c_]-s1n_*nv[c_]);
+					s1t_vec[c_]+=st_; s1t_vabs[c_]+=fabs(st_);
+					s1_vec[c_]+=-S1[c_];                                  // B1: Schliessungsrest
+					if(angew_) { s1t_avec[c_]+=st_; s1t_avabs[c_]+=fabs(st_); }
+				}
+				s1t_vn++; if(angew_) s1t_avn++;
+				// B2: echte Vorzeichen-Abnahme an Ein-Link-Facetten. S1 = w_i c_i eines einzigen Links,
+				// der im Zensus zum Solid zeigt -> S1.n muss NEGATIV sein. Ein Bruch hier heisst, dass
+				// Spiegelung oder Normalenorientierung nicht so sind wie angenommen.
+				if(nl_k==1u) { n_sign_n++; if(s1n_>=0.0) { n_sign_bruch++; if(s1n_>sign_bruch_max) sign_bruch_max=s1n_; } }
 				// M-1: der Nullbeweis braucht WIRKLICH achsparallele Facetten, nicht den 0,99-Eimer.
 				// ★ 05.09. ZWEITE NACHBESSERUNG (am 4-mm-Fahrzeug aufgedeckt, Lauf we_fehl4): die erste Fassung
 				// pruefte NUR amax >= 1-1e-6 und setzte damit "achsparallele Normale" mit "flache 5er-Linkmenge"
@@ -1869,6 +1979,92 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 				+" %  Rang0 "+to_string((float)(100.0*(double)n_ax[i][0]/d2),1u)+" %  |  Links "+to_string((float)((double)l_axsum[i]/d2),2u)); }
 	}
 	{	const char* an2[6]={"0,577-0,65 (Raumdiagonale)","0,65 -0,75","0,75 -0,85","0,85 -0,95","0,95 -0,99","0,99 -1,00 (achsparallel)"};
+		// ★★ STUFE 0 (06.09.): die vorzeichenbehaftete Bilanz von S1_t. Sie beantwortet OHNE Kernel und
+		// OHNE Lauf, ob der Druckrest ueberhaupt eine Netto-Kraftrichtung haben KANN: der Kraftbeitrag
+		// des Modells ist +2(rho-1)*S1_t je Facette, und Sum_f S1_t ist rein statisch.
+		// GRENZEN DIESER ZAHL, vom Pruefagenten benannt und hier eingebaut:
+		//  - Sum S1 (Schliessungsrest) wird MITGEDRUCKT. Nur wenn er klein gegen Sum |S1_t| ist, misst
+		//    Sum S1_t die Fehlausrichtung; sonst misst er die Luecken der Facettenmenge (f.klasse!=0,
+		//    am Fahrzeug zusaetzlich die ausgeschlossene Fahrbahn).
+		//  - Die Bilanz laeuft zweimal: ueber ALLE Facetten und ueber die mit Rang > 0. Die zweite ist
+		//    eine OBERGRENZE fuer die Menge, an der das Modell etwas wegnimmt, keine Gleichheit: die
+		//    stroemungsabhaengigen Rueckfaelle (Residuum-Gate Slot 64, Tangentialbudget 10, sn-Budget
+		//    16, a2_rueckfall, KRAFT=2/MESSNUR/ELIBB=2, twe==0) sind statisch nicht bestimmbar. Am
+		//    kipp26 stehen 26,82 % tatsaechlich angewandte Besuche (kernel.cpp:2581) gegen 66,67 %
+		//    statisch Rang 2.
+		//  - Der Kippkanal taugt hier NICHT als Beweis: sein Schlitz ist punktsymmetrisch, die
+		//    Facetten paaren sich mit S1 -> -S1 und n -> -n, alle drei Komponenten heben sich weg.
+		//    Er zeigt nur, dass das Instrument nicht explodiert. Entschieden wird am geschlossenen Koerper.
+		if(s1t_vn>0ull) {
+			const char* ac_ = "xyz";
+			print_info("   S1_t-BILANZ (vorzeichenbehaftet, Kernel-Konvention; "+to_string(s1t_vn)+" Facetten mit |S1| > 1e-6, davon "
+				+to_string(s1t_avn)+" loesefaehig):");
+			for(uint c_=0u;c_<3u;c_++) {
+				// B5: ohne Betragsboden liefert eine Achse aus reinem Rundungsstaub den Maximalwert 1,0000.
+				// C-1 (Pruefagent 3. Runde): der Entartungstext gilt fuer BEIDE Spalten. Sonst stuende am
+				// kipp26 in derselben x-Zeile "kein Signal" und daneben "Grad 0.0000" -- also
+				// "haelt sich exakt die Waage", was etwas voellig anderes behauptet.
+				const bool entartet_  = s1t_vabs[c_]  <= 1e-6;
+				const bool entartet_a = s1t_avabs[c_] <= 1e-6;
+				const double q_  = entartet_  ? 0.0 : s1t_vec[c_]/s1t_vabs[c_];
+				const double qa_ = entartet_a ? 0.0 : s1t_avec[c_]/s1t_avabs[c_];
+				print_info(string("     ")+ac_[c_]+": Sum S1_t = "+to_string((float)s1t_vec[c_],6u)
+					+" | Sum |S1_t| = "+to_string((float)s1t_vabs[c_],6u)
+					+" | Systematikgrad "+(entartet_?string("entartet (|S1_t| unter 1e-6 -- kein Signal)"):to_string((float)q_,4u))
+					+" || Rang>0: Sum "+to_string((float)s1t_avec[c_],6u)+", Grad "
+					+(entartet_a?string("entartet (kein Signal)"):to_string((float)qa_,4u)));
+			}
+			// B1: der Schliessungsrest, gemessen gegen das SIGNAL (Sum |S1_t| je Achse), nicht gegen
+			// Sum |S1| -- letzteres ist so gross, dass jede Luecke konstruktiv winzig aussieht.
+			{	string sr_ = "";
+				for(uint c_=0u;c_<3u;c_++) {
+					const double r_ = s1t_vabs[c_]>1e-6 ? fabs(s1_vec[c_])/s1t_vabs[c_] : 0.0;
+					sr_ += (c_>0u?", ":"")+string(1u,(char)('x'+c_))+"="+to_string((float)s1_vec[c_],6u)
+						+" (|Rest|/Sum|S1_t| = "+to_string((float)r_,4u)+")";
+				}
+				print_info("     SCHLIESSUNGSREST Sum S1: "+sr_+" | "+to_string(n_uebersprungen)+" Facetten uebersprungen"
+					" (ACHTUNG: diese ANZAHL zaehlt nur die klasse!=0-Luecke; am Fahrzeug kommen die fahrbahnnahen"
+					" Zellen ohne Facette-Objekt ungezaehlt dazu. Der REST selbst erfasst beide Luecken, weil auf dem"
+					" gewickelten Torus Sum_alle S1 = 0 gilt und damit Sum_Facetten S1 = -Sum_Rest S1.)");
+				print_info("     Ueber die VOLLSTAENDIGE Wandlinkmenge waere Sum S1 = 0; was hier steht, sind die Luecken"
+					" der Facettenmenge. ACHTUNG: ein kleiner Rest ist NOTWENDIG, aber NICHT HINREICHEND -- die"
+					" Verunreinigung von Sum S1_t ist Sum_Luecke S1_t und durch Sum_Luecke |S1| beschraenkt, nicht"
+					" durch |Sum_Luecke S1|. Die Luecke kann sich in S1 wegheben und in S1_t trotzdem stehenbleiben.");
+			}
+			// B6: "bitgenau 0" ist ausserhalb des Sonderfalls nicht erfuellbar (Summe ueber Millionen
+			// nicht benachbarter Terme). Deshalb eine benannte Toleranz statt eines unerfuellbaren Solls.
+			for(uint c_=0u;c_<3u;c_++) {
+				if(s1t_vabs[c_]<=1e-6) continue;
+				// B5/B6 des Pruefers, 2. Runde: das Urteil wird fuer BEIDE Mengen gedruckt. Vorher stand
+				// nur die Alle-Facetten-Zahl da -- also ausgerechnet die, gegen die B3 gebaut wurde.
+				// Und es heisst "geometrischer Faktor", nicht "Term": ob der TERM eine Netto-Richtung
+				// hat, haengt zusaetzlich an (rho-1) und ist statisch nicht entscheidbar.
+				auto urteil_ = [](const double q) { return q<=1e-12 ? "weggehoben (unter Akkumulationsrauschen)"
+					: (q>=1e-3 ? "SYSTEMATISCH -- der geometrische Faktor hat eine Netto-Richtung"
+					           : "statisch nicht entscheidbar (zwischen 1e-12 und 1e-3)"); };
+				const double q_  = fabs(s1t_vec[c_]/s1t_vabs[c_]);
+				print_info(string("     Urteil ")+ac_[c_]+" (alle): "+urteil_(q_));
+				if(s1t_avabs[c_]>1e-6) print_info(string("     Urteil ")+ac_[c_]+" (Rang>0, Obergrenze der angewandten Menge): "
+					+urteil_(fabs(s1t_avec[c_]/s1t_avabs[c_])));
+			}
+			// B4: das Produkt Systematikgrad x (rho-1) x 2 x Sum|S1_t| ist KEINE Obergrenze -- es ist der
+			// Wert unter der Annahme, dass (rho-1) und S1_t unkorreliert sind, also unter genau der
+			// Annahme, die zu pruefen der Zweck ist. Die echte Schranke nennt max|rho-1| und den Grad nicht.
+			print_info("     Lesehilfe: Grad ~0 heisst, der GEOMETRISCHE Anteil hebt sich weg -- der Term kann dann nur noch"
+				" ueber die KORRELATION von (rho-1) mit S1_t wirken, und die ist statisch nicht messbar. Schranke ist"
+				" |Sum (rho-1) S1_t| <= 2*max|rho-1|*Sum|S1_t|; das Produkt mit dem Grad waere nur bei Unkorreliertheit richtig.");
+			// B2: die echte Vorzeichen-Abnahme.
+			if(n_sign_n>0ull) {
+				if(n_sign_bruch>0ull) print_warning("   S1_t-BILANZ, VORZEICHEN-ABNAHME VERFEHLT: "+to_string(n_sign_bruch)+" von "
+					+to_string(n_sign_n)+" Ein-Link-Facetten haben S1.n >= 0 (max "+to_string((float)sign_bruch_max,6u)
+					+"). Im Zensus zeigt S1 zum Solid, S1.n muss NEGATIV sein. Entweder ist die Linkmenge nicht gespiegelt wie"
+					" angenommen, oder die Normale zeigt nicht nach aussen -- dann traegt die Bilanz oben das falsche Vorzeichen.");
+				else print_info("     VORZEICHEN-ABNAHME: alle "+to_string(n_sign_n)+" Ein-Link-Facetten haben S1.n < 0"
+					" -- die PRAEMISSE ist am Datensatz bestaetigt (S1 zeigt hier zum Solid, n nach aussen). Dass der Kernel"
+					" spiegelverkehrt gattert und die Bilanz deshalb mit dem Minus Kernel-Vorzeichen traegt, ist eine"
+					" Code-Tatsache (kernel.cpp:2098-2099), die dieser Waechter NICHT prueft.");
+			} else print_info("     VORZEICHEN-ABNAHME NICHT DURCHFUEHRBAR: keine Ein-Link-Facette in diesem Fall.");
+		}
 		print_info("   FEHLAUSRICHTUNG der Facettennormale n gegen die diskrete Linkmengen-Normale S1/|S1|:");
 		print_info("    |S1_t|/|S1| = sin(Winkel). Der Stoerform-Offset, den das Ziel NICHT enthaelt, ist 2*|S1_t| -- er");
 		print_info("    kann nur ueber diesen Winkel in die Schubrichtung kippen. Nach Achsnaehe:");
@@ -3150,6 +3346,22 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle; seit Buchungsschluss 27.08. buchen Rueckfaelle P-only, Slot 69).");
 	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
 	  LBM_Domain::s_fac_masse_alle = min(3u, env_u("CFD_FAC_MASSE_ALLE", 0u)); if(LBM_Domain::s_fac_masse_alle==3u&&LBM_Domain::s_fac_alpha!=2u) print_error("CFD_FAC_MASSE_ALLE=3 (Arm X) braucht CFD_FAC_ALPHA=2 -- der Schatten bildet die ALPHA2-Entscheidung nach; gegen ALPHA=1 gibt es keine Basis."); if(env_u("CFD_FAC_ELIBB",0u)==2u&&(LBM_Domain::s_fac_masse_alle>0u||env_u("CFD_FAC_KRAFT",0u)>0u||env_u("CFD_FAC_PINV",0u)>0u)) print_error("CFD_FAC_ELIBB=2 (Pur) mit MASSE_ALLE/KRAFT/PINV ist nicht definiert -- der Pur-Return sitzt VOR dem Solve, der jeweilige Wirkpfad bliebe 0 (K3).");
+	  // ★★ 06.09.2026 KINEMATISCHES WANDMODELL (CFD_FAC_UW). Sperren, damit kein Arm still etwas
+	  // anderes misst, als er zu messen glaubt -- jede Sperre nennt den Grund, nicht nur das Verbot.
+	  LBM_Domain::s_fac_uw = (env_u("CFD_FACETTEN",0u)>=3u) ? min(1u, env_u("CFD_FAC_UW", 0u)) : 0u;
+	  LBM_Domain::s_fac_uw_sn = env_u("CFD_FAC_UW_SN", 0u)>0u;
+	  if(env_u("CFD_FAC_UW",0u)>1u) print_error("CFD_FAC_UW kennt derzeit nur 0 und 1. Modus 2 (nu_t aus dem gemessenen Feld, fac_wfd) ist bewusst NICHT gebaut: er koppelt an CFD_SGS_FDWAND, braucht ein neues Kernelargument und ist im Kugelfall nicht verdrahtet -- eigener Schritt, eigene Variable.");
+	  if(LBM_Domain::s_fac_uw>0u) {
+	  	if(LBM_Domain::s_fac_masse_alle==0u) print_error("CFD_FAC_UW ohne CFD_FAC_MASSE_ALLE: u_w erzeugt an schraegen Facetten den Massenfluss 6(S1.u_w), weil S1 dort nicht parallel zu n steht (gemessene Fehlausrichtung 5-14 Grad). Ohne Kompensation leckt der Arm. MASSE_ALLE=1 verteilt sie impulsfrei ueber alle 19 Richtungen (Sum w_i c_i = 0).");
+	  	if(LBM_Domain::s_fac_masse_alle==2u) print_error("CFD_FAC_UW mit CFD_FAC_MASSE_ALLE=2: Modus 2 ist am 04.09. verworfen (Bulk-Mode, Geschwindigkeitsklemme x9300, f0 <= 0 bei 2 % der Zellen).");
+	  	if(LBM_Domain::s_fac_masse_alle==3u) print_error("CFD_FAC_UW mit CFD_FAC_MASSE_ALLE=3 (Arm X): Arm X bildet einen Rueckfall-Entscheid im Schatten nach, den es unter u_w nicht gibt -- es wird kein Gleichungssystem mehr geloest. MASSE_ALLE=1 nehmen.");
+	  	if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("CFD_FAC_UW mit CFD_FAC_KRAFT: der Kraftpfad bucht das Residuum R = Ziel - P als Volumenkraft. Unter u_w gibt es kein Residuum, R1/R2 existieren nicht.");
+	  	if(env_f("CFD_FAC_PEMA",0.0f)>0.0f||env_f("CFD_FAC_EMA",0.0f)>0.0f) print_error("CFD_FAC_UW mit EMA/PEMA: beide filtern Groessen des Solve-Pfads, den es unter u_w nicht mehr gibt.");
+	  	if(env_u("CFD_FAC_SATGATE",0u)>0u||env_u("CFD_FAC_QUERGATE",0u)>0u||env_u("CFD_FAC_PINV",0u)>0u||env_u("CFD_FAC_LSQ",0u)>0u) print_warning("CFD_FAC_UW: SATGATE/QUERGATE/PINV/LSQ werden UEBERSPRUNGEN (sie gehoeren zum Solve). Ihre Slots 10/16/64/80 bleiben konstruktiv 0 -- das ist kein stiller No-Op, sondern Bauart, und die Abnahme prueft es.");
+	  	if(env_u("CFD_FAC_ELIBB",0u)>0u) print_warning("CFD_FAC_UW mit ELIBB: die Blende verschiebt die Wandlage auf q, waehrend u_w mit y_w aus fac_geo rechnet. Solange q ~ 0,5 (kipp0) ist das folgenlos; an Kugel/Fahrzeug ist die Eichdiskrepanz y_w gegen q erstmals erstrangig. Als eigener Messarm fahren, nicht als Startzustand.");
+	  	if(env_u("CFD_FAC_NACHBAR",0u)>0u) print_info("CFD_FAC_UW mit NACHBAR: u_B, y_w und u_tau werden KONSISTENT aus derselben Quelle genommen (ut_ab/yw_ab). Gemischt waere u_w strukturell negativ, weil NACHBAR u_tau um Faktor 2,0-4,4 hebt.");
+	  	print_info("KINEMATISCHES WANDMODELL AKTIV (CFD_FAC_UW=1): u_w = u_B - u_tau^2*y_w/(nu*(1+kappa*y+)), geklemmt auf [0, u_B]. Momentenmatrix, Rang, Schur, Kaskade und Gates entfallen; Ein-Link-Facetten bekommen erstmals eine Wandbehandlung. Abnahme: Slot 123 muss feuern, 78+79+12+13+14+15 und 10/16/64/80 muessen 0 sein, Slot 125 (obere Klemme) ist ein Nullbeweis.");
+	  }
 	  if(LBM_Domain::s_fac_masse_alle>0u&&LBM_Domain::s_fac_alpha==0u) print_error("CFD_FAC_MASSE_ALLE braucht CFD_FAC_ALPHA>0 -- ohne Massenkorrektur gibt es nichts zu verteilen, der Schalter waere ein stiller No-Op.");
 	  if(LBM_Domain::s_fac_masse_alle>0u) print_info(string("MASSENKOMPENSATION NEU VERTEILT (CFD_FAC_MASSE_ALLE=")+to_string((ulong)LBM_Domain::s_fac_masse_alle)+", 04.09.2026): MODUS 1 verteilt den alpha-Term ueber ALLE 19 Richtungen mit Gleichgewichtsgewichten, MODUS 2 legt ihn VOLLSTAENDIG auf die Ruhepopulation f_0 (c_0 = 0, traegt also weder Impuls NOCH zweiten Moment -- Modus 1 aendert Sum w_i c_i c_i^T = (1/3) I und damit den Spannungstensor, gemessener Preis am 8-mm-Fahrzeug: cz_druck_rest -0,147 -> +0,029). Statt nur ueber die Wandlinks. Masse bleibt ZELLWEISE exakt erhalten (Sum w_i = 1), aber die Kompensation traegt keinen Impuls mehr (Sum w_i c_i = 0) -- und genau dieser Impuls WAR das ALPHA2-Downdate: Sum_Wand w_i alph c_i = alph*S1 = -(6/S0)(S1.u_s) S1. Das Downdate wird deshalb nicht abgeschaltet, es entfaellt. Der Solve laeuft gegen die ROHE Momentenmatrix. NICHT ZU VERWECHSELN mit der am 25.08. zurueckgenommenen ALPHA-Stufe 3 (A2-Rueckfall): die aenderte nur die BUCHUNG und war feldneutral, diese hier aendert, was AUFGEPRAEGT wird. Anlass: der statische Zensus hat gemessen, dass das Downdate 36,26 % der Facetten eine Rangstufe kostet (8-mm-Fahrzeug: 240.966 von Rang 2 auf 1, 19.969 von Rang 1 auf 0). Wirkpfad Slot 92; Delta-m muss ~float-ulp bleiben, NICHT wachsen.");
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
@@ -3374,7 +3586,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])):string("")));
-		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal"); bericht_gate_kreuztabelle(H,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u); }
+		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -3514,6 +3726,24 @@ void main_setup_kanal() {
 			// K2 ist ein STATIONARITAETS-Kriterium -- im Transientenfenster (<5000 Schritte) wird es
 			// angesagt uebersprungen statt einen legitimen Kurztest zu killen (R3-Nachschliff).
 			if(n_steps-fac_snap_step<5000ull) print_warning("K2-Pruefung UEBERSPRUNGEN: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000) -- dieser Lauf ist KEIN Abnahmelauf.");
+			// ★★ 06.09.2026 (Pruefagent, revidiertes Verdikt): unter CFD_FAC_UW ist die Buchung NICHT mehr
+			// durch den Solve festgenagelt. Im Solve-Arm gilt phi1 = -def_fac_tau*twe per Konstruktion,
+			// K2 prueft dort also eine Identitaet. Unter u_w ist phi1 = P1 + G11*u_w eine FREIE Groesse --
+			// und ihr Verhaeltnis zur Kraftbilanz ist das Experiment, das zwei konkurrierende Lesarten
+			// trennt: 1,00 heisst, die Buchung ist im Gleichgewicht weiterhin twe (dann gilt K2 und
+			// cd_reib bleibt mit der Basis vergleichbar); ~3 heisst, gebucht wird der aufgeloeste viskose
+			// Fluss nu_eff*A (dann ist die Buchungskonvention neu zu entscheiden); >>10 heisst, P1 ist
+			// nicht linear in der Wandgeschwindigkeit und die ganze Zerlegung faellt.
+			// KEINE dieser drei Antworten darf durch ein exit(1) verlorengehen -- deshalb Warnung statt
+			// Fehler. Der Arm ist dadurch NICHT abgenommen; er ist messbar.
+			else if(LBM_Domain::s_fac_uw>0u) {
+				const double vh = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
+				print_warning("K2 unter CFD_FAC_UW: Verhaeltnis Reibungspfad/Kraftbilanz = "+to_string((float)vh,4u)
+					+" -- KEIN Abbruch, sondern die Messgroesse dieses Arms. Im Solve-Arm ist die Buchung eine Identitaet (phi1 == -twe per Konstruktion),"
+					" unter u_w ist sie frei. LESART: 1,00 +- 0,01 = Buchung bleibt twe, K2 gilt weiter, cd_reib mit der Basis vergleichbar."
+					" ~3 = gebucht wird der aufgeloeste viskose Fluss nu_eff*A (an kipp0 ist nu_eff*A/twe = 3,106), Buchungskonvention neu entscheiden."
+					" >>10 = P1 ist nicht linear in u_0, die Zerlegung faellt. VORSICHT: cd_reib aus diesem Arm ist bis zur Klaerung NICHT mit Basislaeufen vergleichbar.");
+			}
 			else if(LBM_Domain::s_fac_messnur>0u) print_info("K2 im MESS-NUR-Arm uebersprungen (das Wandmodell wendet nichts an, der Reibungspfad ist konstruktiv leer -- 31.08./02.09., gleiche Logik wie der Pur-Guard bei K3).");
 			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");
 			if(LBM_Domain::s_fac_elibb_pur) print_info("K3 im Pur-Arm uebersprungen (fac_tau_n bleibt konstruktiv 0 -> n_voll-Kriterium gilt nicht; B3-Pruefbefund 3)."); // Pur-Guard wie beim Slot-7-Fix
@@ -3921,6 +4151,22 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
 	  LBM_Domain::s_fac_masse_alle = min(3u, env_u("CFD_FAC_MASSE_ALLE", 0u)); if(LBM_Domain::s_fac_masse_alle==3u&&LBM_Domain::s_fac_alpha!=2u) print_error("CFD_FAC_MASSE_ALLE=3 (Arm X) braucht CFD_FAC_ALPHA=2 -- der Schatten bildet die ALPHA2-Entscheidung nach; gegen ALPHA=1 gibt es keine Basis."); if(env_u("CFD_FAC_ELIBB",0u)==2u&&(LBM_Domain::s_fac_masse_alle>0u||env_u("CFD_FAC_KRAFT",0u)>0u||env_u("CFD_FAC_PINV",0u)>0u)) print_error("CFD_FAC_ELIBB=2 (Pur) mit MASSE_ALLE/KRAFT/PINV ist nicht definiert -- der Pur-Return sitzt VOR dem Solve, der jeweilige Wirkpfad bliebe 0 (K3).");
+	  // ★★ 06.09.2026 KINEMATISCHES WANDMODELL (CFD_FAC_UW). Sperren, damit kein Arm still etwas
+	  // anderes misst, als er zu messen glaubt -- jede Sperre nennt den Grund, nicht nur das Verbot.
+	  LBM_Domain::s_fac_uw = (env_u("CFD_FACETTEN",0u)>=3u) ? min(1u, env_u("CFD_FAC_UW", 0u)) : 0u;
+	  LBM_Domain::s_fac_uw_sn = env_u("CFD_FAC_UW_SN", 0u)>0u;
+	  if(env_u("CFD_FAC_UW",0u)>1u) print_error("CFD_FAC_UW kennt derzeit nur 0 und 1. Modus 2 (nu_t aus dem gemessenen Feld, fac_wfd) ist bewusst NICHT gebaut: er koppelt an CFD_SGS_FDWAND, braucht ein neues Kernelargument und ist im Kugelfall nicht verdrahtet -- eigener Schritt, eigene Variable.");
+	  if(LBM_Domain::s_fac_uw>0u) {
+	  	if(LBM_Domain::s_fac_masse_alle==0u) print_error("CFD_FAC_UW ohne CFD_FAC_MASSE_ALLE: u_w erzeugt an schraegen Facetten den Massenfluss 6(S1.u_w), weil S1 dort nicht parallel zu n steht (gemessene Fehlausrichtung 5-14 Grad). Ohne Kompensation leckt der Arm. MASSE_ALLE=1 verteilt sie impulsfrei ueber alle 19 Richtungen (Sum w_i c_i = 0).");
+	  	if(LBM_Domain::s_fac_masse_alle==2u) print_error("CFD_FAC_UW mit CFD_FAC_MASSE_ALLE=2: Modus 2 ist am 04.09. verworfen (Bulk-Mode, Geschwindigkeitsklemme x9300, f0 <= 0 bei 2 % der Zellen).");
+	  	if(LBM_Domain::s_fac_masse_alle==3u) print_error("CFD_FAC_UW mit CFD_FAC_MASSE_ALLE=3 (Arm X): Arm X bildet einen Rueckfall-Entscheid im Schatten nach, den es unter u_w nicht gibt -- es wird kein Gleichungssystem mehr geloest. MASSE_ALLE=1 nehmen.");
+	  	if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("CFD_FAC_UW mit CFD_FAC_KRAFT: der Kraftpfad bucht das Residuum R = Ziel - P als Volumenkraft. Unter u_w gibt es kein Residuum, R1/R2 existieren nicht.");
+	  	if(env_f("CFD_FAC_PEMA",0.0f)>0.0f||env_f("CFD_FAC_EMA",0.0f)>0.0f) print_error("CFD_FAC_UW mit EMA/PEMA: beide filtern Groessen des Solve-Pfads, den es unter u_w nicht mehr gibt.");
+	  	if(env_u("CFD_FAC_SATGATE",0u)>0u||env_u("CFD_FAC_QUERGATE",0u)>0u||env_u("CFD_FAC_PINV",0u)>0u||env_u("CFD_FAC_LSQ",0u)>0u) print_warning("CFD_FAC_UW: SATGATE/QUERGATE/PINV/LSQ werden UEBERSPRUNGEN (sie gehoeren zum Solve). Ihre Slots 10/16/64/80 bleiben konstruktiv 0 -- das ist kein stiller No-Op, sondern Bauart, und die Abnahme prueft es.");
+	  	if(env_u("CFD_FAC_ELIBB",0u)>0u) print_warning("CFD_FAC_UW mit ELIBB: die Blende verschiebt die Wandlage auf q, waehrend u_w mit y_w aus fac_geo rechnet. Solange q ~ 0,5 (kipp0) ist das folgenlos; an Kugel/Fahrzeug ist die Eichdiskrepanz y_w gegen q erstmals erstrangig. Als eigener Messarm fahren, nicht als Startzustand.");
+	  	if(env_u("CFD_FAC_NACHBAR",0u)>0u) print_info("CFD_FAC_UW mit NACHBAR: u_B, y_w und u_tau werden KONSISTENT aus derselben Quelle genommen (ut_ab/yw_ab). Gemischt waere u_w strukturell negativ, weil NACHBAR u_tau um Faktor 2,0-4,4 hebt.");
+	  	print_info("KINEMATISCHES WANDMODELL AKTIV (CFD_FAC_UW=1): u_w = u_B - u_tau^2*y_w/(nu*(1+kappa*y+)), geklemmt auf [0, u_B]. Momentenmatrix, Rang, Schur, Kaskade und Gates entfallen; Ein-Link-Facetten bekommen erstmals eine Wandbehandlung. Abnahme: Slot 123 muss feuern, 78+79+12+13+14+15 und 10/16/64/80 muessen 0 sein, Slot 125 (obere Klemme) ist ein Nullbeweis.");
+	  }
 	  if(LBM_Domain::s_fac_masse_alle>0u&&LBM_Domain::s_fac_alpha==0u) print_error("CFD_FAC_MASSE_ALLE braucht CFD_FAC_ALPHA>0 -- ohne Massenkorrektur gibt es nichts zu verteilen, der Schalter waere ein stiller No-Op.");
 	  if(LBM_Domain::s_fac_masse_alle>0u) print_info(string("MASSENKOMPENSATION NEU VERTEILT (CFD_FAC_MASSE_ALLE=")+to_string((ulong)LBM_Domain::s_fac_masse_alle)+", 04.09.2026): MODUS 1 verteilt den alpha-Term ueber ALLE 19 Richtungen mit Gleichgewichtsgewichten, MODUS 2 legt ihn VOLLSTAENDIG auf die Ruhepopulation f_0 (c_0 = 0, traegt also weder Impuls NOCH zweiten Moment -- Modus 1 aendert Sum w_i c_i c_i^T = (1/3) I und damit den Spannungstensor, gemessener Preis am 8-mm-Fahrzeug: cz_druck_rest -0,147 -> +0,029). Statt nur ueber die Wandlinks. Masse bleibt ZELLWEISE exakt erhalten (Sum w_i = 1), aber die Kompensation traegt keinen Impuls mehr (Sum w_i c_i = 0) -- und genau dieser Impuls WAR das ALPHA2-Downdate: Sum_Wand w_i alph c_i = alph*S1 = -(6/S0)(S1.u_s) S1. Das Downdate wird deshalb nicht abgeschaltet, es entfaellt. Der Solve laeuft gegen die ROHE Momentenmatrix. NICHT ZU VERWECHSELN mit der am 25.08. zurueckgenommenen ALPHA-Stufe 3 (A2-Rueckfall): die aenderte nur die BUCHUNG und war feldneutral, diese hier aendert, was AUFGEPRAEGT wird. Anlass: der statische Zensus hat gemessen, dass das Downdate 36,26 % der Facetten eine Rangstufe kostet (8-mm-Fahrzeug: 240.966 von Rang 2 auf 1, 19.969 von Rang 1 auf 0). Wirkpfad Slot 92; Delta-m muss ~float-ulp bleiben, NICHT wachsen.");
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
@@ -3990,8 +4236,22 @@ void main_setup_kugel() {
 	// ---------------------------------------------------------------- Randbedingungen
 	// CFD_KUGEL_FREE=1: y+-, z+- werden FREISTROM (TYPE_E) statt mitbewegte Waende. Dann steht die Kugel
 	// frei, ohne Bodeneffekt und ohne Kanalblockage -- die Voraussetzung, um gegen die
-	// Standard-Widerstandskurve (Clift/Grace/Weber) zu messen. Der Bodeneffekt bei h/D = 0,167 senkt Cd
-	// um rund 20 % und macht jeden Literaturvergleich sinnlos.
+	// Standard-Widerstandskurve (Clift/Grace/Weber) zu messen.
+	// ★★ 06.09.2026 BERICHTIGT UND GEMESSEN. Hier stand: "Der Bodeneffekt bei h/D = 0,167 senkt Cd um
+	// rund 20 % und macht jeden Literaturvergleich sinnlos." Das war eine unbelegte Behauptung, und
+	// sie ist FALSCH -- sie hat am 06.08. sogar die Konfiguration des Validierungsskripts gesteuert
+	// (CFD_KUGEL_ZC=0.834 "weil h/D den Cd senkt"). FACETTEN-LITERATUR.md sagte schon am 16.08. das
+	// Gegenteil (Tsutsui 2008: Bodennaehe erhoeht eher oder bleibt neutral). Gemessen am 06.09. bei
+	// DX=8, Re_D 9,12e5, reines BB, je eine Variable (Serien xa_/xc_/xe_):
+	//   Kanal (vier mitbewegte Waende) + Kugel bodennah h/D 0,167 : Cd_eff 0,6268 +- 0,0026
+	//   FREE=1, Kugel weiter bodennah                             : Cd_eff 0,6075 +- 0,0015  (-3,1 %)
+	//   FREE=1 + Kugel mittig (ZC = Nz/2)                         : Cd_eff 0,5310 +- 0,0085 (-12,6 %)
+	// Der Boden ERHOEHT Cd; zusammen traegt der Aufbau 15,3 %, und die POSITION viermal mehr als die
+	// Waende. Die freie mittige Kugel landet bei 0,531 -- das ist der SUBKRITISCHE Literaturwert
+	// (~0,50), nicht der superkritische (0,12-0,20 bei diesem Re). Der Abstand zu Achenbach ist also
+	// kein Codefehler, sondern ein fehlender laminar-turbulenter Umschlag (Grenzschicht bei D/dx 56
+	// unaufgeloest, kein Transitionsmodell). WER GEGEN LITERATUR MISST, braucht FREE=1 UND ZC = Nz/2
+	// und vergleicht gegen 0,50, nicht gegen 0,12.
 	const bool free_stream = env_on("CFD_KUGEL_FREE");
 	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
 		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;
@@ -4258,7 +4518,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel"); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u);
+		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw);
 			// ★ 05.09. KUGEL: bericht_klassen war hier NIE verdrahtet -- Kanal und Nahfeld rufen es, die Kugel nicht.
 			// Ein Kugelarm mit CFD_FAC_KDIAG=1 haette fac_kd akkumuliert und niemand haette es gelesen (stiller
 			// No-Op, gefunden beim Bau des Druckrest-Akkumulators). tau_ziel = 0: an der Kugel gibt es kein
@@ -4797,6 +5057,7 @@ static void main_setup_fahrzeug_dd() {
 	bool nahfeld_masse_x = false; // ★ ARM X (04.09.): Modus-3-Zustand der NAHFELD-Domaene, dieselbe Statik-Falle
 	bool nahfeld_alpha3 = false; // ★ 04.09.: ALPHA-Stufe-3-Zustand der NAHFELD-Domaene -- dieselbe Statik-Falle wie nahfeld_satgate/nahfeld_pinv
 	bool nahfeld_pinv = false; // ★ 04.09. (Kernel-Audit M2): PINV-Zustand der NAHFELD-Domaene -- dieselbe Falle wie nahfeld_satgate, das Static wird unten fuer lbm_c ueberschrieben
+	uint nahfeld_uw = 0u; // ★ 06.09. (Pruefbefund B2): u_w-Zustand der NAHFELD-Domaene. Das Static wird unten fuer lbm_c ueberschrieben; die Waechter am Laufende brauchen DIESEN Zustand, nicht den des Fernfelds.
 	bool nahfeld_satgate = false; // SATGATE-Zustand der NAHFELD-Domaene (Funktionsscope; gesetzt im Fein-Block, gelesen vom Rueckfall-Detektor am Ende)
 	bool nahfeld_messnur = false; // ★ 03.09. (Pruefagent Pass 2): dito fuer MESSNUR -- der Slot-72-Leser am Ende braucht den NAHFELD-Zustand, die Statik ist dann fuer lbm_c genullt
 	uint nahfeld_kraft = 0u; // ★ Pruefbefund B1 (30.08.): dito fuer den Kraftpfad-Modus -- das Static wird unten fuer lbm_c (Fernfeld, CFD_FERN_FACETTEN) ueberschrieben; ohne Sicherung prueft der Nahfeld-Waechter Modus 0 gegen Slot 70 > 0 und bricht mit exit(1) mitten im Abschlussbericht ab.
@@ -5007,7 +5268,7 @@ static void main_setup_fahrzeug_dd() {
 	  if(getenv("CFD_FAC_DIAGZ")!=nullptr) print_warning("CFD_FAC_DIAGZ ist im dd-Fall NICHT verdrahtet -- Ketten-Diagnose nur im Kanal/Torus.");
 	  LBM_Domain::s_fac_pinv = env_u("CFD_FAC_PINV", 0u); if(LBM_Domain::s_fac_pinv>0u&&env_u("CFD_FAC_LSQ",0u)>0u) print_error("CFD_FAC_PINV und CFD_FAC_LSQ schliessen sich aus -- PINV ersetzt denselben Zweig, LSQ waere still wirkungslos (der #elif faellt durch). Einen von beiden waehlen."); if(LBM_Domain::s_fac_pinv>0u) print_info("RANG-1-PSEUDOINVERSE (CFD_FAC_PINV, 04.09.2026): im gekoppelten Zweig ersetzt Moore-Penrose die achsenparallele Skalarleiter -- Division ueber die SPUR (groesster Eigenwert) statt ueber Gt11. Grund: fuer die ebene Voxelwand ist tr(Gt) exakt 1/3 und kippungsunabhaengig, waehrend Gt11 mit der Stroemungsrichtung gegen 0 laeuft und die Akzeptanzschwelle 1e-4 dann Verstaerkung bis 1e4 durchlaesst. Wirkpfad Slot 80; erwartet fallen Slot 10 UND Slot 16, weil der Eigenvektor Sn.v = 0 exakt erfuellt und damit keine Normalkompensation mehr erzeugt wird."); LBM_Domain::s_fac_idx_voll = env_u("CFD_FAC_IDX_VOLL", 0u); if(LBM_Domain::s_fac_idx_voll>0u) print_info("CFD_FAC_IDX_VOLL=1: fac_idx in der ALTEN Vollfeldform -- deklarierter A/B-Arm gegen die Bitmaske (03.09.). Die Ergebnisse MUESSEN bitgleich sein, unterscheiden darf sich nur der Speicher."); LBM_Domain::s_f_liste = env_u("CFD_F_LISTE", 0u); if(LBM_Domain::s_f_liste>0u) print_info("F-MARKERLISTE (CFD_F_LISTE, 03.09.2026, Befunde B78b/B80/B81): F wird nur fuer WANDsolidzellen alloziert -- 8 mm gemessen: Nahfeld 238 -> 14 MiB, Fernfeld 4 -> 0 MiB. ABGENOMMEN ueber alle drei Sprossen bitgleich (CPU 5/5, iGPU 5/5 und dreimal reproduziert, B70 8-mm-Fahrzeug 19/19), Slot 77 = 0. Der urspruengliche Defekt war NICHT die Liste, sondern die Reihenfolge: die JIT-Defines entstanden vor dem Setzen der Schalter (B81)."); if(LBM_Domain::s_f_liste>0u&&!f_nur_solid_an_setup()) print_error("CFD_F_LISTE braucht CFD_F_NUR_SOLID (Default an): der Kontrollarm CFD_F_NUR_SOLID=0 liest F an JEDER Fluidzelle, und dort gibt es unter der Markerliste keinen Speicherplatz mehr -- die Kombination waere still falsch."); LBM_Domain::s_fac_satgate = fc>=3u&&env_u("CFD_FAC_SATGATE", 0u)>0u; LBM_Domain::s_fac_kraft = fc>=3u ? min(2u, env_u("CFD_FAC_KRAFT", 0u)) : 0u; LBM_Domain::s_fac_kdiag = fc>=3u ? env_u("CFD_FAC_KDIAG", 0u) : 0u; if(fc<3u&&(env_u("CFD_FAC_NACHBAR",0u)>0u||env_u("CFD_FAC_KDIAG",0u)>0u)) print_error("CFD_FAC_NACHBAR/CFD_FAC_KDIAG brauchen CFD_FACETTEN=3 (iMEM) -- bei CFD_FACETTEN="+to_string((ulong)fc)+" wuerde der Schalter still auf 0 gesetzt (No-Op-Waechter 03.09.)."); LBM_Domain::s_fac_nachbar = fc>=3u ? env_u("CFD_FAC_NACHBAR", 0u) : 0u; LBM_Domain::s_fac_messnur = fc>=3u ? env_u("CFD_FAC_MESSNUR", 0u) : 0u; LBM_Domain::s_sgs_gdiag = fc>=1u ? env_u("CFD_SGS_GDIAG", 0u) : 0u; LBM_Domain::s_sgs_fdwand = fc>=1u ? env_u("CFD_SGS_FDWAND", 0u) : 0u; if(LBM_Domain::s_sgs_fdwand>0u) { print_info("SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND, 02.09.): an Facettenzellen kommt die SGS-Relaxationsrate aus |S|_FD des u-Felds (FD-Kernel je Schritt, ein Schritt Versatz) statt aus dem wandmodell-kontaminierten Pi-Tensor (B66/B69: Pi/FD 2,3-3,4). Wirkpfad Slot 76 (B70)."); if(env_u("CFD_FAC_MESSNUR",0u)>0u) print_warning("SGS_FDWAND + MESS-NUR: der Arm ist dann NICHT mehr reines Bounce-Back -- das Kollisions-w an Wandzellen kommt aus dem FD-Pfad (bewusste Kombination fuer BB+FDWAND-Messungen, aber nicht mit alten BB-Bezuegen bitvergleichbar)."); if(env_u("CFD_SGS_WANDFREI",0u)>0u) print_warning("SGS_FDWAND + SGS_WANDFREI: WANDFREI hat an Wandzellen VORRANG -- FDWAND ist dort wirkungslos (Slot 76 bleibt 0). Fuer den FDWAND-Arm WANDFREI abschalten."); } if(LBM_Domain::s_sgs_gdiag>0u) { sgs_gdiag_selbsttest(); print_info("g-DIAGNOSE (CFD_SGS_GDIAG, 31.08.): Messkernel ueber die Wandzellen -- |S|_FD (u-Feld, geistermodenfrei), |S|_Pi (fneq, wie Smagorinsky), D_WALE, D_Sigma, |Omega|. Physik unangetastet, Bericht am Laufende."); } if(LBM_Domain::s_fac_messnur>0u&&env_u("CFD_FAC_NACHBAR",0u)>0u) print_warning("MESS-NUR + NACHBAR: die Nachbarabtastung liegt hinter dem MESS-NUR-Ausstieg und ist WIRKUNGSLOS (Slots 72-74 bleiben 0)."); if(LBM_Domain::s_fac_messnur>0u&&env_u("CFD_FAC_KDIAG",0u)>0u) print_warning("MESS-NUR + KDIAG: die Klassen-Diagnostik wird nie akkumuliert -- die Tabelle am Laufende ist eine Nulltabelle."); if(LBM_Domain::s_fac_messnur>0u&&env_u("CFD_FAC_KRAFT",0u)>0u) print_error("MESS-NUR + KRAFT ist unsinnig (kein Wandmodell -> kein Residuum; Modus 2 stuerbe irrefuehrend am Kraftpfad-Pruefer). Kombination aufloesen."); if(LBM_Domain::s_fac_messnur>0u) print_warning("MESS-NUR (CFD_FAC_MESSNUR, 30.08.): der Kernel wendet KEIN Wandmodell an -- die Wand ist reines Bounce-Back. Facetten werden nur gebaut und gemessen, damit der Druckpfad (cd_facetten.csv) als Aepfel-mit-Aepfeln-Bezug zu einem Wandmodell-Arm dient. Der REIBUNGSanteil ist in diesem Arm konstruktiv 0; belastbar ist der Druckanteil (bei Cz 99,5 %). Slot 75 = Wirkpfad (2. Umzug, B70). Die ELIBB-Blende wird unter MESS-NUR seit B-4 ebenfalls uebersprungen -- der Arm ist exakt reines Bounce-Back."); if(LBM_Domain::s_fac_nachbar>0u) print_info("NACHBARABTASTUNG (CFD_FAC_NACHBAR, 30.08.): Wandmodell-Eingang (u_t, Wandabstand) aus der zweiten Fluidzelle entlang der Normale statt aus der Wandzelle -- Stufenschatten-Fix. Slots 72 (angewandt) / 73 (kein Fluidnachbar) / 74 (Nachbar steht still; 2. Umzug 02.09., B70 -- 35-48 gehoeren SGS_DIAG ueber berechnete Indizes)."); if(LBM_Domain::s_fac_kraft>0u) print_info(string("iMEM-KRAFTPFAD (Weg F, 30.08.): Modus ")+to_string(LBM_Domain::s_fac_kraft)+(LBM_Domain::s_fac_kraft==1u?string(" -- Residuum R als Volumenkraft an RUECKFALLZELLEN (statt s=0); Slot 70, Soll == Slot 69."):string(" -- ALLE Facettenzellen per Kraft, Additivterm aus (Diskriminator gegen den Slip-Pfad); Slot 70."))); if(LBM_Domain::s_fac_kraft>0u) print_warning("KRAFTPFAD (Pruefpunkt 8, 30.08.): object_force/forces.csv (Impulsaustausch an Koerperzellen) sieht die Volumenkraft NICHT -- eine Guo-Kraft im Fluid hat keine Newton-3-Reaktion am Koerper. Der Reibungsanteil an Kraftzellen steht allein in der fac_tau-Buchung (cd_reib/cd_rest); object_force-Abgleiche (K4, Fx_far) weichen um genau den Kraftanteil ab."); LBM_Domain::s_fac_elibb = false; LBM_Domain::s_fac_qmin = 0.1f;
 	nahfeld_pinv = LBM_Domain::s_fac_pinv>0u; // ★ 04.09. (Kernel-Audit M2): s.o.
-	nahfeld_satgate = LBM_Domain::s_fac_satgate; // ★ Pruefbefund 5a (27.08.): das Static wird unten fuer lbm_c ueberschrieben -- der Nahfeld-Detektor braucht DIESEN Zustand
+	nahfeld_uw = LBM_Domain::s_fac_uw; nahfeld_satgate = LBM_Domain::s_fac_satgate; // ★ Pruefbefund 5a (27.08.): das Static wird unten fuer lbm_c ueberschrieben -- der Nahfeld-Detektor braucht DIESEN Zustand
 	nahfeld_kraft = LBM_Domain::s_fac_kraft; // ★ Pruefbefund B1 (30.08.): gleiche Falle fuer den Kraftpfad
 	nahfeld_messnur = LBM_Domain::s_fac_messnur>0u; // ★ 03.09.: gleiche Falle fuer das MESSNUR-Gating des Slot-72-Lesers
 	  if(LBM_Domain::s_fac_satgate) print_info("iMEM-Saettigungs-Gate aktiv (a-strich): Budget-Riss -> BB-Rueckfall statt Klemme (Slots 10/16 = Rueckfaelle; seit Buchungsschluss 27.08. buchen Rueckfaelle P-only, Slot 69).");
@@ -5016,6 +5277,22 @@ static void main_setup_fahrzeug_dd() {
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A): alpha = "+to_string(LBM_Domain::s_fac_pema,5u));
 	  LBM_Domain::s_fac_alpha = (fc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
 	  LBM_Domain::s_fac_masse_alle = min(3u, env_u("CFD_FAC_MASSE_ALLE", 0u)); if(LBM_Domain::s_fac_masse_alle==3u&&LBM_Domain::s_fac_alpha!=2u) print_error("CFD_FAC_MASSE_ALLE=3 (Arm X) braucht CFD_FAC_ALPHA=2 -- der Schatten bildet die ALPHA2-Entscheidung nach; gegen ALPHA=1 gibt es keine Basis."); if(env_u("CFD_FAC_ELIBB",0u)==2u&&(LBM_Domain::s_fac_masse_alle>0u||env_u("CFD_FAC_KRAFT",0u)>0u||env_u("CFD_FAC_PINV",0u)>0u)) print_error("CFD_FAC_ELIBB=2 (Pur) mit MASSE_ALLE/KRAFT/PINV ist nicht definiert -- der Pur-Return sitzt VOR dem Solve, der jeweilige Wirkpfad bliebe 0 (K3).");
+	  // ★★ 06.09.2026 KINEMATISCHES WANDMODELL (CFD_FAC_UW). Sperren, damit kein Arm still etwas
+	  // anderes misst, als er zu messen glaubt -- jede Sperre nennt den Grund, nicht nur das Verbot.
+	  LBM_Domain::s_fac_uw = (env_u("CFD_FACETTEN",0u)>=3u) ? min(1u, env_u("CFD_FAC_UW", 0u)) : 0u;
+	  LBM_Domain::s_fac_uw_sn = env_u("CFD_FAC_UW_SN", 0u)>0u;
+	  if(env_u("CFD_FAC_UW",0u)>1u) print_error("CFD_FAC_UW kennt derzeit nur 0 und 1. Modus 2 (nu_t aus dem gemessenen Feld, fac_wfd) ist bewusst NICHT gebaut: er koppelt an CFD_SGS_FDWAND, braucht ein neues Kernelargument und ist im Kugelfall nicht verdrahtet -- eigener Schritt, eigene Variable.");
+	  if(LBM_Domain::s_fac_uw>0u) {
+	  	if(LBM_Domain::s_fac_masse_alle==0u) print_error("CFD_FAC_UW ohne CFD_FAC_MASSE_ALLE: u_w erzeugt an schraegen Facetten den Massenfluss 6(S1.u_w), weil S1 dort nicht parallel zu n steht (gemessene Fehlausrichtung 5-14 Grad). Ohne Kompensation leckt der Arm. MASSE_ALLE=1 verteilt sie impulsfrei ueber alle 19 Richtungen (Sum w_i c_i = 0).");
+	  	if(LBM_Domain::s_fac_masse_alle==2u) print_error("CFD_FAC_UW mit CFD_FAC_MASSE_ALLE=2: Modus 2 ist am 04.09. verworfen (Bulk-Mode, Geschwindigkeitsklemme x9300, f0 <= 0 bei 2 % der Zellen).");
+	  	if(LBM_Domain::s_fac_masse_alle==3u) print_error("CFD_FAC_UW mit CFD_FAC_MASSE_ALLE=3 (Arm X): Arm X bildet einen Rueckfall-Entscheid im Schatten nach, den es unter u_w nicht gibt -- es wird kein Gleichungssystem mehr geloest. MASSE_ALLE=1 nehmen.");
+	  	if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("CFD_FAC_UW mit CFD_FAC_KRAFT: der Kraftpfad bucht das Residuum R = Ziel - P als Volumenkraft. Unter u_w gibt es kein Residuum, R1/R2 existieren nicht.");
+	  	if(env_f("CFD_FAC_PEMA",0.0f)>0.0f||env_f("CFD_FAC_EMA",0.0f)>0.0f) print_error("CFD_FAC_UW mit EMA/PEMA: beide filtern Groessen des Solve-Pfads, den es unter u_w nicht mehr gibt.");
+	  	if(env_u("CFD_FAC_SATGATE",0u)>0u||env_u("CFD_FAC_QUERGATE",0u)>0u||env_u("CFD_FAC_PINV",0u)>0u||env_u("CFD_FAC_LSQ",0u)>0u) print_warning("CFD_FAC_UW: SATGATE/QUERGATE/PINV/LSQ werden UEBERSPRUNGEN (sie gehoeren zum Solve). Ihre Slots 10/16/64/80 bleiben konstruktiv 0 -- das ist kein stiller No-Op, sondern Bauart, und die Abnahme prueft es.");
+	  	if(env_u("CFD_FAC_ELIBB",0u)>0u) print_warning("CFD_FAC_UW mit ELIBB: die Blende verschiebt die Wandlage auf q, waehrend u_w mit y_w aus fac_geo rechnet. Solange q ~ 0,5 (kipp0) ist das folgenlos; an Kugel/Fahrzeug ist die Eichdiskrepanz y_w gegen q erstmals erstrangig. Als eigener Messarm fahren, nicht als Startzustand.");
+	  	if(env_u("CFD_FAC_NACHBAR",0u)>0u) print_info("CFD_FAC_UW mit NACHBAR: u_B, y_w und u_tau werden KONSISTENT aus derselben Quelle genommen (ut_ab/yw_ab). Gemischt waere u_w strukturell negativ, weil NACHBAR u_tau um Faktor 2,0-4,4 hebt.");
+	  	print_info("KINEMATISCHES WANDMODELL AKTIV (CFD_FAC_UW=1): u_w = u_B - u_tau^2*y_w/(nu*(1+kappa*y+)), geklemmt auf [0, u_B]. Momentenmatrix, Rang, Schur, Kaskade und Gates entfallen; Ein-Link-Facetten bekommen erstmals eine Wandbehandlung. Abnahme: Slot 123 muss feuern, 78+79+12+13+14+15 und 10/16/64/80 muessen 0 sein, Slot 125 (obere Klemme) ist ein Nullbeweis.");
+	  }
 	  if(LBM_Domain::s_fac_masse_alle>0u&&LBM_Domain::s_fac_alpha==0u) print_error("CFD_FAC_MASSE_ALLE braucht CFD_FAC_ALPHA>0 -- ohne Massenkorrektur gibt es nichts zu verteilen, der Schalter waere ein stiller No-Op.");
 	  if(LBM_Domain::s_fac_masse_alle>0u) print_info(string("MASSENKOMPENSATION NEU VERTEILT (CFD_FAC_MASSE_ALLE=")+to_string((ulong)LBM_Domain::s_fac_masse_alle)+", 04.09.2026): MODUS 1 verteilt den alpha-Term ueber ALLE 19 Richtungen mit Gleichgewichtsgewichten, MODUS 2 legt ihn VOLLSTAENDIG auf die Ruhepopulation f_0 (c_0 = 0, traegt also weder Impuls NOCH zweiten Moment -- Modus 1 aendert Sum w_i c_i c_i^T = (1/3) I und damit den Spannungstensor, gemessener Preis am 8-mm-Fahrzeug: cz_druck_rest -0,147 -> +0,029). Statt nur ueber die Wandlinks. Masse bleibt ZELLWEISE exakt erhalten (Sum w_i = 1), aber die Kompensation traegt keinen Impuls mehr (Sum w_i c_i = 0) -- und genau dieser Impuls WAR das ALPHA2-Downdate: Sum_Wand w_i alph c_i = alph*S1 = -(6/S0)(S1.u_s) S1. Das Downdate wird deshalb nicht abgeschaltet, es entfaellt. Der Solve laeuft gegen die ROHE Momentenmatrix. NICHT ZU VERWECHSELN mit der am 25.08. zurueckgenommenen ALPHA-Stufe 3 (A2-Rueckfall): die aenderte nur die BUCHUNG und war feldneutral, diese hier aendert, was AUFGEPRAEGT wird. Anlass: der statische Zensus hat gemessen, dass das Downdate 36,26 % der Facetten eine Rangstufe kostet (8-mm-Fahrzeug: 240.966 von Rang 2 auf 1, 19.969 von Rang 1 auf 0). Wirkpfad Slot 92; Delta-m muss ~float-ulp bleiben, NICHT wachsen.");
 	nahfeld_alpha3 = LBM_Domain::s_fac_masse_alle>0u; nahfeld_masse_x = LBM_Domain::s_fac_masse_alle==3u; // ★ 04.09.: MUSS hinter dem Parsen stehen -- stand elf Zeilen davor und las den Vorgabewert. Slot 92 feuerte, der Waechter sah false und brach den Bericht ab (dieselbe Reihenfolgefalle wie B81).
@@ -5279,6 +5556,11 @@ static void main_setup_fahrzeug_dd() {
 	  // Nahfeld geerbt -- und mit ihm den Wegfall von FACETTEN_ALPHA2 (lbm.cpp: Bedingung traegt
 	  // !s_fac_masse_alle), waehrend die Ansage darunter "ALPHA=2 gilt mit" behauptet haette.
 	  LBM_Domain::s_fac_masse_alle = (ffc>=3u) ? min(3u, env_u("CFD_FAC_MASSE_ALLE", 0u)) : 0u;
+	  // ★★ 06.09.2026 (Pruefbefund B2): dieselbe Statik-Falle fuer das kinematische Wandmodell. Ohne
+	  // diese Zeile erbte lbm_c das #define FACETTEN_UW aus dem Nahfeld-Block -- ohne Sperre, ohne
+	  // Ansage und ohne Abnahme, weil pruefe_kaskade fuer das Fernfeld nirgends gerufen wird.
+	  LBM_Domain::s_fac_uw = (ffc>=3u) ? min(1u, env_u("CFD_FAC_UW", 0u)) : 0u;
+	  LBM_Domain::s_fac_uw_sn = (ffc>=3u) && env_u("CFD_FAC_UW_SN", 0u)>0u;
 	  LBM_Domain::s_fac_alpha = (ffc>=3u) ? env_u("CFD_FAC_ALPHA", 0u) : 0u; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;
 	  LBM_Domain::s_fac_tau = (ffc==2u||ffc==4u) ? 0.0f : 1.0f;
 	  if(ffc>0u) print_info(string("Facettenpfad FERNFELD (P8): ")+(ffc==1u?"Paartausch voll":ffc==2u?"Paartausch NUR TAUSCH":ffc==3u?"iMEM voll":"iMEM NULLZIEL")
@@ -7613,7 +7895,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)df->rho_clamp_hits[18])+", APG-Klemme "+to_string((ulong)df->rho_clamp_hits[19])+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-				if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],nahfeld_satgate,"Nahfeld",nahfeld_masse_x?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv); pruefe_masse_alle(H,nahfeld_alpha3,nahfeld_messnur,nahfeld_kraft,"Nahfeld",nahfeld_masse_x); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld"); bericht_gate_kreuztabelle(H,"Nahfeld",nahfeld_masse_x,nahfeld_satgate,nahfeld_messnur); }
+				if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],nahfeld_uw,nahfeld_satgate,"Nahfeld",nahfeld_masse_x?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv,nahfeld_uw); pruefe_masse_alle(H,nahfeld_alpha3,nahfeld_messnur,nahfeld_kraft,"Nahfeld",nahfeld_masse_x,nahfeld_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld",nahfeld_uw); bericht_gate_kreuztabelle(H,"Nahfeld",nahfeld_masse_x,nahfeld_satgate,nahfeld_messnur,nahfeld_uw); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
