@@ -4348,6 +4348,15 @@ void main_setup_kugel() {
 	const float t_warmup = env_f("CFD_T_WARMUP", 1.0f*t_flush);
 	print_info("Eine Durchspuelung = "+to_string(t_flush,4u)+" s; Default sind zwei davon.");
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 10u)); // 0 waere eine Endlosschleife -- hier klemmen, nicht im Helfer
+	// ★ 07.09.2026 SLICES IM KUGELFALL (Uebergabe 07.09. Abschnitt 2.6): CFD_SLICE_DT war hier weder
+	// verdrahtet noch bewarnt -- render_yslice lief nur im Kanal, im dd-Fall und im Fernfeld. Alle
+	// Kugellaeufe des 07.09. (kc/kd/ke/kf/kg) trugen CFD_SLICE_DT=0.1 in der Umgebung und haben
+	// trotzdem keinen Schnitt (Iron Rule "Slices immer an" den ganzen Tag verletzt). 0 = aus, mit Warnung.
+	const float slice_dt  = env_f("CFD_SLICE_DT", 0.0f);
+	const bool  slice_gpu = env_u("CFD_SLICE_GPU", 1u)>0u;
+	if(slice_dt<=0.0f) print_warning("Dieser Kugel-Lauf schreibt KEINE Slices (CFD_SLICE_DT ungesetzt/0). Slice-Ausgabe ist Pflicht (Sichtung, Iron Rule 5) -- CFD_SLICE_DT auf einen positiven Wert setzen (0.1 = alle 100 ms).");
+	else print_info("Slices (kugel): y-Mittelebene alle "+to_string(slice_dt,3u)+" s, Transportweg "+string(slice_gpu?"Ebenen-Gather (CFD_SLICE_GPU=1)":"Voll-Read (CFD_SLICE_GPU=0)")+"; Wirkpfad kad_punkt wird nach der Schleife geprueft.");
+	float slice_next = 0.0f; bool slice_cp_ok = false; ulong kad_punkt = 0ull;
 	const ulong n_steps  = (ulong)(t_end/dt + 0.5f);
 	const string run_name = getenv("CFD_RUN_NAME") ? string(getenv("CFD_RUN_NAME")) : string("kugel");
 	const string out_dir = get_exe_path()+"../export/"+run_name+"/";
@@ -4474,12 +4483,29 @@ void main_setup_kugel() {
 			lbm.lbm_domain[0]->fac_tau.read_from_device();
 			fac_snap.resize(3ull*lbm.lbm_domain[0]->fac_N);
 			for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull]; } }
+		// ★ 07.09.2026 Slice-Uhr (Block wortgleich zum Kanal, setup.cpp render_yslice-Aufruf "einzel"):
+		// Ebenen-Gather fuer D=1, sonst Voll-Read. Reine Host-Lesung -- kein Feld wird geschrieben, der
+		// FELD-HASH bleibt bitgleich. Der Wirkpfad-Zaehler kad_punkt wird nach der Schleife geprueft.
+		if(slice_dt>0.0f && (float)ts.back()>=slice_next) {
+			slice_next = (float)ts.back() + slice_dt; kad_punkt++;
+			const bool gpu_ok = slice_gpu && lbm.get_D()==1u;
+			if(gpu_ok && !slice_cp_ok) { lbm.alloc_coupling_planes((ulong)Nx*(ulong)Nz); slice_cp_ok = true; }
+			if(gpu_ok) lbm.lese_yslice_in_host(Ny/2u);
+			else { lbm.u.read_from_device(); lbm.flags.read_from_device(); }
+			render_yslice(lbm, Nx, Ny, Nz, Ny/2u, si_u/u_lat, si_u, (int)((float)ts.back()*1000.0f+0.5f), out_dir, "kugel");
+			print_info("[SLICE] t = "+to_string((float)ts.back(),3u)+" s");
+		}
 		fx.push_back((double)units.si_F(F_lat.x));
 		fy.push_back((double)units.si_F(F_lat.y));
 		fz.push_back((double)units.si_F(F_lat.z));
 	}
 
 	// ---------------------------------------------------------------- Auswertung
+	if(slice_dt>0.0f) { // ★ 07.09.2026 Wirkpfad der Slice-Uhr (Muster dd-Fall S3): ein Schalter ohne feuernden Zaehler ist ein harter Fehler
+		const ulong kad_soll = ts.empty() ? 0ull : (ulong)floor(ts.back()/(double)slice_dt)+1ull;
+		if(kad_punkt==0ull) print_error("[Kugel] SLICE-AUSGABE (CFD_SLICE_DT) aktiv, aber KEIN Slice-Punkt gefeuert -- stiller No-Op.");
+		else print_info("[Kugel] Slices geschrieben: "+to_string(kad_punkt)+" (Soll ~"+to_string(kad_soll)+" bei CFD_SLICE_DT = "+to_string(slice_dt,3u)+" s).");
+	}
 	std::vector<double> cd_w, cz_w;
 	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
 		cd_w.push_back(fx[i]/((double)q_inf*(double)A_nom));

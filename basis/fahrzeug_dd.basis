@@ -20,6 +20,13 @@
 #     OHNE Fluidnachbarn in Normalenrichtung (Slot 73), am 4-mm-Fahrzeug 1.120.236 von 1,57e9
 #     Entscheiden = 0,07 %. Dort ist er hergeleitet (BB-Deflation der eigenen Zelle, P1 ~ -u/3) und
 #     richtig; ihn auf 1,0 zu setzen wuerde diese 0,07 % schlechter stellen ohne Gegenwert.
+#   CFD_FAC_UTKORR 1.5 BESTAETIGT (Heiko-Entscheid 07.09.2026): "nur noch als Rueckfall fuer Zellen
+#     ohne Fluidnachbarn in Normalenrichtung (Slots 73/74)" -- genau das tut kernel.cpp:2039
+#     (nachbar_ab ? ut_ab : ut_ab*def_fac_utkorr). Gemessen 07.09.: 8-mm-Fahrzeug Slot 73 = 211.844,
+#     Slot 74 = 3.160 von 180.596.611 Entscheiden = 0,119 %; 4 mm 0,072 %; Kanal Slot 73 = 74 = 0
+#     (dort beweisbarer No-Op). Code-Default ist 1.0; der Wert 1,5 ist auf dieser Restmenge aus der
+#     BB-Deflation hergeleitet. Die am 07.09. zwischenzeitlich geaeusserte Einstufung als Fehler war
+#     falsch (UEBERGABE-2026-09-07.md Abschnitt 2.3) -- der Eintrag bleibt.
 # STANDARD GEAENDERT (Heiko 29.08.2026, zweiter Eintrag): Facettenpfad mit voller Abdeckung.
 #   CFD_FACETTEN_NORMQUELLE 1 : Normale aus der flaechengewichteten Voxelflaechensumme (V3b)
 #   CFD_FACETTEN_YWKLEMME   1 : zu kleines y_w wird auf yw_min GEKLEMMT statt die Zelle zu verwerfen
