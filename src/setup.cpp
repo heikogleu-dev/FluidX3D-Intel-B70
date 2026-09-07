@@ -360,6 +360,14 @@ static void sgs_gdiag_selbsttest() {
 // ★★ 07.09.2026 SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM, Variante B der Uebergabe 07.09. §4) -- Host-Seite:
 // Selbsttest, Wirkpfad-Waechter, Sbar-Zeitreihe. Kernel-Teil: kernel.cpp sgs_fdwand unter #ifdef SGS_SISM;
 // Bindung: lbm.cpp alloc_facetten_domain (fac_sb, 6 float je Facette). T und ab sind SCHRITTE.
+// ★ Nachpruefung Audit-Schleife 2: |S| aus den sechs unabhaengigen Komponenten -- EINE Quelle fuer den Host.
+// Der Selbsttest prueft jetzt DIESE Funktion; vorher schrieb er beide Formen im Testkoerper neu hin und war damit
+// eine Tautologie (konnte nur scheitern, wenn man den Test selbst kaputtmacht). Der Kernel (kernel.cpp:4471) traegt
+// dieselbe Formel, laeuft aber auf dem Geraet und ist von hier nicht aufrufbar -- diese Gleichheit ist per Kommentar
+// an beiden Stellen verankert, nicht per Test. Wer eine der beiden aendert, aendert die andere mit.
+static double sism_norm6(const double c0, const double c1, const double c2, const double c3, const double c4, const double c5) {
+	return sqrt(2.0*(c0*c0+c1*c1+c2*c2+2.0*(c3*c3+c4*c4+c5*c5))); // == kernel.cpp:4471 (sbar) == 9er-Schleife kernel.cpp:4450 (snorm_fd)
+}
 static void sgs_sism_selbsttest() {
 	static bool einmal=false; if(einmal) return; einmal=true;
 	// (1) Klemme und Abzugsformel gegen eine double-Referenz: w = 1/(tau0 + 3*c2*max(0, |S| - Sbar)).
@@ -388,8 +396,7 @@ static void sgs_sism_selbsttest() {
 		double S[3][3]; for(int i=0;i<3;i++) for(int a=0;a<3;a++) S[i][a]=0.5*(G[i][a]+G[a][i]);
 		double ss=0.0; for(int i=0;i<3;i++) for(int a=0;a<3;a++) ss+=S[i][a]*S[i][a]; // Schleifenform (kernel.cpp:4450)
 		const double norm_schleife=sqrt(2.0*ss);
-		const double c0=S[0][0],c1=S[1][1],c2=S[2][2],c3=S[0][1],c4=S[0][2],c5=S[1][2]; // 6-Komponenten-Form (kernel.cpp:4471 / setup.cpp:418)
-		const double norm_sechs=sqrt(2.0*(c0*c0+c1*c1+c2*c2+2.0*(c3*c3+c4*c4+c5*c5)));
+		const double norm_sechs=sism_norm6(S[0][0],S[1][1],S[2][2],S[0][1],S[0][2],S[1][2]); // die PRODUKTIVE Host-Funktion, nicht noch einmal hingeschrieben
 		if(fabs(norm_schleife-norm_sechs)>1e-6*(1.0+norm_schleife))
 			print_error("SISM-Selbsttest VERLETZT (4): |S| Schleifenform "+to_string((float)norm_schleife,8u)+" gegen 6-Komponenten-Form "+to_string((float)norm_sechs,8u)
 				+" -- snorm_fd und Sbar waeren VERSCHIEDEN normiert, die Differenz |S|-|<S>| damit systematisch falsch und JEDES SISM-Ergebnis ungueltig.");
@@ -430,7 +437,7 @@ static void pruefe_sism_wirkpfad(const uint* H, const ulong t_ende, const ulong 
 // erste und letzte Zeile des Messfensters und urteilt am Laufende.
 static double sism_sbar_erste=-1.0, sism_sbar_letzte=-1.0; static ulong sism_sbar_n=0ull;
 static void pruefe_sism_drift(const string& ort) {
-	if(sism_sbar_n<2ull||sism_sbar_erste<=0.0) return;
+	if(sism_sbar_n<2ull||sism_sbar_erste<=0.0) { print_info("["+ort+"] SISM: Sbar-Drift nicht pruefbar -- nur "+to_string(sism_sbar_n)+" Phase-2-Abtastungen im Messfenster (Nachpruefung Audit 2: der Rueckweg war stumm und damit selbst ein stiller No-Op)."); return; }
 	const double rel = 100.0*(sism_sbar_letzte-sism_sbar_erste)/sism_sbar_erste;
 	if(fabs(rel)>3.0) print_warning("["+ort+"] SISM: Sbar driftet im Messfenster um "+to_string((float)rel,1u)+" % ("+to_string((float)sism_sbar_erste,7u)+" -> "+to_string((float)sism_sbar_letzte,7u)
 		+", "+to_string(sism_sbar_n)+" Abtastungen) -- die EMA ist NICHT eingeschwungen. Die Zahlen dieses Arms sind ANLAUF, kein Zustand; T gegen die Sperre ab pruefen (Faustregel ab >= 3T, besser 5T). Belegt 07.09. an kn_T100 (+9,2 %).");
@@ -442,8 +449,7 @@ static void sism_sbar_zeile(LBM_Domain* D, const ulong schritt, const string& ou
 	double sum=0.0, mx=0.0; ulong n_pos=0ull;
 	for(ulong f=0ull; f<D->fac_N; f++) {
 		const float s0=D->fac_sb[6ull*f], s1=D->fac_sb[6ull*f+1ull], s2=D->fac_sb[6ull*f+2ull], s3=D->fac_sb[6ull*f+3ull], s4=D->fac_sb[6ull*f+4ull], s5=D->fac_sb[6ull*f+5ull];
-		const double q=(double)s0*s0+(double)s1*s1+(double)s2*s2+2.0*((double)s3*s3+(double)s4*s4+(double)s5*s5);
-		const double sb=sqrt(2.0*q); sum+=sb; if(sb>mx) mx=sb; if(sb>0.0) n_pos++;
+		const double sb=sism_norm6((double)s0,(double)s1,(double)s2,(double)s3,(double)s4,(double)s5); sum+=sb; if(sb>mx) mx=sb; if(sb>0.0) n_pos++;
 	}
 	static bool kopf=false; std::ofstream csv(out_dir+"sism_sbar.csv", kopf?std::ios::app:std::ios::trunc);
 	if(!kopf) { csv<<"# SISM: Sbar = |<S>| (Gittereinheiten) ueber alle Facetten. phase = Phase, in der der abgelegte Sbar-Stand WIRKT\n"
@@ -3744,7 +3750,6 @@ void main_setup_kanal() {
 		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw, LBM_Domain::s_fac_rdiag); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
-		if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kanal"); pruefe_sism_drift("Kanal"); } // ★ 07.09. SISM-Wirkpfad 126/127 + Drift-Urteil. ANS ENDE des Berichts gestellt (Audit-Befund 7): die Funktion enthaelt print_error-Zweige = exit, und davor stehende Berichte gingen sonst verloren -- dieselbe Klasse, die der erste Pruefagent fuer die 100-%-Klemme schon behoben hat.
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
 		if(env_u("CFD_FAC_NACHBAR",0u)>0u&&LBM_Domain::s_fac_messnur==0u) { const ulong n72=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[72], n73=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[73], n74=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[74]; const ulong ns=n72+n73+n74;
 			if(n72==0ull) print_error("[Kanal] CFD_FAC_NACHBAR war angefordert, aber Slot 72 = 0 -- stiller No-Op (Emission? kein Fluidnachbar: "+to_string(n73)+", Nachbar still: "+to_string(n74)+").");
@@ -3910,6 +3915,7 @@ void main_setup_kanal() {
 				else if(FK.px!=0.0) print_info("K3: Druck_x = "+to_string((float)FK.px)+" innerhalb Toleranz "+to_string((float)tol_px)+" (nicht exakt 0, Rundungsrest der double-Summe)."); }
 		}
 	}
+	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kanal"); pruefe_sism_drift("Kanal"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil, WIRKLICH ans Ende des Fallberichts. Nachpruefung der Audit-Schleife 2: der erste Versuch setzte den Aufruf hinter bericht_gdiag und liess im Kanal noch ~170 Berichtszeilen dahinter -- also FRUEHER als vor dem Fix. Die Funktion enthaelt print_error = exit; hier frisst es nichts mehr.
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
 	print_info("Referenz Lee & Moser 5186: U_b+ = 24,104, c_f = 3,4424e-3.");
 	_exit(0);
@@ -4715,7 +4721,6 @@ void main_setup_kugel() {
 			}
 		// ★ B2 (Pruefagent, 07.09.): bericht_gdiag gehoert NICHT in den CFD_FACETTEN>=3-Block. s_sgs_gdiag ist nur auf fc>=1 gegatet, und alloc_facetten bekommt das env ungegated -- bei CFD_FACETTEN=1|2 waere der Bericht sonst wieder ein stiller No-Op mit Aktiv-Ansage, genau die Lueckenklasse, die dieser Fix beseitigen sollte. Kanal (3637) und Nahfeld (7958) rufen ihn ebenfalls eine Ebene hoeher.
 		if(env_u("CFD_FACETTEN",0u)>0u) bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kugel");
-		if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kugel"); pruefe_sism_drift("Kugel"); } // ★ 07.09. SISM-Wirkpfad 126/127 + Drift-Urteil. ANS ENDE des Berichts gestellt (Audit-Befund 7): die Funktion enthaelt print_error-Zweige = exit, und davor stehende Berichte gingen sonst verloren -- dieselbe Klasse, die der erste Pruefagent fuer die 100-%-Klemme schon behoben hat.
 		if(env_u("CFD_FACETTEN",0u)>=3u) { double dm=0.0, nk=0.0;
 			lbm.lbm_domain[0]->fac_tau.read_from_device(); // ★ Nachpruefer Stufe-3: Stale-Fix auch hier (Kanal-M-Fix war nicht nachgezogen)
 			for(ulong i3=0ull;i3<lbm.lbm_domain[0]->fac_N;i3++){ dm+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+4ull]; nk+=(double)lbm.lbm_domain[0]->fac_tau[6ull*i3+5ull]; }
@@ -4746,6 +4751,7 @@ void main_setup_kugel() {
 				+", Reibung x = "+to_string((float)FKu.rx,6u)+" | n_voll "+to_string(FKu.n_voll)+", projiziert "+to_string(FKu.n_proj)+", unklar "+to_string(FKu.n_unklar));
 		}
 	}
+	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kugel"); pruefe_sism_drift("Kugel"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil, WIRKLICH ans Ende des Fallberichts. Nachpruefung der Audit-Schleife 2: der erste Versuch setzte den Aufruf hinter bericht_gdiag und liess im Kanal noch ~170 Berichtszeilen dahinter -- also FRUEHER als vor dem Fix. Die Funktion enthaelt print_error = exit; hier frisst es nichts mehr.
 	print_info("---------------------------------------------------------------");
 
 	// ★ FELD-HASH (2026-08-24). Wortgleich zu dem im Kanalfall (setup.cpp:1699), damit die
@@ -8110,7 +8116,7 @@ static void main_setup_fahrzeug_dd() {
 				else if(n72+n73+n74>3865470566ull) print_warning("[Nahfeld] NACHBAR-Zaehler ueber 90 % des uint-Bereichs ("+to_string(n72+n73+n74)+") -- WICKELGEFAHR beim naechsten laengeren Lauf.");
 				print_info("[Nahfeld] NACHBAR-Wirkpfad: Slot 72 angewandt = "+to_string(n72)+" ("+to_string((float)(ns>0ull?100.0*(double)n72/(double)ns:0.0),1u)+" % der Nachbar-Entscheide), 73 kein Fluidnachbar = "+to_string(n73)+", 74 Nachbar still = "+to_string(n74)+" (t%100-Stichprobe; UTKORR wirkt nur an 73/74)."); } }
 		if(env_u("CFD_SGS_FDWAND",0u)>0u) { const ulong s39=(ulong)df->rho_clamp_hits[76]; if(s39==0ull) print_error("[Nahfeld] SGS_FDWAND war angefordert, aber Slot 76 = 0 -- stiller No-Op."); else print_info("[Nahfeld] SGS_FDWAND-Wirkpfad Slot 76 = "+to_string(s39)+"."); }
-		if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(df->rho_clamp_hits.data(), lbm_f.get_t(), df->sism_ab, df->sism_T, df->sism_on, "Nahfeld"); pruefe_sism_drift("Nahfeld"); } // ★ 07.09. SISM-Wirkpfad Slot 126/127
+ // ★ 07.09. SISM-Wirkpfad Slot 126/127
 		// ★ 03.09. F-MARKERLISTE: Slot 77 zaehlt jedes store3_F IN der F-BBox, das keinen Slot fand.
 		// Das ist der Ersatz fuer den F-Waechter, der unter der Liste gegenstandslos wird: waere die
 		// Host-Maske keine echte Obermenge des Kernel-Praedikats, ginge dort still Kraft verloren.
@@ -8201,6 +8207,7 @@ static void main_setup_fahrzeug_dd() {
 		}
 		print_info("ACHTUNG P8: Fx_far (forces.csv) und der Fernfeld-Fahrzeugkraft-Anker oben sind in diesem Arm PHANTOMBEHAFTET (object_force an facettenbehandelten Links); kraft_facetten bleibt Nahfeld-only -- fuer A/B nur die VERSCHIEBUNG werten.");
 	}
+	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm_f.lbm_domain[0]->rho_clamp_hits.data(), lbm_f.get_t(), lbm_f.lbm_domain[0]->sism_ab, lbm_f.lbm_domain[0]->sism_T, lbm_f.lbm_domain[0]->sism_on, "Nahfeld"); pruefe_sism_drift("Nahfeld"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil ans ECHTE Ende des dd-Berichts (Nachpruefung Audit 2: vorher stand der Aufruf vor dem F-Listen-Block und ~90 Berichtszeilen; die Funktion enthaelt print_error = exit).
 	print_info("---------------------------------------------------------------");
 	_exit(0);
 }
