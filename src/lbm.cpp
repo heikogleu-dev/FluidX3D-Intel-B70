@@ -306,6 +306,7 @@ float LBM_Domain::s_fac_kappa = 0.4f;
 float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm
 float LBM_Domain::s_fac_qkappe = 1.0f; // Ex-Stabilitaetskappe des q>0,5-Zweigs: mit der MLS-Blende (Baustein 1, 26.08.) obsolet -- Default 1,0 = keine Kappung; Env-Hebel CFD_FAC_QKAPPE bleibt fuer A/Bs
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
+uint LBM_Domain::s_fac_rdiag = 0u; // ★ 07.09. Rueckfall-Diagnose (CFD_FAC_RDIAG), reine Zaehler
 uint LBM_Domain::s_fac_kraft = 0u; // ★ 30.08. Zellkraft statt Slip (CFD_FAC_KRAFT)
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
@@ -361,7 +362,10 @@ void LBM_Domain::allocate(Device& device) {
 	// [35..39] nu_t/nu_0 wandnaechste Lage | [40..44] davon anliegend | [45..48] oberer Schwanz
 	// [49..53] Stoerform-Offset |2(S1.t)|/Ziel | [54..58] |P|/Ziel | [59] Bewegtwand-Term
 	// [60..63] Guo-Korrektur, rel. Aenderung von |Pi^neq| | [64] Quergate (CFD_FAC_QUERGATE) | [65] LSQ-Rueckfall
-	// ALLE Ereignis-Slots sind t%100-Stichproben; 49..58 und 60..63 zusaetzlich hash-ausgeduennt (jede 64.).
+	// [136..140] RDIAG |2(rho-1)(S1.t1)|/|Ziel| an RUECKFALLbesuchen | [141]/[142] dessen Vorzeichen + / -
+	// [143] RDIAG Nenner (Rueckfallbesuche mit Ziel>0) | [144..148] s1_soll/u_t bei G11>0 (Gate-Rueckfall)
+	// [149] G11roh ~ 0 (c_1 parallel n) | [150..154] s1_soll/u_t bei G11==0 (Rang 0) -- HYPOTHETISCH, s. kernel.cpp
+	// ALLE Ereignis-Slots sind t%100-Stichproben; 49..58 und 60..63 zusaetzlich hash-ausgeduennt (jede 64.). RDIAG (136..154) ist NICHT ausgeduennt.
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -1383,6 +1387,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")
 	+((s_facetten&&s_fac_imem&&s_fac_quergate) ? (string)"\n	#define FACETTEN_QUERGATE" : (string)"")
 	+((s_facetten&&s_fac_imem&&s_fac_kraft>0u) ? (string)"\n	#define FACETTEN_KRAFT\n	#define def_fac_kraft "+to_string(min(2u,s_fac_kraft))+"u" : (string)"") // ★ 30.08. Zellkraft statt Slip (Weg F) // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
+	+((s_facetten&&s_fac_imem&&s_fac_rdiag>0u) ? (string)"\n	#define FACETTEN_RDIAG" : (string)"") // ★ 07.09. Rueckfall-Diagnose, bitneutral
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"
 	"\n	#define def_fac_apg "+to_string(s_fac_apg,6u)+"f" : (string)"") // APG-Messarm: Emission nur bei kappa != 0 (Kommentar-Verklebung R2 geloest) /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"

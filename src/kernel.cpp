@@ -2740,6 +2740,53 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	    fac_kd[k8+14ul]+=(pass2_an?-def_fac_tau*twe:0.0f); fac_kd[k8+15ul]+=(pass2_an?2.0f*b1_kd:0.0f); } } // ★ S1 (04.09. abends): pass2_an statt !rueckfall -- unter KRAFT=2 ist pass2_an ueberall false, rueckfall nicht // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
 )+"#endif"+R( // FACETTEN_KDIAG
 	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
+)+"#ifdef FACETTEN_RDIAG"+R(
+	// ★★ 07.09.2026 RUECKFALL-DIAGNOSE (CFD_FAC_RDIAG, Planungsagent-Schritt K1).
+	// ANLASS: fac_kd[12..15] und die Slots 118..122 sind auf pass2_an gegatet und damit an genau
+	// den Facetten BLIND, die zu 100 % zurueckfallen -- der Einzellink-Klasse (21,5 % Kugel,
+	// 33,3 % kipp26). Solange das so ist, weiss niemand, ob deren |phi1|/twe (3,31 an der Kugel,
+	// 27,8 am kipp26) ein REIBUNGSdefekt ist oder fehlgebuchter WANDDRUCK -- am kipp26 meldet der
+	// Report den Rest-Druckterm in 99,2 % der ANGEWANDTEN Besuche >= Ziel, und ueber die
+	// zurueckgefallenen sagt er nichts.
+	// [136..140] |2(rho-1)(S1.t1)| / |Ziel| an RUECKFALLbesuchen, Dekaden 0,001/0,01/0,1/1
+	// [141]/[142] Vorzeichen desselben Terms (hebt er sich weg oder steht er systematisch?)
+	// [143] Nenner: gesampelte Rueckfallbesuche mit Ziel (twe > 0)
+	// [144..148] / [150..154] s1_soll/u_t = -(def_fac_tau*twe+P1)/(G11roh*u_t), Grenzen 0/0,1/0,5/1,0.
+	//            GETRENNT nach Rueckfallursache (Pruefbefund B4, 07.09.): [144..148] G11 > 0, also
+	//            Gate-Rueckfall -- der Loeser hat dort GERECHNET und ein Gate hat verworfen, der
+	//            Quotient ist der Wert, den er setzen wollte. [150..154] G11 == 0 (Rang 0, Einzel-
+	//            link): dort ist der unter der Massen-Nebenbedingung erreichbare Unterraum LEER
+	//            (kernel.cpp:2151-2163, Befund 25.08.), R1/G11roh beantwortet also nur die
+	//            HYPOTHETISCHE Frage "was waere ohne diese Nebenbedingung noetig" -- kein Sollwert.
+	//            Wer beide Saetze addiert, vermischt eine Messung mit einer Hypothese.
+	// [149] Rueckfallbesuche mit G11roh ~ 0 (c_1 parallel n, kipp45-Klasse) -- dort gibt es keine
+	//       tangentiale Injektionsmoeglichkeit und auch keine BB-Bremse; s1_soll ist undefiniert.
+	// BITNEUTRAL: nur Zaehler, kein Zugriff auf fhn. Abnahme = Feld-Hash gegen einen AUS-Arm
+	// aus DEMSELBEN Binary. (Die Begruendung dafuer ist NICHT, dass Kommentartext das Compilat
+	// aendere -- das ist widerlegt, R() ist #__VA_ARGS__ und der Praeprozessor entfernt Kommentare
+	// VOR der Stringifizierung, kernel.hpp:4. Sondern: das Einschalten fuegt echten Code hinzu,
+	// und am 07.09. brach ein Hash zwischen zwei Binaries mit identischem OpenCL-Text -- Ursache
+	// ungeklaert, Kandidat FMA-Kontraktion im Host bei -O. Deshalb: AUS-neu gegen AN-neu.)
+	if(rueckfall&&t%100ul==0ul&&def_fac_tau*twe>0.0f) {
+		const float b1_rf = S1x*t1x+S1y*t1y+S1z*t1z;
+		const float zi_rf = fabs(def_fac_tau*twe);
+		const float a_rf = 2.0f*(rhon-1.0f)*b1_rf;
+		const float rr_rf = zi_rf>0.0f ? fabs(a_rf)/zi_rf : 0.0f;
+		const uint b_rf = rr_rf<0.001f?0u:(rr_rf<0.01f?1u:(rr_rf<0.1f?2u:(rr_rf<1.0f?3u:4u)));
+		if(hits[136u+b_rf]<0xF0000000u) atomic_inc(&hits[136u+b_rf]);
+		if(a_rf>0.0f) { if(hits[141]<0xF0000000u) atomic_inc(&hits[141]); }
+		if(a_rf<0.0f) { if(hits[142]<0xF0000000u) atomic_inc(&hits[142]); }
+		if(hits[143]<0xF0000000u) atomic_inc(&hits[143]);
+		if(G11roh>1e-8f) {
+			const float s1s_rf = -(def_fac_tau*twe+P1)/G11roh;
+			const float q_rf = ut>1e-12f ? s1s_rf/ut : 0.0f;
+			const uint b_s = q_rf<0.0f?0u:(q_rf<0.1f?1u:(q_rf<0.5f?2u:(q_rf<1.0f?3u:4u)));
+			if(G11>1e-8f) { if(hits[144u+b_s]<0xF0000000u) atomic_inc(&hits[144u+b_s]); }
+			if(G11<=1e-8f) { if(hits[150u+b_s]<0xF0000000u) atomic_inc(&hits[150u+b_s]); }
+		}
+		if(G11roh<=1e-8f) { if(hits[149]<0xF0000000u) atomic_inc(&hits[149]); }
+	}
+)+"#endif"+R(
 )+"#ifdef FACETTEN_DIAGZ"+R(
 	// ★ Iron Rule 3 (Heiko 2026-08-16): eingebaute Zwischenergebnis-Diagnostik. Die gewaehlte
 	// Facette schreibt ihre komplette Kette jeden Schritt in einen 18er-Puffer; der Host sampelt
