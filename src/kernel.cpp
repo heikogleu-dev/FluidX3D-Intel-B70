@@ -2042,17 +2042,23 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float utau = ut_wm/up;
 		tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut;
-		if(tw>tw_max) { tw = tw_max;
 )+"#ifndef FACETTEN_PEMA"+R(
 )+"#ifndef FACETTEN_APG"+R(
-			if(t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA/APG zaehlt die ANGEWANDTE Kette (Tiefen-Audit R2: sonst bis 3x je Besuch)
+		// Auditor A Befund 3 (07.09.): GENAU EINMAL JE BESUCH. Vorher standen zwei Zaehlstellen --
+		// eine in der Klemme, eine hinter twf = tw*faca. Feuert die erste, ist tw == tw_max, also
+		// twf = tw_max*faca, und an jeder NICHT achsparallelen Facette ist faca > 1: die zweite
+		// feuerte zwingend mit. Slot 8 lief bis zum Doppelten der Besuchszahl und war als
+		// tau-Klemme N (Host, ohne Nenner) nicht lesbar. Am 4 mm auch eine Kopfhoehenfrage: Slot 8
+		// saettigt nicht und stand im schlimmsten Fall bei 79 Prozent des uint-Bereichs. Die
+		// PEMA/APG-Zweige wurden im Tiefen-Audit R2 genau dafuer saniert; der Basisarm nicht.
+		if((tw>tw_max||tw*faca>tw_max)&&t%100ul==0ul) atomic_inc(&hits[8]);
 )+"#endif"+R( // FACETTEN_APG
 )+"#endif"+R( // FACETTEN_PEMA
-		}
+		if(tw>tw_max) { tw = tw_max; }
 		const float twf = tw*faca;
 )+"#ifndef FACETTEN_PEMA"+R(
 )+"#ifndef FACETTEN_APG"+R(
-		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // unter PEMA/APG zaehlt die angewandte Kette (Audit 1/3 + Tiefen-R2)
+		// (die zweite Zaehlstelle stand hier -- Befund 3, jetzt oberhalb zusammengefasst)
 )+"#endif"+R( // FACETTEN_APG
 )+"#endif"+R( // FACETTEN_PEMA
 		twe = fmin(twf, tw_max);
@@ -2544,7 +2550,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Druck-Bookkeeping vorbei). alpha aus dem ANGEWANDTEN u_s (nach Gate/Klemme/EMA), damit
 	// Sum q = alpha*S0 + 6(S1*u_s) = 0 exakt gilt, egal was Gates und Filter getan haben.
 	// S0 >= w(1) > 0 hier: ohne Wandlink waere der Solver oben mit Rang 0 ausgestiegen.
-	const float alph = -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0;
+	const float alph = (S0>0.0f) ? -6.0f*(S1x*usx+S1y*usy+S1z*usz)/S0 : 0.0f; // Auditor A Befund 2 (07.09.): Nullschutz. Die alte Begruendung (S0 >= w(1) > 0, sonst waere der Solver mit Rang 0 ausgestiegen) ist seit dem Buchungsschluss vom 27.08. hinfaellig -- Rang 0 steigt nicht mehr per return aus, sondern laeuft mit rueckfall=true weiter. Eine aktive Facette ohne einen einzigen Wandlink haette 0/0 = NaN geliefert; unter ALPHA=1 haette das ueber phi1 den GANZEN Reibungspfad vergiftet. Bitgleich fuer jeden Lauf mit S0 > 0.
 )+"#ifdef FACETTEN_MASSE_ALLE"+R(
 	// ★ 04.09. (Diff-Pruefung d6): unter MASSE_ALLE wird beta3 = alph*S0 injiziert, nicht alph. Mit
 	// S0 ~ 0,1..0,3 warnte der Waechter auf einem drei- bis zehnfach zu grossen Wert.
@@ -2752,9 +2758,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// [141]/[142] Vorzeichen desselben Terms (hebt er sich weg oder steht er systematisch?)
 	// [143] Nenner: gesampelte Rueckfallbesuche mit Ziel (twe > 0)
 	// [144..148] / [150..154] s1_soll/u_t = -(def_fac_tau*twe+P1)/(G11roh*u_t), Grenzen 0/0,1/0,5/1,0.
-	//            GETRENNT nach Rueckfallursache (Pruefbefund B4, 07.09.): [144..148] G11 > 0, also
+	//            GETRENNT ueber den KASKADENZWEIG (Auditor A, Befund 1). DIE ERSTE FASSUNG TRENNTE
+	//            NACH G11 GEGEN G11roh UND WAR EIN STILLER NO-OP: FACETTEN_ALPHA2 wird nur emittiert,
+	//            wenn MASSE_ALLE == 0 (lbm.cpp), und ohne dieses Downdate ist G11 bitidentisch mit
+	//            G11roh. Im gemessenen Arm (MASSE_ALLE=3) war 'G11roh > 0 und G11 == 0' damit
+	//            unerfuellbar, [150..154] konstruktiv leer, und ALLE Rueckfaelle landeten im Eimersatz
+	//            'der Loeser hat gerechnet' -- darunter 43,1 % reine Einzellink-Faelle, fuer die er gar
+	//            nichts gerechnet hat. zweig (2258) traegt die REALE Kaskade: [144..148] zweig > 0, also
 	//            Gate-Rueckfall -- der Loeser hat dort GERECHNET und ein Gate hat verworfen, der
-	//            Quotient ist der Wert, den er setzen wollte. [150..154] G11 == 0 (Rang 0, Einzel-
+	//            Quotient ist der Wert, den er setzen wollte. [150..154] zweig == 0 (Rang-0-Ausstieg,
 	//            link): dort ist der unter der Massen-Nebenbedingung erreichbare Unterraum LEER
 	//            (kernel.cpp:2151-2163, Befund 25.08.), R1/G11roh beantwortet also nur die
 	//            HYPOTHETISCHE Frage "was waere ohne diese Nebenbedingung noetig" -- kein Sollwert.
@@ -2781,8 +2793,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float s1s_rf = -(def_fac_tau*twe+P1)/G11roh;
 			const float q_rf = ut>1e-12f ? s1s_rf/ut : 0.0f;
 			const uint b_s = q_rf<0.0f?0u:(q_rf<0.1f?1u:(q_rf<0.5f?2u:(q_rf<1.0f?3u:4u)));
-			if(G11>1e-8f) { if(hits[144u+b_s]<0xF0000000u) atomic_inc(&hits[144u+b_s]); }
-			if(G11<=1e-8f) { if(hits[150u+b_s]<0xF0000000u) atomic_inc(&hits[150u+b_s]); }
+			if(zweig>0u) { if(hits[144u+b_s]<0xF0000000u) atomic_inc(&hits[144u+b_s]); }
+			if(zweig==0u) { if(hits[150u+b_s]<0xF0000000u) atomic_inc(&hits[150u+b_s]); }
 		}
 		if(G11roh<=1e-8f) { if(hits[149]<0xF0000000u) atomic_inc(&hits[149]); }
 	}
