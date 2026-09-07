@@ -167,6 +167,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_sgs_wandfrei) print_error("CFD_SGS_WANDFREI ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu entfernen).");
 	if(s_sgs_diag) print_error("CFD_SGS_DIAG ohne SUBGRID ist sinnlos (es gaebe kein nu_t zu messen).");
 	if(s_sgs_fdwand>0u) print_error("CFD_SGS_FDWAND ohne SUBGRID ist sinnlos (der w-Ersatz-Hook liegt im SUBGRID-Block und waere still tot).");
+	if(s_sgs_sism>0u) print_error("CFD_SGS_SISM ohne SUBGRID ist sinnlos (der FD-w-Hook liegt im SUBGRID-Block und waere still tot).");
 	if(!s_sgs_guo) print_warning("CFD_SGS_GUO=0: Pi^neq OHNE Guo-Korrektur -- die Scherrate ist dort verzerrt, wo die Volumenkraft wirkt (Kontrollarm, nicht die Physik).");
 #endif // SUBGRID
 	// R2-Nachpruefer: Ansage NACH den harten Abweisern (vorher stand "aktiv" eine Zeile vor dem exit)
@@ -175,6 +176,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// FDWAND an allen Facettenzellen ein stiller No-Op (Bins 35-48 leer). Seit 03.09. nachmittags steht er HINTER dem if/else und
 	// misst das finale w -- die Kombination ist jetzt das Instrument fuer "nu_t IST gegen kappa*y+ SOLL" an Wandzellen.
 	if(s_sgs_diag&&s_sgs_fdwand>0u) print_info("CFD_SGS_DIAG x CFD_SGS_FDWAND: DIAG misst an Facettenzellen das FD-nu_t aus fac_wfd (Block hinter dem if/else seit 03.09.; vorher stiller No-Op der Bins 35-48).");
+	// ★ 07.09.2026 SISM-Waechter (Planungsagent-Vorpruefung): der Sbar-Abzug lebt im FD-Kernel -- ohne FDWAND gibt es den
+	// Kernel nicht, ohne Facetten keine Zellenliste; T = 0 waere alpha = inf; ab < 3T laesst den Anfahrtransienten in <S>
+	// stehen und die Klemme greift dann flaechig (nu_t = 0 = WANDFREI-Zustand, am 07.09. nach 175 Schritten divergiert).
+	if(s_sgs_sism>0u&&s_sgs_fdwand==0u) print_error("CFD_SGS_SISM braucht CFD_SGS_FDWAND=1 -- der Sbar-Abzug lebt im FD-Kernel sgs_fdwand; ohne ihn gaebe es keinen Kernel (stiller No-Op).");
+	if(s_sgs_sism>0u&&!s_facetten) print_error("CFD_SGS_SISM ohne CFD_FACETTEN: keine Facettenzellen, kein FD-Kernel.");
+	if(s_sgs_sism>0u&&s_sgs_sism_T==0u) print_error("CFD_SGS_SISM_T = 0 (oder ungesetzt): alpha = 1/T waere eine Division durch 0. T in SCHRITTEN angeben und HERLEITEN (Kanal: aus T_ett; Kugel/Fahrzeug: L/U durch dt) -- kein Handwert.");
+	if(s_sgs_sism>0u&&s_sgs_sism_T>0u&&s_sgs_sism_ab<3ull*(ulong)s_sgs_sism_T) print_warning("CFD_SGS_SISM_AB < 3*T: <S> traegt am Phasenwechsel noch den Anfahrtransienten -- die Klemme kann flaechig greifen (nu_t = 0 = WANDFREI-Zustand). Der Slot-127-Anteil am Laufende zeigt es.");
+	if(s_sgs_sism>0u&&s_sgs_wandfrei) print_warning("SISM x WANDFREI: WANDFREI hat an Wandzellen Vorrang (FDWAND-Leser in stream_collide) -- fac_wfd wird dort nie gelesen; Slot 126 zaehlt im FD-Kernel trotzdem, die Physik ist der WANDFREI-Arm.");
+	if(s_sgs_sism>0u) print_info("SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM, 07.09.2026, Leveque et al. 2007) im FD-Kernel: nu_t = c2*max(0, |S|_FD - |<S>|), <S> = EMA ueber T = "+to_string((ulong)s_sgs_sism_T)+" Schritte, klassisch bis Schritt "+to_string(s_sgs_sism_ab)+" (EMA laeuft ab 0 mit, KEIN Warmstart). Wirkpfad Slot 126 (Abzug aktiv) / 127 (Klemme |S|<Sbar, nur Phase 2), Zeitreihe sism_sbar.csv.");
 	// ★ 03.09. UTKORR-Ansage fuer NACHBAR. Der No-Op-Waechter (NACHBAR/KDIAG ohne iMEM) sitzt an den LESESTELLEN in setup.cpp: dort
 	// wird der Schalter bei fc<3 still auf 0 gesetzt, hier waere er schon unsichtbar (Rauchtest xs_guard_nb_ohne_imem 03.09.: rc=0).
 	if(s_fac_nachbar>0u) print_info("NACHBARABTASTUNG aktiv (CFD_FAC_NACHBAR): Wandmodell-Eingang u_t/y_w aus der zweiten Fluidzelle entlang der Normale (Slot 72 angewandt / 73 kein Fluidnachbar / 74 Nachbar still). CFD_FAC_UTKORR = "+to_string(s_fac_utkorr,3u)+" wirkt NUR an Zellen mit Eigenabtastung -- die 3/2-BB-Deflation gilt am Nachbarn nicht (03.09.).");
@@ -324,6 +334,7 @@ bool LBM_Domain::s_sgs_wandfrei = false;
 bool LBM_Domain::s_sgs_guo = true; // ★ 2026-08-25 Default AN: das ist die richtige Physik, CFD_SGS_GUO=0 ist der Kontrollarm
 bool LBM_Domain::s_sgs_diag = false;
 ulong LBM_Domain::s_sgs_diag_ab = 0ull;
+uint LBM_Domain::s_sgs_sism = 0u; uint LBM_Domain::s_sgs_sism_T = 0u; ulong LBM_Domain::s_sgs_sism_ab = 0ull; // ★ 07.09. SISM (T/ab in Schritten)
 float LBM_Domain::s_sponge_wmin = 0.5f;
 bool LBM_Domain::s_sparse_tiles_on = false;
 uint LBM_Domain::s_sparse_T = 8u;
@@ -355,7 +366,7 @@ void LBM_Domain::allocate(Device& device) {
 	// und koennten bei ~1e9+ Ereignissen ueberlaufen -- Ist!=Soll faellt im Report auf, aber wer
 	// Slots erweitert, gate sie. Vergroesserung statt neuem Puffer: haengt schon an stream_collide,
 	// keine Signaturaenderung, Kontrollarm bleibt bitgleich (neue Slots nur unter #ifdef-Emission).
-	rho_clamp_hits = Memory<uint>(device, 160ull); // 128->160 am 06.09.: [123] u_w-Wirkpfad, [124] untere Klemme (= reines BB), [125] obere Klemme -- ACHTUNG, KEIN echter Nullbeweis: duw >= 0 immer, also ist uw > ut_ab konstruktiv unmoeglich und der Zaehler kann nie feuern (Pruefbefund 06.09.), [126] NICHT GEBAUT (war fuer nu_eff<nu vorgesehen, Modus 2 entfiel -- Slot ist FREI), [128..135] u_w/u_B-Histogramm. // 80->96 am 04.09.: [80] Rang-1-Pseudoinverse angewandt (im Bericht, pruefe_kaskade). [81..91] ZIELERFUELLUNG 04.09.: [81] gestichprobte Besuche (Nenner), [82] angewandt ohne Ziel (twe=0), [83..91] NEUN Eimer fuer r = phi1/(-def_fac_tau*twe) je Besuch, Grenzen -10/-1/0/0,5/0,9/1,1/2/10 (nach dem Erstlauf von sieben auf neun geschaerft). [92] Wirkpfad CFD_FAC_MASSE_ALLE. [93] Modus 2: f_0<=0 nach Kompensation. [94] ARM X: Schatten sagt Rueckfall, roh haette angewandt (X zwingt auf BB). [95] ARM X: roh Rueckfall, Schatten haette angewandt. KREUZTABELLE Gate x Solve-Zweig (04.09. abends, Spalte = Zweig der REALEN Kaskade vor dem Gate, 1=[78] 2=[79] 3=[12] 4=[14]/[80]): [96..99] Gate[10] x Zweig | [100..103] Gate[16] x Zweig | [104..107] Gate[64] x Zweig | [108..111] ARM X [94] x roher Zweig | [112..115] ARM X [95] x roher Zweig | [116] ARM X [95] mit rohem Rang-0 | [117] BODEN_EQ_ABSTAND-Aussparungen (S5). [118..122] REST-DRUCKTERM 05.09., SAETTIGEND: |2*(rho-1)*(S1.t1)|/Ziel, Grenzen 0,001/0,01/0,1/1 -- misst, was vom hydrostatischen Term NACH der Stoerform im Ziel VERBLEIBT. NUR die t1-Komponente (im Zielerfuellungsblock als b1_ze = S1.t1 NEU gebildet -- in der Basis, gegen die geloest wurde; unter PEMA ist das NICHT B1o), denn nur die geht in R1 ein; 49..53 misst dagegen den weggenommenen Term als VOLLEN Tangentialbetrag. [123..127] frei. SAETTIGEND (>=0xF0000000): 67-71, 76, 78-95, 108-116, 118-122; WICKELND: 7-18, 27, 64, 65, 96-107, 117 -- das Soll an Slot 7 wird mod 2^32 geprueft (D1, bewusst nicht angeglichen). Die frueher hier angekuendigte Kreuztabelle "Gate-Rueckfall nach Solve-Zweig" IST DAMIT GEBAUT. // 72->80 am 02.09.: Slots 20-71 sind luecklos belegt (30-48 SGS_DIAG-Bins ueber BERECHNETE Indizes 30u+b/35u+bw/40u+bw/45u+..., die ein Literal-Grep nicht sieht -- zweimal bezahlte Lektion B-3/B70); neue Zaehler ab 72 // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] Kraftzellen im Anlauf t<100, UNGEGATET (saettigend) | [72..74] NACHBAR angewandt/kein-Fluid/still | [75] MESSNUR-Wirkpfad | [76] FDWAND angewandt | [77] F-Listen-Wirkpfadwaechter (kernel.cpp:912, Soll 0) | [78/79] exakte Solve-Zweige (siehe oben) --  KORRIGIERT 05.09.: hier stand faelschlich "[77..79] frei", alle drei sind belegt // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
+	rho_clamp_hits = Memory<uint>(device, 160ull); // 128->160 am 06.09.: [123] u_w-Wirkpfad, [124] untere Klemme (= reines BB), [125] obere Klemme -- ACHTUNG, KEIN echter Nullbeweis: duw >= 0 immer, also ist uw > ut_ab konstruktiv unmoeglich und der Zaehler kann nie feuern (Pruefbefund 06.09.), [126] SISM angewandt = Sbar-Abzug aktiv (Phase 2, t%100, saettigend, gezaehlt im FD-Kernel sgs_fdwand seit 07.09. abends -- vorher frei), [127] SISM-Klemme |S|_FD < Sbar (nur Phase 2, t%100, saettigend; 127/126 = Klemmanteil: 0 % = EMA tot, 100 % = WANDFREI-Zustand, dazwischen Physik), [128..135] u_w/u_B-Histogramm. // 80->96 am 04.09.: [80] Rang-1-Pseudoinverse angewandt (im Bericht, pruefe_kaskade). [81..91] ZIELERFUELLUNG 04.09.: [81] gestichprobte Besuche (Nenner), [82] angewandt ohne Ziel (twe=0), [83..91] NEUN Eimer fuer r = phi1/(-def_fac_tau*twe) je Besuch, Grenzen -10/-1/0/0,5/0,9/1,1/2/10 (nach dem Erstlauf von sieben auf neun geschaerft). [92] Wirkpfad CFD_FAC_MASSE_ALLE. [93] Modus 2: f_0<=0 nach Kompensation. [94] ARM X: Schatten sagt Rueckfall, roh haette angewandt (X zwingt auf BB). [95] ARM X: roh Rueckfall, Schatten haette angewandt. KREUZTABELLE Gate x Solve-Zweig (04.09. abends, Spalte = Zweig der REALEN Kaskade vor dem Gate, 1=[78] 2=[79] 3=[12] 4=[14]/[80]): [96..99] Gate[10] x Zweig | [100..103] Gate[16] x Zweig | [104..107] Gate[64] x Zweig | [108..111] ARM X [94] x roher Zweig | [112..115] ARM X [95] x roher Zweig | [116] ARM X [95] mit rohem Rang-0 | [117] BODEN_EQ_ABSTAND-Aussparungen (S5). [118..122] REST-DRUCKTERM 05.09., SAETTIGEND: |2*(rho-1)*(S1.t1)|/Ziel, Grenzen 0,001/0,01/0,1/1 -- misst, was vom hydrostatischen Term NACH der Stoerform im Ziel VERBLEIBT. NUR die t1-Komponente (im Zielerfuellungsblock als b1_ze = S1.t1 NEU gebildet -- in der Basis, gegen die geloest wurde; unter PEMA ist das NICHT B1o), denn nur die geht in R1 ein; 49..53 misst dagegen den weggenommenen Term als VOLLEN Tangentialbetrag. [123..125] u_w (s. o.), [126..127] SISM (s. o.). SAETTIGEND (>=0xF0000000): 67-71, 76, 78-95, 108-116, 118-122, 126-127; WICKELND: 7-18, 27, 64, 65, 96-107, 117 -- das Soll an Slot 7 wird mod 2^32 geprueft (D1, bewusst nicht angeglichen). Die frueher hier angekuendigte Kreuztabelle "Gate-Rueckfall nach Solve-Zweig" IST DAMIT GEBAUT. // 72->80 am 02.09.: Slots 20-71 sind luecklos belegt (30-48 SGS_DIAG-Bins ueber BERECHNETE Indizes 30u+b/35u+bw/40u+bw/45u+..., die ein Literal-Grep nicht sieht -- zweimal bezahlte Lektion B-3/B70); neue Zaehler ab 72 // [70] KRAFTPFAD (CFD_FAC_KRAFT, saettigend; Soll Modus 1: == [69]) | [71] Kraftzellen im Anlauf t<100, UNGEGATET (saettigend) | [72..74] NACHBAR angewandt/kein-Fluid/still | [75] MESSNUR-Wirkpfad | [76] FDWAND angewandt | [77] F-Listen-Wirkpfadwaechter (kernel.cpp:912, Soll 0) | [78/79] exakte Solve-Zweige (siehe oben) --  KORRIGIERT 05.09.: hier stand faelschlich "[77..79] frei", alle drei sind belegt // // [67] ELIBB-Wirkpfad beide Zweige (saettigend) | [68] MLS-q>0,5-Zweig allein (saettigend, Audit 26.08.) | [69] Rueckfall-Buchung P-only (saettigend, Buchungsschluss 27.08.; Soll = 13+15+64 +10+16 unter SATGATE) // ★ LEGENDE, Stand 2026-08-27 (Pruefbefund 3-E: die alte war in sich widerspruechlich)
 	// [0..1] RHO_CLAMP unten/oben (t%100) | [2..5] Wandfunktion | [6] SGS_WANDFREI | [7..19] Facetten/iMEM
 	// [20] BODEN_EQ | [21] EINLASS_EQ | [22] N2F-SCHALE | [23..24] N2F-Paritaet | [25..26] Paarungsbeweis
 	// [27] Slot-13-Split | [28] Geschwindigkeitsklemme | [29] SPONGE | [30..34] nu_t/nu_0 Dekaden
@@ -476,6 +487,7 @@ void LBM_Domain::allocate(Device& device) {
 		if(nachbar_on) { fac_nb = Memory<float>(device, 2ull); kernel_stream_collide.add_parameters(fac_nb); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fdwand_on = s_sgs_fdwand>0u; // ★ Geistermoden-Fix: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd)
 		if(fdwand_on) { fac_wfd = Memory<float>(device, 1ull); kernel_stream_collide.add_parameters(fac_wfd); } // Platzhalter; alloc_facetten_domain baut und rebindet -- der KOHAERENZ-WAECHTER dort verhindert, dass der Platzhalter je gelesen wird
+		sism_on = fdwand_on&&s_sgs_sism>0u; sism_T = s_sgs_sism_T; sism_ab = s_sgs_sism_ab; // ★ 07.09. SISM: Konstruktionszustand + T/ab einfrieren (Emission haengt an derselben Statik). Puffer fac_sb und die drei Kernelargumente entstehen in alloc_facetten_domain -- KEIN Platzhalter noetig, weil kernel_sgs_fdwand selbst erst dort gebaut wird
 	}
 
 	// FORK -- Block-Tiling: tile_slot ist per TS_P der LETZTE Parameter jedes fi-Kernels, muss also NACH
@@ -675,8 +687,9 @@ void LBM_Domain::alloc_f_liste(const uchar* flags_host, const uint Nx, const uin
 		+to_string((ulong)(b_alt/1048576ull))+" -> "+to_string((ulong)(b_neu/1048576ull))+" MiB inkl. Maske, gespart "
 		+to_string((ulong)((b_alt>b_neu?b_alt-b_neu:0ull)/1048576ull))+" MiB (VRAM UND System-RAM). Wirkpfad-Waechter: Slot 77 muss am Laufende 0 sein.");
 }
-void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand) {
+void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand, const uint sgs_sism) {
 	if((sgs_fdwand>0u)!=fdwand_on) print_error("SGS_FDWAND-Konfigurationsbruch: env-Parameter ("+to_string((ulong)sgs_fdwand)+") und Konstruktionszustand ("+string(fdwand_on?"an":"aus")+") widersprechen sich -- Emission haengt am Konstruktionszustand, Puffer am Parameter; beide muessen aus DEMSELBEN CFD_SGS_FDWAND stammen (Statik-Lebensdauer-Lehre 02.09.).");
+	if((sgs_sism>0u)!=sism_on) print_error("SGS_SISM-Konfigurationsbruch: env-Parameter ("+to_string((ulong)sgs_sism)+") und Konstruktionszustand ("+string(sism_on?"an":"aus")+") widersprechen sich -- Emission haengt am Konstruktionszustand, Puffer am Parameter; beide muessen aus DEMSELBEN CFD_SGS_SISM stammen (Statik-Lebensdauer-Lehre 02.09.). Haeufigste Ursache: SISM ohne FDWAND oder ohne Facetten."); // ★ 07.09. SISM
 	if(!facetten_on) { print_error("alloc_facetten_domain ohne CFD_FACETTEN."); return; }
 	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
 	if(FN==0ull) { print_error("alloc_facetten_domain: F-BBox ist leer."); return; }
@@ -694,7 +707,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + (fac_kdiag_on ? 64ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 16 float seit 05.09. -- Vorschaetzung MUSS mitziehen, sonst ist der VRAM-Waechter um 16 B/Facette blind)
 		                      + (nachbar_on ? 8ull*aktiv : 0ull)     // fac_nb (deterministische Nachbarabtastung, 2 float)
 		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull)  // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
-		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:12ull)*aktiv : 0ull); // fac_wfd (4 B) + gd_zellen (8 B), falls nicht schon von gdiag gebaut
+		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:12ull)*aktiv : 0ull)  // fac_wfd (4 B) + gd_zellen (8 B), falls nicht schon von gdiag gebaut
+		                      + (sgs_sism>0u ? 24ull*aktiv : 0ull);   // ★ 07.09. fac_sb (6 float) der SISM-EMA -- Vorschaetzung MUSS mitziehen (KDIAG-Lehre: sonst ist der VRAM-Waechter um 24 B/Facette blind)
 		const ulong mb_fac = bytes_fac/1048576ull;
 		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
 		const ulong belegt = (ulong)device.info.memory_used;
@@ -887,6 +901,13 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		for(ulong q=0ull;q<aktiv;q++) fac_wfd[q]=1.0f/get_tau(); // = def_w // Init = molekulares w (erster Schritt ohne nu_t an Wandzellen -- dokumentiert harmlos)
 		fac_wfd.write_to_device();
 		kernel_sgs_fdwand = Kernel(device, aktiv, "sgs_fdwand", u, flags, gd_zellen, (uint)aktiv, fac_wfd);
+		if(sism_on) { // ★ 07.09. SISM: EMA-Puffer (6 float je Facette, Start 0 -- KEIN Warmstart mit S, der liefert nu_t = 0 im ersten Schritt), t + Zaehler als Kernelargumente. Reihenfolge = Kernel-Signatur unter #ifdef SGS_SISM (t, fac_sb, rho_clamp_hits), zwingend VOR tile_slot (TS_P ist der letzte Parameter)
+			fac_sb = Memory<float>(device, 6ull*aktiv);
+			for(ulong q=0ull;q<6ull*aktiv;q++) fac_sb[q]=0.0f;
+			fac_sb.write_to_device();
+			kernel_sgs_fdwand.add_parameters(t, fac_sb, rho_clamp_hits); // Position 5/6/7; rho_clamp_hits haengt schon an stream_collide -- Mehrfachbindung desselben cl_mem ist unproblematisch
+			print_info("SISM gebunden: fac_sb "+to_string((float)(24ull*aktiv)/1048576.0f,1u)+" MB fuer "+to_string(aktiv)+" Facetten, EMA T = "+to_string((ulong)sism_T)+" Schritte (alpha = 1/T im Kernel), klassisch bis Schritt "+to_string(sism_ab)+"; Slot 126/127 am Laufende.");
+		}
 		if(sparse_on) kernel_sgs_fdwand.add_parameters(tile_slot); // gleiche B-7-Lehre wie sgs_gdiag
 		{ const uint fwix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u)+(nachbar_on?1u:0u); // +nachbar_on (03.09.): fac_nb sitzt VOR fac_wfd
 		  kernel_stream_collide.set_parameters(fwix, fac_wfd); } // ★ Rebind NACH dem Neubau -- der Rebind stand zuerst VOR dem Move-Assignment und band den gleich darauf ZERSTOERTEN Platzhalter (CL -52 beim ersten Enqueue; exakt die DIAGZ-Use-after-free-Lektion, 02.09. erneut bezahlt)
@@ -909,9 +930,9 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		+to_string((float)(fac_idx_voll_on ? 4ull*FN : 8ull*((FN+31ull)/32ull))/1048576.0f,1u)+(fac_idx_voll_on?" MB (Vollfeld)":" MB (Bitmaske+Praefixsumme)")+", Geometrie "+to_string((float)(aktiv*32ull)/1048576.0f,1u)+" MB auf "+device.info.name+".");
 }
 
-void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand) {
+void LBM::alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap, const uint sgs_gdiag, const uint sgs_fdwand, const uint sgs_sism) {
 	if(get_D()!=1u) { print_error("CFD_FACETTEN ist nur fuer eine Domaene gebaut (dd = zwei getrennte Instanzen)."); return; }
-	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap, sgs_gdiag, sgs_fdwand); // 02.09.: BEIDE Parameter wirklich durchreichen (der Regex-Umbau hatte diese Zeile verfehlt -- Lauf 3 ist am neuen No-Op-Waechter LAUT gescheitert, genau dafuer ist er da)
+	lbm_domain[0]->alloc_facetten_domain(F, (uint)get_Nx(), (uint)get_Ny(), qmap, sgs_gdiag, sgs_fdwand, sgs_sism); // 02.09.: BEIDE Parameter wirklich durchreichen (der Regex-Umbau hatte diese Zeile verfehlt -- Lauf 3 ist am neuen No-Op-Waechter LAUT gescheitert, genau dafuer ist er da)
 }
 
 void LBM_Domain::finalize_sparse_tiles() {
@@ -970,7 +991,7 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 	// verlaesst sich darauf, dass t ein monotoner Schrittzaehler < 2^62 bleibt (t>>62 == 0).
 	if(t>=(1ull<<62)) print_error("enqueue_stream_collide: t >= 2^62 -- die Remat-Invariante (t>>62==0) waere verletzt.");
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz).enqueue_run();
-	if(fdwand_on&&fac_wfd.length()>1ull) kernel_sgs_fdwand.enqueue_run();
+	if(fdwand_on&&fac_wfd.length()>1ull) { if(sism_on) kernel_sgs_fdwand.set_parameters(5u, t); kernel_sgs_fdwand.enqueue_run(); } // ★ 07.09. SISM: t je Schritt nachfuehren (Muster sgs_gdiag/boden_eq), Position 5 = erstes SGS_SISM-Argument; der FD-Kernel sieht dasselbe t wie der eben gerechnete Schritt (increment_time_step folgt erst danach)
 	if(nachbar_on&&fac_N>0ull) kernel_fac_nachbar.enqueue_run(); // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
@@ -1382,6 +1403,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_nachbar>0u) ? (string)"\n	#define FACETTEN_NACHBAR" : (string)"") // ★ 30.08. Eingang aus der zweiten Fluidzelle
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik
 	+((s_facetten&&s_sgs_fdwand>0u) ? (string)"\n	#define SGS_FDWAND" : (string)"") // ★ 02.09. Geistermoden-Fix (braucht Facetten fuer fac_idx, nicht zwingend iMEM -- wirkt auch im MESSNUR/BB-Arm)
+	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_sism>0u) ? (string)"\n	#define SGS_SISM"
+	"\n	#define def_sgs_sism_T "+to_string((ulong)s_sgs_sism_T)+"u" // T in SCHRITTEN als uint; alpha = 1.0f/(float)def_sgs_sism_T erst im Kernel (Pruefbefund M3: to_string(float) ist Festkomma -- alpha ~1e-4 wuerde auf 0,4 % quantisiert)
+	"\n	#define def_sgs_sism_ab "+to_string(s_sgs_sism_ab)+"ul" : (string)"") // ★ 07.09.2026 SHEAR-IMPROVED SMAGORINSKY im FD-Kernel (Leveque 2007); ab wie def_sgs_diag_ab. Ohne Schalter: kein Define, keine Signaturaenderung -> Kontrollarm bitgleich
 	+((s_facetten&&s_fac_imem&&s_fac_elibb) ? (string)"\n	#define FACETTEN_ELIBB" : (string)"") // ★ B2 (2026-08-25): ELIBB 18-Link, q aus der Facettenebene
 	+((s_facetten&&s_fac_imem&&s_fac_elibb_pur) ? (string)"\n	#define FACETTEN_ELIBB_PUR" : (string)"") // ★ Pur-Arm: NUR Geometrie-Blende (CFD_FAC_ELIBB=2)
 	+((s_facetten&&s_fac_imem&&s_fac_lsq) ? (string)"\n	#define FACETTEN_LSQ" : (string)"")

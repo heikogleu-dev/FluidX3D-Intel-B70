@@ -4413,8 +4413,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	fac_gd[k8+6ul]  += (float)nsolid;
 } // sgs_gdiag()
 
-)+R(kernel void sgs_fdwand(const global float* u, const global uchar* flags,
-	const global ulong* gd_zellen, const uint gd_N, global float* fac_wfd TS_P) {
+)+R(kernel void sgs_fdwand)+"("+R(const global float* u, const global uchar* flags,
+	const global ulong* gd_zellen, const uint gd_N, global float* fac_wfd // ) {
+)+"#ifdef SGS_SISM"+R(
+	, const ulong t, global float* fac_sb, global uint* rho_clamp_hits // ★ 07.09. SISM: Reihenfolge = add_parameters in alloc_facetten_domain (t, fac_sb, hits), VOR tile_slot
+)+"#endif"+R( // SGS_SISM
+	TS_P
+)+") {"+R( // sgs_fdwand() -- Kopfklammern als Strings AUSSERHALB von R() (Muster stream_collide): R() zaehlt Klammern; ein Splice zwischen "(" und ")" innerhalb EINES R-Blocks wird bis zur balancierten Klammer als TEXT stringifiziert -- so kam 07.09. abends ')+"#ifdef SGS_SISM"+R(' woertlich in den OpenCL-Quelltext (JIT -11 in ALLEN Armen, auch SISM=0)
 	// ★★ SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND, 02.09.2026, Heiko-Go "korrigiere bitte das sgs";
 	// Befunde B66/B69: das iMEM-Wandmodell schreibt nicht-hydrodynamische Populationen in fhn, und
 	// Smagorinsky baut daraus seinen Tensor -- Pi/FD = 2,3-3,4 an anwendenden Wandzellen. WALE/Sigma
@@ -4445,7 +4450,38 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	for(uint i=0u;i<3u;i++) for(uint a=0u;a<3u;a++) { const float Sia=0.5f*(g[i][a]+g[a][i]); SS=fma(Sia,Sia,SS); }
 	const float snorm_fd = sqrt(2.0f*SS);
 	const float tau0 = 1.0f/def_w;
+)+"#ifndef SGS_SISM"+R(
 	fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // 0.030021 = (C*Delta)^2, C = 0.1733 wie Hauptkernel (0.76421222/(18*sqrt(2)))
+)+"#else"+R(
+	// ★★ SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM, 07.09.2026, Leveque/Toschi/Shao/Scotti JFM 570 (2007)):
+	//   nu_t = c2 * max(0, |S| - |<S>|),  c2 = 0.030021 = (C*Delta)^2 wie oben.
+	// <S> = EMA der SECHS unabhaengigen S-Komponenten je Facette (fac_sb[6 gid ..]), Start 0, KEIN Warmstart
+	// mit S (der lieferte nu_t = 0 im ersten Schritt); Sbar = sqrt(2 <S>:<S>) = Betrag des gemittelten
+	// TENSORS -- die billige Form <|S|> waere ein anderes Modell (im Zeitmittel nu_t = 0 = WANDFREI).
+	// Zweiphasig (Warmlaufsperre, Muster def_sgs_diag_ab): t < def_sgs_sism_ab -> klassische FDWAND-Formel
+	// WORTGLEICH (bei ab >= n_steps bitgleich zum FDWAND-Arm), die EMA laeuft schon mit; danach Abzug mit
+	// Klemme fmax(0, .) -- die Klemme ist ZWINGEND, ohne sie faellt tau ab Sbar > 1,57e-4 unter 0,5.
+	// Reihenfolge: ALTES Sbar lesen -> w schreiben -> EMA aktualisieren (erster Schritt: Sbar = 0).
+	// Racefrei: 1 Work-Item = 1 Facette (Waechter in alloc_facetten_domain), fac_sb[6 gid ..] liest und
+	// schreibt nur das eigene Item; u/flags stammen aus dem vorigen In-Order-Launch. Atomics nur an den
+	// Zaehlern 126/127 -> physikneutral. alpha = 1/T exakt aus der Schrittzahl (Compile-Konstante).
+	const ulong k6 = 6ul*(ulong)gid;
+	const float Sn[6] = { g[0][0], g[1][1], g[2][2], 0.5f*(g[0][1]+g[1][0]), 0.5f*(g[0][2]+g[2][0]), 0.5f*(g[1][2]+g[2][1]) };
+	float sb[6]; for(uint q=0u; q<6u; q++) sb[q] = fac_sb[k6+(ulong)q];
+	const float sbar = sqrt(2.0f*(sq(sb[0])+sq(sb[1])+sq(sb[2])+2.0f*(sq(sb[3])+sq(sb[4])+sq(sb[5]))));
+	if(t<def_sgs_sism_ab) {
+		fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // Phase 1: klassisch, WORTGLEICH zur Zeile im #ifndef-Zweig
+	} else {
+		const float ds = snorm_fd-sbar;
+		fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*fmax(0.0f, ds)); // Phase 2: Abzug mit Klemme
+		if(t%100ul==0ul) { // Wirkpfad (t%100 wie ueblich, saettigend): 126 = Abzug aktiv, 127 = Klemme greift (|S| < Sbar)
+			if(rho_clamp_hits[126]<0xF0000000u) atomic_inc(&rho_clamp_hits[126]);
+			if(ds<0.0f&&rho_clamp_hits[127]<0xF0000000u) atomic_inc(&rho_clamp_hits[127]);
+		}
+	}
+	const float a_ = 1.0f/(float)def_sgs_sism_T;
+	for(uint q=0u; q<6u; q++) fac_sb[k6+(ulong)q] = fma(a_, Sn[q]-sb[q], sb[q]); // sb += alpha*(S - sb)
+)+"#endif"+R( // SGS_SISM
 } // sgs_fdwand()
 
 )+R(kernel void fac_nachbar_ab(const global float* u, const global uchar* flags, const global float* fac_geo,

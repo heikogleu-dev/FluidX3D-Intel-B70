@@ -153,7 +153,7 @@ public:
 	Kernel kernel_extract_plane_flags;
 	Kernel kernel_drive_boundary_cubic_lift;
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
-	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr, const uint sgs_gdiag=0u, const uint sgs_fdwand=0u); // sgs_gdiag als PARAMETER statt Statik (02.09.: zwei Statik-Lebensdauer-Fallen hintereinander -- ffc-Parsing und H1-Resetliste nullten s_sgs_gdiag vor alloc; env-getriebener Parameter hat keine Lebensdauer) // C1b: Puffer bauen + binden; qmap = Remesh-q (B1-Stufe 2)
+	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr, const uint sgs_gdiag=0u, const uint sgs_fdwand=0u, const uint sgs_sism=0u); // sgs_gdiag als PARAMETER statt Statik (02.09.: zwei Statik-Lebensdauer-Fallen hintereinander -- ffc-Parsing und H1-Resetliste nullten s_sgs_gdiag vor alloc; env-getriebener Parameter hat keine Lebensdauer) // C1b: Puffer bauen + binden; qmap = Remesh-q (B1-Stufe 2)
 
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Nur belegt, wenn alloc_schale()
 	// gerufen wurde (CFD_N2F_SCHALE>0) -- sonst bleibt alles unangetastet (Default bitidentisch).
@@ -203,7 +203,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 155 (Puffer 160, lbm.cpp:358) -- die Legende in lbm.cpp:366-368 ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 155 (Puffer 160, lbm.cpp:358; 126/127 seit 07.09. abends von SISM belegt) -- die Legende in lbm.cpp:366-368 ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
@@ -214,6 +214,7 @@ public:
 	static uint s_fac_alpha;
 	static bool s_fac_elibb;
 	static uint s_sgs_fdwand;  // ★ 02.09. SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND=1): w an Facettenzellen aus |S|_FD des u-Felds (FD-Kernel, ein Schritt versetzt) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert (B66/B69)
+	static uint s_sgs_sism; static uint s_sgs_sism_T; static ulong s_sgs_sism_ab; // ★ 07.09.2026 SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM=1, Leveque/Toschi/Shao/Scotti JFM 570, 2007) im FD-Kernel sgs_fdwand: nu_t = c2*max(0, |S|_FD - |<S>|), <S> = EMA der SECHS S-Komponenten je Facette (fac_sb; die billige Form <|S|> waere ein anderes Modell -- im Zeitmittel nu_t = 0 = WANDFREI). T = EMA-Zeitkonstante in SCHRITTEN (alpha = 1/T erst im Kernel, Muster def_fac_nu: keine Festkomma-Quantisierung), ab = Warmlaufsperre in Schritten (bis dahin klassische FDWAND-Formel WORTGLEICH, EMA laeuft ab 0 mit). Braucht CFD_SGS_FDWAND=1 und Facetten. Wirkpfad Slots 126 (Abzug aktiv) / 127 (Klemme |S|<Sbar); Zeitreihe sism_sbar.csv
 	static uint s_sgs_gdiag;   // ★ 31.08. g-DIAGNOSE (CFD_SGS_GDIAG=1): sparser Messkernel ueber die Facettenzellen -- |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle akkumuliert; fasst Physik nicht an
 	static uint s_fac_messnur; // ★ 30.08. CFD_FAC_MESSNUR: Facetten bauen und MESSEN, im Kernel aber NICHTS anwenden -- BB-Physik mit Facetten-Instrument (Aepfel-mit-Aepfeln-Bezug fuer BB-Vergleiche)
 	static uint s_fac_pinv; // ★ 04.09. CFD_FAC_PINV: Moore-Penrose-Pseudoinverse statt achsenparalleler Skalarleiter im gekoppelten Zweig
@@ -241,6 +242,7 @@ public:
 	bool fac_elibb_on = false; // ★ B2: ELIBB-Konstruktionszustand (eingefroren wie diagz)
 	Memory<float> fac_nb; Kernel kernel_fac_nachbar; bool nachbar_on = false; // ★ 03.09. deterministische Nachbarabtastung: (u_t_abt, y_abt) je Facette (2 float) aus eigenem Kernel nach stream_collide, ein Schritt Versatz (fac_wfd-Muster); Konstruktionszustand eingefroren
 	Memory<float> fac_wfd; Kernel kernel_sgs_fdwand; bool fdwand_on = false; // ★ Geistermoden-Fix: w je Facettenzelle (1 float), Konstruktionszustand eingefroren (Emission + Platzhalter im ctor); alloc rebindet ueber den env-Parameter
+	Memory<float> fac_sb; bool sism_on = false; uint sism_T = 0u; ulong sism_ab = 0ull; // ★ 07.09. SISM: EMA der 6 S-Komponenten je Facette (6 float), Konstruktionszustand + T/ab als Konstruktionszeit-Kopie eingefroren (read-once-Doktrin wie boden_eq_n; die Statik kann von einer Resetliste genullt werden, BEVOR alloc laeuft -- Lehre 02.09.). Kein Platzhalter im ctor noetig: kernel_sgs_fdwand entsteht selbst erst in alloc_facetten_domain
 	Memory<ulong> gd_zellen; Memory<float> fac_gd; Kernel kernel_sgs_gdiag; bool gdiag_on = false; // ★ g-Diagnose: fid->Zellindex-Liste, 8-float-Akkumulator je Facette, eigener Kernel (kein Eingriff in stream_collide)
 	void sgs_gdiag_gpu(); // Mess-Enqueue an der Chunk-/Sample-Kadenz (run mit finish)
 	Memory<float> fac_kd; bool fac_kdiag_on = false; // ★ Klassen-Diagnostik-Akkumulator (16 float je Facette seit 05.09.), nur mit CFD_FAC_KDIAG; Konstruktionszustand eingefroren
@@ -715,7 +717,7 @@ public:
 	void finalize_sparse_tiles(); // FORK: Block-Tiling abschliessen; nach Voxelisierung UND Randbedingungen aufrufen, no-op wenn aus
 	void set_pressure_outlet_faces(const uint face_mask, const float rho_out=1.0f); // FORK: Druck-Auslass. Bits: 1=x_min 2=x_max 4=y_min 8=y_max 16=z_min 32=z_max
 	void set_velocity_inlet_faces(const uint face_mask); // FORK: Geschwindigkeits-Einlass -- u vorgeschrieben, rho laeuft mit der Innenzelle mit
-	void alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr, const uint sgs_gdiag=0u, const uint sgs_fdwand=0u); // C1b: Einzeldomaene, filtert klasse!=0, laedt hoch, bindet
+	void alloc_facetten(const std::vector<Facette>& F, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr, const uint sgs_gdiag=0u, const uint sgs_fdwand=0u, const uint sgs_sism=0u); // C1b: Einzeldomaene, filtert klasse!=0, laedt hoch, bindet
 	// FORK -- Doppel-Domaene (Kopplung grob -> fein). Reihenfolge: einmal alloc_coupling_planes() auf BEIDEN
 	// Domaenen, danach je Fernfeld-Schritt extract_plane_macros() auf der groben und drive_boundary_from_coarse()
 	// auf der feinen Domaene. Beide erfordern einen vorherigen run() (Kernel brauchen initialisierte Puffer).
