@@ -56,6 +56,15 @@
 #   1 ms laenger laufen. Betrifft p4_v3b und p4_v1 (beide noch mit 0.5) nicht mehr --
 #   deren 500-ms-Slices sind aus den VTK nachgerendert.
 # ACHTUNG, Einheit unbekannt (als modus gefuehrt, bitte einordnen): CFD_FACETTEN_KANTE_KOH, CFD_FACETTEN_NORMQUELLE, CFD_FACETTEN_YWKLEMME
+# LAUFPROTOKOLL (Heiko 07.09.2026 abends, verbindlich fuer Tests UND Produktion): 501 ms physikalisch,
+#   Slices ALLE 50 ms, Messung ab 201 ms bis zum Ende. Daraus drei Aenderungen:
+#   CFD_T_WARMUP 0.2 -> 0.201 (Messfenster ab 201 ms).
+#   CFD_SLICE_DT 0.1 ENTFERNT -> CFD_SLICE_NEAR_STEPS 5000 zellen_fein: im dd-Fall schaltet ein gesetztes
+#     CFD_SLICE_DT auf die driftende Legacy-Uhr (Grund fuer den 501-ms-Merksatz); CFD_SLICE_DT=0.05 verliert
+#     dort die letzten 48 ms (Audit E-1, logs/audit_E_slices_2026-09-07.md, HOCH). Die Near-Step-Kadenz ist
+#     drift-frei: 5000 feine Schritte = 50,0 ms bei 4 mm (dt_f = 1e-5 s), skaliert wie zellen_fein mit
+#     dx_ref/dx -> 2500 bei 8 mm (dt_f = 2e-5 s). Einheit zellen_fein bewusst, weil dt_f proportional dx.
+#     Der Diff-Schnitt ist im Kadenz-Modus per Default AUS (Heiko 26.08.), CFD_DIFF_SCHNITT=1 reaktiviert ihn.
 CFD_BODEN_EQ 2 modus
 CFD_BODEN_EQ_ABSTAND 2 modus
 CFD_BODEN_EQ_DOWN 1 modus
@@ -89,9 +98,9 @@ CFD_NEAR_LY 2.6400 phys
 CFD_NEAR_LZ 1.8560 phys
 CFD_NEAR_VOR_MM 96 phys
 CFD_SGS_FDWAND 1 modus
-CFD_SLICE_DT 0.1 ausgabe
+CFD_SLICE_NEAR_STEPS 5000 zellen_fein
 CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.501 phys
-CFD_T_WARMUP 0.2 phys
+CFD_T_WARMUP 0.201 phys
 CFD_VTK_DT 0.15 ausgabe
 CFD_VTK_ENDE 1 ausgabe
