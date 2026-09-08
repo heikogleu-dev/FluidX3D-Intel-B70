@@ -575,6 +575,7 @@ void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector
 	// ★ 08.09. VRAM-Sparmassnahme 4: blendet=false (Nahfeld) legt Blend-Eingang und Gewichte als 1-Element-Dummy an.
 	// Der Blend-Kernel wird trotzdem gebaut -- Signatur und Bindungsreihenfolge bleiben unveraendert; er wird im
 	// Nahfeld nie enqueued (setup.cpp blendet nur lbm_c).
+	if(!blendet&&schale_alpha!=0.0f) print_error("alloc_schale mit blendet=false auf einer Domaene mit alpha = "+to_string(schale_alpha,3u)+" != 0: der Blend-Kernel liest unear[3*gid+2] UNBEDINGT und laese weit ueber einen 1-Element-Puffer hinaus (Pruefagent-Befund B2, 08.09.).");
 	schale_unear = Memory<float>(device, blendet ? 3ull*n : 1ull); // Blend-Eingang (Host-Upload); Ctor-Nullinit -> vor dem ersten Upload waere unear 0, deshalb macht das Setup einen 1-Outer-Vorlauf wie bei der Hinkopplung
 	schale_uout  = Memory<float>(device, 3ull*n); // Extract-Ausgang (getrennt, damit der Waechter-Extract unear nicht ueberschreibt)
 	schale_gewicht = Memory<float>(device, blendet ? n : 1ull); // Gradient-Blend: Zellgewichte (Lagen-Rampe), wirken als a = alpha*gewicht[gid]
@@ -584,7 +585,7 @@ void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector
 	kernel_schale_blend   = Kernel(device, n, "schale_blend", fi, flags, t, 0.0f, schale_liste, (uint)n, schale_unear, schale_gewicht, modus, rho_clamp_hits); // t/alpha (Pos. 2/3) je Enqueue; gewicht+modus VOR diag (Plan-Vorgabe)
 	if(sparse_on) kernel_schale_blend.add_parameters(tile_slot); // TS_P haengt NUR an SPARSE_TILES (XL-Audit-B1-Lektion); der Blend laeuft zwar nur im Fernfeld (ohne Tiling), aber die Signatur muss zur Emission der Domaene passen
 	print_info("N2F-Schale: "+to_string(n)+" Zellen a 2x3+1 floats + Indexliste = "
-		+to_string((float)(n*36ull)/1048576.0f,2u)+" MB auf "+device.info.name+" (alpha dieser Domaene: "+to_string(schale_alpha,3u)+", modus "+to_string(modus)+(modus==2u?" IDENT-Debug":modus==1u?" FNEQ":" EQ")+").");
+		+to_string((float)(n*(blendet?32ull:16ull))/1048576.0f,2u)+" MB auf "+device.info.name+" (alpha dieser Domaene: "+to_string(schale_alpha,3u)+", modus "+to_string(modus)+(modus==2u?" IDENT-Debug":modus==1u?" FNEQ":" EQ")+").");
 }
 
 void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend (nach einlass_eq)
@@ -722,8 +723,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
 		                      + (fac_kdiag_on ? 64ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 16 float seit 05.09. -- Vorschaetzung MUSS mitziehen, sonst ist der VRAM-Waechter um 16 B/Facette blind)
 		                      + (nachbar_on ? 8ull*aktiv : 0ull)     // fac_nb (deterministische Nachbarabtastung, 2 float)
-		                      + (sgs_gdiag>0u ? 40ull*aktiv : 0ull)  // gd_zellen (8 B) + fac_gd (32 B) der g-Diagnose
-		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:12ull)*aktiv : 0ull)  // fac_wfd (4 B) + gd_zellen (8 B), falls nicht schon von gdiag gebaut
+		                      + (sgs_gdiag>0u ? 36ull*aktiv : 0ull)  // gd_zellen (4 B seit 08.09.) + fac_gd (32 B) der g-Diagnose
+		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:8ull)*aktiv : 0ull)  // fac_wfd (4 B) + gd_zellen (4 B seit 08.09.), falls nicht schon von gdiag gebaut
 		                      + (sgs_sism>0u ? 24ull*aktiv : 0ull);   // ★ 07.09. fac_sb (6 float) der SISM-EMA -- Vorschaetzung MUSS mitziehen (KDIAG-Lehre: sonst ist der VRAM-Waechter um 24 B/Facette blind)
 		const ulong mb_fac = bytes_fac/1048576ull;
 		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
@@ -899,7 +900,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 16ull*aktiv); for(ulong q8=0ull;q8<16ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(64ull*aktiv/1048576ull))+" MB, 16 float je Facette (Text sagte bis 05.09. \"10\" -- war schon bei 12 falsch), Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
 	if(sgs_gdiag>0u||sgs_fdwand>0u||nachbar_on) { // ★ Liste fid->Zellindex wird von g-Diagnose, Geistermoden-Fix UND Nachbarabtastung (03.09.) gebraucht
 		gd_zellen = Memory<uint>(device, aktiv);
-		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=(uint)f.n; } } // ★ 08.09. uint (N < 2^32, oben geprueft)
+		if(get_N()>0xFFFFFFFFull) print_error("gd_zellen ist seit 08.09. uint (VRAM) -- bei N > 2^32 wuerde jeder Zellindex still abgeschnitten. Der Waechter darueber prueft die FACETTENzahl, nicht N (Pruefagent-Befund B1).");
+		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=(uint)f.n; } }
 		gd_zellen.write_to_device();
 	}
 	if(nachbar_on) { // ★ 03.09. DETERMINISTISCHE NACHBARABTASTUNG: Puffer bauen, Kernel binden, stream_collide-Rebind (fac_wfd-Muster, B70-bewiesen)
@@ -1100,7 +1102,8 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 	else { kf_N = liste_n; kf_marker = marker; kf_zper = z_per; kf_bound = true; }
 	if(liste_n==0ull) return; // leere Liste: kraft_facetten_gpu liefert Nullen ohne Launch
 	liste_m = Memory<uint>(device, liste_n); // Ctor-Nullinit + zweiter Voll-Write = ein verschenkter 16-MB-Transfer, EINMALIG beim Bind -- bewusst toleriert (Pruefagent N2)
-	for(ulong i=0ull; i<liste_n; i++) liste_m[i] = (uint)liste[i]; // ★ 08.09. uint -- der Waechter auf 2^32 steht direkt darueber
+	if(get_N()>0xFFFFFFFFull) print_error("kf_liste/kfb_liste sind seit 08.09. uint (VRAM) -- bei N > 2^32 wuerde jeder Zellindex still abgeschnitten. Der Waechter oben prueft die LISTENLAENGE, nicht den Indexwert (Pruefagent-Befund B1).");
+	for(ulong i=0ull; i<liste_n; i++) liste_m[i] = (uint)liste[i];
 	liste_m.write_to_device();
 	const ulong gruppen = (liste_n+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE; // = ceil(liste_n/64.0)
 	psum_m = Memory<float>(device, 3ull*gruppen);
@@ -1943,8 +1946,17 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 #endif // FORCE_FIELD
 	ulong bytes_bekannt = N_dom*b_ohne_F;
 #ifdef FORCE_FIELD
-	bytes_bekannt += 12ull*F_N; // ★ 03.09.: unter CFD_F_LISTE ist das eine OBERGRENZE -- die Slotzahl steht erst
-	                           // nach der Voxelisierung fest, die Vorpruefung laeuft davor. Bewusst konservativ.
+	// ★ 08.09. (Pruefagent-Befund B3): unter CFD_F_LISTE ist 12*F_N eine um Faktor ~40 zu hohe Obergrenze
+	// (4 mm: 1832 MiB gebucht gegen 43 MiB real). Die Vorpruefung lief damit weiter gegen den ALTEN Bedarf --
+	// der freigewordene Speicher waere zwar zur Laufzeit da, aber der Deckel bei "memory_required + reserve >
+	// memory_available" haette weiter jedes feinere Gitter abgelehnt. Genau die Klage, die in
+	// basis/fahrzeug_dd.basis schon steht. Die Slotzahl steht erst nach der Voxelisierung fest, also wird
+	// hier mit dem gemessenen Wandsolid-Anteil abgeschaetzt: 3.739.681 von 160.106.544 F-BBox-Zellen am
+	// 4-mm-Fahrzeug = 2,34 % (logs/zg_pinv4.log). Aufschlag auf 6 % plus Maske und Liste -- grosszuegig
+	// gegen jede Geometrie, aber nicht mehr um Faktor 40 daneben. Der harte Schutz bleibt der
+	// VRAM-Waechter in alloc_facetten_domain, der gegen den GEMESSENEN Frei-Wert prueft.
+	if(LBM_Domain::s_f_liste>0u) bytes_bekannt += (ulong)(0.06*12.0*(double)F_N) + 8ull*(((ulong)F_N+31ull)/32ull) + (ulong)(0.06*4.0*(double)F_N);
+	else bytes_bekannt += 12ull*F_N;
 #endif // FORCE_FIELD
 	if(LBM_Domain::s_facetten) bytes_bekannt += (LBM_Domain::s_fac_idx_voll>0u ? 4ull*(ulong)F_N : 8ull*(((ulong)F_N+31ull)/32ull)); // fac_idx als Bitmaske+Praefixsumme (03.09.) -- die Pruefung kannte den Posten frueher gar nicht
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB

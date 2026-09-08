@@ -6,7 +6,10 @@
 # STANDARD GEAENDERT (08.09.2026): CFD_F_LISTE 1 ist Basis. Das Kraftfeld F lief bisher als volles
 #   Feld ueber die F-Bounding-Box (1118x468x306 = 160,1 Mio Zellen, 1832 MiB) bei einer Belegung von
 #   2,336 % -- nur 3.739.681 der 62,7 Mio Solidzellen sind WANDsolid und koennen ueberhaupt eine Kraft
-#   tragen. Mit Markerliste: 1832 -> 81 MiB, gespart 1790 MB.
+#   tragen. Mit Markerliste: F selbst 1832 -> 43 MiB, gespart 1790 MiB. (Die oft zitierte Zeile
+#   "1832 -> 81 MiB inkl. Maske, gespart 1751 MiB" meint dasselbe anders gerechnet: f_maske belegt
+#   38 MiB und wird in BEIDEN Armen alloziert, faellt also aus der Differenz heraus. 1790 ist die
+#   Differenz des F-Puffers allein, 1751 die inklusive Maske -- nicht beides gleichzeitig zitieren.)
 #   ABNAHME (AUDIT-BEFUNDE B82, Serie yc_vram4mm, 03.09., 4-mm-PRODUKTIONSPUNKT, Heiko-Freigabe):
 #     alle drei Arme 17/17 Ergebnis-CSVs BITGLEICH; Slot 77 (Schreibversuch ohne Slot) = 0;
 #     freier VRAM min-zu-min +1709 MiB; Leistungsindex 10700 -> 10688 = -0,11 %, also keine Einbusse.
@@ -93,7 +96,7 @@ CFD_FAC_ELIBB 1 modus
 CFD_FAC_NACHBAR 1 modus
 CFD_FAC_SATGATE 1 modus
 CFD_FAC_UTKORR 1.5 modus
-CFD_F_LISTE 1 schalter
+CFD_F_LISTE 1 modus
 CFD_FERN_BODEN_EQ 2 modus
 CFD_FERN_BODEN_EQ_DOWN 1 modus
 CFD_FERN_EINLASS_EQ 2 modus
