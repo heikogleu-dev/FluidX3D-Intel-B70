@@ -3083,6 +3083,57 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(fdw_fid!=0xFFFFFFFFu) {
 		w = fac_wfd[fdw_fid];
 		if(t%100ul==0ul&&rho_clamp_hits[76]<0xF0000000u) atomic_inc(&rho_clamp_hits[76]); // Slot 76 (B70; 39 war der oberste SGS_DIAG-Wandlagen-Bin): FDWAND angewandt
+)+"#ifdef SGS_VANDRIEST"+R(
+		// ★★ VAN-DRIEST-DAEMPFUNG auf der FACETTEN-Architektur (CFD_SGS_VANDRIEST, 08.09.2026).
+		// D = 1 - exp(-y+/A+), A+ = 26 (van Driest 1956, Literatur -- kein Handwert); nu_t <- nu_t * D^2.
+		// ENTSCHEIDEND UND DER GRUND, WARUM DAS HIER GEHT: y+ kommt aus dem WANDMODELL, nicht aus dem
+		// lokalen Strain. V1 schaetzte y+ = kappa*y^2*|S|/nu und multiplizierte dann mit demselben |S|
+		// (FluidX3D/src/kernel.cpp:3079) -- eine Selbstreferenz, die an der Abloesung mit |S| -> 0 auch
+		// y+ -> 0 und damit nu_t -> 0 trieb: WANDFREI genau dort, wo es divergiert. Der V1-Auditsatz
+		// lautet "y+ aus lokalem Strain nullt sich an der Abloesung selbst". Hier dagegen:
+		//   tw  = fac_tau_acc[6 fid]/fac_tau_cnt[fid] -- LAUFMITTEL der Wandschubspannung aus der
+		//         Spalding-Kette des iMEM-Wandmodells (Eingang u_t, mit NACHBAR aus der zweiten
+		//         Fluidzelle). Ein Zeitmittel kann der Momentanstroemung nicht folgen: die
+		//         dynamische Rueckkopplung existiert konstruktiv nicht.
+		//   y_w = fac_geo[8 fid + 3]                  -- Wandabstand aus der Voxelgeometrie.
+		//   DEKLARIERT (Pruefagent 08.09., Befund 3): fac_tau_acc summiert tw ueber ALLE Besuche, auch
+		//   Rueckfallbesuche mit "haette"-Werten (8 mm: 42,8 % der Besuche) -- dieselbe Reihe wie
+		//   yplus_facetten.csv. Das Kontaminationsmass steht im Bericht (KDIAG-Vergleich gegen die
+		//   angewandten Besuche); ein Wechsel auf die angewandte Reihe braeuchte 8 B je Facette ausserhalb
+		//   von KDIAG und waere eine eigene Variable.
+		//   LETZT-STICHPROBE (Befund 2): Slots 160..167 sind ein Zeitintegral ueber alle Zaehlslots ab der
+		//   Sperre, der Host kennt aber nur den Endzustand -- ein Vergleich der beiden ist konstruktiv
+		//   unscharf. Deshalb zaehlt jeder Slot zusaetzlich in Bank (t/100)&1 der Slots 170..185 und nullt
+		//   im selben Slot die andere Bank (atomic_min auf 0, racefrei: niemand schreibt sie in diesem
+		//   Slot). Nach dem Lauf traegt Bank (L/100)&1 GENAU den letzten Slot L.
+		//   nu_t haengt weiter an |S|_FD aus dem u-Feld: zwei UNABHAENGIGE Groessen, D ist nur ein
+		//   Gewicht, nu_t bleibt linear in |S| (V1 verhielt sich wie |S|^3).
+		// Host-Spiegel derselben Formel: yplus_facetten.csv in setup.cpp.
+		// 1/nu = 2*def_fac_Y (def_fac_Y = 0.5f/nu, unbedingt unter FACETTEN emittiert) -- NICHT
+		// def_fac_nu verwechseln, das haengt am widerlegten u_w-Arm.
+		if(t>=def_sgs_vd_ab) { // WARMLAUFSPERRE (08.09., iGPU-Befund Kanal N=108): tw ist ein Laufmittel seit t=0 und im Anlauf zu klein -> y+ zu klein -> D^2 zu klein -> ZU STARKE Daempfung genau in der Phase, in der WANDFREI nach 175 Schritten divergierte. Vorher: w unangetastet, nichts gezaehlt (Muster def_sgs_sism_ab).
+		{	const uint vd_cnt = fac_tau_cnt[fdw_fid];
+			if(vd_cnt>0u) {
+				const float vd_tw = fac_tau_acc[6ul*(ulong)fdw_fid]/(float)vd_cnt;
+				const float vd_yp = sqrt(fmax(0.0f, vd_tw))*fac_geo[8ul*(ulong)fdw_fid+3ul]*(2.0f*def_fac_Y);
+				const float vd_d  = 1.0f-exp(-vd_yp*(1.0f/def_sgs_vd_aplus));
+				const float vd_d2 = vd_d*vd_d;
+				if(t%100ul==0ul) {
+					const uint vd_bin = min(7u, (uint)(vd_d2*8.0f));
+					if(rho_clamp_hits[160u+vd_bin]<0xF0000000u) atomic_inc(&rho_clamp_hits[160u+vd_bin]);
+					if(rho_clamp_hits[168]<0xF0000000u) atomic_inc(&rho_clamp_hits[168]);
+					const uint vd_bank = (uint)((t/100ul)&1ul);
+					atomic_inc(&rho_clamp_hits[170u+8u*vd_bank+vd_bin]);
+					for(uint vb=0u; vb<8u; vb++) atomic_min(&rho_clamp_hits[170u+8u*(1u-vd_bank)+vb], 0u);
+				}
+)+"#ifdef SGS_VANDRIEST_ANWENDEN"+R(
+				const float vd_tau0 = 1.0f/def_w;
+				const float vd_nut  = (1.0f/w-vd_tau0)*(1.0f/3.0f);
+				w = 1.0f/(vd_tau0+3.0f*vd_d2*vd_nut);
+)+"#endif"+R( // SGS_VANDRIEST_ANWENDEN
+			} else if(t%100ul==0ul&&rho_clamp_hits[169]<0xF0000000u) atomic_inc(&rho_clamp_hits[169]);
+		} }
+)+"#endif"+R( // SGS_VANDRIEST
 	} else
 )+"#endif"+R( // SGS_FDWAND
 	{ // Smagorinsky-Lilly subgrid turbulence model, source: https://arxiv.org/pdf/comp-gas/9401004.pdf, in the eq. below (26), it is "tau_0" not "nu_0", and "sqrt(2)/rho" (they call "rho" "n") is missing
