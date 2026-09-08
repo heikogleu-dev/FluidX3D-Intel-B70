@@ -3737,7 +3737,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float old = val; while((old=atomic_xchg(addr, atomic_xchg(addr, 0.0f)+old))!=0.0f);
 )+"#endif"+R(
 }
-)+R(kernel void po_reduce_mean(const global float* rho, const global ulong* po_interior, const uint N_po, global float* po_part) {
+)+R(kernel void po_reduce_mean(const global float* rho, const global uint* po_interior, const uint N_po, global float* po_part) {
 	// Mittelwert der Dichte ueber die INNENZELLEN der Auslassebene: erst im lokalen Speicher
 	// zusammenfassen, dann schreibt jede Gruppe exklusiv ihren Slot. Die Endsumme bildet
 	// po_final_mean in Indexordnung -- OHNE Atomik (Umbau 2026-08-24, siehe dort).
@@ -3777,7 +3777,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	po_mean[0] = s/(float)N_po;
 } // po_final_mean()
 
-)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global ulong* po_cells, const global ulong* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
+)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
 	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
 	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
@@ -3808,7 +3808,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// ebenen-gleichfoermige Mode.
 	const uint gid = get_global_id(0);
 	if(gid>=N_po) return;
-	const ulong n = po_cells[gid], m = po_interior[gid];
+	const ulong n = (ulong)po_cells[gid], m = (ulong)po_interior[gid]; // ★ 08.09. Listen sind uint (VRAM); der Index bleibt ulong
 	// ★★ ANKER AUF DEN FLAECHENMITTELWERT, nicht auf jede Zelle. 2026-08-08.
 	// Vorher wurde rho JEDER Auslasszelle einzeln gegen rho_out gezogen. Beim Fahrzeug sitzt der feine
 	// Auslass 0,449 Fahrzeuglaengen hinter dem Heck, also im Totwasser -- dort erzwang rho_out = 1 auf
@@ -4005,7 +4005,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 // Fenster-Konvention: Offsets -ratio/2 .. ratio-ratio/2-1 je Achse (bei ratio=4: -2..+1) -- das
 // Blockzentrum liegt eine HALBE Feinzelle unter dem Deckungspunkt (2 mm bei dx_f=4mm); fuer eine
 // Relaxationsquelle unerheblich, aber deklariert.
-)+R(kernel void schale_extract(const global float* u, const global uchar* flags, const global ulong* liste, const uint n, const uint ratio, const uint mittel, global float* out) {
+)+R(kernel void schale_extract(const global float* u, const global uchar* flags, const global uint* liste, const uint n, const uint ratio, const uint mittel, global float* out) {
 	const uint gid = get_global_id(0);
 	if(gid>=n) return;
 	const uxx c = (uxx)liste[gid];
@@ -4056,7 +4056,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 // die Slots, aus denen f_post kam -- store_f(f_true) mit f_true[i]=fhn[pair(i)] legt jeden Wert
 // bitgleich zurueck (fpxx->float->fpxx ist verlustfrei): das IDENT-No-Op. Damit ist store_f im
 // TRUE-Frame adressiert und der EQ-Arm (store feq(u_blend), u_blend physikalisch) konsistent.
-)+R(kernel void schale_blend(global fpxx* fi, const global uchar* flags, const ulong t, const float alpha, const global ulong* liste, const uint n, const global float* unear, const global float* gewicht, const uint modus, volatile global uint* diag TS_P) {
+)+R(kernel void schale_blend(global fpxx* fi, const global uchar* flags, const ulong t, const float alpha, const global uint* liste, const uint n, const global float* unear, const global float* gewicht, const uint modus, volatile global uint* diag TS_P) {
 	const uint gid = get_global_id(0);
 	if(gid>=n) return;
 	const uxx nn = (uxx)liste[gid];
@@ -4284,7 +4284,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	for(uint g=0u; g<n_groups; g++) { sx+=of_part[3u*g]; sy+=of_part[3u*g+1u]; sz+=of_part[3u*g+2u]; }
 	object_sum[0]=sx; object_sum[1]=sy; object_sum[2]=sz;
 } // object_force_final()
-)+R(kernel void kraft_facetten_gpu(const global float* F, const global uint* f_maske, const global ulong* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
+)+R(kernel void kraft_facetten_gpu(const global float* F, const global uint* f_maske, const global uint* kf_liste, const uint kf_N, const global uint* fac_idx, const global uint* fac_tau_n, const global float* fac_geo, const uint fac_on, const uint z_per, global float* kf_psum, global uint* kf_pcnt) {
 	// FORK kraft_facetten-GPU: Druckanteil des Facetten-Cd-Pfads ohne Host-F-Transfer. Range =
 	// Markerzellen-Indexliste (der Host baut sie in der Dreifachschleifen-Scan-Reihenfolge der
 	// F-BBox). Klassifikation voll/projiziert/unklar und Projektion AUSDRUCKSGLEICH zum Host-Pfad
@@ -4350,7 +4350,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // kraft_facetten_gpu()
 
 )+R(kernel void sgs_gdiag(const global fpxx* fi, const global float* u, const global uchar* flags,
-	const global ulong* gd_zellen, const uint gd_N, global float* fac_gd, const ulong t,
+	const global uint* gd_zellen, const uint gd_N, global float* fac_gd, const ulong t,
 	const float fx, const float fy, const float fz, const uint guo_an TS_P) {
 	// ★★ g-DIAGNOSE (31.08.2026, Pruefagenten-Empfehlung "Messung statt Wette", ARBEITSLISTE Vorzeichen-
 	// Einwand). Sparser Kernel ueber die Facettenzellenliste, laeuft NACH einem abgeschlossenen Schritt
@@ -4465,7 +4465,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // sgs_gdiag()
 
 )+R(kernel void sgs_fdwand)+"("+R(const global float* u, const global uchar* flags,
-	const global ulong* gd_zellen, const uint gd_N, global float* fac_wfd // ) {
+	const global uint* gd_zellen, const uint gd_N, global float* fac_wfd // ) {
 )+"#ifdef SGS_SISM"+R(
 	, const ulong t, global float* fac_sb, global uint* rho_clamp_hits // ★ 07.09. SISM: Reihenfolge = add_parameters in alloc_facetten_domain (t, fac_sb, hits), VOR tile_slot
 )+"#endif"+R( // SGS_SISM
@@ -4536,7 +4536,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // sgs_fdwand()
 
 )+R(kernel void fac_nachbar_ab(const global float* u, const global uchar* flags, const global float* fac_geo,
-	const global ulong* gd_zellen, const uint gd_N, global float* fac_nb TS_P) {
+	const global uint* gd_zellen, const uint gd_N, global float* fac_nb TS_P) {
 	// ★★ DETERMINISTISCHE NACHBARABTASTUNG (CFD_FAC_NACHBAR, 03.09.2026). Der Direktzugriff u[nb] in
 	// apply_facette_imem lief im Kernel stream_collide, der u im selben Launch schreibt -- gemessen NICHT
 	// bitreproduzierbar (xu_det_mit_a/b: cf 0,00073682648 gegen 0,00073630592; ohne NACHBAR bitgleich).

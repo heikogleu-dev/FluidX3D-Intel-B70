@@ -71,8 +71,8 @@ private:
 	// sind Kanten und Ecken (Zelle liegt auf zwei oder drei Auslassflaechen) sauber loesbar, und nur so
 	// laesst sich vorab pruefen, dass jede Innenzelle wirklich Fluid ist und jede Randzelle genau einmal
 	// vorkommt. Die frueher gespeicherte Richtung (po_dirs) konnte beides nicht.
-	Memory<ulong> po_cells;    // Randzellen, jede genau einmal
-	Memory<ulong> po_interior; // zugehoerige echte Innenzelle, aus der extrapoliert wird
+	Memory<uint> po_cells;    // Randzellen, jede genau einmal (★ 08.09. uint statt ulong: N < 2^32, spart die Haelfte)
+	Memory<uint> po_interior; // zugehoerige echte Innenzelle, aus der extrapoliert wird (★ 08.09. uint)
 	Kernel kernel_apply_pressure_outlet;
 	uint po_N_active = 0u;
 	// FORK -- Geschwindigkeits-Einlass: u bleibt vorgeschrieben (das macht TYPE_E), rho laeuft mit.
@@ -161,7 +161,7 @@ public:
 	// ist der Blend-EINGANG (Host-Upload vom Nahfeld-Blockmittel), schale_uout der Extract-AUSGANG
 	// (Nahfeld: Blockmittel; Fernfeld: Waechter-Punktwerte). Getrennte Puffer, damit der Waechter-
 	// Extract auf dem Fernfeld das hochgeladene unear nicht ueberschreibt.
-	Memory<ulong> schale_liste;
+	Memory<uint> schale_liste; // ★ 08.09. uint statt ulong (VRAM-Sparmassnahme 3)
 	Memory<float> schale_unear, schale_uout; // je 3 float pro Schalenzelle (ux,uy,uz)
 	Memory<float> schale_gewicht; // ★ Gradient-Blend: Zellgewicht in [0;1] (Lagen-Rampe innen 1 -> aussen 1/N; x+ skalierbar); wirkt im Kernel als a = alpha*gewicht[gid]
 	Kernel kernel_schale_extract, kernel_schale_blend;
@@ -171,7 +171,7 @@ public:
 	static float s_schale_alpha; // CFD_N2F_SCHALE: Blendfaktor u_neu=(1-a)*u_far+a*u_near; 0 = aus. Setup setzt lbm_f EXPLIZIT 0 (Blend laeuft NUR im Fernfeld).
 	bool  schale_paritaet = false;  // Konstruktionszeit-Kopie (read-once)
 	static bool s_schale_paritaet; // CFD_N2F_PARITAET: Kernel bekommt alpha EXAKT 0, der Enqueue laeuft aber -- das Torgatter haengt weiter an schale_alpha>0. Ohne diese Trennung schaltet ein alpha=0 den Kernel ganz ab und der Beweis liefe ins Leere (gemessen 2026-08-22: Slot-22-Wirkpfad NULL -> harter Fehler).
-	void alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus); // Muster alloc_coupling_planes: echte Puffer, Kernel mit echten Puffern; NACH finalize_sparse_tiles rufen (fi-Bindung!)
+	void alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus, const bool blendet=true); // ★ 08.09. blendet=false: Blend-Eingang und Gewichte als 1-Element-Dummy (VRAM-Sparmassnahme 4, das Nahfeld blendet nie). Muster alloc_coupling_planes: echte Puffer, Kernel mit echten Puffern; NACH finalize_sparse_tiles rufen (fi-Bindung!)
 	void enqueue_schale_blend(); // post-stream Blend; No-Op bei schale_n==0 ODER schale_alpha==0
 
 	// ★★ Daempfungszone -- PRO DOMAENE, und das ist keine Kosmetik. Vorpruefung 2026-08-09:
@@ -245,7 +245,7 @@ public:
 	Memory<float> fac_wfd; Kernel kernel_sgs_fdwand; bool fdwand_on = false; // ★ Geistermoden-Fix: w je Facettenzelle (1 float), Konstruktionszustand eingefroren (Emission + Platzhalter im ctor); alloc rebindet ueber den env-Parameter
 	bool vandriest_on = false; uint vandriest_modus = 0u; ulong vandriest_ab = 0ull; // ★ 08.09. van Driest: Konstruktionszustand eingefroren (Statik-Lebensdauer-Lehre 02.09.)
 	Memory<float> fac_sb; bool sism_on = false; uint sism_T = 0u; ulong sism_ab = 0ull; // ★ 07.09. SISM: EMA der 6 S-Komponenten je Facette (6 float), Konstruktionszustand + T/ab als Konstruktionszeit-Kopie eingefroren (read-once-Doktrin wie boden_eq_n; die Statik kann von einer Resetliste genullt werden, BEVOR alloc laeuft -- Lehre 02.09.). Kein Platzhalter im ctor noetig: kernel_sgs_fdwand entsteht selbst erst in alloc_facetten_domain
-	Memory<ulong> gd_zellen; Memory<float> fac_gd; Kernel kernel_sgs_gdiag; bool gdiag_on = false; // ★ g-Diagnose: fid->Zellindex-Liste, 8-float-Akkumulator je Facette, eigener Kernel (kein Eingriff in stream_collide)
+	Memory<uint> gd_zellen; Memory<float> fac_gd; Kernel kernel_sgs_gdiag; bool gdiag_on = false; // ★ 08.09. gd_zellen uint statt ulong (VRAM). ★ g-Diagnose: fid->Zellindex-Liste, 8-float-Akkumulator je Facette, eigener Kernel (kein Eingriff in stream_collide)
 	void sgs_gdiag_gpu(); // Mess-Enqueue an der Chunk-/Sample-Kadenz (run mit finish)
 	Memory<float> fac_kd; bool fac_kdiag_on = false; // ★ Klassen-Diagnostik-Akkumulator (16 float je Facette seit 05.09.), nur mit CFD_FAC_KDIAG; Konstruktionszustand eingefroren
 	Memory<float> fac_us;    // EMA-Zustand 3 float je Facette (nur gebunden wenn s_fac_ema>0)
@@ -261,14 +261,14 @@ public:
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege
 	Memory<uchar> fac_q; // ★ B1: q je Link (18 uchar je aktive Facette; 0 = kein Schnitt -> HWBB, sonst q = qb/254, 127 = exakt 0,5)
 	// ★ kraft_facetten-GPU-Reduktion: Druckanteil des Cd-Pfads auf dem Geraet statt per Voll-F-Transfer.
-	Memory<ulong> kf_liste;  // Markerzellen-Indexliste (Host-Scan-Reihenfolge der F-BBox)
+	Memory<uint> kf_liste; // ★ 08.09. uint statt ulong -- der groesste Einzelposten dieser Massnahme (237 MB bei 4 mm)  // Markerzellen-Indexliste (Host-Scan-Reihenfolge der F-BBox)
 	Memory<float> kf_psum;   // 3 float je Arbeitsgruppe: px,py,pz-Teilsummen (atomikfrei)
 	Memory<uint>  kf_pcnt;   // 3 uint je Arbeitsgruppe: voll,proj,unklar
 	Kernel kernel_kraft_facetten;
 	ulong kf_N=0ull; uchar kf_marker=0u; bool kf_zper=false, kf_bound=false; // Bindungsschluessel (marker,z_per) + Waechter
 	// ★ FORK Kraft-Zerlegung (CFD_KRAFT_ZBAND): zweiter Bindungs-Slot fuer die z-Band-Teilliste (z<zband).
 	// Eigener Puffersatz + eigener Kernel -- der Hauptslot bleibt wortgleich unangetastet.
-	Memory<ulong> kfb_liste;  // Band-Teilliste (dieselbe Scan-Reihenfolge, Filter z<zband)
+	Memory<uint> kfb_liste; // ★ 08.09. uint statt ulong (derselbe Membersatz wie kf_liste)  // Band-Teilliste (dieselbe Scan-Reihenfolge, Filter z<zband)
 	Memory<float> kfb_psum;   // 3 float je Arbeitsgruppe
 	Memory<uint>  kfb_pcnt;   // 3 uint je Arbeitsgruppe
 	Kernel kernel_kraft_facetten_band;
@@ -734,7 +734,7 @@ public:
 	// schale_upload_unear() auf der groben Instanz. Der Blend selbst laeuft in do_time_step
 	// (enqueue_schale_blend, nach einlass_eq) und ist ueber s_schale_alpha nur im Fernfeld scharf.
 	// Gradient-Blend: gewichte (je Listenzelle, [0;1]) und modus (0 EQ / Bit 0 FNEQ / 2 IDENT-Debug).
-	void alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus);
+	void alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus, const bool blendet=true);
 	void schale_extract_u(std::vector<float>& out, const uint mittel); // Kernel-Run + Read des out-Puffers (blockierend)
 	void schale_upload_unear(const std::vector<float>& unear); // Host -> schale_unear (Blend-Eingang)
 	void reset(); // reset simulation (takes effect in following run() call)

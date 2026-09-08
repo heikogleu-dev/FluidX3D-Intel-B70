@@ -558,7 +558,7 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 // Puffern erzeugen -- kein Platzhalter-Bind-später (die DIAGZ-Use-after-free-Klasse). MUSS nach
 // finalize_sparse_tiles laufen (fi ist dann final gebunden; im dd-Fall hat das Grobgitter ohnehin
 // kein Tiling, und das Setup ruft alloc erst nach run(0)).
-void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus) {
+void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus, const bool blendet) {
 	const ulong n = (ulong)liste.size();
 	if(n==0ull) { print_error("alloc_schale mit leerer Liste."); return; }
 	if(n>0x55555555ull) { print_error("alloc_schale: Liste ueberschreitet 2^32/3 Zellen -- die 3u*gid-Indexprodukte in schale_extract/schale_blend (kernel.cpp) wickeln in 32 Bit VOR der 2^32-Grenze (Kernel-Pruefer 2026-08-22 abends). Praktisch unerreichbar, aber der Guard deckt jetzt seine eigene Arithmetik."); return; }
@@ -568,13 +568,17 @@ void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector
 	if(modus>2u) { print_error("alloc_schale: modus = "+to_string(modus)+" (gueltig: 0 EQ, 1 FNEQ, 2 IDENT-Debug)."); return; }
 	schale_n = (uint)n;
 	schale_modus = modus;
-	schale_liste = Memory<ulong>(device, n);
-	for(ulong i=0ull; i<n; i++) schale_liste[i] = liste[i];
+	schale_liste = Memory<uint>(device, n);
+	if(get_N()>0xFFFFFFFFull) print_error("alloc_schale: Gitter ueberschreitet 2^32 Zellen -- schale_liste ist seit 08.09. uint (VRAM).");
+	for(ulong i=0ull; i<n; i++) schale_liste[i] = (uint)liste[i];
 	schale_liste.write_to_device();
-	schale_unear = Memory<float>(device, 3ull*n); // Blend-Eingang (Host-Upload); Ctor-Nullinit -> vor dem ersten Upload waere unear 0, deshalb macht das Setup einen 1-Outer-Vorlauf wie bei der Hinkopplung
+	// ★ 08.09. VRAM-Sparmassnahme 4: blendet=false (Nahfeld) legt Blend-Eingang und Gewichte als 1-Element-Dummy an.
+	// Der Blend-Kernel wird trotzdem gebaut -- Signatur und Bindungsreihenfolge bleiben unveraendert; er wird im
+	// Nahfeld nie enqueued (setup.cpp blendet nur lbm_c).
+	schale_unear = Memory<float>(device, blendet ? 3ull*n : 1ull); // Blend-Eingang (Host-Upload); Ctor-Nullinit -> vor dem ersten Upload waere unear 0, deshalb macht das Setup einen 1-Outer-Vorlauf wie bei der Hinkopplung
 	schale_uout  = Memory<float>(device, 3ull*n); // Extract-Ausgang (getrennt, damit der Waechter-Extract unear nicht ueberschreibt)
-	schale_gewicht = Memory<float>(device, n); // Gradient-Blend: Zellgewichte (Lagen-Rampe), wirken als a = alpha*gewicht[gid]
-	for(ulong i=0ull; i<n; i++) schale_gewicht[i] = gewichte[i];
+	schale_gewicht = Memory<float>(device, blendet ? n : 1ull); // Gradient-Blend: Zellgewichte (Lagen-Rampe), wirken als a = alpha*gewicht[gid]
+	if(blendet) for(ulong i=0ull; i<n; i++) schale_gewicht[i] = gewichte[i];
 	schale_gewicht.write_to_device();
 	kernel_schale_extract = Kernel(device, n, "schale_extract", u, flags, schale_liste, (uint)n, ratio, 1u, schale_uout); // mittel (Pos. 5) je Enqueue
 	kernel_schale_blend   = Kernel(device, n, "schale_blend", fi, flags, t, 0.0f, schale_liste, (uint)n, schale_unear, schale_gewicht, modus, rho_clamp_hits); // t/alpha (Pos. 2/3) je Enqueue; gewicht+modus VOR diag (Plan-Vorgabe)
@@ -894,8 +898,8 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	if(fac_elibb_on) kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u), fac_q); // ★ B2: Rebind des in alloc gebauten fac_q (Signaturposition = nach diagz)
 	if(fac_kdiag_on) { fac_kd = Memory<float>(device, 16ull*aktiv); for(ulong q8=0ull;q8<16ull*aktiv;q8++) fac_kd[q8]=0.0f; fac_kd.write_to_device(); kernel_stream_collide.set_parameters(fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u), fac_kd); print_info("Klassen-Diagnostik (CFD_FAC_KDIAG): fac_kd "+to_string((ulong)(64ull*aktiv/1048576ull))+" MB, 16 float je Facette (Text sagte bis 05.09. \"10\" -- war schon bei 12 falsch), Tabelle je Treppenklasse am Laufende."); } // ★ Rebind nach fac_q
 	if(sgs_gdiag>0u||sgs_fdwand>0u||nachbar_on) { // ★ Liste fid->Zellindex wird von g-Diagnose, Geistermoden-Fix UND Nachbarabtastung (03.09.) gebraucht
-		gd_zellen = Memory<ulong>(device, aktiv);
-		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=f.n; } }
+		gd_zellen = Memory<uint>(device, aktiv);
+		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=(uint)f.n; } } // ★ 08.09. uint (N < 2^32, oben geprueft)
 		gd_zellen.write_to_device();
 	}
 	if(nachbar_on) { // ★ 03.09. DETERMINISTISCHE NACHBARABTASTUNG: Puffer bauen, Kernel binden, stream_collide-Rebind (fac_wfd-Muster, B70-bewiesen)
@@ -1086,7 +1090,7 @@ void LBM_Domain::enqueue_object_torque(const float3& rotation_center, const ucha
 void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const uchar marker, const bool z_per, const bool band_slot) {
 	// ★ FORK Kraft-Zerlegung: band_slot=true waehlt den kfb_*-Membersatz (z-Band-Teilliste), sonst
 	// laeuft alles wortgleich ueber den Hauptslot. kfb_zband setzt der Aufrufer (setup.cpp).
-	Memory<ulong>& liste_m = band_slot ? kfb_liste : kf_liste;
+	Memory<uint>& liste_m = band_slot ? kfb_liste : kf_liste;
 	Memory<float>& psum_m  = band_slot ? kfb_psum  : kf_psum;
 	Memory<uint>&  pcnt_m  = band_slot ? kfb_pcnt  : kf_pcnt;
 	Kernel& kernel_m = band_slot ? kernel_kraft_facetten_band : kernel_kraft_facetten;
@@ -1095,8 +1099,8 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 	if(band_slot) { kfb_N = liste_n; kfb_marker = marker; kfb_zper = z_per; kfb_bound = true; } // eigene Schluessel (Pruefagent M)
 	else { kf_N = liste_n; kf_marker = marker; kf_zper = z_per; kf_bound = true; }
 	if(liste_n==0ull) return; // leere Liste: kraft_facetten_gpu liefert Nullen ohne Launch
-	liste_m = Memory<ulong>(device, liste_n); // Ctor-Nullinit + zweiter Voll-Write = ein verschenkter 16-MB-Transfer, EINMALIG beim Bind -- bewusst toleriert (Pruefagent N2)
-	for(ulong i=0ull; i<liste_n; i++) liste_m[i] = liste[i];
+	liste_m = Memory<uint>(device, liste_n); // Ctor-Nullinit + zweiter Voll-Write = ein verschenkter 16-MB-Transfer, EINMALIG beim Bind -- bewusst toleriert (Pruefagent N2)
+	for(ulong i=0ull; i<liste_n; i++) liste_m[i] = (uint)liste[i]; // ★ 08.09. uint -- der Waechter auf 2^32 steht direkt darueber
 	liste_m.write_to_device();
 	const ulong gruppen = (liste_n+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE; // = ceil(liste_n/64.0)
 	psum_m = Memory<float>(device, 3ull*gruppen);
@@ -2396,9 +2400,10 @@ void LBM_Domain::set_pressure_outlet_faces(const uint face_mask, const float rho
 	if((face_mask&1u)!=0u) print_warning("Druck-Auslass: face_mask enthaelt x_min. Das ist normalerweise der EINLASS -- dort wird u jetzt extrapoliert statt vorgegeben.");
 
 	po_N_active = N_po;
-	po_cells    = Memory<ulong>(device, (ulong)N_po);
-	po_interior = Memory<ulong>(device, (ulong)N_po);
-	for(uint i=0u; i<N_po; i++) { po_cells[i] = cells[i]; po_interior[i] = interior[i]; }
+	po_cells    = Memory<uint>(device, (ulong)N_po);
+	po_interior = Memory<uint>(device, (ulong)N_po);
+	if(get_N()>0xFFFFFFFFull) print_error("Druck-Auslass: Gitter ueberschreitet 2^32 Zellen -- po_cells/po_interior sind seit 08.09. uint (VRAM).");
+	for(uint i=0u; i<N_po; i++) { po_cells[i] = (uint)cells[i]; po_interior[i] = (uint)interior[i]; }
 	po_cells.write_to_device();
 	po_interior.write_to_device();
 	po_mean = Memory<float>(device, 1ull);
@@ -2571,10 +2576,10 @@ void LBM::drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vec
 }
 
 // ★ P9c N2F-SCHALE: LBM-Ebenen-Wrapper (Muster alloc_coupling_planes/extract_plane_macros).
-void LBM::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus) {
+void LBM::alloc_schale(const std::vector<ulong>& liste, const std::vector<float>& gewichte, const uint ratio, const uint modus, const bool blendet) {
 	if(get_D()!=1u) { print_error("N2F-Schale: nur fuer je eine Domaene je LBM-Instanz gebaut."); return; }
 	if(!initialized) { print_error("alloc_schale vor der Initialisierung. Erst run(0) rufen."); return; }
-	lbm_domain[0]->alloc_schale(liste, gewichte, ratio, modus);
+	lbm_domain[0]->alloc_schale(liste, gewichte, ratio, modus, blendet);
 }
 
 void LBM::schale_extract_u(std::vector<float>& out, const uint mittel) {
@@ -2595,6 +2600,7 @@ void LBM::schale_upload_unear(const std::vector<float>& unear) {
 	if(dom->schale_n==0u) { print_error("schale_upload_unear ohne alloc_schale."); return; }
 	const ulong m = 3ull*(ulong)dom->schale_n;
 	if((ulong)unear.size()<m) { print_error("schale_upload_unear: Puffer zu klein ("+to_string((ulong)unear.size())+" < "+to_string(m)+")."); return; }
+	if(dom->schale_unear.length()<3ull*(ulong)dom->schale_n) { print_error("schale_upload_unear auf eine Domaene mit blendet=false -- der Blend-Eingang ist dort ein Dummy (VRAM-Sparmassnahme 4, 08.09.)."); return; }
 	for(ulong i=0ull; i<m; i++) dom->schale_unear[i] = unear[i];
 	dom->schale_unear.write_to_device();
 }

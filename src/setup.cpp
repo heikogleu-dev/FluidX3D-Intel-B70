@@ -6966,7 +6966,7 @@ static void main_setup_fahrzeug_dd() {
 	std::vector<float> n2f_unear, n2f_ufar;
 	std::ofstream swcsv; double sw_rms_prev = -1.0; uint sw_steigend = 0u; bool n2f_neg_geprueft = false;
 	if(n2f_alpha>0.0f) {
-		lbm_f.alloc_schale(n2f_liste_f, n2f_gewicht, ratio, n2f_modus);   // Deckungspunkt-Indizes, Blockmittel-Fenster ratio^3 (Gewichte hier inert -- lbm_f blendet NIE, alpha=0)
+		lbm_f.alloc_schale(n2f_liste_f, n2f_gewicht, ratio, n2f_modus, false); // ★ 08.09. blendet=false -- das Nahfeld blendet NIE (alpha=0); Blend-Eingang und Gewichte dort Dummies, 28 MB bei 4 mm   // Deckungspunkt-Indizes, Blockmittel-Fenster ratio^3 (Gewichte hier inert -- lbm_f blendet NIE, alpha=0)
 		lbm_c.alloc_schale(n2f_liste_c, n2f_gewicht, 1u, n2f_modus);      // Schalenzellen; ratio=1 -- hier laeuft nur der Waechter-Extract (mittel=0) und der Blend
 		lbm_f.schale_extract_u(n2f_unear, n2f_mittel);
 		lbm_c.schale_upload_unear(n2f_unear);
