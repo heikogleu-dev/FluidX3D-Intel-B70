@@ -1,20 +1,32 @@
 # FluidX3D — Intel Arc Pro B70: Vehicle Aerodynamics (LBM-WMLES vs. OpenFOAM)
 
-**Performance & results at a glance** *(all numbers measured on this rig; force and performance
-figures from production run `f4_vollumfang_mls`, 2026-08-27, commit 94a802c; memory and subgrid
-figures updated 2026-09-08 — 508.7 M fine cells @ 4 mm on the B70 +
-203 M coarse cells @ 16 mm on the iGPU, 50 000 fine steps = 0.5 s physical, wall clock 91 min)*
+**Performance & results at a glance** *(all numbers measured on this rig. Forces from the 4 mm
+production runs `p4_nb` (baseline, 2026-09-03) and `km_s4_sism` (with the subgrid model on the wall
+cell, 2026-09-08), paired, N = 300, window t ≥ 0.201 s. Cd/Cz are the **rest** figures — the moving
+z-band around the wheel contact is split off, because the floor imprint produces ≈ −0.7 of purely
+artificial downforce — plus the friction path. Memory and throughput at 4 mm, 519 M fine cells on
+the B70 + 203 M coarse cells @ 16 mm on the iGPU, 501 ms physical.)*
+
+| Metric | Baseline | With wall-cell SISM | Reference |
+|---|---|---|---|
+| **Cd** | 0.5924 ± 0.0140 | **0.5747 ± 0.0115** | OpenFOAM 13: 0.599 |
+| **Cz** | −0.8860 ± 0.0265 | **−0.9687 ± 0.0179** | OF13: −1.301 → **74 % of the reference downforce** |
+| **Pressure share of Cz** | −0.9514 | **−1.0531** | the model's contribution: −0.1017 ± 0.0099 (**10.3 σ**) |
 
 | Metric | Value | Context |
 |---|---|---|
-| **Cd (artefact-corrected, window mean)** | **0.805 ± 0.010** | OpenFOAM 13 reference: 0.599 |
-| **Cz (artefact-corrected, window mean)** | **−1.180 ± 0.016** | OF13: −1.301 → **91 % of the reference downforce** |
-| **Performance index** | **10 958 s_wall/s_phys** | the full wall-model chain costs **zero** (91.3 min vs. 92 min without it) |
+| **Wall clock, 4 mm production** | ~1.5 h for 501 ms physical | the full wall-model chain costs nothing measurable |
 | **B70 kernel (8 mm screening rung)** | **1 534 MLUPs / 189 GB/s** | **+63 %** vs. the pre-optimisation era (939 MLUPs) |
 | **Dual-GPU overlap** | **CONCURRENT 96.1 %** | B70 93.9 % busy @ 2.5 GHz mean, iGPU 91.0 % (fdinfo profiler, 180 s) |
 | **VRAM (4 mm production)** | 27 452 / 32 655 MB, **3 168 MiB measured free** | was 29 318 MB; the September memory work bought back 2.1 GB at 0.11 % throughput cost |
-| **Subgrid on the wall cell** | **cz_druck_rest −0.1017 (10.3 σ)** | shear-improved Smagorinsky closes 29 % of the remaining lift gap; three other SGS candidates measured and rejected |
 | Single-domain B70 baseline | ≈ 5 464 MLUPS | 96–100 % of peak bandwidth (upstream solver quality) |
+
+> **On an older headline figure.** Earlier versions of this file led with Cd 0.805 / Cz −1.180 from
+> the run `f4_vollumfang_mls` (2026-08-27). Those were *post-hoc artefact-corrected* values whose
+> correction chain is not reproducible from the surviving record — that run's raw log reports
+> Cd = 9.87 with phantom forces at facet-treated links. The table above uses the in-code force
+> decomposition instead, which every run since produces directly and identically. The two are not
+> comparable, and the older pair has been retired rather than carried forward.
 
 ![f4_vollumfang_mls — near field at 500 ms](docs/f4_vollumfang_nah_500ms.png)
 *First full-configuration 4 mm production run (`f4_vollumfang_mls`): Toyota MR2 at 30 m/s
@@ -102,48 +114,32 @@ keeping it visible is what stops it being re-proposed.
 | **Mass correction α = 2 + saturation gate** on the facet momentum exchange | The facet model injects momentum; without the correction it also injects mass, and the leak **grows** with resolution | Sphere, Δm 458.7 → **−1e-6**; the uncorrected arm's leak scales 272 (D/dx 11) → **13 149** (D/dx 37.5) — the correction gets *more* important toward the vehicle, not less |
 | **Wall-model coverage fix** — y_w clamp instead of discard, plus a coherence edge test | 19.9 % of all wall cells had no wall model at all and nobody noticed | **19.9 % → 4.5 %** (4 mm: 146 198 of 3 275 383 cells) |
 
-### 3 · Subgrid model — five models measured, one works, and the reason is not what we assumed
+### 3 · Subgrid model
 
-This is the part of the fork with the most **negative** results, and they are kept here deliberately:
-each one cost a build, and each one narrows the search. The short version: on a wall-modelled LBM at
-4–8 mm, **it is not the strength of an SGS correction that decides, but where it acts.**
-
-| Model | What it does | Measured effect on the vehicle | Verdict |
-|---|---|---|---|
-| **`CFD_SGS_FDWAND`** | at facet cells, ν_t from a finite-difference \|S\| of the velocity field instead of from the Π-tensor | Π/FD = 2.3–3.4 at applying wall cells — the wall model writes non-hydrodynamic populations and Smagorinsky builds its tensor from them | **kept, is baseline** |
-| **`CFD_SGS_SISM`** — shear-improved Smagorinsky (Lévêque 2007), ν_t = c²·max(0, \|S\| − \|⟨S⟩⟩\|) on facet cells | subtracts the *stationary* part of the strain, which near a wall dominates the total | 4 mm, paired, N = 300: **cz_druck_rest −0.1017 ± 0.0099 (10.3 σ)** — closes **29 %** of the gap to OF13 | **kept** |
-| **`CFD_SGS_VANDRIEST`** — D = 1 − exp(−y⁺/A⁺), ν_t ← ν_t·D², y⁺ from the wall model's τ_w running mean | classical near-wall damping, and the y⁺ comes from the wall model rather than from the local strain (V1 failed on exactly that self-reference) | 4 mm, paired, N = 300: **cz_druck_rest −0.0004 ± 0.0035 (0.1 σ)** despite lowering ν_t by 23.6 % on average at facet cells | **rejected** |
-| **`CFD_SGS_BAND`** — SISM extended to wall layers 2 and 3 over a dedicated cell list | the single-link cells (16.3 % of near-wall cells) are *geometrically* layer 2 and a layer-1 model never reaches them | 8 mm, paired against layer 1, N = 129: **cz +0.0093 ± 0.0077 (1.2 σ)**, i.e. not distinguishable, despite tripling the treated cell count | **built, no gain at 8 mm; 4 mm pending** |
-| **WALE / Sigma / Vreman / AMD** | structural operators on the full gradient tensor | evaluated offline on 5 identical fields (mean ν_t reduction, layer 1 / layer 3): WALE 86.7/57.9 %, Sigma 66.7/34.2 %, Vreman 50.5/21.3 %, AMD 35.6/18.1 % | **not built** — see below |
-
-**Why van Driest fails here.** Its criterion is the viscous sublayer (y⁺ < 30). Measured over
-3.1 M facets, the first fluid cell sits at a **median y⁺ of 75 at 4 mm and 141 at 8 mm**. The damping
-is strongest where y⁺ is small, i.e. in attached regions with a thin boundary layer; lift is decided
-at separation, where y⁺ is large and D² ≈ 1. It lowers ν_t substantially — at the wrong place.
-
-**Why the band gains nothing.** The reduction per layer barely decays outward (4 mm: 85.2 / 80.0 /
-75.9 % for layers 1–3; 8 mm: 82.3 / 81.6 / 75.4 %) and the effect path counter fires exactly, so the
-model demonstrably acts. It just does not move the pressure integral. SISM's effect sits entirely in
-the **first** wall cell — the one whose ν_eff has to carry the wall shear the wall model prescribes.
-
-**Why WALE and Sigma are not built.** Ω is not a moment of the local distribution — the Π-tensor in
-D3Q19 is symmetric by construction, so every structural model needs central differences of the
-velocity field, a separate launch, and a field per cell (519 MB at 4 mm as uchar). Measured on top of
-that: their ratio is spatially **white noise** (stride-1 correlation 0.13–0.40, while \|S\| itself
-correlates at 0.92), and ν_t would jump by more than a decade against the face neighbour in **30 %**
-of interior cells, against 0.1 % for Smagorinsky. WALE additionally damps vortex cores *above*
-Smagorinsky (Op = 0.90 at \|S\| = 0 in solid-body rotation) — Nicoud's own 2011 criticism, which is
-what motivated Sigma. Neither offers an advantage over SISM at comparable cost.
-
-**One instructive false alarm, kept as a warning.** At 8 mm, SISM appears to halve the pressure drag
-(cd_druck_rest 1.0709 → 0.5603, 70 σ). At 4 mm the same measurement gives **+0.0051 (1.4 σ)**. The
-8 mm geometry has 9.0 % of its facets on one-cell-thick parts against 0.7 % at 4 mm; SISM is repairing
-a **geometry artefact** of the coarse rung, not physics. The coarse rung is sound for stability,
-effect-path and wall-shear screening — not for pressure-side verdicts.
+**Active in the baseline:**
 
 | Change | Why | Measured effect |
 |---|---|---|
-| **Double-booking of SGS and wall model: disproved, permanent detector left in the code** | It was the planned next build step — the premise turned out to be wrong | model/force balance 1.024 instead of the suspected 0.5; the detector now runs in every channel report |
+| **`CFD_SGS_FDWAND`** — at facet cells, ν_t comes from a finite-difference \|S\| of the velocity field instead of from the Π-tensor | The wall model writes non-hydrodynamic populations into the local distribution, and Smagorinsky builds its tensor from exactly those | Π/FD = 2.3–3.4 at applying wall cells; the substitution removes a factor that has nothing to do with turbulence |
+| **`CFD_SGS_SISM`** — shear-improved Smagorinsky (Lévêque et al., *JFM* 570, 2007) on facet cells: ν_t = c²·max(0, \|S\| − \|⟨S⟩\|), with ⟨S⟩ an exponential moving average of the six tensor components per facet (24 B each, T = 50 ms) | Near a wall the strain rate is dominated by the *mean* shear, which is not turbulence. Subtracting it is the one correction of the five tested that moves the forces | 4 mm, paired, N = 300: **cz_druck_rest −0.1017 ± 0.0099 (10.3 σ)** — closes **29 %** of the remaining lift gap. The clamp at zero is mandatory: without it τ drops below ½ |
+
+Both carry effect-path counters, self-tests against literature values, and a host-side is=should
+report; the EMA additionally has a drift watchdog that judges the measurement window at run end.
+
+**Available but not in the baseline** (kept switchable so the measurement can be repeated rather
+than believed — each was built, accepted bit-identically in its control arm, and then measured):
+
+| Switch | Verdict | Number that decided it |
+|---|---|---|
+| `CFD_SGS_VANDRIEST` — D = 1 − exp(−y⁺/A⁺), ν_t ← ν_t·D², y⁺ from the wall model's own τ_w running mean rather than from the local strain | rejected | 4 mm, paired, N = 300: **cz_druck_rest −0.0004 ± 0.0035 (0.1 σ)**, despite lowering ν_t by 23.6 % on average. Its criterion is the viscous sublayer; the first fluid cell sits at a median y⁺ of 75 (4 mm) / 141 (8 mm), so it damps where the layer is thin and does nothing where separation decides lift |
+| `CFD_SGS_BAND` — SISM extended to wall layers 2 and 3 over a dedicated cell list | no gain at 8 mm; 4 mm pending | 8 mm, paired against layer 1, N = 129: **cz +0.0093 ± 0.0077 (1.2 σ)** despite tripling the treated cell count. The reduction per layer barely decays outward (82.3 / 81.6 / 75.4 %) and the effect path fires exactly — the model acts, it just does not move the pressure integral |
+| WALE, Sigma, Vreman, AMD | not built | Ω is not a moment of the local distribution (the D3Q19 Π-tensor is symmetric by construction), so each needs central differences, a separate launch and a field per cell (519 MB at 4 mm). Measured offline on identical fields, their ratio is spatially white noise (stride-1 correlation 0.13–0.40 against 0.92 for \|S\| itself) and ν_t would jump by more than a decade against the face neighbour in 30 % of interior cells |
+
+> **A warning about the coarse rung.** At 8 mm, SISM appears to halve the pressure drag
+> (cd_druck_rest 1.0709 → 0.5603, 70 σ). At 4 mm the same measurement gives **+0.0051 (1.4 σ)**.
+> The 8 mm geometry has 9.0 % of its facets on one-cell-thick parts against 0.7 % at 4 mm — the
+> model is repairing a **geometry artefact** of the screening rung, not physics. The coarse rung is
+> sound for stability, effect-path and wall-shear screening; not for pressure-side verdicts.
 
 ### 4 · Numerics and number format
 
@@ -287,12 +283,12 @@ report — carries **phantom friction** wherever the facet wall model has modifi
 absolute values are meaningless: it reports Cd 7.5–8.9 across every run against an OF13 reference of
 0.599, and at 8 mm it even flips the sign of Cz. Only *differences between arms* may be read from
 it. The valid absolute instrument is the facet path in `cd_facetten.csv`. Measured on the 4 mm run
-`p4_nb`, window means from warm-up:
+`p4_nb` and its subgrid arm `km_s4_sism`, window means from warm-up (N = 300, paired):
 
-| | Facet path | OpenFOAM 13 | Deviation |
+| | Baseline `p4_nb` | With wall-cell SISM `km_s4_sism` | OpenFOAM 13 |
 |---|---|---|---|
-| **Cd** (pressure, band removed + friction) | **0.5924** | 0.599 | **−1.1 %** |
-| **Cz** (same composition) | **−0.8860** | −1.301 | **−31.9 %** |
+| **Cd** (pressure, band removed + friction) | 0.5924 | **0.5747** | 0.599 (−4.1 %) |
+| **Cz** (same composition) | −0.8860 | **−0.9687** | −1.301 (−25.5 %) |
 
 *Caveat, stated: the friction terms are window means over the facet set without the band split,
 while the pressure terms are band-split — the sum mixes slightly different subsets. Good for the
@@ -416,11 +412,12 @@ full copy of the sources plus commit hash lands in `export/<run>/code/` (`LAUF.t
 
 ## Where we stand (2026-09-08)
 
-The last full 4 mm production run with the complete validated chain (`f4_vollumfang_mls`,
-2026-08-27) measured artefact-corrected window means **Cd 0.805 ± 0.010 / Cz −1.180 ± 0.016**
-against OF13 0.599 / −1.301 — **91 % of the reference downforce**, at zero cost in wall clock.
+The current 4 mm production configuration with the subgrid model on the wall cell
+(`km_s4_sism`, paired against `p4_nb`, N = 300) reaches **Cd 0.5747 ± 0.0115 against OF13 0.599**
+and **Cz −0.9687 ± 0.0179 against −1.301**, i.e. drag within 4 % of the reference and **74 % of
+the reference downforce**. Drag is no longer the open item on this configuration; lift is.
 
-Since then the work has moved to the subgrid axis, and the honest summary is that **one of four
+The work of the last week went into the subgrid axis, and the honest summary is that **one of four
 candidates works**:
 
 | | contribution to cz_druck_rest at 4 mm | share of the gap to OF13 |
@@ -431,8 +428,11 @@ candidates works**:
 | remaining gap | −0.2479 | 71 % |
 
 What remains, in order of size:
-- **Cd is +34 % over the reference**, dominated by the friction path of coherent shallow-staircase
-  surfaces (the "26° class"). Unchanged, and still the largest single item.
+- **The friction path of coherent shallow-staircase surfaces** (the "26° class") remains the known
+  weak point of the wall chain: its momentum bookkeeping misses its target by design of the
+  staircase, closing to within 13 % only at 45°. On the current configuration it no longer shows up
+  as a drag excess — Cd sits 4 % *below* the reference — but the bookkeeping gap is unresolved and
+  will matter again on any geometry with more shallow surfaces.
 - **The wall model reaches 71.2 % of the real wall cells.** The figure often quoted internally
   (58 %) counts cells that are geometrically layer 2: 16.3 % of near-wall cells touch the solid
   through a single *diagonal* link only, sit at a wall distance of 1.1 instead of 0.5 cells, and
