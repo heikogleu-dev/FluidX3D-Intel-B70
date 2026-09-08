@@ -927,6 +927,13 @@ void store3_F(global float* F, const global uint* f_maske, const uxx n, const fl
 // alloc_facetten_domain (Waechter, kein Kommentar) -- damit ist der Umbau bit-identisch abnehmbar.
 // KEIN Geschwindigkeitshebel: die eingesparten ~640 MB/Schritt sind gegen den DDF-Verkehr
 // desselben Kernels (>=37,6 GB/Schritt) unter 2 %. Der Posten traegt sich ueber 573 MiB VRAM.
+uint band_fid(const global uint* band_idx, const uxx fbi) { // ★ 08.09. SGS-BAND: dieselbe Bitmasken-Nummerierung wie fac_fid, eigener Puffer, IMMER Bitmaske (kein VOLL-Rueckschalter)
+	const uxx ib = 2ul*(uxx)(fbi>>5);
+	const uint l = (uint)(fbi&31);
+	const uint maske = band_idx[ib];
+	if(((maske>>l)&1u)==0u) return 0xFFFFFFFFu; // keine Bandzelle
+	return band_idx[ib+1ul] + (uint)popcount(maske & ((1u<<l)-1u));
+}
 uint fac_fid(const global uint* fac_idx, const uxx fbi) {
 )+"#ifdef FAC_IDX_VOLL"+R(
 	return fac_idx[fbi]; // ★ Rueckschalter CFD_FAC_IDX_VOLL: die alte Vollfeldform, ein uint je Zelle
@@ -2855,6 +2862,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef SGS_FDWAND"+R(
 	, const global float* fac_wfd // ★ Geistermoden-Fix: w je Facettenzelle aus |S|_FD des Vorschritts (Position = nach fac_kd)
 )+"#endif"+R( // SGS_FDWAND
+)+"#ifdef SGS_BAND"+R(
+	, const global uint* band_idx, const global float* band_sbar // ★ 08.09. SGS-BAND: Maske und Sbar (Betrag des zeitgemittelten Scherratentensors) der Wandlagen 2..N (Position = NACH fac_wfd, Host-add-Reihenfolge in alloc_sgs_band)
+)+"#endif"+R( // SGS_BAND
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
 )+") {"+R( // stream_collide()
@@ -3061,7 +3071,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// (geistermodenfreies |S|_FD) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert.
 	// SGS_WANDFREI hat VORRANG (Extremtest); Slot 39 zaehlt die Anwendung (t%100 wie ueblich).
 	uint fdw_fid = 0xFFFFFFFFu;
-	{ uxx fbi_; if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS&&f_bbox(n,&fbi_)) fdw_fid = fac_fid(fac_idx, fbi_); }
+)+"#ifdef SGS_BAND"+R(
+	uint band_bid = 0xFFFFFFFFu; // ★ 08.09. SGS-BAND: Listenindex der Wandlagen 2..N, disjunkt zur Facettenmenge
+)+"#endif"+R( // SGS_BAND
+	{ uxx fbi_; if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS&&f_bbox(n,&fbi_)) { fdw_fid = fac_fid(fac_idx, fbi_);
+)+"#ifdef SGS_BAND"+R(
+		if(fdw_fid==0xFFFFFFFFu) band_bid = band_fid(band_idx, fbi_); // nur wenn KEINE Facettenzelle -- die Mengen sind auf dem Host disjunkt gebaut
+)+"#endif"+R( // SGS_BAND
+	} }
 )+"#endif"+R( // SGS_FDWAND
 )+"#ifdef SGS_WANDFREI"+R(
 	// ★★ TEST B der Rauwand-Diagnose (Laufzeitschalter CFD_SGS_WANDFREI, 2026-08-15): kein nu_t in
@@ -3176,6 +3193,28 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // SGS_GUO
 		const float Q = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz)); // Q = H*H, turbulent eddy viscosity nut = (C*Delta)^2*|S|, intensity of local strain rate tensor |S|=sqrt(2*S*S)
 		w = 2.0f/(tau0+sqrt(sq(tau0)+0.76421222f*sqrt(Q)/rhon)); // 0.76421222 = 18*sqrt(2)*(C*Delta)^2, C = 1/pi*(2/(3*CK))^(3/4) = Smagorinsky-Lilly constant, CK = 3/2 = Kolmogorov constant, Delta = 1 = lattice constant
+)+"#ifdef SGS_BAND"+R(
+		// ★★ SGS-BAND, UMBAU 08.09.2026 nach dem gescheiterten Kipptest. Die erste Fassung ERSETZTE w
+		// auf den Bandzellen durch das FD-w (wie an Facettenzellen) -- der 8-mm-Stressarm kippte damit
+		// bei Schritt 392, und zwar auch OHNE SISM (Arm vb_d8_bandnosism, exakt dieselbe Zeit). Der
+		// Grund ist physikalisch: an der FACETTENZELLE ist der Pi-Tensor vom Wandmodell kontaminiert
+		// (Pi/FD = 2,3-3,4, gemessen 02.09.), dort ist der FD-Stencil eine REPARATUR. In Lage 2/3 ist
+		// Pi sauber -- dort waere der FD-Stencil nur eine andere, glattere Diskretisierung, und die
+		// traegt nicht.
+		// JETZT: das Smagorinsky-w bleibt stehen, und der SISM-Abzug wird darauf angewandt. Weil
+		// nu_t = c2*|S| linear in |S| ist, laesst sich der Abzug ohne |S| ausdruecken:
+		//   nu_t,SISM = c2*max(0, |S| - Sbar) = max(0, nu_t - c2*Sbar).
+		// Der Bandkernel liefert also nur noch Sbar je Bandzelle (band_sbar), nicht mehr ein fertiges w.
+		if(band_bid!=0xFFFFFFFFu) {
+			const float nut_b = (1.0f/w-tau0)*(1.0f/3.0f);            // nu_t aus dem eben gerechneten Smagorinsky-w
+			const float nut_n = fmax(0.0f, nut_b-0.030021f*band_sbar[band_bid]); // Klemme wie in Lage 1 ZWINGEND
+			w = 1.0f/(tau0+3.0f*nut_n);
+			if(t%100ul==0ul) {
+				if(rho_clamp_hits[186]<0xF0000000u) atomic_inc(&rho_clamp_hits[186]); // Wirkpfad: Bandzelle behandelt
+				if(nut_n<=0.0f&&rho_clamp_hits[187]<0xF0000000u) atomic_inc(&rho_clamp_hits[187]); // Klemme greift (Sbar >= |S|)
+			}
+		}
+)+"#endif"+R( // SGS_BAND
 	} // modity LBM relaxation rate by increasing effective viscosity in regions of high strain rate (add turbulent eddy viscosity), nu_eff = nu_0+nu_t
 )+"#ifdef SGS_DIAG"+R(
 	// ★ 03.09. (Pruefagent-Vorschlag 6): DIAG-Block HINTER das FDWAND-if/else gezogen. Er hing nur an w und tau0; im
@@ -4467,7 +4506,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+R(kernel void sgs_fdwand)+"("+R(const global float* u, const global uchar* flags,
 	const global uint* gd_zellen, const uint gd_N, global float* fac_wfd // ) {
 )+"#ifdef SGS_SISM"+R(
-	, const ulong t, global float* fac_sb, global uint* rho_clamp_hits // ★ 07.09. SISM: Reihenfolge = add_parameters in alloc_facetten_domain (t, fac_sb, hits), VOR tile_slot
+	, const ulong t, global float* fac_sb, global uint* rho_clamp_hits, const uint sbar_out // ★ 07.09. SISM: Reihenfolge = add_parameters in alloc_facetten_domain (t, fac_sb, hits), VOR tile_slot. ★ 08.09. sbar_out: 0 = fac_wfd traegt w (Lage 1, Geistermoden-Fix), 1 = es traegt Sbar (Band -- dort ersetzt nichts das w, stream_collide zieht Sbar selbst ab)
 )+"#endif"+R( // SGS_SISM
 	TS_P
 )+") {"+R( // sgs_fdwand() -- Kopfklammern als Strings AUSSERHALB von R() (Muster stream_collide): R() zaehlt Klammern; ein Splice zwischen "(" und ")" innerhalb EINES R-Blocks wird bis zur balancierten Klammer als TEXT stringifiziert -- so kam 07.09. abends ')+"#ifdef SGS_SISM"+R(' woertlich in den OpenCL-Quelltext (JIT -11 in ALLEN Armen, auch SISM=0)
@@ -4520,7 +4559,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const float Sn[6] = { g[0][0], g[1][1], g[2][2], 0.5f*(g[0][1]+g[1][0]), 0.5f*(g[0][2]+g[2][0]), 0.5f*(g[1][2]+g[2][1]) };
 	float sb[6]; for(uint q=0u; q<6u; q++) sb[q] = fac_sb[k6+(ulong)q];
 	const float sbar = sqrt(2.0f*(sq(sb[0])+sq(sb[1])+sq(sb[2])+2.0f*(sq(sb[3])+sq(sb[4])+sq(sb[5]))));
-	if(t<def_sgs_sism_ab) {
+	if(sbar_out!=0u) {
+		// ★ 08.09. BANDMODUS: der Kernel liefert NUR Sbar. Kein w-Ersatz -- den Abzug rechnet
+		// stream_collide auf dem dort gebildeten Smagorinsky-nu_t (Kipptest-Lehre, s. dort).
+		// Vor der Sperre 0 ausgeben: dann ist der Abzug exakt null und der Arm bitgleich zum Bezug.
+		fac_wfd[gid] = t<def_sgs_sism_ab ? 0.0f : sbar;
+		if(t>=def_sgs_sism_ab&&t%100ul==0ul&&rho_clamp_hits[126]<0xF0000000u) atomic_inc(&rho_clamp_hits[126]);
+	} else if(t<def_sgs_sism_ab) {
 		fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // Phase 1: klassisch, WORTGLEICH zur Zeile im #ifndef-Zweig
 	} else {
 		const float ds = snorm_fd-sbar;

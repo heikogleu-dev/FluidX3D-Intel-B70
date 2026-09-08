@@ -203,7 +203,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 186 (Puffer seit 08.09. 192 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 188 (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
@@ -220,6 +220,7 @@ public:
 	static uint s_fac_messnur; // ★ 30.08. CFD_FAC_MESSNUR: Facetten bauen und MESSEN, im Kernel aber NICHTS anwenden -- BB-Physik mit Facetten-Instrument (Aepfel-mit-Aepfeln-Bezug fuer BB-Vergleiche)
 	static uint s_fac_pinv; // ★ 04.09. CFD_FAC_PINV: Moore-Penrose-Pseudoinverse statt achsenparalleler Skalarleiter im gekoppelten Zweig
 	static uint s_fac_idx_voll; // ★ 03.09. CFD_FAC_IDX_VOLL: fac_idx wieder als volles uint-Feld (Rueckschalter fuer das A/B gegen die Bitmaske)
+	static uint s_sgs_band; // ★ 08.09. CFD_SGS_BAND: Zahl der zusaetzlichen Wandlagen (0 = aus, 2 = Lage 2, 3 = Lage 2+3)
 	static uint s_f_liste; // ★ 03.09. CFD_F_LISTE: F nur noch an Wandsolidzellen (Markerliste statt BBox-Vollfeld)
 	static uint s_fac_nachbar; // ★ 30.08. CFD_FAC_NACHBAR: Wandmodell-EINGANG aus der zweiten Fluidzelle entlang der Normale (Stufenschatten-Fix, Weg-1 Stufe 3)
 	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 16 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, u_t_abtast, y_abtast, tw_angewandt, besuche_angewandt, 05.09.: Druckrest A, |A|, Ziel B, Geometrie C); Host-Tabelle je Treppenklasse
@@ -303,6 +304,21 @@ public:
 	bool f_liste_on = false; // Konstruktionszustand eingefroren (Statik-Lebensdauer-Lehre 02.09.)
 	ulong f_slots = 0ull;    // Zahl der Wandsolidzellen = F-Slots; 0 = Vollfeld-Arm
 	uint f_param_sc = 0u, f_param_uf = 0u; // Signaturposition von F in stream_collide bzw. update_fields (fuer den Rebind nach der Neuanlage)
+	// ★★ 08.09.2026 SGS-BAND (CFD_SGS_BAND): SISM auf die Wandlagen 2..N statt nur auf die Facettenzellen.
+	// Heikos Befund des Tages: die Einzellink-Zellen (16,3 % der wandnahen Zellen, y_w ~ 1,1 statt 0,5)
+	// sind geometrisch LAGE 2 und werden von einem Lage-1-Modell nie erreicht. Gemessen faellt die
+	// SISM-Absenkung nach aussen kaum ab (4 mm: Lage 1/2/3 = 85,2/80,0/75,9 %), das Band traegt also.
+	// KEIN neuer Kernel: derselbe sgs_fdwand-Text wird ein zweites Mal mit den band_*-Puffern gestartet
+	// (zweites Kernel-Objekt aus demselben Programm) -- damit entfaellt jedes Klammerfallen-Risiko.
+	// Die Bandliste ist DISJUNKT zur Facettenmenge; stream_collide fragt erst fdw_fid, dann band_fid.
+	Memory<uint> band_idx;    // Bitmaske+Praefixsumme ueber die F-BBox (Muster fac_idx), nur Lage 2..N
+	Memory<uint> band_zellen; // fbi je Bandzelle (uint, nicht n als ulong -- die F-BBox passt in 32 Bit)
+	Memory<float> band_sbar;  // ★ 08.09. NACH dem Kipptest: Sbar (Betrag des zeitgemittelten Scherratentensors) je Bandzelle. Frueher war das ein fertiges w -- der w-ERSATZ kippte am 8-mm-Stressarm bei Schritt 392, auch ohne SISM.
+	Memory<float> band_sb;    // EMA der 6 S-Komponenten je Bandzelle (nur unter SISM belegt)
+	ulong band_N = 0ull; uint band_lagen = 0u; bool band_on = false; uint band_param_pos = 0u; // Signaturposition von band_idx in stream_collide, in alloc_facetten_domain berechnet (dort sind alle Schalter im Scope)
+	ulong band_n_lage[8] = {0,0,0,0,0,0,0,0}; // Zellzahl je Lage, fuer den Bericht und Ist=Soll
+	Kernel kernel_sgs_band;
+	void alloc_sgs_band(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const uint lagen);
 	void alloc_f_liste(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz); // baut Maske+Praefix, legt F neu an, rebindet
 	// Zelle (als F-BBox-Index) -> F-Slot. AUSDRUCKSGLEICH zu f_slot() in kernel.cpp -- beide Pfade
 	// werden von CFD_FAC_GPU_PRUEF zahlenscharf gegeneinander gestellt.
