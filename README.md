@@ -9,9 +9,23 @@ the B70 + 203 M coarse cells @ 16 mm on the iGPU, 501 ms physical.)*
 
 | Metric | Baseline | With wall-cell SISM | Reference |
 |---|---|---|---|
-| **Cd** | 0.5924 ± 0.0140 | **0.5747 ± 0.0115** | OpenFOAM 13: 0.599 |
-| **Cz** | −0.8860 ± 0.0265 | **−0.9687 ± 0.0179** | OF13: −1.301 → **74 % of the reference downforce** |
-| **Pressure share of Cz** | −0.9514 | **−1.0531** | the model's contribution: −0.1017 ± 0.0099 (**10.3 σ**) |
+| **Cd** = pressure (band removed) + friction | 0.5924 ± 0.0140 | **0.5747 ± 0.0115** | OpenFOAM 13: 0.599 |
+| **Cz** = pressure (band removed) + friction | −0.8860 ± 0.0265 | **−0.9687 ± 0.0179** | OF13: −1.301 → **74 % of the reference downforce** |
+
+Both are **total** coefficients, because the OF13 reference is one. Their composition, on the SISM
+arm, so that no number here can be confused with another:
+
+| Component | Value | |
+|---|---|---|
+| `cz_druck` | −0.8252 | pressure including the wheel-contact z-band |
+| `cz_druck_band` | +0.2279 | that band alone — the floor imprint, **an artefact**, which is why it is split off |
+| **`cz_druck_rest`** | **−1.0531** | pressure without the band. **This is the quantity every model comparison in this document is measured on**: SISM moves it by −0.1017 ± 0.0099 (10.3 σ) against the baseline's −0.9514 |
+| `cz_reib` | +0.0844 | friction, and it works *against* downforce |
+| **Cz total** | **−0.9687** | `cz_druck_rest + cz_reib` — the row in the table above |
+
+Model effects are quoted on `cz_druck_rest` throughout, because the friction path responds to these
+models with the opposite sign and would dilute the signal. The comparison against the reference
+needs the total.
 
 | Metric | Value | Context |
 |---|---|---|
