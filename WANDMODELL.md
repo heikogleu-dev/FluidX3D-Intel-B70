@@ -386,3 +386,73 @@ Geht NACHBAR in die Basis, ist `CFD_FAC_UTKORR=1,5` an 99,9 % der Zellen wirkung
 nur noch Rückfall für Zellen ohne Fluidnachbarn in Normalenrichtung (Slots 73/74). Der Entscheid
 — UTKORR dort auf 1,0 oder auf 1,5 lassen — steht bei Heiko. **Messstand:** Befund B74 der internen Prüfunterlagen (nicht veröffentlicht);
 der direkte Dreipunkt-A/B (ohne beides / UTKORR 1,5 / NACHBAR) läuft als Serie `xd_utkorr_kanal`.
+
+---
+
+# Wie viel Wand das Modell wirklich erreicht (2026-09-08)
+
+Die Zahl, die intern lange zitiert wurde — „an 42 % der Facettenbesuche fällt das Wandmodell auf
+Bounce-Back zurück" — ist richtig gezählt und trotzdem irreführend. Sie zählt Zellen mit, die
+geometrisch gar keine Wandzellen sind.
+
+## Gemessen am 4-mm-Voxelkörper, D3Q19-Nachbarschaft
+
+3,27 Mio wandnahe Fluidzellen, aufgeschlüsselt nach der Zahl eigener Solid-Links:
+
+| Links | Zellen | Anteil | Anbindung |
+|---|---|---|---|
+| 1 | 534.765 | 16,3 % | **zu 100 % rein diagonal** (kein Achsennachbar solid) |
+| 2 | 83.019 | 2,5 % | zu 99,1 % diagonal |
+| 3 | 82.836 | 2,5 % | 84 % achsparallel |
+| 4 | 401.279 | 12,3 % | achsparallel |
+| 5 | 1.535.213 | 46,9 % | achsparallel — die glatte Wand |
+
+**Alle Einzellink-Zellen, ausnahmslos, haben einen Nachbarn mit vier oder mehr Links.** Sie sitzen
+in zweiter Reihe an einer Treppenkante und berühren das Solid nur über eine Kantendiagonale.
+Dünnteile sind nicht die Ursache (1,1 % gegen 0,1 % bei den 5-Link-Zellen).
+
+Der Wandabstand bestätigt es unabhängig, aus `facetten_klassen.csv`: die glatte Wand liegt bei
+y_w = 0,50, also einem halben Zellabstand. Die Einzellink-Klasse liegt bei 1,00 bis 1,21 mit
+Schwerpunkt 1,11 — **mehr als eine ganze Zellbreite entfernt**. Diese Zellen sind der Sache nach
+Lage-2-Zellen, die als Facettenzellen geführt werden; ihr Rückfall ist womöglich korrektes
+Verhalten, denn die Wandarbeit leistet der Nachbar, der direkt an der Fläche sitzt.
+
+## Abdeckung, richtig gerechnet
+
+| Gruppe | Facetten | Anteil | Abdeckung |
+|---|---|---|---|
+| rein diagonal angebunden (1–2 Links) | 584.385 | 18,7 % | 1,0 % |
+| **echte Wandzellen (≥ 3 Links)** | 2.544.800 | 81,3 % | **71,2 %** |
+| alle zusammen | 3.129.185 | | 58,1 % |
+
+Nach Anbindungsgrad innerhalb der echten Wandzellen: 3 Links 46,1 %, 4 Links 54,0 %, 5 Links
+(die glatte Wand, 58,5 % der echten) 73,2 %, 6–7 Links 90,4 %, 8 Links 73,1 %.
+
+## Was die verbleibenden 28,8 % sind
+
+Das Sättigungsgate — eine **Modellentscheidung, kein Geometrieloch**. Alle Schalterhebel darauf
+sind seit dem 30.08.2026 ausgemessen und erschöpft: das Gate abzuschalten senkt den Rückfall auf
+18,9 %, kippt aber die Kräfte in die falsche Richtung (cz_druck_rest −0,152 → −0,050, 16,9 σ,
+weg von OF13). Das Budget zu verdoppeln verschiebt nur vom einen Gate zum anderen. ELIBB
+abzuschalten macht es schlechter.
+
+**Korrektur einer früheren Begründung.** Es hieß, ein rein normaler Einzellink trage keinen
+Tangentialimpuls, weil c·t₁ = c·t₂ = 0. Gemessen ist das Gegenteil: 100 % der Einzellinks sind
+diagonal, und eine Diagonale trägt sehr wohl Tangentialimpuls. Die Ursache des Rückfalls ist der
+**Rang** — ein Link liefert eine Gleichung, das 3×3-System braucht drei. Wer an dieser Klasse
+baut, sollte von der Ranglücke ausgehen, nicht vom fehlenden Tangentialanteil.
+
+## Warum der Vergleich mit einem körperangepassten Netz nur halb trägt
+
+Die Facetten sind eine echte Oberflächenrekonstruktion, insofern ist der Vergleich fair. Der
+Unterschied liegt nicht in der Fläche, sondern darin, wer sie bedient: dort ist jede Randzelle
+direkt an ihre Randfläche gekoppelt, hier läuft die Kopplung über Gittervektoren. Eine Zelle mit
+einem einzigen Diagonallink hat genau eine Gleichung für ein System, das drei braucht. Nicht die
+Fläche ist schlecht, die Anbindung ist unterbestimmt.
+
+## Offen
+
+Der einzige nicht ausprobierte Weg ist, die Masse **global** statt je Zelle zu bilanzieren. Dann
+entfällt das Downdate und 36 % der Facetten steigen eine Rangstufe. Der Versuch vom 04.09.
+scheiterte, weil er die Massenerhaltung ersatzlos strich statt sie zu verlagern (Masseleck
+kumulativ −111.443 → +1.362.344, cz_druck_rest kippte von −0,1409 auf +0,1130).

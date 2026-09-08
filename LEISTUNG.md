@@ -137,3 +137,32 @@ Fernfeld-Dimensionierung zählen nur noch Rechenzeit und Versperrung.
 - **Transfer-Zähler** (`XFER_DIAG`), der die 96-MB-Verschwendung gefunden hat.
 
 Beides ist wenig Aufwand und lohnt, sobald der Index nicht mehr von selbst erklärbar ist.
+
+---
+
+# Speicherstand 4 mm nach der Aufräumrunde (2026-09-08)
+
+Der Produktionspunkt bei 4 mm (519.139.485 Zellen im Nahfeld) hat sich verschoben:
+
+| | vorher | nachher |
+|---|---|---|
+| Speicherplan Nahfeld | 29.100 MB | **27.452 MB** |
+| Schlupf im Plan | 1.059 MB | **2.707 MB** |
+| freier VRAM, extern gemessen (Minimum) | 1.302 MiB | **3.168 MiB** |
+| Leistungsindex | unverändert | −0,11 %, im Rauschen |
+
+Drei Maßnahmen, alle bitgleich abgenommen: das Kraftfeld als Markerliste (1790 MB), sechs
+Indexlisten von 64 auf 32 Bit (259 MB), die Schalenpuffer im Nahfeld als Ein-Element-Dummy (28 MB).
+
+**Zwei Lehren, die über die Zahlen hinausgehen.** Der größte Posten war kein Umbau, sondern ein
+Schalter, der seit fünf Tagen abgenommen war und in keiner Konfiguration stand — er war als
+*Befund* abgenommen und nie zur *Basis* befördert worden. Und die Vorprüfung im Konstruktor
+buchte das Kraftfeld weiter in voller Größe, unabhängig vom Schalter: der Speicher war zur
+Laufzeit frei, aber der Deckel lehnte weiterhin Gitter ab, die gepasst hätten. Gefunden hat das
+die unabhängige Prüfung genau des Commits, der den Speicher gespart hat.
+
+**Eine Messnotiz zum Instrument.** Die solverinterne Rekonstruktion des freien Speichers ist rund
+1,9 GB zu optimistisch, weil der Prozess das Debug-Dateisystem nicht lesen darf und deshalb
+rechnet statt zu messen. Der VRAM-Wächter prüft gegen genau diese Rekonstruktion. Wer sich auf
+ihn verlässt, sollte vorher `werkzeuge/vram_sammler.sh` mitlaufen lassen — der liest über einen
+eingerichteten sudo-Pfad den echten Wert.
