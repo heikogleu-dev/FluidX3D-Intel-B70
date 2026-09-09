@@ -2174,7 +2174,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// aus der GEOMETRIE kommen (ELIBB, q-gewichteter Wandabstand), nicht aus dem Zuruecknehmen einer
 	// Identitaet. Bestaetigt auch empirisch: ab_45_kontrolle und ab_45_a2fall sind in jeder
 	// gedruckten Zahl gleich.
-	const float G11roh=G11, G22roh=G22; // Rohmomente VOR dem ALPHA2-Downdate -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
+	const float G11roh=G11, G22roh=G22, Snnroh=Snn; // Rohmomente VOR dem ALPHA2-Downdate -- Snnroh (09.09.2026) fuer den Rauschboden des Vollrangtests, s. dort -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
 )+"#ifdef FACETTEN_ALPHA2"+R(
 	// ★ J4-alpha Stufe 2 (Plan 2026-08-17): symmetrisches Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T
 	// mit cq = S1/S0 -- eine Kovarianz, garantiert PSD. Der Solve erreicht sein Impulsziel damit
@@ -2366,7 +2366,20 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// eps*G11 der Einzellink-Zellen -- 31 % der Kugelfacetten FLACKERTEN ins Rang-2 mit
 	// G~=Rauschen, s=R/1e-8~1e6, Doppelklemme, permanente Injektion (belegt: 546 statt 485
 	// Beitraeger). Jetzt RELATIV zu den Vor-Schur-Diagonalen: 3 Dekaden Marge zu eps beidseitig.
-	if(dett>=1e-4f*Gt11*Gt22&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett;
+	// ★★ 09.09.2026 RAUSCHBODEN (CFD_FAC_DETEPS, Default 0 = bitidentisch). Fortsetzung der
+	// J4-Lehre oben, eine Ebene tiefer. Fuer die EBENE Voxel-Linkmenge ist G' nach dem ALPHA2-
+	// Downdate exakt (1/3)(I - m m^T) mit m = Voxelachse; das Schur-Komplement hat dann exakt
+	// Rang 1 und dett ist ANALYTISCH NULL. Numerisch bleibt Rauschen: Snn entsteht bei 2190 als
+	// Differenz zweier O(1)-Groessen und traegt den Absolutfehler eps*Snnroh; ueber Gt = G - Sn Sn/Snn
+	// schlaegt er als eps*(G11+G22)*Snnroh/Snn in dett durch. Die relative Schranke 1e-4*Gt11*Gt22
+	// faellt mit Gt11 = (1/3)sin^2(psi) gegen NULL und liegt bei kleinem Kippwinkel UNTER dem
+	// Rauschen -- die Zelle nimmt dann einen Vollrangzweig, den es nicht gibt, und dividiert durch
+	// Rauschen: s1 wird 1e4..1e7 mal u_t und beide Gates reissen zu Recht.
+	// GEMESSEN 09.09. (8 mm, ph8_persist): 93,3 % aller Gate-Rueckfaelle kommen aus diesem Zweig
+	// (Quote 45,8 %) gegen 2,8 % im PINV-Zweig darunter; Rueckfall gegen Kippwinkel springt bei
+	// genau 1 Grad von 1,5 auf 92,7 % -- dort endet der Schutz des Waechters bei 2193.
+	const float det_eps = def_fac_deteps*1.1920929e-7f*(G11+G22)*(Snnroh/fmax(Snn,1e-30f));
+	if(dett>=1e-4f*Gt11*Gt22+det_eps&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett;
 		if(t%100ul==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); zweig=2u; } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
 )+"#ifdef FACETTEN_PINV"+R(
 	// ★★ 04.09.2026 RANG-1-PSEUDOINVERSE (CFD_FAC_PINV, Default aus). Der gemessene Befund dahinter:
@@ -2418,7 +2431,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
 	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
 	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
-	if(!rueckfall&&(fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut)) { if(t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
+	if(!rueckfall&&((def_fac_isogate>0.5f) ? (s1*s1+s2*s2>4.0f*def_fac_budget*def_fac_budget*ut*ut) : (fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut))) { if(t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
 )+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
 	if(!rueckfall&&(s1c!=s1||s2c!=s2)&&t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } // Slot 10: u_s-Klemme (nicht an Rueckfallzellen zaehlen -- Pruefbefund 4a)

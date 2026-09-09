@@ -343,6 +343,8 @@ long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
 float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bitidentisch
 float LBM_Domain::s_fac_budget_sn = 1.0f; // CFD_FAC_BUDGET_SN (1a-Bsn), Default bitidentisch
+float LBM_Domain::s_fac_isogate = 0.0f;   // CFD_FAC_ISOGATE (09.09.), Default bitidentisch
+float LBM_Domain::s_fac_deteps = 0.0f;    // CFD_FAC_DETEPS (09.09.), Default bitidentisch
 bool LBM_Domain::s_sgs_wandfrei = false;
 bool LBM_Domain::s_sgs_guo = true; // ★ 2026-08-25 Default AN: das ist die richtige Physik, CFD_SGS_GUO=0 ist der Kontrollarm
 bool LBM_Domain::s_sgs_diag = false;
@@ -1491,6 +1493,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_chifak "+to_string(1.0f/(3.0f*nu+1.0f),8u)+"f"
 	"\n	#define def_fac_budget "+to_string(s_fac_budget,4u)+"f"
 	"\n	#define def_fac_budget_sn "+to_string(s_fac_budget_sn,4u)+"f"
+	"\n	#define def_fac_isogate "+to_string(s_fac_isogate,4u)+"f"
+	"\n	#define def_fac_deteps "+to_string(s_fac_deteps,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
 	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
 	+((s_facetten&&s_fac_imem&&s_fac_ema>0.0f) ? (string)"\n	#define FACETTEN_EMA"

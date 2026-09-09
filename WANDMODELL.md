@@ -428,13 +428,73 @@ Verhalten, denn die Wandarbeit leistet der Nachbar, der direkt an der Fläche si
 Nach Anbindungsgrad innerhalb der echten Wandzellen: 3 Links 46,1 %, 4 Links 54,0 %, 5 Links
 (die glatte Wand, 58,5 % der echten) 73,2 %, 6–7 Links 90,4 %, 8 Links 73,1 %.
 
-## Was die verbleibenden 28,8 % sind
+## Was die verbleibenden 28,8 % sind — BERICHTIGT 09.09.2026
 
-Das Sättigungsgate — eine **Modellentscheidung, kein Geometrieloch**. Alle Schalterhebel darauf
-sind seit dem 30.08.2026 ausgemessen und erschöpft: das Gate abzuschalten senkt den Rückfall auf
-18,9 %, kippt aber die Kräfte in die falsche Richtung (cz_druck_rest −0,152 → −0,050, 16,9 σ,
-weg von OF13). Das Budget zu verdoppeln verschiebt nur vom einen Gate zum anderen. ELIBB
-abzuschalten macht es schlechter.
+Hier stand: „Das Sättigungsgate — eine Modellentscheidung, kein Geometrieloch. Alle Schalterhebel
+darauf sind seit dem 30.08.2026 ausgemessen und erschöpft." **Der zweite Satz war falsch, und der
+erste nur zur Hälfte richtig.**
+
+**Die Linkzahl ist der falsche Schlüssel.** Der Gruppierungsschlüssel der Klassentabelle
+(`setup.cpp:623`) ist `(eigene_links, y_w)` — die **Normale steht nicht darin**. Von den 1.489.304
+5-Link-Facetten am 4-mm-Körper sind nur **63,99 % wirklich achsparallel** (Kippung < 1°); die
+übrigen 36,01 % tragen dieselbe flache Linkmenge mit einer Normalen, die im Median 17,9° davon
+abweicht. Getrennt gerechnet (zwei unabhängige Bilanzgleichungen, beide Proben treffen auf die
+fünfte Stelle):
+
+| 5-Link-Facetten | Anteil | Rückfall |
+|---|---|---|
+| achsparallel (< 1°) | 63,99 % | **3,39 %** |
+| gekippte Normale | 36,01 % | **68,28 %** |
+
+**Die glatte Wand fällt also praktisch nicht zurück.** Die gekippten 36 % tragen 75 % des
+5-Link-Rückfalls; zusammen mit den gekippten 4-Link-Zellen sind es 78 % des Rückfalls aller echten
+Wandzellen.
+
+**Der Mechanismus ist ein Konditionierungsfehler, keine Sättigung.** Weicht die Normale um mehr als
+etwa 1° von der Achse der eigenen Linkmenge ab, greift der Auslöschungswächter (`kernel.cpp:2193`)
+nicht mehr, die Weiche geht in den gekoppelten Zweig, und das Schur-Komplement hat **exakt Rang 1**:
+`dett ≡ 0` und `tr(Gt) ≡ 1/3` für jede Normale und jeden Azimut. Der Vollrangzweig ist damit
+konstruktiv unerreichbar (`dett/(Gt11·Gt22) ≈ −1e-13` gegen die Schwelle `+1e-4`). Es bleibt die
+Skalarleiter `s1 = R1/Gt11 = 3·R1/sin²φ` — eine Verstärkung um Faktor 6 bis 395, für `sn` bis
+1,1e4. **Beide Gates messen dann Geometrie, nicht Physik.** Das ist B86 (AUDIT-BEFUNDE.md), am
+04.09. gefunden; die Aussage „alle Hebel tot" stammt vom 30.08. und ist damit vor-B86.
+
+## Der Hebel: CFD_FAC_PINV
+
+Die Rang-1-Pseudoinverse löst über die Spur (den einzigen Eigenwert, exakt 1/3) statt über einen
+Diagonaleintrag und macht `Sn·v = 0` exakt, sodass `sn ≡ 0` gilt und das sn-Gate seinen künstlichen
+Auslöser verliert. Gemessen am 8-mm-Fahrzeug (09.09.2026, Binary aus Commit `2330bd5`, eine
+Variable gegen `rd8_aus` aus derselben Serie, beide rc=0):
+
+| | ohne PINV | mit PINV |
+|---|---|---|
+| Rückfall echte Wandzellen (≥ 3 Links) | 29,49 % | **18,17 %** |
+| **Abdeckung** | 70,51 % | **81,83 %** |
+| sn-Gate [16] | 7,1 % | 1,2 % (−83 %) |
+| u_s-Gate [10] | 16,9 % | 13,6 % |
+| Einzellinks (Rang 0) | 16,4 % | 16,4 % — unberührt |
+| cz_druck_rest | −0,14829 | −0,14455 (**0,9 σ**) |
+
+Wirkpfad Slot 80 = 40.018.965 = 22,16 % des Wirkpfads. Wo die Wirkung sitzt: 3 Links gekippt
+51,20 → 15,78 %, 4 Links gekippt 43,41 → 10,55 %, 5 Links gekippt 67,20 → 46,81 %. Die 8-Link-Ecken
+(Rang 3, wo PINV konstruktiv nicht greifen kann) bleiben bei 18,78 → 18,99 % — korrekte
+Negativkontrolle. Auch die achsparallele 5-Link-Klasse hält: ihre Bewegung von −2,47 pp ist zu
+−2,34 pp allein durch die 11,49 % gekippte Beimischung erklärt.
+
+Der Unterschied zu `CFD_FAC_SATGATE=0`, das am 30.08. den Rückfall um 24 pp senkte: jenes kaufte die
+Quote mit einem Modellwechsel und zerlegte die Kräfte (16,9 σ weg von OF13). PINV senkt um 9,1 pp
+und lässt sie stehen — es behebt einen Fehler, statt eine Zahl zu kaufen.
+
+**`CFD_FAC_BUDGET=2` obendrauf** bringt nur noch +1,17 pp (Abdeckung 81,83 → 83,00 %), und 47 % des
+Gewinns am u_s-Gate wandern zurück ins sn-Gate (1,2 → 2,1 %). Der 30.08.-Befund „verschiebt nur"
+gilt also abgeschwächt weiter.
+
+**Was bleibt:** 17,00 % Rückfall an echten Wandzellen, Schwerpunkt die gekippten 5-Link-Zellen mit
+45,68 %. Deren Klassenmittel erklärt ihn nicht — dort ist |P1|/u_t = 0,089, das zweitkleinste aller
+Klassen, während das Gate rechnerisch erst bei |P1|/u_t > 2/3 reißt. Der Rest sitzt im
+Fluktuationsschwanz einzelner Zeitschritte, und den kann weder ein Klassenmittel noch die heutige
+Diagnostik auflösen: RDIAG zählt global, KDIAG mittelt ausschließlich über die **angewandten**
+Besuche.
 
 **Korrektur einer früheren Begründung.** Es hieß, ein rein normaler Einzellink trage keinen
 Tangentialimpuls, weil c·t₁ = c·t₂ = 0. Gemessen ist das Gegenteil: 100 % der Einzellinks sind
@@ -450,9 +510,61 @@ direkt an ihre Randfläche gekoppelt, hier läuft die Kopplung über Gittervekto
 einem einzigen Diagonallink hat genau eine Gleichung für ein System, das drei braucht. Nicht die
 Fläche ist schlecht, die Anbindung ist unterbestimmt.
 
+## Der Rangweg ist gemessen, nicht offen — Berichtigung 09.09.2026
+
+Bis zum 08.09. stand hier, die Masse **global** statt je Zelle zu bilanzieren sei der einzige nicht
+ausprobierte Weg. Das ist überholt: der Weg wurde am 04./05.09. gebaut, gemessen und verworfen. Die
+Stelle zitierte die Empfehlung vom 04.09. mittags, nicht das Ergebnis vom selben Abend.
+
+**`CFD_FAC_MASSE_ALLE=1`** (Kompensation über alle 19 Links statt nur über die Wandlinks; das
+Downdate entfällt, die zellweise Massenerhaltung bleibt) — 8 mm, B70, gepaart, 150 Proben,
+Block-SEM über 8, FluidX3D-v2 @ f74f8f9:
+
+| | Bezug | Modus 1 |
+|---|---|---|
+| Rückfall | 42,79 % | **22,53 %** |
+| angewandt | 57,24 % | 77,40 % |
+| Δm kumulativ | — | **im Rauschen** (kein Masseleck) |
+| cz_druck_rest | −0,14709 | **+0,02918** |
+
+Die Rangwanderung trat exakt wie vorhergesagt ein, das Masseleck des ALPHA=0-Versuchs blieb aus —
+und die Kräfte kippten trotzdem weg von OF13 (−1,301). 59 % der Modellwirkung verloren, cd_reib
++8,1 %. **Disqualifiziert.**
+
+**Wo der Schaden sitzt** (Arm X, Lauf `vs_x8`, 05.09., @ 1aab3fc, dieselbe Paarung):
+
+| Anteil | Δcz_druck_rest | |
+|---|---|---|
+| (B) Injektionsform, auf der Schnittmenge | +0,02622 | 0,9 σ — **im Rauschen** |
+| (A) die neu abgedeckten Zellen | +0,15004 | 5,7 σ — **der Schaden** |
+| Summe | +0,17627 | = direkt gemessen, fünfte Stelle |
+
+Damit ist auch die noch nicht gebaute globale Variante getroffen: sie unterscheidet sich von
+Modus 1 genau in dem Anteil, der gemessen wirkungslos ist, und deckt dieselbe Zellmenge auf —
+das Downdate entfällt in beiden Fällen, also wandert derselbe Rang. Ein Restunterschied bleibt
+(eine globale Bilanz gibt die zellweise Neutralität auf, Modus 1 nicht), aber er liegt nicht dort,
+wo der Schaden gemessen wurde.
+
+**Und er hätte die Einzellink-Klasse ohnehin nie erreicht.** Eine Zelle mit einem Link ist auch
+**ohne** Downdate rangdefizit — im gekoppelten Solve ist
+
+    G̃11 = G11 − Sn1²/Snn = 6w(c·t₁)² − [6w(c·t₁)(c·n)]² / [6w(c·n)²] = 0
+
+exakt, solange c·n ≠ 0, und das gilt bei 100 % dieser Zellen. Die Wanderungsmatrix vom 04.09. zeigt
+es unabhängig: die 117.957 Einzellink-Facetten stehen schon **roh** auf Rang 0 und wandern nirgends
+hin. Der Abdeckungsgewinn 57,24 → 77,40 % betrifft Zellen mit zwei und mehr Links. **Die
+Ranglücke der Einzellinks und die Rangwanderung des Downdates sind zwei disjunkte Mengen** — die
+frühere Fassung dieses Kapitels hat sie verknüpft.
+
 ## Offen
 
-Der einzige nicht ausprobierte Weg ist, die Masse **global** statt je Zelle zu bilanzieren. Dann
-entfällt das Downdate und 36 % der Facetten steigen eine Rangstufe. Der Versuch vom 04.09.
-scheiterte, weil er die Massenerhaltung ersatzlos strich statt sie zu verlagern (Masseleck
-kumulativ −111.443 → +1.362.344, cz_druck_rest kippte von −0,1409 auf +0,1130).
+Nur noch ein Punkt, und er ist Hygiene, keine Physik: den Ausschluss der Einzellink-Klasse
+**deklarieren** statt ihn aus der Rangkaskade zu erben (`faca = 0` bei `eigene_links == 1`, oder
+sie gar nicht erst in `fac_idx` aufnehmen). Heute fallen sie über die Kaskade zurück — jede
+künftige Änderung am Rang-Gate (PINV, LSQ, MASSE_ALLE, andere Basiswahl) lässt sie still wieder
+zu und bläht die modellierte Wandfläche unbemerkt auf. Empfehlung vom 05.09., ungeprüft, nicht
+gebaut.
+
+Für die Abdeckung der **echten** Wandzellen (≥ 3 Links) gibt es keinen offenen Hebel mehr: die
+fehlenden 28,8 % sind das Sättigungsgate, dessen Schalter seit dem 30.08. erschöpft sind, und der
+einzige Rang-Hebel darauf ist der oben gemessene Schaden.

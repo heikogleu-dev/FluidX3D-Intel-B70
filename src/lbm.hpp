@@ -254,6 +254,8 @@ public:
 	static float s_fac_tau;  // 1 = voll, 0 = nur Tausch (CFD_FACETTEN=2)
 	static float s_fac_budget;    // CFD_FAC_BUDGET (Facetten-1a-Arm B4t): Skalierung des Tangentialbudgets |s1|<=2ut*k, |s2|<=ut*k. Default 1.0 = bitidentisch. Die +-2ut/+-ut-Budgets sind DESIGN (Gl. 9), nie geeicht -- Planungsagent 2026-08-22.
 	static float s_fac_budget_sn; // CFD_FAC_BUDGET_SN (Arm Bsn): Skalierung des sn-Budgets |sn|<=ut*k. Default 1.0 = bitidentisch.
+	static float s_fac_isogate;   // CFD_FAC_ISOGATE (09.09.2026): 1 = ISOTROPES Tangentialgate sqrt(s1^2+s2^2) <= 2*budget*ut statt der getrennten Schranken |s1|<=2ut*k UND |s2|<=ut*k. Default 0.0 = bitidentisch. Anlass: gemessen liegen 43,4 % der Gate-Rueckfaelle mit s1_soll/u_t in [0;1] INNERHALB des s1-Budgets -- dort kann nur das s2-Gate mit dem HALBEN Budget gefeuert haben, und die Basis (t1 = Richtung des momentanen u_t, kernel.cpp:2073) rotiert mit der Stroemung. Das Gate misst dann die zufaellige Lage von u_s in einer mitrotierenden Basis, nicht die Groesse des Slips.
+	static float s_fac_deteps;    // CFD_FAC_DETEPS (09.09.2026): Faktor K des Rauschbodens im Vollrangtest des gekoppelten Schur-Zweigs. det_eps = K*eps*(G11+G22)*Snnroh/Snn. Default 0.0 = bitidentisch. K=16 ist nachgerechnet: echte Rang-2-Linkmengen (Kante, Ecke) liegen 5-6 Dekaden ueber dem Rauschterm, ebene Mengen fallen sauber in den PINV-Zweig durch.
 	bool facetten_on = false, facetten_bound = false; // read-once + Bindungswaechter
 	uint fac_param_pos = 0u; ulong fac_N = 0ull;      // Parameterposition in stream_collide, aktive Facetten
 	Memory<float> fac_geo;   // AoS 8 float je Facette: nx,ny,nz,yw,fac_a(=1/|n_achse|),achse,[6] reserviert (Zband-z, Folgearbeit),[7] frei -- 8 B/Facette ungenutzt, Stride-Umbau vertagt (D9)

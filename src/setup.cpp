@@ -617,6 +617,19 @@ static void bericht_klassen(LBM_Domain* D, const std::vector<Facette>& F, const 
 	D->fac_kd.read_from_device();
 	struct Agg { ulong n=0ull; double v=0.0, ut=0.0, tw=0.0, twe=0.0, p1=0.0, s1=0.0, phi=0.0, rf=0.0, uta=0.0, ywa=0.0, twa=0.0, va=0.0, A=0.0, absA=0.0, B=0.0, C=0.0; }; // twa/va (04.09.): tw und Besuche NUR ueber angewandte Besuche; A/absA/B/C (05.09.): vorzeichenbehafteter Druckrest, Betragssumme, Ziel, Geometrie -- alle nur ueber angewandte Besuche
 	std::map<std::pair<uint,int>,Agg> M; ulong k=0ull;
+	// ★ PERSISTENZ-HISTOGRAMM (09.09.2026). Anlass: Heikos Frage, ob eine zurueckgefallene Zelle den
+	// Mittelwert ihrer bedienten Nachbarn uebernehmen kann. Davor muss geklaert sein, WORAN der Rueckfall
+	// liegt: faellt immer DIESELBE Zelle zurueck (bimodal, geometrisch-persistent), ist die statische
+	// Nachbarschaftsstatistik bereits die ganze Antwort; streut die Rate um den Klassenmittelwert, ist es
+	// ein Fluktuationsschwanz und die GLEICHZEITIGKEIT entscheidet. Die Klassentabelle kann das nicht
+	// zeigen, weil sie ueber Facetten mittelt. Rein hostseitig aus fac_kd[16k+6]/[16k+7], kein Kerneleingriff.
+	ulong ph_ges[11]={0}, ph_ziel[11]={0}; ulong ph_n=0ull, ph_zn=0ull; double ph_s=0.0, ph_zs=0.0;
+	// ★ Je-Facette-Ausgabe fuer die RAEUMLICHE Autokorrelation (09.09.): erst mit dem Zellindex laesst
+	// sich pruefen, ob Zellen mit hoher Rueckfallrate BEIEINANDER liegen. Genau das entscheidet, ob eine
+	// Mittelung ueber bediente Nachbarn traegt -- in einem Cluster aus Dauer-Rueckfaellern gibt es keine.
+	std::ofstream fp(out_dir+"facetten_persistenz.csv"); fp.precision(6);
+	fp << "# Rueckfallrate JE FACETTE (" << ort << "): rate = fac_kd[16k+6]/fac_kd[16k+7]; n = Zellindex im Nahfeldgitter\n";
+	fp << "n,eigene_links,yw,nx,ny,nz,besuche,rate\n";
 	double wA=0.0, wAbs=0.0, wB=0.0, wC=0.0, wV=0.0, wBes=0.0; ulong nb_n=0ull, nb_bruch=0ull; double nb_max=0.0; // Wandsummen + Nullbeweis (05.09.)
 	for(const Facette& f : F) { if(f.klasse!=0u) continue; if(16ull*k+15ull>=D->fac_kd.length()) break; // 16 seit 05.09. -- STILLE TRUNKIERUNG, wenn hier 12 stehen bliebe
 		const float* a=&D->fac_kd[16ull*k]; k++;
@@ -624,6 +637,11 @@ static void bericht_klassen(LBM_Domain* D, const std::vector<Facette>& F, const 
 		g.n++; g.v+=a[7]; g.ut+=a[0]; g.tw+=a[1]; g.twe+=a[2]; g.p1+=a[3]; g.s1+=a[4]; g.phi+=a[5]; g.rf+=a[6]; g.uta+=a[8]; g.ywa+=a[9]; g.twa+=a[10]; g.va+=a[11];
 		g.A+=a[12]; g.absA+=a[13]; g.B+=a[14]; g.C+=a[15];
 		wA+=a[12]; wAbs+=a[13]; wB+=a[14]; wC+=a[15]; wV+=a[11]; wBes+=a[7];
+		if(a[7]>0.0f) { const double r_=(double)a[6]/(double)a[7]; const uint b_=(uint)fmin(10.0, floor(r_*10.0+1e-9));
+			ph_ges[b_]++; ph_n++; ph_s+=r_;
+			const float am_=fmax(fabs(f.nx),fmax(fabs(f.ny),fabs(f.nz)));
+			if(f.eigene_links==5u&&am_<=0.99984770f&&(int)lround(100.0f*f.yw)!=50) { ph_ziel[b_]++; ph_zn++; ph_zs+=r_; }
+			fp << f.n << "," << f.eigene_links << "," << f.yw << "," << f.nx << "," << f.ny << "," << f.nz << "," << a[7] << "," << r_ << "\n"; }
 		// ★ NULLBEWEIS A-1 (05.09.): achsparallele Facette MIT 5er-Linkmenge -> S1 = (0,0,+-1/6), t1.n = 0 bitgenau
 		// -> A, |A|, C muessen BITGENAU 0.0f sein. Nur diese Konfiguration (die 53ceb50-Lektion: der 0,99-Eimer
 		// enthaelt 4-Link-Facetten mit zu Recht nichtverschwindendem S1_t). Gezaehlt, nicht gemittelt.
@@ -635,6 +653,20 @@ static void bericht_klassen(LBM_Domain* D, const std::vector<Facette>& F, const 
 		  if(exakt_achse&&f.eigene_links==5u) { nb_n++; if(a[12]!=0.0f||a[13]!=0.0f||a[15]!=0.0f) { nb_bruch++; const float m_=fmax(fabs(a[13]),fabs(a[15])); if(m_>nb_max) nb_max=m_; } } } }
 	std::vector<std::pair<std::pair<uint,int>,Agg>> V(M.begin(), M.end());
 	std::sort(V.begin(), V.end(), [](const std::pair<std::pair<uint,int>,Agg>& x, const std::pair<std::pair<uint,int>,Agg>& y){ return x.second.n>y.second.n; });
+	if(ph_n>0ull) {
+		string z1="", z2="";
+		for(uint b=0u; b<11u; b++) {
+			z1 += (b>0u?string(" "):string("")) + to_string((float)(100.0*(double)ph_ges[b]/(double)ph_n),1u);
+			z2 += (b>0u?string(" "):string("")) + to_string((float)(ph_zn>0ull?100.0*(double)ph_ziel[b]/(double)ph_zn:0.0),1u);
+		}
+		print_info("["+ort+"] PERSISTENZ-HISTOGRAMM: Rueckfallrate JE FACETTE, Eimer [0;0,1) ... [0,9;1) und exakt 1,0 (11 Werte, Prozent):");
+		print_info("  ALLE "+to_string(ph_n)+" Facetten, Mittel "+to_string((float)(ph_s/(double)ph_n),4u)+": "+z1);
+		print_info("  ZIELKLASSE 5 Links / Kipp >= 1 Grad / y_w != 0,50 -- "+to_string(ph_zn)+" Facetten, Mittel "+to_string((float)(ph_zn>0ull?ph_zs/(double)ph_zn:0.0),4u)+": "+z2);
+		print_info("  CSV je Facette: "+out_dir+"facetten_persistenz.csv (Zellindex, Linkzahl, y_w, Normale, Besuche, Rate)");
+		print_info("  LESART: Randeimer voll (bimodal) = persistenter, geometrischer Rueckfall, immer dieselben Zellen -- dann ist");
+		print_info("  die statische Nachbarschaftsstatistik die ganze Antwort. Um den Mittelwert konzentriert = Fluktuationsschwanz --");
+		print_info("  dann entscheidet, ob die Nachbarn ZEITGLEICH bedient sind, und das misst erst ein Zeitschritt-Zaehler.");
+	}
 	print_info("["+ort+"] KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG): "+to_string(k)+" Facetten in "+to_string((ulong)V.size())+" Klassen (eigene_links, y_w). Mittel je Besuch"+(tau_ziel>0.0?" -- tw/Ziel gegen tau_ziel "+to_string((float)tau_ziel,9u):string(""))+":");
 	print_info("  links  y_w     n_fac    Besuche/fac   u_t        u_t_abt    y_abt   tw         twe        |P1|       s1         phi1       Rueckfall%   tw/Ziel  |P1|/twe   s1/u_t"); // s1/u_t (03.09.): Slip relativ zur Zellgeschwindigkeit = Randwert-Inkonsistenz des FD-Sensors (sgs_fdwand setzt u=0 am Solid)
 	std::ofstream fk(out_dir+"facetten_klassen.csv"); fk.precision(7);
@@ -3645,6 +3677,8 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_pema>0.0f) print_info("iMEM-PEMA aktiv (Weg A, Eingangs-Filterung): alpha = "+to_string(LBM_Domain::s_fac_pema,5u)+", Zeitkonstante ~"+to_string((uint)(1.0f/LBM_Domain::s_fac_pema))+" Schritte");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  LBM_Domain::s_fac_budget = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET", 1.0f)));       // 1a-B4t: Tangentialbudget-Skalar (geklemmt 0,25..4; Ansage unten)
+	  LBM_Domain::s_fac_isogate = (env_u("CFD_FAC_ISOGATE", 0u)>0u) ? 1.0f : 0.0f; // ★ 09.09.: isotropes Tangentialgate statt getrennter s1/s2-Schranken
+	  LBM_Domain::s_fac_deteps = fmax(0.0f, fmin(1024.0f, env_f("CFD_FAC_DETEPS", 0.0f))); // ★ 09.09.: Rauschboden im Vollrangtest (K, empfohlen 16)
 	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
 	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
 	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
@@ -4456,6 +4490,8 @@ void main_setup_kugel() {
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  LBM_Domain::s_fac_budget = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET", 1.0f)));       // 1a-B4t: Tangentialbudget-Skalar (geklemmt 0,25..4; Ansage unten)
+	  LBM_Domain::s_fac_isogate = (env_u("CFD_FAC_ISOGATE", 0u)>0u) ? 1.0f : 0.0f; // ★ 09.09.: isotropes Tangentialgate statt getrennter s1/s2-Schranken
+	  LBM_Domain::s_fac_deteps = fmax(0.0f, fmin(1024.0f, env_f("CFD_FAC_DETEPS", 0.0f))); // ★ 09.09.: Rauschboden im Vollrangtest (K, empfohlen 16)
 	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
 	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
 	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
@@ -5631,6 +5667,8 @@ static void main_setup_fahrzeug_dd() {
 	  if(fc==4u&&LBM_Domain::s_fac_apg!=0.0f) print_warning("Arm 4 (Nullziel) + APG: tw/[0]-Akkumulator und y+-Report tragen APG-Korrektur, Ziel bleibt 0 -- reine Diagnose-Kombination (Gross-Audit N17).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
 	  LBM_Domain::s_fac_budget = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET", 1.0f)));       // 1a-B4t: Tangentialbudget-Skalar (geklemmt 0,25..4; Ansage unten)
+	  LBM_Domain::s_fac_isogate = (env_u("CFD_FAC_ISOGATE", 0u)>0u) ? 1.0f : 0.0f; // ★ 09.09.: isotropes Tangentialgate statt getrennter s1/s2-Schranken
+	  LBM_Domain::s_fac_deteps = fmax(0.0f, fmin(1024.0f, env_f("CFD_FAC_DETEPS", 0.0f))); // ★ 09.09.: Rauschboden im Vollrangtest (K, empfohlen 16)
 	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
 	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
 	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
@@ -5665,7 +5703,7 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u);
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_rdiag=0u; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_kraft = 0u; LBM_Domain::s_fac_kdiag = 0u; LBM_Domain::s_fac_nachbar = 0u; LBM_Domain::s_fac_messnur = 0u; LBM_Domain::s_sgs_fdwand = 0u; LBM_Domain::s_sgs_gdiag = 0u; LBM_Domain::s_sgs_sism = 0u; LBM_Domain::s_sgs_sism_T = 0u; LBM_Domain::s_sgs_sism_ab = 0ull; LBM_Domain::s_sgs_vandriest = 0u; LBM_Domain::s_sgs_band = 0u; LBM_Domain::s_sgs_vd_ab = 0ull; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_fac_isogate = 0.0f; LBM_Domain::s_fac_deteps = 0.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_rdiag=0u; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_kraft = 0u; LBM_Domain::s_fac_kdiag = 0u; LBM_Domain::s_fac_nachbar = 0u; LBM_Domain::s_fac_messnur = 0u; LBM_Domain::s_sgs_fdwand = 0u; LBM_Domain::s_sgs_gdiag = 0u; LBM_Domain::s_sgs_sism = 0u; LBM_Domain::s_sgs_sism_T = 0u; LBM_Domain::s_sgs_sism_ab = 0ull; LBM_Domain::s_sgs_vandriest = 0u; LBM_Domain::s_sgs_band = 0u; LBM_Domain::s_sgs_vd_ab = 0ull; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
 	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
@@ -8401,7 +8439,7 @@ static void main_setup_fernfeld() {
 	// ★ Wandfunktion: BEWUSST nur im Kanal verdrahtet. Am Fahrzeug traefe die z-Wand-Logik die
 	// MITBEWEGTE Fahrbahn (u_t wird absolut genommen -- an einer bewegten Wand falsch) und die
 	// Karosserie braucht die Facetten (C1b). Bis dahin: ueberall sonst hart aus.
-	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_rdiag=0u; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_kraft = 0u; LBM_Domain::s_fac_kdiag = 0u; LBM_Domain::s_fac_nachbar = 0u; LBM_Domain::s_fac_messnur = 0u; LBM_Domain::s_sgs_fdwand = 0u; LBM_Domain::s_sgs_gdiag = 0u; LBM_Domain::s_sgs_sism = 0u; LBM_Domain::s_sgs_sism_T = 0u; LBM_Domain::s_sgs_sism_ab = 0ull; LBM_Domain::s_sgs_vandriest = 0u; LBM_Domain::s_sgs_band = 0u; LBM_Domain::s_sgs_vd_ab = 0ull; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
+	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_fac_isogate = 0.0f; LBM_Domain::s_fac_deteps = 0.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u;; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_rdiag=0u; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_kraft = 0u; LBM_Domain::s_fac_kdiag = 0u; LBM_Domain::s_fac_nachbar = 0u; LBM_Domain::s_fac_messnur = 0u; LBM_Domain::s_sgs_fdwand = 0u; LBM_Domain::s_sgs_gdiag = 0u; LBM_Domain::s_sgs_sism = 0u; LBM_Domain::s_sgs_sism_T = 0u; LBM_Domain::s_sgs_sism_ab = 0ull; LBM_Domain::s_sgs_vandriest = 0u; LBM_Domain::s_sgs_band = 0u; LBM_Domain::s_sgs_vd_ab = 0ull; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) print_warning("CFD_WANDFUNKTION wird in diesem Fall NICHT angewandt (nur kanal).");
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	if(env_u("CFD_FACETTEN", 0u)>0u) print_warning("CFD_FACETTEN wird im fernfeld-Fall NICHT angewandt (Audit R3: die 6. Stelle hatte die Ansage schon wieder ausgelassen).");
