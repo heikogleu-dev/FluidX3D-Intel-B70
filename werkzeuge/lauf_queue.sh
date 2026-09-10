@@ -78,8 +78,15 @@ while IFS= read -r zeile; do
 		echo "[$(date +%H:%M:%S)] warte 120 s und wiederhole $name" | tee -a "$Q"; sleep 120
 	done
 	m=""; [ $rc -ne 0 ] && m=" FEHLER"
-	# ★★ 06.09.2026 WAECHTERAUSGABEN SICHTBAR MACHEN. print_error bricht den Lauf NICHT ab, also
-	# meldet rc weiterhin 0 -- am 06.09. trugen 15 von 80 Lauflogs einen unbemerkten Error, darunter
+	# ★★ 06.09.2026 WAECHTERAUSGABEN SICHTBAR MACHEN.
+	# ★ BERICHTIGT 10.09. nachts: der Satz hier lautete "print_error bricht den Lauf NICHT ab,
+	# also meldet rc weiterhin 0". DAS IST FALSCH. Beide Fassungen von print_error in
+	# src/utilities.hpp enden auf exit(1), belegt an logs/pt3_komma.log (6 kB statt 170 kB,
+	# Log endet unmittelbar hinter dem Error, rc=1). Der 06.09.-Befund "15 von 80 Logs mit
+	# unbemerktem Error" bleibt richtig -- diese Errors feuern am LAUFENDE, nach den CSVs,
+	# die Physik ueberlebt, rc ist trotzdem 1. Die Annahme steuert, wie Abnahmen gebaut
+	# werden: ein Waechter vor den uebrigen Abnahmen reisst sie alle mit.
+	# Am 06.09. trugen 15 von 80 Lauflogs einen unbemerkten Error, darunter
 	# "K2 verletzt: Abnahmelauf disqualifiziert". Und der naive Filter findet ihn nicht: die Rohbytes
 	# sind `Error^[[0m:`, der Farb-Reset steht ZWISCHEN Wort und Doppelpunkt, `tr -d '\033'` entfernt
 	# nur das ESC-Byte und laesst `[0m` stehen. Deshalb hier der vollstaendige ANSI-Filter.

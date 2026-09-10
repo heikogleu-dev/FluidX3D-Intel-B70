@@ -3921,7 +3921,6 @@ void main_setup_kanal() {
 	// ★ P-TRT-ABNAHME AUF EBENE 1, ausserhalb JEDER Bedingung (Pruefbefund 10.09. abends).
 	// Sie stand zuerst im CFD_FACETTEN-Block; im Fahrzeugbericht haette sie sogar zusaetzlich
 	// in if(n2f_alpha>0.0f) gesteckt. Ein Waechter, den man wegschalten kann, ist keiner.
-	pruefe_ptrt(lbm.lbm_domain[0], "Kanal");
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 2: Wirkpfad-Nachweis, Soll EXAKT (F7)
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
@@ -4113,6 +4112,11 @@ void main_setup_kanal() {
 	if(env_u("CFD_SGS_VANDRIEST",0u)>0u) bericht_vandriest(lbm.lbm_domain[0], LBM_Domain::s_sgs_vd_aplus, "Kanal"); // ★ 08.09. van Driest: Wirkpfad, D^2-Histogramm, Ist=Soll Geraet gegen Host-y+
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
 	print_info("Referenz Lee & Moser 5186: U_b+ = 24,104, c_f = 3,4424e-3.");
+	// ★★ HIER, GANZ AM ENDE, und nicht mehr vor den uebrigen Abnahmen (Host-Pruefer 10.09.
+	// nachts): print_error ist exit(1). Stand die P-TRT-Abnahme vorn, riss ein Fehlbefund
+	// nach 95 min Rechenzeit ALLE folgenden Abnahmen mit -- SISM, SGS-Band, Facetten, K2.
+	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
+	pruefe_ptrt(lbm.lbm_domain[0], "Kanal");
 	_exit(0);
 }
 
@@ -4190,16 +4194,25 @@ void pruefe_ptrt(LBM_Domain* d, const char* ort) {
 	if(getenv("CFD_PTRT")==nullptr||(float)atof(getenv("CFD_PTRT"))<=0.0f) return;
 	d->rho_clamp_hits.read_from_device();
 	const ulong q199=(ulong)d->rho_clamp_hits[199], q200=(ulong)d->rho_clamp_hits[200], q201=(ulong)d->rho_clamp_hits[201];
+	const ulong q202=(ulong)d->rho_clamp_hits[202], q203=(ulong)d->rho_clamp_hits[203];
 	const ulong satt=0xF0000000ull;
 	const string wo = "["+string(ort)+"] ";
-	if(q199==0ull) { print_error(wo+"P-TRT war angefordert (CFD_PTRT="+string(getenv("CFD_PTRT"))+"), aber Slot 199 = 0 -- stiller No-Op. Wurde PTRT ueberhaupt emittiert? CFD_DUMP_CL=1 pruefen."); return; }
-	if(q201==0ull) { print_error(wo+"P-TRT: Block besucht ("+to_string(q199)+"), aber Slot 201 = 0 -- der Abzug ist ueberall exakt null, also (w - omega_g) == 0 oder gar kein Geistanteil. Slot 200 = "+to_string(q200)+"."); return; }
-	if(q199>=satt||q200>=satt||q201>=satt) {
-		print_warning(wo+"P-TRT-Wirkpfad: Zaehler GESAETTIGT (199 = "+to_string(q199)+", 200 = "+to_string(q200)+", 201 = "+to_string(q201)+", Schranke "+to_string(satt)+"). Der Wirkpfad ist damit belegt, der Gleichheitstest 201 == 200 aber NICHT mehr aussagekraeftig -- oberhalb der Schranke entscheidet der Wettlauf der atomics. Fuer einen scharfen Test kuerzer laufen lassen.");
-		return;
-	}
-	if(q201!=q200) print_warning(wo+"P-TRT: Slot 201 ("+to_string(q201)+") weicht von Slot 200 ("+to_string(q200)+") ab -- erwartet ist Gleichheit unterhalb der Saettigung, solange omega_g != w. Differenz "+to_string(q200>q201?q200-q201:q201-q200)+".");
-	else print_info(wo+"P-TRT-Wirkpfad: Slot 199 besucht = "+to_string(q199)+", 200 Geistanteil vorhanden = "+to_string(q200)+", 201 Abzug ungleich null = "+to_string(q201)+" -- 201 == 200 unterhalb der Saettigung, Ist=Soll bestanden (t%100-Stichprobe).");
+	if(q199==0ull&&q202==0ull) { print_error(wo+"P-TRT war angefordert (CFD_PTRT="+string(getenv("CFD_PTRT"))+"), aber die Slots 199 UND 202 sind null -- stiller No-Op. Wurde PTRT ueberhaupt emittiert? CFD_DUMP_CL=1 pruefen."); return; }
+	// ★★ DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200 (Kernel-Pruefer 10.09. nachts).
+	// 200 und 201 feuern in JEDER Zelle, weil schon das FP16S-Quantisierungsrauschen ein
+	// Geistmoment von 1,08e-6 erzeugt (reiner Chapman-Enskog-Zustand: 3,1e-18). 201 == 200 ist
+	// damit eine Tautologie und beweist nur (w - omega_g) != 0. 203 zaehlt dagegen die Zellen,
+	// in denen der Abzug GROESSER ist als das Speicherquantum -- nur dort ueberlebt er die
+	// Rundung und wirkt. Faellt der Anteil unter 20 %, ist der Abzug ueberwiegend wirkungslos.
+	if(q202==0ull) { print_error(wo+"P-TRT: die ausgeduennte Zweitzaehlung (Slot 202) ist null, obwohl Slot 199 = "+to_string(q199)+" feuert. Das Ausduennungsgatter n%1024 trifft keine Zelle -- Gitter zu klein oder Indexlogik kaputt."); return; }
+	const double anteil = 100.0*(double)q203/(double)q202;
+	if(q203==0ull) print_error(wo+"P-TRT: Slot 203 = 0 bei "+to_string(q202)+" Stichproben -- der Abzug liegt in JEDER Stichprobe unter dem FP16S-Speicherquantum und wird beim Speichern verworfen. Der Schalter ist wirkungslos, obwohl 199..201 feuern.");
+	else print_info(wo+"P-TRT-Wirkpfad: ausgeduennte Stichproben "+to_string(q202)+", davon "+to_string(q203)+" mit Abzug UEBER dem FP16S-Speicherquantum = "+to_string((float)anteil,1u)+" %. Ist=Soll bestanden (Slot 203 > 0). "
+		+"DEUTUNG: der Anteil ist eine Kennzahl, KEIN Ausschlusskriterium. Ein Abzug unterhalb des Quantums ist nicht wirkungslos -- der Kollisionsterm verschiebt f je Schritt um 6 bis 10 Quanten, die Rundung dithert also, und ein systematischer Unterquantum-Beitrag verschiebt den Mittelwert trotzdem. Was der Zaehler HART ausschliesst, ist der Fall 203 = 0: dort liegt der Abzug in JEDER Stichprobe unter dem Quantum und wird verworfen. "
+		+"Vergleichswert Kanal N=20 kipp26 bei omega_g = 1,90: 15,3 %.");
+	// Die groben Zaehler bleiben als Zweitbeleg, aber MIT Saettigungsvorbehalt.
+	if(q199>=satt||q200>=satt||q201>=satt) print_info(wo+"P-TRT: die groben Zaehler 199/200/201 sind gesaettigt ("+to_string(q199)+"/"+to_string(q200)+"/"+to_string(q201)+") -- erwartet bei dieser Zellzahl, der scharfe Test laeuft ueber 202/203.");
+	else if(q201!=q200) print_warning(wo+"P-TRT: Slot 201 ("+to_string(q201)+") weicht von Slot 200 ("+to_string(q200)+") ab, obwohl unterhalb der Saettigung -- erwartet ist Gleichheit, solange omega_g != w.");
 }
 
 void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float nu_lat, const float dx, const float dt, const float si_rho, const string& out_dir, const char* wo) {
@@ -4928,7 +4941,6 @@ void main_setup_kugel() {
 	// ★ P-TRT-ABNAHME AUF EBENE 1, ausserhalb JEDER Bedingung (Pruefbefund 10.09. abends).
 	// Sie stand zuerst im CFD_FACETTEN-Block; im Fahrzeugbericht haette sie sogar zusaetzlich
 	// in if(n2f_alpha>0.0f) gesteckt. Ein Waechter, den man wegschalten kann, ist keiner.
-	pruefe_ptrt(lbm.lbm_domain[0], "Kugel");
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe-2-Commit 3: Wirkpfad Ist=Soll + tau-Akkumulator an der Kugel
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		if(env_u("CFD_SGS_FDWAND",0u)>0u) { const ulong s76=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[76]; if(s76==0ull) print_error("[Kugel] SGS_FDWAND war angefordert, aber Slot 76 = 0 -- stiller No-Op (Emission? Rebind? Enqueue?)."); else print_info("[Kugel] SGS_FDWAND-Wirkpfad Slot 76 = "+to_string(s76)+" (Soll ~ fac_N * ceil(n/100))."); } // ★ 07.09. abends (Planungsagent SISM): die Kugel hatte als EINZIGER Fall keinen Slot-76-Waechter -- an genau dem Fall, an dem FDWAND erst heute verdrahtet wurde
@@ -4996,6 +5008,11 @@ void main_setup_kugel() {
 	// Der Intel-Runtime-Teardown laeuft beim regulaeren Rueckweg in ein "double free or
 	// corruption (out)" (rc=134), nachdem alle Dateien geschrieben sind. Upstream hat denselben
 	// Exit-Bug an anderer Stelle und musste den "sauberen" Fix einen Tag spaeter zurueckrudern.
+	// ★★ HIER, GANZ AM ENDE, und nicht mehr vor den uebrigen Abnahmen (Host-Pruefer 10.09.
+	// nachts): print_error ist exit(1). Stand die P-TRT-Abnahme vorn, riss ein Fehlbefund
+	// nach 95 min Rechenzeit ALLE folgenden Abnahmen mit -- SISM, SGS-Band, Facetten, K2.
+	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
+	pruefe_ptrt(lbm.lbm_domain[0], "Kugel");
 	_exit(0);
 }
 
@@ -8276,8 +8293,6 @@ static void main_setup_fahrzeug_dd() {
 	// ★ P-TRT-ABNAHME AUF EBENE 1, ausserhalb JEDER Bedingung (Pruefbefund 10.09. abends).
 	// Sie stand zuerst im CFD_FACETTEN-Block; im Fahrzeugbericht haette sie sogar zusaetzlich
 	// in if(n2f_alpha>0.0f) gesteckt. Ein Waechter, den man wegschalten kann, ist keiner.
-	pruefe_ptrt(lbm_f.lbm_domain[0], "Nahfeld");
-	pruefe_ptrt(lbm_c.lbm_domain[0], "Fernfeld"); // ★ das Fernfeld bekommt PTRT ueber dasselbe getenv MIT -- ungeprueft waere es eine zweite, stille Variable
 	if(n2f_alpha>0.0f) { // ★ P9c: N2F-SCHALE-Wirkpfad-Endnachweis Slot 22 (Muster EINLASS_EQ)
 		lbm_f.lbm_domain[0]->rho_clamp_hits.read_from_device(); lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong swf=(ulong)lbm_f.lbm_domain[0]->rho_clamp_hits[22], swc=(ulong)lbm_c.lbm_domain[0]->rho_clamp_hits[22];
@@ -8456,6 +8471,12 @@ static void main_setup_fahrzeug_dd() {
 	// weder Cd_druck noch den SISM-Waechter fressen. Der Bericht baut seinen Host-Spiegel selbst aus fac_tau/fac_tau_n/fac_geo.
 	if(env_u("CFD_SGS_VANDRIEST",0u)>0u) bericht_vandriest(lbm_f.lbm_domain[0], LBM_Domain::s_sgs_vd_aplus, "Nahfeld");
 	print_info("---------------------------------------------------------------");
+	// ★★ HIER, GANZ AM ENDE, und nicht mehr vor den uebrigen Abnahmen (Host-Pruefer 10.09.
+	// nachts): print_error ist exit(1). Stand die P-TRT-Abnahme vorn, riss ein Fehlbefund
+	// nach 95 min Rechenzeit ALLE folgenden Abnahmen mit -- SISM, SGS-Band, Facetten, K2.
+	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
+	pruefe_ptrt(lbm_f.lbm_domain[0], "Nahfeld");
+	pruefe_ptrt(lbm_c.lbm_domain[0], "Fernfeld"); // ★ das Fernfeld bekommt PTRT ueber dasselbe getenv MIT -- ungeprueft waere es eine zweite, stille Variable
 	_exit(0);
 }
 

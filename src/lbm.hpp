@@ -188,7 +188,7 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 128 Slots (Legende: lbm.cpp bei der Allokation) (70 Kraftpfad, 71 reserviert; 30.08.). Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
+	Memory<uint> rho_clamp_hits; // 224 Slots (KORRIGIERT 10.09. nachts -- hier stand 128, der Puffer ist seit 08.09. 224) (Legende: lbm.cpp bei der Allokation) (70 Kraftpfad, 71 reserviert; 30.08.). Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -203,7 +203,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 202 (188..198 gehoeren seit 10.09. dem NUT_SKAL-Diskriminator, 199..201 seit 10.09. abends P-TRT: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug wirklich ungleich null) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 204 (188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben

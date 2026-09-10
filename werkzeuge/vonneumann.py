@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Lineare von-Neumann-Stabilitaet des D3Q19-Kollisionsoperators dieses Forks.
 
-    werkzeuge/vonneumann.py                    # Nachrechnung der Tabelle in lbm.cpp:1403-1407
+    werkzeuge/vonneumann.py                    # Nachrechnung der Tabelle in lbm.cpp:1443-1447
     werkzeuge/vonneumann.py --ptrt             # zusaetzlich P-TRT mit omega_g = 1,0 und 1,9
-        --tau 0.5000071   Relaxationszeit tau+ (Vorgabe: der Wert aus lbm.cpp:1403)
+        --tau 0.5000071   Relaxationszeit tau+ (Vorgabe: der Wert aus lbm.cpp:1443)
                           ACHTUNG, ZWEI BETRIEBSPUNKTE: 0,5000071 ist das FERNFELD bei 16 mm,
                           das 4-mm-NAHFELD hat 0,50002832 (beide stehen in logs/zd4_ohne.log).
                           Fuer Aussagen ueber den 4-mm-Defekt --tau 0.50002832 setzen. Am
@@ -13,8 +13,23 @@
         --n 24            Stuetzstellen je k-Achse im Grobgitter
         --fein            nach dem Grobgitter lokal nachoptimieren (langsamer, genauer)
 
+DIE AUFLOESUNG IST HIER KEINE KOMFORTFRAGE, SIE ENTSCHEIDET DAS VORZEICHEN
+  Ein feineres k-Gitter findet nur GROESSERE Maxima, nie kleinere -- jeder zu grob
+  gerechnete Wert ist also zu OPTIMISTISCH, und zwar unterschiedlich stark je Arm.
+  Damit kippt die Reihenfolge. Am 10.09.2026 ist das VIERMAL passiert:
+    1. SRT bei 16^3: max|lambda| 1,000259 statt 1,003455 -- SRT sah damit als
+       stabilster Arm aus statt als zweitschlechtester.
+    2. Ein Planungsagent hielt deshalb die Tabelle in lbm.cpp:1444-1447 fuer falsch.
+    3. Derselbe Agent empfahl CFD_LAMBDA mit "Faktor 16", gerechnet in einer k-Box
+       um den Ursprung -- das Maximum lag ausserhalb.
+    4. Die P-TRT-Kurve bei 40^3 wies bei omega_g = 1,94 einen Einbruch auf, den es
+       nicht gibt: die NACHBARN waren unteraufgeloest, nicht 1,94.
+  FAUSTREGEL AUS DIESEN VIER FAELLEN: unter n = 72 mit --fein ist keine Zahl
+  belastbar, und zwei Arme sind nur vergleichbar, wenn BEIDE konvergiert sind.
+  Konvergenz zeigt man, indem man n verdoppelt und den Wert unveraendert findet.
+
 WARUM ES DAS GIBT
-  In src/lbm.cpp:1403-1407 steht eine gerechnete Tabelle (max|Eigenwert| und e-Faltung
+  In src/lbm.cpp:1443-1447 steht eine gerechnete Tabelle (max|Eigenwert| und e-Faltung
   fuer Lambda = 3/16, 1/4, SRT und 9,1e-8). Das Skript dazu ist nicht erhalten. Am
   10.09.2026 hat ein Planungsagent die Zahlen NICHT reproduziert -- weder Betrag noch
   Reihenfolge -- und daran haengt die Wahl von omega_g fuer P-TRT. Dieses Skript ist die
@@ -32,13 +47,13 @@ WAS GERECHNET WIRD
 
 QUELLEN IM CODE
   Gleichgewicht  src/kernel.cpp:1136-1187 (calculate_f_eq, Stoerform: feq - w_i)
-  TRT-Kollision  src/kernel.cpp:3453-3486  (wp = w, wm = 1/(Lambda/(1/w-1/2)+1/2))
-  Linkreihenfolge src/kernel.cpp:4385      (fzc[19][3])
+  TRT-Kollision  src/kernel.cpp:3559-3610  (wp = w, wm = 1/(Lambda/(1/w-1/2)+1/2))
+  Linkreihenfolge src/kernel.cpp:4509      (fzc[19][3])
 """
 import sys, argparse, itertools
 import numpy as np
 
-# ---- D3Q19 in DER Reihenfolge dieses Forks (src/kernel.cpp:4385 und die feq-Zeilen 1167-1187)
+# ---- D3Q19 in DER Reihenfolge dieses Forks (src/kernel.cpp:4509 und die feq-Zeilen 1167-1187)
 C = np.array([
     ( 0, 0, 0),
     ( 1, 0, 0), (-1, 0, 0),
@@ -54,7 +69,7 @@ C = np.array([
 W = np.array([1.0/3.0] + [1.0/18.0]*6 + [1.0/36.0]*12)
 Q = 19
 # Gegenrichtung: im Fork liegt sie immer im Nachbarindex (i ungerade -> i+1), siehe die
-# fhb/feb-Schleife in src/kernel.cpp:3470-3476.
+# fhb/feb-Schleife in src/kernel.cpp:3574-3580.
 GEGEN = np.array([0] + [i+1 if i % 2 == 1 else i-1 for i in range(1, Q)])
 
 # Geistmoden der symmetrischen Unterraeume, korrigierte ganzzahlige Basis

@@ -405,9 +405,9 @@ void LBM_Domain::allocate(Device& device) {
 	// ALLE Ereignis-Slots sind t%100-Stichproben; 49..58 und 60..63 zusaetzlich hash-ausgeduennt (jede 64.). RDIAG (136..154) ist NICHT ausgeduennt.
 	// [126..127] SISM Wirkpfad/Klemme | [160..167] VAN DRIEST D^2-Histogramm, Zeitintegral aller Zaehlslots ab CFD_SGS_VD_AB
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
-	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 188 (Puffer 224 seit 08.09.).
+	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 186 (Puffer 192). Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	// letzten Slot L. NAECHSTER FREIER SLOT: 204 (Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -1359,17 +1359,26 @@ string ptrt_defines() {
 	if(roh==nullptr||roh[0]=='\0') return "";
 	char* ende = nullptr;
 	const double wert = strtod(roh, &ende);
-	while(ende!=nullptr&&*ende==' ') ende++;
+	while(ende!=nullptr&&(*ende==' '||*ende=='\t'||*ende=='\r'||*ende=='\n')) ende++; // ★ auch Tab und CR, sonst scheitert eine CRLF-Seriendatei
 	if(ende==nullptr||*ende!='\0') print_error("CFD_PTRT = \""+string(roh)+"\" ist keine reine Zahl (Rest: \""+string(ende==nullptr?"":ende)+"\"). Dezimaltrenner ist der PUNKT: CFD_PTRT=1.95, nicht 1,95. Ein stillschweigend abgeschnittener Wert waere hier besonders teuer, weil 1,0 und 1,95 auf entgegengesetzten Enden der Skala liegen.");
-	if(wert<=0.0) return "";
-	if(wert>=2.0) print_error("CFD_PTRT = "+to_string((float)wert,6u)+" ist >= 2. Der Geistanteil waechst dann je Schritt um |1-omega_g| >= 1, der Lauf ist unbedingt instabil. Erlaubt ist 0 < omega_g < 2.");
+	// ★ AB HIER GEGEN DEN FLOAT PRUEFEN, nicht gegen den double (Host-Pruefer 10.09. nachts):
+	// emittiert wird to_string((float)wert), und CFD_PTRT=1.99999995 ist als double < 2, als
+	// float aber EXAKT 2.0f. Der Waechter haette genau den Fall durchgelassen, den er verhindern
+	// soll. Und die Bedingung muss POSITIV formuliert sein: bei NaN sind sowohl wert<=0 als auch
+	// wert>=2 falsch, NaN passierte beide Waechter und landete als "NaNf" im Kernel.
+	const float wf = (float)wert;
+	if(!(wf>0.0f&&wf<2.0f)) {
+		if(wf!=wf) print_error("CFD_PTRT = \""+string(roh)+"\" ergibt NaN. omega_g muss eine Zahl in (0, 2) sein.");
+		if(wf>=2.0f) print_error("CFD_PTRT = "+to_string(wf,6u)+" ist >= 2. Der Geistanteil waechst dann je Schritt um |1-omega_g| >= 1, der Lauf ist unbedingt instabil. Erlaubt ist 0 < omega_g < 2.");
+		return ""; // wf <= 0 heisst "aus" -- ohne Meldung, das ist der dokumentierte Aus-Zustand
+	}
 #ifndef D3Q19
 	print_error("CFD_PTRT ist gesetzt, aber dieser Build ist nicht D3Q19. Der P-TRT-Block kennt nur die drei D3Q19-Geistmoden und die Gewichte def_w0/def_ws/def_we; unter D3Q27 waere er kein Projektor mehr (er speiste Masse ein), unter D2Q9 schriebe er ueber das DDF-Feld hinaus. Velocity set in defines.hpp aendern oder CFD_PTRT weglassen.");
 	return "";
 #else
-	print_info("P-TRT AKTIV: omega_g = "+to_string((float)wert,8u)+" (Geistanteil des geraden Nichtgleichgewichts relaxiert mit dieser Rate statt mit der Kollisionsrate w). Wirkpfad Slots 199/200/201, Abnahme pruefe_ptrt.");
+	print_info("P-TRT AKTIV: omega_g = "+to_string(wf,8u)+" (Geistanteil des geraden Nichtgleichgewichts relaxiert mit dieser Rate statt mit der Kollisionsrate w). Wirkpfad Slots 199/200/201, Abnahme pruefe_ptrt.");
 	return (string)"\n	#define PTRT"
-	      +"\n	#define def_omega_g "+to_string((float)wert, 12u)+"f";
+	      +"\n	#define def_omega_g "+to_string(wf, 12u)+"f";
 #endif // D3Q19
 }
 
@@ -1461,20 +1470,27 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// (wp - omega_g) wird dann nirgends exakt null.
 	// WELCHER WERT? Gerechnet mit werkzeuge/vonneumann.py auf der SRT-BASIS (dem Operator, den
 	// dieser Fork wirklich rechnet), am Betriebspunkt tau = 0,50002832 (4-mm-Nahfeld) und
-	// u_lat = 0,075 (setup.cpp) -- BEIDE Angaben gehoeren dazu, ohne u_lat ist die Tabelle nicht
-	// reproduzierbar, und mit dem Fernfeld-tau 0,5000071 kommt etwas anderes heraus:
+	// u_lat = 0,075. BEIDE Angaben gehoeren dazu, und dazu DIE k-AUFLOESUNG -- ohne sie ist die
+	// Tabelle nicht reproduzierbar. Werte aus k-Gitter 72^3 mit Nachoptimierung, konvergenzgeprueft:
 	//   omega_g   max|Eigenwert|   e-Faltung   Akkumulation 1/(1-|1-omega_g|)
 	//     1,0        1,006362          158            1
-	//     1,7        1,001600          626            3
-	//     1,9        1,000448         2234           10
-	//     1,95       1,000296         3381           20     <- Optimum auf diesem Gitter
-	//     1,99       1,001264          792          100
-	//     w (heute)  1,002163          463         8828
-	// Bei 1,95 verbessern sich BEIDE Kriterien: e-Faltung Faktor 7,3 gegen heute, Akkumulation
-	// von 8828 auf 20. Der Verlauf ist NICHT monoton -- 1,99 ist schon wieder schlechter.
-	// VOLLE PURIFIKATION (omega_g = 1,0) IST DIE FALSCHE WAHL: 158 liegt UNTER dem heutigen
+	//     1,80       1,001000         1000            5
+	//     1,84       1,000771         1298            6
+	//     1,87       1,000603         1659            8
+	//     1,90       1,000447         2236           10     <- OPTIMUM
+	//     1,93       1,000554         1806           14
+	//     1,95       1,000772         1296           20
+	//     w (heute)  1,003387          296         8828
+	// Bei 1,90 verbessern sich BEIDE Kriterien: e-Faltung Faktor 7,6 gegen heute, Akkumulation
+	// von 8828 auf 10. Der Verlauf ist NICHT monoton, das Maximum liegt zwischen 1,87 und 1,93.
+	// VOLLE PURIFIKATION (omega_g = 1,0) IST DIE SCHLECHTESTE WAHL: 158 liegt UNTER dem heutigen
 	// Stand. Sie steht im Preprint als "Geist-Eigenwert auf null", ist hier aber der schlechteste
-	// Punkt der Skala. Erster Messarm deshalb 1,95.
+	// Punkt der Skala.
+	// ★ ACHTUNG, TEUER GELERNT: eine fruehere Fassung dieser Tabelle stammte von einem 40er-Gitter
+	// und nannte 1,95 als Optimum mit Faktor 7,3. Beides falsch. Ein feineres k-Gitter findet nur
+	// GROESSERE Maxima, jeder zu grobe Wert ist also zu optimistisch -- und zwar je Arm
+	// unterschiedlich stark, weshalb die REIHENFOLGE kippt. Unter n = 72 mit --fein ist hier keine
+	// Zahl belastbar; die Begruendung steht im Kopf von werkzeuge/vonneumann.py.
 	// Schranke: omega_g >= 2 ist unbedingt instabil (|1-omega_g| >= 1, der Geistanteil waechst
 	// je Schritt), omega_g <= 0 hiesse "gar nicht relaxieren". Beides faengt ptrt_defines().
 	+ptrt_defines()

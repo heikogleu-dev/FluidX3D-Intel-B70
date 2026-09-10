@@ -3462,7 +3462,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Orthogonalitaet 4,2e-17, Projektor idempotent 1,1e-16, Masse/Impuls/Spannung/3. Momente
 	// des Abzugs exakt null, ausgerollte Form gegen die Projektormatrix 1,8e-15 -- alles in
 	// werkzeuge/vonneumann.py nachrechenbar.
-	const float pt_k = w-def_omega_g; // = 0 hiesse No-Op; Zaehler 201 unten deckt genau das auf
+	// ★ fmax, nicht die blanke Differenz (Kernel-Pruefer 10.09. nachts): der Abzug setzt den
+	// Geist-Eigenwert auf 1-omega_g, UNABHAENGIG von w. Wo die lokale Rate unter omega_g faellt,
+	// waere das eine VERSCHLECHTERUNG -- gemessene Schwelle nu_t/nu_0 > 452 im Nahfeld, > 1810 im
+	// Fernfeld, und die aeusseren 15 der 64 Sponge-Zellen liegen darunter (w_Rand = 1,9185).
+	// Mit fmax relaxiert der Geist mit min(w, omega_g) und damit nirgends langsamer als heute.
+	// Kein Handwert, eine Zeile, ein FLOP.
+	const float pt_k = fmax(0.0f, w-def_omega_g); // = 0 hiesse No-Op; Zaehler 201 deckt genau das auf
 	const float pt_n0=fhn[0]-feq[0];
 	const float pt_n1=fhn[1]-feq[1], pt_n2=fhn[2]-feq[2], pt_n3=fhn[3]-feq[3];
 	const float pt_n4=fhn[4]-feq[4], pt_n5=fhn[5]-feq[5], pt_n6=fhn[6]-feq[6];
@@ -3494,6 +3500,24 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		if(pt_mabs>0.0f&&rho_clamp_hits[200]<0xF0000000u) atomic_inc(&rho_clamp_hits[200]); // es gab ueberhaupt Geistanteil
 		const float pt_dabs = fabs(pt_d0)+fabs(pt_dx)+fabs(pt_dy)+fabs(pt_dz)+fabs(pt_e1)+fabs(pt_e2)+fabs(pt_e3);
 		if(pt_dabs>0.0f&&rho_clamp_hits[201]<0xF0000000u) atomic_inc(&rho_clamp_hits[201]); // der Abzug ist WIRKLICH ungleich null
+		// ★★ ZWEITZAEHLUNG, ausgeduennt ueber den Zellindex (Kernel- und Host-Pruefer 10.09. nachts).
+		// ZWEI Gruende, und beide sind hart:
+		//  (1) 199..201 SAETTIGEN bei 4 mm nach acht Stichproben, also nach 800 von 50.100 Schritten.
+		//      Schlimmer: EIN Stichprobenschritt (446 Mio Fluidzellen) uebersteigt den Kopfraum
+		//      zwischen 0xF0000000 und 2^32 um Faktor 1,7 -- der Zaehler kann WICKELN und dann
+		//      unter der Saettigungsschranke landen, worauf der Host faelschlich vergleicht.
+		//      Mit n%1024 bleiben ~507.000 Zaehlungen je Stichprobe, also keine Saettigung im Lauf.
+		//  (2) 200/201 KOENNEN GAR NICHT DURCHFALLEN. Ein reiner Chapman-Enskog-Zustand hat
+		//      Geistmoment 3,1e-18, nach EINEM FP16S-Speicherumlauf steht dort 1,08e-6. Jede Zelle
+		//      meldet also Geistanteil, und 201 == 200 ist eine Tautologie. Slot 203 prueft
+		//      stattdessen, ob der Abzug die SPEICHERRUNDUNG ueberlebt: relative FP16S-Aufloesung
+		//      9,8e-4 auf der Stoerform f^ = f - w_i (gemessen, AUDIT-BEFUNDE B77). Bleibt 203
+		//      nahe null, ist der Abzug kleiner als das Speicherquantum und wirkungslos --
+		//      genau die Regression, die 199..201 nicht sehen.
+		if(n%1024u==0u) {
+			if(rho_clamp_hits[202]<0xF0000000u) atomic_inc(&rho_clamp_hits[202]);
+			if(fabs(pt_e1)>9.8e-4f*fabs(fhn[7])&&rho_clamp_hits[203]<0xF0000000u) atomic_inc(&rho_clamp_hits[203]);
+		}
 	}
 )+"#endif"+R( // PTRT
 )+"#if defined(SRT)"+R(
