@@ -6,6 +6,9 @@
 #include <set> // ★ P9c N2F-SCHALE: Deduplizierung der Schalen-Zellliste
 #include <map> // ★ Gradient-Blend: Zelle -> (Gewicht, Lage), max-Gewicht bei Lagen-Duplikaten
 
+
+void pruefe_ptrt(LBM_Domain* d, const char* ort); // ★ 10.09.2026: Definition steht weiter unten, der Kanal-Aufruf davor
+
 static bool f_nur_solid_an_setup() { const char* e = getenv("CFD_F_NUR_SOLID"); return e==nullptr||e[0]=='\0'||atoi(e)>0; } // Default AN, wortgleich zu lbm.cpp
 extern char** environ;
 
@@ -3915,6 +3918,10 @@ void main_setup_kanal() {
 		print_info("Wandfunktion-Wirkpfad: "+to_string(wz)+" gezaehlte Wandzellen-Updates (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", Ein-Zellen-Spalte "+to_string(sp));
 		if(wz==0ull) print_error("Wandfunktion war eingeschaltet, aber der Wirkpfad-Zaehler ist NULL -- lautloser No-Op.");
 	}
+	// ★ P-TRT-ABNAHME AUF EBENE 1, ausserhalb JEDER Bedingung (Pruefbefund 10.09. abends).
+	// Sie stand zuerst im CFD_FACETTEN-Block; im Fahrzeugbericht haette sie sogar zusaetzlich
+	// in if(n2f_alpha>0.0f) gesteckt. Ein Waechter, den man wegschalten kann, ist keiner.
+	pruefe_ptrt(lbm.lbm_domain[0], "Kanal");
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 2: Wirkpfad-Nachweis, Soll EXAKT (F7)
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
@@ -4168,6 +4175,33 @@ void f_listen_zensus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const 
 	print_info("  Bauform B (nur Wandsolid + Bitmaske): "+to_string((ulong)(b_formB/1048576ull))+" MiB -> Gewinn "+to_string((ulong)((b_heute>b_formB?b_heute-b_formB:0ull)/1048576ull))+" MiB");
 	print_info("  ENTSCHEIDUNGSREGEL (03.09.): traegt Bauform B unter 1,2 GB, lohnt der Umbau den Eingriff nicht.");
 }
+// ★★ 10.09.2026 P-TRT-ABNAHME, als FUNKTION statt dreimal eingeklebt.
+// ZWEI FEHLER, DIE HIER SCHON DRINSTECKTEN und vom Pruefagenten gefunden wurden:
+//  (1) Die Abnahme stand zuerst INNERHALB von `if(env_u("CFD_FACETTEN",0u)>0u)`. Ein P-TRT-Lauf
+//      ohne Wandmodell waere damit voellig ungeprueft durchgelaufen -- und haette, waere PTRT gar
+//      nicht emittiert worden, als "P-TRT-Messung" die blanke Baseline geliefert. Deshalb liest
+//      diese Funktion den Zaehlerpuffer SELBST und haengt an keinem fremden Schalter.
+//  (2) Der Gleichheitstest 201 == 200 ist NUR unterhalb der Saettigung aussagekraeftig. Bei 4 mm
+//      stehen 508 Mio Zellen im Nahfeld; mit t%100 ist 0xF0000000 nach acht Stichproben erreicht,
+//      also nach 800 Schritten. Danach haengt der Ueberschuss am Wettlauf der atomics und die
+//      Gleichheit ist zufaellig -- eine Warnung dort waere ein Fehlalarm. Wird die Saettigung
+//      erreicht, sagt die Funktion das und verzichtet auf den Vergleich.
+void pruefe_ptrt(LBM_Domain* d, const char* ort) {
+	if(getenv("CFD_PTRT")==nullptr||(float)atof(getenv("CFD_PTRT"))<=0.0f) return;
+	d->rho_clamp_hits.read_from_device();
+	const ulong q199=(ulong)d->rho_clamp_hits[199], q200=(ulong)d->rho_clamp_hits[200], q201=(ulong)d->rho_clamp_hits[201];
+	const ulong satt=0xF0000000ull;
+	const string wo = "["+string(ort)+"] ";
+	if(q199==0ull) { print_error(wo+"P-TRT war angefordert (CFD_PTRT="+string(getenv("CFD_PTRT"))+"), aber Slot 199 = 0 -- stiller No-Op. Wurde PTRT ueberhaupt emittiert? CFD_DUMP_CL=1 pruefen."); return; }
+	if(q201==0ull) { print_error(wo+"P-TRT: Block besucht ("+to_string(q199)+"), aber Slot 201 = 0 -- der Abzug ist ueberall exakt null, also (w - omega_g) == 0 oder gar kein Geistanteil. Slot 200 = "+to_string(q200)+"."); return; }
+	if(q199>=satt||q200>=satt||q201>=satt) {
+		print_warning(wo+"P-TRT-Wirkpfad: Zaehler GESAETTIGT (199 = "+to_string(q199)+", 200 = "+to_string(q200)+", 201 = "+to_string(q201)+", Schranke "+to_string(satt)+"). Der Wirkpfad ist damit belegt, der Gleichheitstest 201 == 200 aber NICHT mehr aussagekraeftig -- oberhalb der Schranke entscheidet der Wettlauf der atomics. Fuer einen scharfen Test kuerzer laufen lassen.");
+		return;
+	}
+	if(q201!=q200) print_warning(wo+"P-TRT: Slot 201 ("+to_string(q201)+") weicht von Slot 200 ("+to_string(q200)+") ab -- erwartet ist Gleichheit unterhalb der Saettigung, solange omega_g != w. Differenz "+to_string(q200>q201?q200-q201:q201-q200)+".");
+	else print_info(wo+"P-TRT-Wirkpfad: Slot 199 besucht = "+to_string(q199)+", 200 Geistanteil vorhanden = "+to_string(q200)+", 201 Abzug ungleich null = "+to_string(q201)+" -- 201 == 200 unterhalb der Saettigung, Ist=Soll bestanden (t%100-Stichprobe).");
+}
+
 void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float nu_lat, const float dx, const float dt, const float si_rho, const string& out_dir, const char* wo) {
 	L.update_force_field();
 	LBM_Domain* D = L.lbm_domain[0];
@@ -4891,6 +4925,10 @@ void main_setup_kugel() {
 		print_info("BODEN_EQ-Wirkpfad Kugel: "+to_string(bq)+" Band-Resets (t%100-Stichprobe).");
 		if(bq==0ull) print_error("CFD_BODEN_EQ gesetzt, aber Kugel-Wirkpfad NULL -- lautloser No-Op.");
 	}
+	// ★ P-TRT-ABNAHME AUF EBENE 1, ausserhalb JEDER Bedingung (Pruefbefund 10.09. abends).
+	// Sie stand zuerst im CFD_FACETTEN-Block; im Fahrzeugbericht haette sie sogar zusaetzlich
+	// in if(n2f_alpha>0.0f) gesteckt. Ein Waechter, den man wegschalten kann, ist keiner.
+	pruefe_ptrt(lbm.lbm_domain[0], "Kugel");
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe-2-Commit 3: Wirkpfad Ist=Soll + tau-Akkumulator an der Kugel
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		if(env_u("CFD_SGS_FDWAND",0u)>0u) { const ulong s76=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[76]; if(s76==0ull) print_error("[Kugel] SGS_FDWAND war angefordert, aber Slot 76 = 0 -- stiller No-Op (Emission? Rebind? Enqueue?)."); else print_info("[Kugel] SGS_FDWAND-Wirkpfad Slot 76 = "+to_string(s76)+" (Soll ~ fac_N * ceil(n/100))."); } // ★ 07.09. abends (Planungsagent SISM): die Kugel hatte als EINZIGER Fall keinen Slot-76-Waechter -- an genau dem Fall, an dem FDWAND erst heute verdrahtet wurde
@@ -5305,6 +5343,7 @@ static void main_setup_fahrzeug() {
 // Und er meldet FEHLENDE Schalter genauso hart wie abweichende -- das ist die Haelfte, die
 // im entwerteten Lauf gefehlt hat.
 #include <sstream>   // ★ Audit-Notiz: istringstream kam bisher nur transitiv ueber <regex>
+
 extern char** environ; // ★ H3: fuer die Gegenrichtung (im Lauf gesetzt, in der Referenz unbekannt)
 struct BasisZeile { string name, wert, einheit; };
 static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
@@ -8234,6 +8273,11 @@ static void main_setup_fahrzeug_dd() {
 		if(eqc==0ull) print_error("CFD_FERN_EINLASS_EQ gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op.");
 		if(eqf!=0ull) print_error("Nahfeld zaehlt EINLASS_EQ-Wirkpfad -- es MUSS unberuehrt bleiben (read-once-Bruch?).");
 	}
+	// ★ P-TRT-ABNAHME AUF EBENE 1, ausserhalb JEDER Bedingung (Pruefbefund 10.09. abends).
+	// Sie stand zuerst im CFD_FACETTEN-Block; im Fahrzeugbericht haette sie sogar zusaetzlich
+	// in if(n2f_alpha>0.0f) gesteckt. Ein Waechter, den man wegschalten kann, ist keiner.
+	pruefe_ptrt(lbm_f.lbm_domain[0], "Nahfeld");
+	pruefe_ptrt(lbm_c.lbm_domain[0], "Fernfeld"); // ★ das Fernfeld bekommt PTRT ueber dasselbe getenv MIT -- ungeprueft waere es eine zweite, stille Variable
 	if(n2f_alpha>0.0f) { // ★ P9c: N2F-SCHALE-Wirkpfad-Endnachweis Slot 22 (Muster EINLASS_EQ)
 		lbm_f.lbm_domain[0]->rho_clamp_hits.read_from_device(); lbm_c.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong swf=(ulong)lbm_f.lbm_domain[0]->rho_clamp_hits[22], swc=(ulong)lbm_c.lbm_domain[0]->rho_clamp_hits[22];

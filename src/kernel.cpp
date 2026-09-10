@@ -3432,6 +3432,70 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float regf = -3.0f*rhon/w; // `w` ist hier die RELAXATIONSRATE und verdeckt die Gewichtsfunktion w(i)
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES && REGULARIZED_BOUNDARIES
 
+)+"#ifdef PTRT"+R(
+	// ★★ P-TRT, Purified TRT (Yu/Yu/Zhou/Chen/Yuan/Shu, arXiv:2602.06686), gebaut 10.09.2026.
+	// Der GEISTANTEIL des symmetrischen Nichtgleichgewichts wird mit def_omega_g relaxiert statt
+	// mit der Kollisionsrate w:  f^post = <Kollision> + (w - omega_g) * (Pg n),  n = f - feq.  Herleitung ohne Umweg:
+	// SRT ist f - w*n, TRT ist f - wp*n+ - wm*n-; spaltet man den GERADEN Anteil in Hydro-
+	// und Geistanteil und relaxiert den Geistanteil mit omega_g, bleibt genau dieser Term.
+	// ★ DIESER FORK RECHNET SRT (defines.hpp:10), NICHT TRT (defines.hpp:19 auskommentiert).
+	// Der Block stand zuerst im TRT-Zweig und war damit toter Code -- die Abnahme hat es am
+	// 10.09. abends gefangen (Slot 199 = 0, Feld-Hash unveraendert). Er steht jetzt VOR der
+	// Weiche, gilt also fuer beide Operatoren.
+	//
+	// DREI DINGE, DIE HIER SCHIEFGEHEN KOENNEN, und warum sie es nicht tun:
+	//  (1) Die Momentensumme ist UNGEWICHTET (sum_j g_j n_j), die Rueckgabe GEWICHTET (w_i g_i ...).
+	//      Beides gewichtet waere kein Projektor -- ein stiller Halbtreffer.
+	//  (2) w_i ist die GEWICHTSFUNKTION, nicht die Relaxationsrate. Im TRT-Block verdeckt die
+	//      lokale Rate `w` den Namen (siehe die Warnung an der regf-Zeile weiter oben), deshalb
+	//      stehen hier die Makros def_w0/def_ws/def_we und NICHT w bzw. w(i).
+	//  (3) KEINE Tabelle, KEINE Schleife, KEIN laufzeitindiziertes Feld. Der Kernel traegt schon
+	//      sechs 19er-Felder; zwei weitere liessen den Intel-Uebersetzer beim Erzeugen haengen
+	//      (Anmerkung am Regularisierungsblock). Ausgerollt kostet es nichts: ueber alle 19
+	//      Richtungen gibt es nur SIEBEN verschiedene Korrekturwerte.
+	//
+	// Basis (korrigiert gegenueber A.7-A.9 des Preprints, dort fuer D3Q19 nicht orthogonal),
+	// in der Linkreihenfolge dieses Forks, mit Gram diag(2, 4/3, 4/9):
+	//   g1 = [ 1,-2,-2,-2,-2,-2,-2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+	//   g2 = [ 0,-2,-2, 1, 1, 1, 1, 1, 1, 1, 1,-2,-2, 1, 1, 1, 1,-2,-2]
+	//   g3 = [ 0, 0, 0,-1,-1, 1, 1, 1, 1,-1,-1, 0, 0, 1, 1,-1,-1, 0, 0]
+	// Orthogonalitaet 4,2e-17, Projektor idempotent 1,1e-16, Masse/Impuls/Spannung/3. Momente
+	// des Abzugs exakt null, ausgerollte Form gegen die Projektormatrix 1,8e-15 -- alles in
+	// werkzeuge/vonneumann.py nachrechenbar.
+	const float pt_k = w-def_omega_g; // = 0 hiesse No-Op; Zaehler 201 unten deckt genau das auf
+	const float pt_n0=fhn[0]-feq[0];
+	const float pt_n1=fhn[1]-feq[1], pt_n2=fhn[2]-feq[2], pt_n3=fhn[3]-feq[3];
+	const float pt_n4=fhn[4]-feq[4], pt_n5=fhn[5]-feq[5], pt_n6=fhn[6]-feq[6];
+	const float pt_n7=fhn[7]-feq[7], pt_n8=fhn[8]-feq[8], pt_n9=fhn[9]-feq[9];
+	const float pt_n10=fhn[10]-feq[10], pt_n11=fhn[11]-feq[11], pt_n12=fhn[12]-feq[12];
+	const float pt_n13=fhn[13]-feq[13], pt_n14=fhn[14]-feq[14], pt_n15=fhn[15]-feq[15];
+	const float pt_n16=fhn[16]-feq[16], pt_n17=fhn[17]-feq[17], pt_n18=fhn[18]-feq[18];
+	const float pt_ger = pt_n1+pt_n2+pt_n3+pt_n4+pt_n5+pt_n6; // gerade Links (1..6)
+	const float pt_kan = pt_n7+pt_n8+pt_n9+pt_n10+pt_n11+pt_n12+pt_n13+pt_n14+pt_n15+pt_n16+pt_n17+pt_n18;
+	const float pt_m1 = pt_n0-2.0f*pt_ger+pt_kan;
+	const float pt_m2 = -2.0f*(pt_n1+pt_n2)+(pt_n3+pt_n4+pt_n5+pt_n6)+(pt_n7+pt_n8)+(pt_n9+pt_n10)
+	                  -2.0f*(pt_n11+pt_n12)+(pt_n13+pt_n14)+(pt_n15+pt_n16)-2.0f*(pt_n17+pt_n18);
+	const float pt_m3 = -(pt_n3+pt_n4)+(pt_n5+pt_n6)+(pt_n7+pt_n8)-(pt_n9+pt_n10)+(pt_n13+pt_n14)-(pt_n15+pt_n16);
+	const float pt_a1 = 0.5f*pt_k*pt_m1;   // durch die Gram-Diagonale 2
+	const float pt_a2 = 0.75f*pt_k*pt_m2;  // durch 4/3
+	const float pt_a3 = 2.25f*pt_k*pt_m3;  // durch 4/9
+	const float pt_d0 = def_w0*pt_a1;
+	const float pt_dx = def_ws*(-2.0f*pt_a1-2.0f*pt_a2);
+	const float pt_dy = def_ws*(-2.0f*pt_a1+pt_a2-pt_a3);
+	const float pt_dz = def_ws*(-2.0f*pt_a1+pt_a2+pt_a3);
+	const float pt_e1 = def_we*(pt_a1+pt_a2+pt_a3);
+	const float pt_e2 = def_we*(pt_a1+pt_a2-pt_a3);
+	const float pt_e3 = def_we*(pt_a1-2.0f*pt_a2);
+	if(t%100ul==0ul) {
+		// Drei Zaehler statt einem: einer allein bewiese nur, dass der Block betreten wurde.
+		// Muster wie am NUT_SKAL-Diskriminator. Saettigend, sonst wickeln sie binnen Sekunden.
+		if(rho_clamp_hits[199]<0xF0000000u) atomic_inc(&rho_clamp_hits[199]); // Wirkpfad: Block besucht
+		const float pt_mabs = fabs(pt_m1)+fabs(pt_m2)+fabs(pt_m3);
+		if(pt_mabs>0.0f&&rho_clamp_hits[200]<0xF0000000u) atomic_inc(&rho_clamp_hits[200]); // es gab ueberhaupt Geistanteil
+		const float pt_dabs = fabs(pt_d0)+fabs(pt_dx)+fabs(pt_dy)+fabs(pt_dz)+fabs(pt_e1)+fabs(pt_e2)+fabs(pt_e3);
+		if(pt_dabs>0.0f&&rho_clamp_hits[201]<0xF0000000u) atomic_inc(&rho_clamp_hits[201]); // der Abzug ist WIRKLICH ungleich null
+	}
+)+"#endif"+R( // PTRT
 )+"#if defined(SRT)"+R(
 )+"#ifdef VOLUME_FORCE"+R(
 	const float c_tau = fma(w, -0.5f, 1.0f);
@@ -3439,6 +3503,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // VOLUME_FORCE
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
+)+"#ifdef PTRT"+R(
+	fhn[0] += pt_d0;
+	fhn[1] += pt_dx; fhn[2] += pt_dx;
+	fhn[3] += pt_dy; fhn[4] += pt_dy;
+	fhn[5] += pt_dz; fhn[6] += pt_dz;
+	fhn[7] += pt_e1; fhn[8] += pt_e1; fhn[13] += pt_e1; fhn[14] += pt_e1;
+	fhn[9] += pt_e2; fhn[10] += pt_e2; fhn[15] += pt_e2; fhn[16] += pt_e2;
+	fhn[11] += pt_e3; fhn[12] += pt_e3; fhn[17] += pt_e3; fhn[18] += pt_e3;
+)+"#endif"+R( // PTRT
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	// ★ TYPE_E-Zweig HERAUSGEHOBEN statt als Ternaer in der Schleife: der fruehere Aufbau expandierte
 	// den Randausdruck 19-fach in die Kollisionszeile, daran blieb der Uebersetzer haengen. So sieht
@@ -3448,6 +3521,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = REG_E(i); // f_eq bzw. f_eq + f_neq (regularisiert)
 	} else {
 		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(1.0f-w, fhn[i], fma(w, feq[i], Fin[i])); // perform collision (SRT)
+)+"#ifdef PTRT"+R(
+		fhn[0] += pt_d0;
+		fhn[1] += pt_dx; fhn[2] += pt_dx;
+		fhn[3] += pt_dy; fhn[4] += pt_dy;
+		fhn[5] += pt_dz; fhn[6] += pt_dz;
+		fhn[7] += pt_e1; fhn[8] += pt_e1; fhn[13] += pt_e1; fhn[14] += pt_e1;
+		fhn[9] += pt_e2; fhn[10] += pt_e2; fhn[15] += pt_e2; fhn[16] += pt_e2;
+		fhn[11] += pt_e3; fhn[12] += pt_e3; fhn[17] += pt_e3; fhn[18] += pt_e3;
+)+"#endif"+R( // PTRT
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#elif defined(TRT)"+R(
@@ -3475,12 +3557,30 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	}
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(0.5f*wp, feq[i]-fhn[i]+feb[i]-fhb[i], fma(0.5f*wm, feq[i]-feb[i]-fhn[i]+fhb[i], fhn[i]+Fin[i])); // perform collision (TRT)
+)+"#ifdef PTRT"+R(
+		fhn[0] += pt_d0;
+	fhn[1] += pt_dx; fhn[2] += pt_dx;
+	fhn[3] += pt_dy; fhn[4] += pt_dy;
+	fhn[5] += pt_dz; fhn[6] += pt_dz;
+	fhn[7] += pt_e1; fhn[8] += pt_e1; fhn[13] += pt_e1; fhn[14] += pt_e1;
+	fhn[9] += pt_e2; fhn[10] += pt_e2; fhn[15] += pt_e2; fhn[16] += pt_e2;
+	fhn[11] += pt_e3; fhn[12] += pt_e3; fhn[17] += pt_e3; fhn[18] += pt_e3;
+)+"#endif"+R( // PTRT
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	// ★ TYPE_E-Zweig herausgehoben -- Begruendung wie im SRT-Zweig.
 	if(flagsn_bo==TYPE_E) {
 		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = REG_E(i); // f_eq bzw. f_eq + f_neq (regularisiert)
 	} else {
 		for(uint i=0u; i<def_velocity_set; i++) fhn[i] = fma(0.5f*wp, feq[i]-fhn[i]+feb[i]-fhb[i], fma(0.5f*wm, feq[i]-feb[i]-fhn[i]+fhb[i], fhn[i]+Fin[i])); // perform collision (TRT)
+)+"#ifdef PTRT"+R(
+			fhn[0] += pt_d0;
+		fhn[1] += pt_dx; fhn[2] += pt_dx;
+		fhn[3] += pt_dy; fhn[4] += pt_dy;
+		fhn[5] += pt_dz; fhn[6] += pt_dz;
+		fhn[7] += pt_e1; fhn[8] += pt_e1; fhn[13] += pt_e1; fhn[14] += pt_e1;
+		fhn[9] += pt_e2; fhn[10] += pt_e2; fhn[15] += pt_e2; fhn[16] += pt_e2;
+		fhn[11] += pt_e3; fhn[12] += pt_e3; fhn[17] += pt_e3; fhn[18] += pt_e3;
+)+"#endif"+R( // PTRT
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 )+"#endif"+R( // TRT

@@ -91,5 +91,18 @@ while IFS= read -r zeile; do
 	if [ "$n_err" -gt 0 ]; then
 		printf '%s' "$ent" | grep 'Error:' | sed 's/.*Error: */          ! /' | cut -c1-100 | tee -a "$Q"
 	fi
+	# ★★ 10.09.2026 KRAFTVERLAUF ALS STANDBILD-SERIE (Heiko-Vorgabe): alle 100 ms physikalisch
+	# ein Bild nach export/<lauf>/kraftverlauf_000300ms.png usw., dazu kraftverlauf.png ueber den
+	# ganzen Lauf. Laeuft NACH dem Lauf im SELBEN Kettenglied -- kein eigener Waechterprozess,
+	# Iron Rule 4 bleibt gewahrt. Die Bilder entstehen aus cd_facetten.csv, also nachtraeglich
+	# genau so, wie sie waehrend des Laufs entstanden waeren. Fehler hier duerfen die Kette NICHT
+	# abbrechen: es ist Auswertung, nicht Messung.
+	if [ "${CFD_QUEUE_KRAFTBILD:-1}" != "0" ] && [ -s "export/$name/cd_facetten.csv" ]; then
+		if python3 werkzeuge/kraftverlauf.py "$name" --serie "${CFD_QUEUE_KRAFTBILD_MS:-100}" > "logs/$name.kraftverlauf.log" 2>&1; then
+			echo "          Kraftverlauf: $(grep -c 'geschrieben:' "logs/$name.kraftverlauf.log") Bilder in export/$name/" | tee -a "$Q"
+		else
+			echo "          HINWEIS: kraftverlauf.py fehlgeschlagen ($name) -- siehe logs/$name.kraftverlauf.log" | tee -a "$Q"
+		fi
+	fi
 done < "$1"
 echo "[$(date +%H:%M:%S)] SERIE FERTIG ($n Laeufe)" | tee -a "$Q"

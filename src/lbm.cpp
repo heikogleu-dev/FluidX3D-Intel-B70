@@ -1342,6 +1342,37 @@ void LBM_Domain::enqueue_unvoxelize_mesh_on_device(const Mesh* mesh, const uchar
 // das Offline-Scratch-Gate ein (Kanal-Referenzpunkt). Wer hier Defines aendert/ergaenzt, zieht
 // den Zwilling nach -- sonst prueft das Gate still eine Quelle, die niemand mehr faehrt.
 // Voller Drift-Anker (Gate difft gegen frischen CFD_DUMP_DEFINES-Dump): Folgepunkt im Plan.
+// ★★ P-TRT-EMISSION UND IHRE WAECHTER (10.09.2026 abends, nach der Diff-Pruefung).
+// DREI FALLEN, die der Pruefagent an der ersten Fassung fand:
+//  (1) atof bricht am ersten unbrauchbaren Zeichen ab. CFD_PTRT=1,9 in deutscher
+//      Kommaschreibweise haette still 1.0 ergeben -- und 1,0 ist ausgerechnet das schlechte
+//      Ende der Skala (e-Faltung 158 gegen 463 im heutigen Stand). Der Lauf haette
+//      "omega_g = 1,9" geheissen und 1,0 gerechnet. Deshalb strtod mit Endzeigerpruefung.
+//  (2) Ohne Ansage im Log ist hinterher nicht nachvollziehbar, welcher Wert wirklich
+//      emittiert wurde. to_string(float, 12u) klemmt intern auf 8 Nachkommastellen.
+//  (3) Der Kernelblock ist D3Q19-spezifisch (sieben Korrekturwerte, def_w0/ws/we). Unter
+//      D3Q27 waere er kein Projektor mehr und wuerde still Masse einspeisen, unter D2Q9
+//      schriebe er ueber fhn[8] hinaus. Deshalb wird PTRT ausserhalb von D3Q19 GAR NICHT
+//      emittiert, und der Schalter meldet sich als Fehler statt still zu wirken.
+string ptrt_defines() {
+	const char* roh = getenv("CFD_PTRT");
+	if(roh==nullptr||roh[0]=='\0') return "";
+	char* ende = nullptr;
+	const double wert = strtod(roh, &ende);
+	while(ende!=nullptr&&*ende==' ') ende++;
+	if(ende==nullptr||*ende!='\0') print_error("CFD_PTRT = \""+string(roh)+"\" ist keine reine Zahl (Rest: \""+string(ende==nullptr?"":ende)+"\"). Dezimaltrenner ist der PUNKT: CFD_PTRT=1.95, nicht 1,95. Ein stillschweigend abgeschnittener Wert waere hier besonders teuer, weil 1,0 und 1,95 auf entgegengesetzten Enden der Skala liegen.");
+	if(wert<=0.0) return "";
+	if(wert>=2.0) print_error("CFD_PTRT = "+to_string((float)wert,6u)+" ist >= 2. Der Geistanteil waechst dann je Schritt um |1-omega_g| >= 1, der Lauf ist unbedingt instabil. Erlaubt ist 0 < omega_g < 2.");
+#ifndef D3Q19
+	print_error("CFD_PTRT ist gesetzt, aber dieser Build ist nicht D3Q19. Der P-TRT-Block kennt nur die drei D3Q19-Geistmoden und die Gewichte def_w0/def_ws/def_we; unter D3Q27 waere er kein Projektor mehr (er speiste Masse ein), unter D2Q9 schriebe er ueber das DDF-Feld hinaus. Velocity set in defines.hpp aendern oder CFD_PTRT weglassen.");
+	return "";
+#else
+	print_info("P-TRT AKTIV: omega_g = "+to_string((float)wert,8u)+" (Geistanteil des geraden Nichtgleichgewichts relaxiert mit dieser Rate statt mit der Kollisionsrate w). Wirkpfad Slots 199/200/201, Abnahme pruefe_ptrt.");
+	return (string)"\n	#define PTRT"
+	      +"\n	#define def_omega_g "+to_string((float)wert, 12u)+"f";
+#endif // D3Q19
+}
+
 string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_Nx "+to_string(Nx)+"u"
 	"\n	#define def_Ny "+to_string(Ny)+"u"
@@ -1405,12 +1436,50 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	//   Lambda = 1/4   -> praktisch unveraendert (w- ist laengst null) -- der Umbau brachte NICHTS
 	//   SRT            -> max|Eigenwert| = 1,003480, e-Faltung 288 Schritte  (GEMESSEN 2,6x besser)
 	//   Lambda = 9,1e-8 (w- = 1,95) -> max|Eigenwert| = 1,000485, e-Faltung 2062 Schritte
+	// ★ NACHGERECHNET 10.09.2026, unabhaengige Neuimplementierung werkzeuge/vonneumann.py:
+	//   ALLE VIER ZEILEN BESTAETIGT. 3/16 und 9,1e-8 auf die letzte Stelle, SRT 1,003455/290
+	//   (k-Gitter 96^3 mit Nachoptimierung) gegen 1,003480/288 hier.
+	//   WER SIE NICHT REPRODUZIERT, HAT EIN ZU GROBES k-GITTER: bei 16^3 kommt fuer SRT
+	//   1,000259 heraus -- falscher Betrag UND falsche Reihenfolge. Genau dieser Fehler liess
+	//   am 10.09. einen Planungsagenten die Tabelle fuer falsch halten. Das SRT-Maximum sitzt
+	//   in einem schmalen Gebiet bei kx ~ 0,02 pi, die TRT-Maxima nicht.
 	// SRT ist der Sonderfall Lambda = (tau-1/2)^2. Ein Knopf deckt damit ALLE Operatoren ab, und
 	// ungesetzt bleibt der Quelltext bit-identisch zum bisherigen Stand.
 	+"\n	#define def_lambda "+to_string(getenv("CFD_LAMBDA")!=nullptr?(float)atof(getenv("CFD_LAMBDA")):0.1875f, 12u)+"f"
+
 #endif // TRT
 
-	"\n	#define TYPE_S 0x01" // 0b00000001 // (stationary or moving) solid boundary
+	// ★★ P-TRT (CFD_PTRT = omega_g), 10.09.2026. STEHT AUSSERHALB DES SRT/TRT-#elif, WEIL DIESER
+	// FORK SRT RECHNET (defines.hpp:10; TRT ist in defines.hpp:19 auskommentiert). Zuerst stand er
+	// drinnen und war damit wirkungslos -- die Abnahme fing es am selben Abend (Slot 199 = 0).
+	// P-TRT gilt fuer beide Operatoren: relaxiert wird der Geistanteil des GERADEN Nichtgleich-
+	// gewichts, den SRT wie TRT sonst mit der Kollisionsrate w behandeln. Relaxiert den Geistanteil des symmetrischen
+	// Nichtgleichgewichts mit einer eigenen Rate statt mit wp. Ungesetzt oder <= 0 wird NICHTS
+	// emittiert -- dann ist der OpenCL-Quelltext zeichengleich zum bisherigen Stand und der Lauf
+	// bitgleich. Das ist der EINZIGE bitgleiche Kontrollarm: omega_g = wp taugt NICHT als Nullarm,
+	// weil wp unter SUBGRID/SPONGE/FDWAND zellweise ist, def_omega_g aber eine JIT-Konstante --
+	// (wp - omega_g) wird dann nirgends exakt null.
+	// WELCHER WERT? Gerechnet mit werkzeuge/vonneumann.py auf der SRT-BASIS (dem Operator, den
+	// dieser Fork wirklich rechnet), am Betriebspunkt tau = 0,50002832 (4-mm-Nahfeld) und
+	// u_lat = 0,075 (setup.cpp) -- BEIDE Angaben gehoeren dazu, ohne u_lat ist die Tabelle nicht
+	// reproduzierbar, und mit dem Fernfeld-tau 0,5000071 kommt etwas anderes heraus:
+	//   omega_g   max|Eigenwert|   e-Faltung   Akkumulation 1/(1-|1-omega_g|)
+	//     1,0        1,006362          158            1
+	//     1,7        1,001600          626            3
+	//     1,9        1,000448         2234           10
+	//     1,95       1,000296         3381           20     <- Optimum auf diesem Gitter
+	//     1,99       1,001264          792          100
+	//     w (heute)  1,002163          463         8828
+	// Bei 1,95 verbessern sich BEIDE Kriterien: e-Faltung Faktor 7,3 gegen heute, Akkumulation
+	// von 8828 auf 20. Der Verlauf ist NICHT monoton -- 1,99 ist schon wieder schlechter.
+	// VOLLE PURIFIKATION (omega_g = 1,0) IST DIE FALSCHE WAHL: 158 liegt UNTER dem heutigen
+	// Stand. Sie steht im Preprint als "Geist-Eigenwert auf null", ist hier aber der schlechteste
+	// Punkt der Skala. Erster Messarm deshalb 1,95.
+	// Schranke: omega_g >= 2 ist unbedingt instabil (|1-omega_g| >= 1, der Geistanteil waechst
+	// je Schritt), omega_g <= 0 hiesse "gar nicht relaxieren". Beides faengt ptrt_defines().
+	+ptrt_defines()
+
+	+"\n	#define TYPE_S 0x01" // 0b00000001 // (stationary or moving) solid boundary
 	"\n	#define TYPE_E 0x02" // 0b00000010 // equilibrium boundary (inflow/outflow)
 	"\n	#define TYPE_T 0x04" // 0b00000100 // temperature boundary
 	"\n	#define TYPE_F 0x08" // 0b00001000 // fluid
