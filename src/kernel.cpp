@@ -3164,6 +3164,40 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			} else if(t%100ul==0ul&&rho_clamp_hits[169]<0xF0000000u) atomic_inc(&rho_clamp_hits[169]);
 		} }
 )+"#endif"+R( // SGS_VANDRIEST
+)+"#ifdef SGS_NUT_SKAL"+R(
+		// ★★ DISKRIMINATOR-MESSARM (CFD_SGS_NUT_SKAL, 10.09.2026, Heiko-Go). KEIN Produktionsschalter.
+		// DIE FRAGE: ist der gemessene SISM-Kraftgewinn Modellphysik -- oder nur die fehlende
+		// Wanddaempfung? Beleg fuer die Frage: SISM senkt nu_t in Lage 1 um 85,2 % (Lagenmessung
+		// 08.09., 4 mm), und die Feldpruefung 10.09. zeigt genau dort die unphysikalischen Zellen
+		// (84,6 % der Ausreisser sind direkte Wandnachbarn, Grundrate 1,18 %).
+		// DIESER ARM senkt nu_t am KLASSISCHEN Modell um denselben Faktor: gleiche Daempfung, KEINE
+		// Scherungssubtraktion. Reproduziert er die Kraftaenderung, ist SISMs Gewinn keine Physik.
+		// DER FAKTOR IST KEIN STELLKNOPF, SONDERN EIN MESSWERT -- er wird aus dem SISM-Lauf
+		// ABGELESEN (1 - 0,852 = 0,148 fuer Lage 1). Deshalb Default 1,0 = aus = bitgleich, keine
+		// Produktionsempfehlung und ein print_error gegen jede Kombination mit einem zweiten
+		// nu_t-Senker (SISM, VANDRIEST=2) -- das waeren zwei Variablen in einem Lauf.
+		// Idiom WOERTLICH wie der van-Driest-Zweig darueber: nu_t aus w, skalieren, w zurueck.
+		// nu_mol als 0.5f/def_fac_Y (relativ genau auf 5e-8) statt (1/def_w-0.5)/3 -- letzteres
+		// traegt bei tau0 = 0,50003 einen systematischen Bias von -0,14 % (4 mm) bis -0,85 %
+		// (Fernfeld). Nachgerechnet in float32 vom Pruefagenten 10.09. Muster def_fac_nu.
+		{	const float ns_tau0 = 1.0f/def_w, ns_numol = 0.5f/def_fac_Y;
+			const float ns_nut = (1.0f/w-ns_tau0)*(1.0f/3.0f);
+			const float ns_w = 1.0f/(ns_tau0+3.0f*def_sgs_nut_skal*ns_nut);
+			if(t%100ul==0ul) {
+				if(rho_clamp_hits[188]<0xF0000000u) atomic_inc(&rho_clamp_hits[188]); // Wirkpfad: Zweig besucht, MUSS gleich Slot 76 sein
+				if(ns_nut>0.0f&&rho_clamp_hits[189]<0xF0000000u) atomic_inc(&rho_clamp_hits[189]); // es gab ueberhaupt ein nu_t zum Skalieren
+				if(ns_w!=w&&rho_clamp_hits[190]<0xF0000000u) atomic_inc(&rho_clamp_hits[190]); // w hat sich WIRKLICH geaendert -- gegen den stillen No-Op
+				const float ns_r = ns_nut/ns_numol; // nu_t in Vielfachen der molekularen Viskositaet
+				// Saettigungsschranke AUCH hier, nicht nur an 188..190: der Wickelwaechter in
+				// setup.cpp behandelt >= 0xF0000000 als gesaettigt und meldet, alles darunter aber
+				// als print_error -- und print_error ist exit(1), also VOR der ganzen Endauswertung.
+				// Ein ungeschuetztes Fach risse den Lauf ab, statt still zu saettigen.
+				const uint ns_b = 191u+(ns_nut<=0.0f?0u:(ns_r<1.0f?1u:(ns_r<10.0f?2u:(ns_r<30.0f?3u:(ns_r<100.0f?4u:(ns_r<300.0f?5u:(ns_r<1000.0f?6u:7u)))))));
+				if(rho_clamp_hits[ns_b]<0xF0000000u) atomic_inc(&rho_clamp_hits[ns_b]); // Summe 191..198 == Slot 188, solange nichts saettigt
+			}
+			w = ns_w;
+		}
+)+"#endif"+R( // SGS_NUT_SKAL
 	} else
 )+"#endif"+R( // SGS_FDWAND
 	{ // Smagorinsky-Lilly subgrid turbulence model, source: https://arxiv.org/pdf/comp-gas/9401004.pdf, in the eq. below (26), it is "tau_0" not "nu_0", and "sqrt(2)/rho" (they call "rho" "n") is missing
@@ -4556,7 +4590,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+"#ifndef SGS_SISM"+R(
 	fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // 0.030021 = (C*Delta)^2, C = 0.1733 wie Hauptkernel (0.76421222/(18*sqrt(2)))
 )+"#else"+R(
-	// ★★ SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM, 07.09.2026, Leveque/Toschi/Shao/Scotti JFM 570 (2007)):
+	// ★★ SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM, 07.09.2026, Leveque/Toschi/Shao/Bertoglio JFM 570 (2007)):
 	//   nu_t = c2 * max(0, |S| - |<S>|),  c2 = 0.030021 = (C*Delta)^2 wie oben.
 	// <S> = EMA der SECHS unabhaengigen S-Komponenten je Facette (fac_sb[6 gid ..]), Start 0, KEIN Warmstart
 	// mit S (der lieferte nu_t = 0 im ersten Schritt); Sbar = sqrt(2 <S>:<S>) = Betrag des gemittelten

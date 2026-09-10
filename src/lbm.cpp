@@ -124,6 +124,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// vier Zeilen weiter oben bereits beschreibt.
 	f_liste_on = s_f_liste>0u;
 	band_lagen = s_sgs_band; band_on = s_sgs_band>0u; // ★ 08.09. Konstruktionszustand einfrieren (read-once-Doktrin)
+	nut_skal = s_sgs_nut_skal; // ★ 10.09. dito fuer den Diskriminator-Messarm
 	fac_idx_voll_on = s_fac_idx_voll>0u;
 	fac_pinv_on = s_fac_pinv>0u; // ★ 04.09.: Rang-1-Pseudoinverse statt Skalarleiter (JIT-Define, muss vor der ersten Kernel-Erzeugung stehen)
 	for(uint i=0u; i<6u; i++) s_fbbox[i]=0u; // read-once: eine zweite Domaene erbt die Box nicht
@@ -190,6 +191,14 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_sgs_band==1u) print_error("CFD_SGS_BAND=1 ist sinnlos: Lage 1 IST die Facettenmenge und wird schon von FDWAND/SISM behandelt. Gueltig sind 0 (aus), 2 (Lage 2) oder 3 (Lage 2+3).");
 	if(s_sgs_band>0u&&s_sgs_wandfrei) print_error("CFD_SGS_BAND x CFD_SGS_WANDFREI: WANDFREI ueberspringt den ganzen Block, das Band bliebe wirkungslos -- und WANDFREI ist am 8-mm-Fahrzeug nach 175 Schritten divergiert.");
 	if(s_sgs_band>0u&&s_sgs_sism==0u) print_error("CFD_SGS_BAND braucht CFD_SGS_SISM=1. Seit dem Umbau vom 08.09. liefert der Bandkernel NUR Sbar; ohne SISM gibt es kein Sbar und der Abzug waere konstant null (stiller No-Op). Die fruehere Fassung ersetzte stattdessen w -- sie kippte am 8-mm-Stressarm bei Schritt 392, auch ohne SISM.");
+	if(s_sgs_nut_skal!=1.0f&&s_sgs_fdwand==0u) print_error("CFD_SGS_NUT_SKAL braucht CFD_SGS_FDWAND=1 -- der Skalierzweig sitzt IM FDWAND-Block von stream_collide; ohne ihn ein stiller No-Op.");
+	if(s_sgs_nut_skal!=1.0f&&!s_facetten) print_error("CFD_SGS_NUT_SKAL ohne CFD_FACETTEN: keine Facettenzellen, kein Zweig.");
+	if(s_sgs_nut_skal!=1.0f&&s_sgs_sism>0u) print_error("CFD_SGS_NUT_SKAL und CFD_SGS_SISM gleichzeitig: ZWEI nu_t-Senker an derselben Zelle, also zwei Variablen in einem Lauf (Iron Rule 1). Der Diskriminator misst gerade GEGEN SISM -- er gehoert in den Arm OHNE SISM.");
+	if(s_sgs_nut_skal!=1.0f&&s_sgs_vandriest>1u) print_error("CFD_SGS_NUT_SKAL und CFD_SGS_VANDRIEST=2 gleichzeitig: van Driest senkt nu_t bereits mit D^2, das waeren zwei Senker in einem Lauf.");
+	if(s_sgs_nut_skal!=1.0f&&s_sgs_wandfrei) print_error("CFD_SGS_NUT_SKAL x CFD_SGS_WANDFREI: das WANDFREI-Gate ueberspringt den ganzen FDWAND-Zweig -- der Skalierer bliebe wirkungslos, und WANDFREI ist am 8-mm-Fahrzeug nach 175 Schritten divergiert.");
+	if(s_sgs_nut_skal!=1.0f&&s_sgs_nut_skal<5e-7f&&s_sgs_nut_skal>0.0f) print_error("CFD_SGS_NUT_SKAL = "+to_string(s_sgs_nut_skal,9u)+" liegt unter 5e-7 und wird von to_string(...,6u) als Festkomma zu 0.000000f emittiert -- nu_t an Wandzellen waere dann EXAKT null, also der WANDFREI-Zustand, und zwar am Waechter unten vorbei (Muster s_fac_ema/s_fac_pema/s_fac_apg). Groesseren Faktor waehlen.");
+	if(s_sgs_nut_skal<=0.0f) print_error("CFD_SGS_NUT_SKAL <= 0 setzt nu_t an Wandzellen auf null oder negativ -- das IST der WANDFREI-Zustand, der am 8-mm-Fahrzeug nach 175 Schritten divergierte. Positiv waehlen.");
+	if(s_sgs_nut_skal>1.0f) print_warning("CFD_SGS_NUT_SKAL > 1 ERHOEHT die Wanddaempfung. Als Diskriminator gegen SISM ist der Arm nur mit einem Faktor < 1 sinnvoll, und zwar mit dem ABGELESENEN (Lage 1, 4 mm: 0,148).");
 	if(s_sgs_band>3u) print_warning("CFD_SGS_BAND = "+to_string(s_sgs_band)+": mehr als drei Lagen sind ungemessen. Die Lagenmessung reicht bis Lage 6 (Absenkung 85,2/80,0/75,9/72,1/69,1/67,9 % bei 4 mm), aber der Klemm-Verbund ueber viele Lagen ist der WANDFREI-Pfad.");
 	if(s_sgs_sism>0u&&s_sgs_fdwand==0u) print_error("CFD_SGS_SISM braucht CFD_SGS_FDWAND=1 -- der Sbar-Abzug lebt im FD-Kernel sgs_fdwand; ohne ihn gaebe es keinen Kernel (stiller No-Op).");
 	if(s_sgs_sism>0u&&!s_facetten) print_error("CFD_SGS_SISM ohne CFD_FACETTEN: keine Facettenzellen, kein FD-Kernel.");
@@ -319,6 +328,7 @@ uint LBM_Domain::s_sgs_gdiag = 0u; // ★ 31.08. g-Diagnose (CFD_SGS_GDIAG)
 uint LBM_Domain::s_fac_messnur = 0u; // ★ 30.08. Mess-Nur-Modus (BB-Physik, Facetten-Instrument)
 uint LBM_Domain::s_fac_pinv = 0u; // ★ 04.09. CFD_FAC_PINV: Rang-1-Pseudoinverse im gekoppelten Zweig
 uint LBM_Domain::s_fac_idx_voll = 0u; // ★ 03.09. Rueckschalter auf die fac_idx-Vollfeldform (A/B gegen die Bitmaske)
+float LBM_Domain::s_sgs_nut_skal = 1.0f; // ★ 10.09. Diskriminator-Messarm, 1,0 = aus = bitgleich
 uint LBM_Domain::s_sgs_band = 0u; // ★ 08.09. CFD_SGS_BAND
 uint LBM_Domain::s_f_liste = 0u; // ★ 03.09. CFD_F_LISTE: F nur an Wandsolidzellen
 uint LBM_Domain::s_fac_nachbar = 0u; // ★ 30.08. Nachbarabtastung des Wandmodell-Eingangs
@@ -1517,6 +1527,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_sgs_vd_aplus "+to_string(s_sgs_vd_aplus,4u)+"f"
 	"\n	#define def_sgs_vd_ab "+to_string(s_sgs_vd_ab)+"ul" : (string)"") // ★ 08.09. van Driest auf Facetten; A+ als Konstante emittiert (Literatur 26.0)
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_vandriest>1u) ? (string)"\n	#define SGS_VANDRIEST_ANWENDEN" : (string)"") // Modus 2 legt erst hier die Wirkung auf w um; Modus 1 bleibt bitgleich
+	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_nut_skal!=1.0f) ? (string)"\n	#define SGS_NUT_SKAL"
+	"\n	#define def_sgs_nut_skal "+to_string(s_sgs_nut_skal,6u)+"f" : (string)"") // ★ 10.09. Diskriminator: nu_t am klassischen Modell skaliert. Ohne Schalter kein Define -> Kontrollarm bitgleich. Sechs Nachkommastellen reichen (Faktor der Groessenordnung 0,1; Pruefbefund M3 betraf Groessen ~1e-6).
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_band>0u) ? (string)"\n	#define SGS_BAND" : (string)"") // ★ 08.09. SGS-BAND: Wandlagen 2..N ueber eine eigene Zellenliste; KEINE neue Kernelfunktion, nur zwei Argumente und ein Leserzweig
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_sism>0u) ? (string)"\n	#define SGS_SISM"
 	"\n	#define def_sgs_sism_T "+to_string((ulong)s_sgs_sism_T)+"u" // T in SCHRITTEN als uint; alpha = 1.0f/(float)def_sgs_sism_T erst im Kernel (Pruefbefund M3: to_string(float) ist Festkomma -- alpha ~1e-4 wuerde auf 0,4 % quantisiert)
