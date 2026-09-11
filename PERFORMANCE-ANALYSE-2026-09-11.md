@@ -172,7 +172,18 @@ Spätpuffer" ist damit bis auf ~19 MiB ausgereizt.
 
 Nicht aus den Agentenberichten, sondern danach am Code geprüft. Reihenfolge nach Hebel.
 
-## A1 — Die halbe Facettenkette ist Geometrie und ist einmalig vorberechenbar
+## A1 — WIDERLEGT (siehe Teil 3.3). Ursprünglicher Titel: „Die halbe Facettenkette ist Geometrie"
+
+> **⚠ Dieser Abschnitt ist falsch und bleibt nur als Beleg stehen.** Die Momentenmatrix ist
+> **nicht** reine Geometrie: `t1 = ut/|ut|` (`kernel.cpp:2073`) zeigt in Richtung der lokalen
+> tangentialen Geschwindigkeit, und die stammt aus `calculate_rho_u(fhn,…)` (`kernel.cpp:2002`,
+> selbst nachgeprüft). `ct1`/`ct2` sind Projektionen auf **diese** Basis, also drehen sich
+> G11/G22/G12/Sn1/Sn2 jeden Schritt mit der Strömung. Konstant sind nur der volle 3×3-Tensor
+> `M = Σ 6w_i c_i c_iᵀ` und die basisunabhängigen Invarianten Snn, det(G′), tr(G′), |Sn′|².
+> Der Ersatzvorschlag mit demselben Ziel und ohne Falschannahme steht in **Teil 3.3, Variante B**
+> (−2,76 % Instruktionen, null zusätzlicher Speicher). Die unten genannten ≈ 51 MiB wären
+> ohnehin 113 MB gewesen.
+
 
 `kernel.cpp:2117` akkumuliert je Wandbesuch und Schritt über 19 Richtungen:
 
@@ -397,3 +408,324 @@ Präfixsummen.
 - **Freier VRAM real** — Debugfs-Rechte fehlen, alle Frei-Werte sind die 20/19-Rekonstruktion.
 - **Bitgleichheit von SPARSE bei aktiver Facettenkette** — strukturell geprüft, nie gelaufen.
 - **RAM-Spitze im Betrieb** — aus Allokationen gerechnet, nicht aus `/proc/<pid>/status`.
+
+## 3.2 Bandbreite und Zugriffsmuster
+
+### Die angezeigten MLUPs sind ein Anzeigefehler — Faktor 2,551
+
+Das ist der größte Befund dieser Runde. **Selbst nachgeprüft, Kette geschlossen:**
+
+- `Info::print_update` rechnet `lbm->get_N() / runtime_lbm_timestep_smooth` (`info.cpp:119`).
+- `info.lbm` wird in `print_initialize(LBM*)` gesetzt (`info.cpp:49`). Letzter Aufrufer im
+  Aufbau ist `lbm_c.run(0u)` (`setup.cpp:7045`, direkt nach `lbm_f.run(0u)` in 7044) — der
+  Zeiger zeigt also auf das **Fernfeld**.
+- `info.update(clock.stop())` steht nur in `LBM::run` (`lbm.cpp:2447`; die zweite Stelle 2877
+  ist der Partikelpfad, nicht aktiv). Die Zeitschleife ruft `run()` **nur fürs Nahfeld**
+  (`setup.cpp:7441/7459`); das Fernfeld läuft über `run_async`, und das ruft `info.update` nie.
+
+**Angezeigt wird also: grobe Zellzahl geteilt durch feine Schrittzeit.**
+
+| | Wert |
+|---|---|
+| angezeigt (`logs/p4dt_deteps.log`) | 1946–1974 MLUPs, 239–243 GB/s |
+| Nf/Nc = 519 139 485 / 203 489 280 | **2,5512** |
+| **wahre Nahfeldrate** | **5028 MLUPs** (dt_fein = 103,24 ms) |
+| Gegenprobe Phasenprofil | 434,6 ms/grob × 95,8 % / 4 = 104,09 ms — 0,8 % ab |
+
+Eigenbeweis im Lauflog: nach dem Nahfeld-Header steht `519 | 64 GB/s`, nach dem
+Fernfeld-Header `203 | 25 GB/s`, beide bei dt = 1,0 s Startwert. Die Zellzahl springt mit,
+die Uhr nicht.
+
+**Folge für das ganze Projekt: jede MLUPs- und GB/s-Zahl aus einem Doppeldomänenlauf ist um
+2,55 zu klein.** Das betrifft `README.md:45` („1534 MLUPs / 189 GB/s", 8-mm-Sprosse, Faktor
+dort 2,561). Die **Verhältnisse** der A/B-Kette („939 → 1534, +63 %") bleiben gültig — beide
+Arme tragen denselben Fehler. Die **Absolutwerte** nicht. Für den laufenden ELIBB-A/B heißt
+das: die Wanduhr bleibt das Maß, MLUPs taugen nur als Verhältnis.
+
+### Korrektur am Agentenbefund: die 5464 sind belegt, nur nicht hier
+
+Der Agent stufte die dreimal in `README.md` (48, 77, 665) genannten „≈ 5 464 MLUPS" als
+unbelegt ein. **Das stimmt nicht.** Sie stehen in `FluidX3D/MODIFICATIONS.md:251` als eigene
+Messung: V1, **Einzeldomäne**, 337,5 M Zellen, Baseline ohne Wandmodell (dagegen 3289 MLUPs
+mit Wandmodell, −40 %). Einzeldomäne heißt: kein Anzeigefehler, die Zahl ist echt.
+
+**Damit fällt der „Faktor 2,8" ganz weg, und das Bild dreht sich:**
+
+| | MLUPs | Quelle |
+|---|---:|---|
+| Upstream B70, FP32/FP16S | 6750 (85 % von 608 GB/s) | `README_UPSTREAM.md:1223` |
+| V1 Einzeldomäne, ohne Wandmodell | 5 464 | `FluidX3D/MODIFICATIONS.md:251` |
+| **v2 Nahkernel heute, wahr** | **5 028** | diese Runde, gerechnet |
+| V1 Einzeldomäne, mit Wandmodell | 3 289 | `FluidX3D/MODIFICATIONS.md:251` |
+| v2, angezeigt | 1 946 | Anzeigefehler ×2,551 |
+
+Der v2-Nahkernel liegt **8 % unter** der V1-Baseline ohne Wandmodell — mit der kompletten
+Facettenkette, SISM, P-TRT und DETEPS obendrauf. Das ist kein Performanceproblem, das ist
+ein gutes Ergebnis. **Die Suche nach dem „verlorenen Faktor" war eine Suche nach einem
+Artefakt.**
+
+### Wahrer Verkehr je Zelle und Schritt
+
+SoA-Layout `index_f(n,i)=i*def_N+n` (`kernel.cpp:993`), aus dem Quelltext ausgezählt:
+
+| Zellklasse | Anteil | B/Zelle/Schritt |
+|---|---:|---:|
+| Solid (früher Ausstieg, `kernel.cpp:2894`) | 12,2 % | 1 |
+| Freistrom-Fluid außerhalb der F-BBox | 57,0 % | 93 |
+| Fluid in der F-BBox | 29,6 % | 93,75 |
+| Bandzelle Lage 2 | 0,51 % | 97,75 |
+| **Facettenzelle** | 0,60 % | **339,5** = 3,65× Freistrom |
+
+| Posten je feinem Schritt | GB | % |
+|---|---:|---:|
+| DDF lesen + schreiben (2×38 B × 455,8 M Fluidzellen) | 34,64 | 79,9 |
+| rho + u schreiben | 7,29 | 16,8 |
+| flags | 0,52 | 1,2 |
+| Facettenpuffer gesamt | 0,77 | 1,8 |
+| fac_idx (2×) + band_idx | 0,12 | 0,3 |
+| **Summe** | **43,36** | |
+| je Gitterzelle | 83,5 B | |
+| **erreichte Bandbreite** | **420 GB/s** = 69 % der 608er Spitze, 81 % der von Upstream auf derselben Karte erreichten 520 GB/s | |
+
+### Korrektur an Teil 2 §A6: die Anzeige überzeichnet um 47 %, nicht 10 %
+
+63,85 gegen 43,36 GB. Zerlegung der 20,50 GB Lücke:
+
+- **Nachbar-Flags, 18 B unter `MOVING_BOUNDARIES`** (`lbm.cpp:65-67`): 9,32 GB = **45 %**.
+  `apply_moving_boundaries` läuft nur an TYPE_MS-Zellen (`kernel.cpp:2903`) — 1 102 365 von
+  519 M = **0,21 %**. 18 B werden für 100 % der Zellen gebucht und von 0,21 % bezahlt.
+  **Das ist der größere Posten und er fehlte in Teil 2.**
+- `F` (12 B, nie gelesen unter `F_NUR_SOLID`): 6,23 GB = 30 % — der in §A6 gefundene Teil.
+- DDF+rho+u über alle statt über die 87,8 % Fluidzellen: 5,83 GB = 28 %.
+- Gegenbuchung Facetten-/Indexpuffer, die die Formel nicht kennt: −0,90 GB.
+
+### Koaleszenz ist in Ordnung — am Offline-Compiler gemessen
+
+`ocloc -device bmg-g31`, Produktionsdefines rekonstruiert. Kontrollwert: `stream_collide`
+6630 instCount gegen 6590 der ersten Runde.
+
+| Arm | inst | DDF ld/st | flags ld | f32 ld/st | Atomics |
+|---|---:|---:|---:|---:|---:|
+| Produktion | 6630 | **19 / 19** | 91 | 97 / 12 | 59 |
+| ohne KDIAG | 6594 | 19 / 19 | 91 | 93 / 8 | 59 |
+| **ohne ELIBB** | **4484** | 19 / 19 | 55 | 77 / 11 | 40 |
+| ohne SGS_BAND | 6508 | 19 / 19 | 91 | 92 / 12 | 57 |
+| reines Bounce-Back | 3401 | 19 / 19 | 43 | 59 / 6 | 18 |
+| Fernkernel (B70) | 1628 | 19 / 19 | 19 | 44 / 4 | 10 |
+
+**Der DDF-Pfad ist in jedem Arm exakt 19 `load.ugm.d16u32` + 19 `store` — voll koaleszierte
+32-B-Nachrichten, keine einzige Zusatzberührung durch die Facettenkette.** Nur die
+±x-Nachbarslots laufen um ein Element versetzt, das ist Esoteric Pull und upstream-inhärent.
+
+Bitmaske + Präfixsumme kosten je Zelle **drei** Aufschläge (über `cbit`/popcount gezählt):
+`fac_idx` in `apply_facette_imem` (`kernel.cpp:1971`), `fac_idx` **nochmal** im FDWAND-Block
+(`kernel.cpp:3090`), `band_idx` (`kernel.cpp:3092`). Zwei unabhängige Ladepaare auf dieselbe
+Adresse, der Übersetzer fasst sie nicht zusammen. **Bandbreitlich egal** (0,12 GB = 0,3 %,
+streng sequentiell) — der Preis ist Latenz und Instruktionen.
+
+### Neuer harter Befund: `fac_nachbar_ab` hat Scratch, und das Gate sieht ihn nicht
+
+```
+fac_nachbar_ab   simd=32  grf=128  private_size=7296  spill=0
+stream_collide   simd=16  grf=128  private_size=0     spill=0
+sgs_fdwand       simd=32  grf=128  private_size=0     spill=0
+```
+
+7296 B = 228 B (die 57-float-Tabelle in `c()`, `kernel.cpp:996`) × 32 Lanes. **Genau die
+Fehlerklasse, für die `scratch_gate.sh` gebaut wurde** — gefunden wird sie nicht, weil das
+Gate `stream_collide` fest verdrahtet als einzigen Kernel prüft (selbst nachgeprüft:
+`scratch_gate.sh:33`, `igc_offline.sh "$T/$arm.cl" "$dev" stream_collide`).
+
+Ursache und Gegenprobe, beide gemessen:
+
+| Variante | private | inst | Scratch |
+|---|---:|---:|---|
+| Produktion | 7296 | 791 | 42× `store.ugm.d32x4`, 21× `load.ugm.d32x8t` |
+| `opencl_unroll_hint(18)` | 7296 | 791 | unverändert — **Unrolling hilft nicht** |
+| **`c(ib)` (`kernel.cpp:4788`) → `0.0f`** | **0** | **484 (−39 %)** | **alle weg** |
+
+Es ist nicht die Schleife, es ist der eine laufzeitindizierte `c(ib)`-Zugriff **nach** ihr.
+Obergrenze 2,1 GB Scratch je Launch, 8,4 GB je grobem Schritt (≤ 4,8 %); ein großer Teil
+bleibt im L1, die −39 % Instruktionen sind hart.
+
+### Das Fernfeld hat eine Wand nach oben — und das ist neu gegenüber Teil 2 §A4
+
+| | |
+|---|---:|
+| Fernschritt gemessen | **369 ms** |
+| Fenster für den Fernschritt (0,9 % + 95,8 % von 434,6 ms) | **420 ms** |
+| **Schlupf** | **12 %** |
+
+Teil 2 §A4 sagte richtig: dort sparen bringt null Wanduhr. **Die schärfere Folgerung fehlte:
+wird das Nahfeld um mehr als 12 % schneller, wird die iGPU zum kritischen Pfad.** Jede
+Nahfeld-Maßnahme über 12 % hinaus ist ohne gleichzeitige Fernfeld-Arbeit wertlos. Das ist
+die Obergrenze, an der jede Optimierung dieses Dokuments zu messen ist.
+
+Ob die iGPU bei 51,3 GB/s bandbreiten- oder rechengebunden ist, bleibt offen: 25,4 M Threads
+× 2145 Instruktionen bei 512 Lanes/2,0 GHz ergibt 0,43 s theoretisch gegen 0,369 s gemessen
+— **beides liegt in derselben Größenordnung**. Rezept: 25-s-Paar auf Gerät 2 mit
+`UPDATE_FIELDS` an/aus (92 → 76 B/Zelle, −17 % Verkehr).
+
+### Die drei Bandbreiten-Maßnahmen aus Runde 2
+
+1. **`sgs_fdwand` und `fac_nachbar_ab` zu einem Launch verschmelzen.** Beide laufen über
+   dieselbe Liste mit identischem Bereich (`lbm.cpp:1009` und `:1019`), beide je feinem
+   Schritt, beide lesen `u` und `flags` derselben 6er-Nachbarschaft derselben 3 129 185
+   Zellen, beide schreiben disjunkt, keiner liest die Ausgabe des anderen. Verschmolzen
+   entfallen 6 doppelte Flag-Gather und ein Dispatch. **Geschätzt 0,4–2 GB je feinem Schritt
+   = 1–4 %**, bitgleich bei erhaltener Schreibreihenfolge. Geschätzt, weil die Trefferquote
+   der Gather nicht messbar war.
+2. **`c(ib)` in `fac_nachbar_ab` durch Arithmetik ersetzen** — `private_size` 7296 → 0,
+   instCount −39 %, bitgleich (dieselben Konstanten, nur nicht über den Speicher). **Und:
+   `scratch_gate.sh` muss alle Kernel prüfen, nicht nur `stream_collide`**, sonst bleibt
+   diese Fehlerklasse weiter blind. Das ist die billigste Maßnahme im ganzen Dokument.
+3. **`CFD_FAC_KDIAG=0`** — 0,400 GB je feinem Schritt = 0,92 %, dazu −191 MiB VRAM. Größter
+   Einzelposten unter den Zusatzpuffern und trotzdem unter einem Prozent. **Das ist die
+   ehrliche Größenordnung: in `stream_collide` steckt kein großer Bandbreitenhebel mehr, weil
+   80 % des Verkehrs der DDF-Strom ist und der bei D3Q19/FP16S nicht kleiner wird.**
+
+*Bewusst nicht empfohlen:* `rho[n]` jeden Schritt zu schreiben kostet 1,82 GB = 4,2 %.
+Gelesen wird rho zwischen den Schritten nur an TYPE_E, am Druck-Auslass und von der Ausgabe.
+Ein Gate wäre **nicht bitgleich** und würde den Druck-Auslass verändern.
+
+### Was Runde 2 hier nicht messen konnte
+
+- **Laufzeit irgendeines Kernels** — alles ist Instruktions-, Nachrichten- und Byte-Zählung.
+- **Trefferquote der u-/flags-Gather** — die Spanne 1,4–5 GB ist deshalb Faktor 3,5 breit.
+- **Dispatchkosten von `boden_eq`** (519,1 M Work-Items für ~1,1 M aktive) — offen aus Runde 1.
+- **DDR5-Spitzenbandbreite** — `dmidecode` braucht root, EDAC leer.
+- **Divergenzkosten der Facettenkette** — 0,6 % der Zellen, 4571 Instruktionen je betroffener
+  Subgroup. Braucht einen Laufzeit-A/B.
+
+## 3.3 Datenfluss und Vorberechnung — was ist konstant, was dreht sich mit
+
+Messgrundlage: Offline-Compiler, Produktionszeile rekonstruiert, Basis `stream_collide`
+**7221** Instr. auf der B70 (0xe223, simd16, private 0, spill 0), **8396** auf der iGPU
+(0x7d67, simd8). Die Differenz zu Runde 1 (6590) ist gemessen erklärt: P-TRT +243,
+KDIAG +52, DETEPS 16 +20. Alle Deltas unten gegen **diese** Basis.
+
+Die Voraussetzung aller Geometrieaussagen trägt: `flags` wird nach der Voxelierung nie wieder
+geschrieben (`setup.cpp:6043` im Aufbau, Zeitschleife ruft nur `lbm_f.run`;
+`update_moving_boundaries` läuft im Fahrzeugfall nie, `kernel.cpp:4155`).
+
+### A1 ist widerlegt — die Basis dreht sich mit der Strömung
+
+**Das ist eine Korrektur an mir selbst, nicht am Code.** Ich hatte in Teil 2 behauptet,
+G11/G22/G12/Sn1/Sn2 seien reine Geometrie. Nachgeprüft: `t1 = ut/|ut|` (`kernel.cpp:2073`),
+`ut` aus `calculate_rho_u(fhn,…)` (`kernel.cpp:2002`), `t2 = n × t1` (`:2074`), und `ct1`/`ct2`
+(`:2116`) sind Projektionen auf genau diese Basis. **Sie drehen sich jeden Schritt.**
+
+Numerisch belegt, feste Normale und feste Wandlinkmenge, nur der Azimut φ der Basis gedreht:
+
+| φ | G11′ | G22′ | G12′ | Sn1′ | **Snn′** | **det(G′)** | **tr(G′)** |
+|---|---|---|---|---|---|---|---|
+| 0,0 | 0,48891 | 0,48292 | 0,01376 | −0,06324 | 0,13928 | 0,23592 | 0,97183 |
+| 0,7 | 0,49999 | 0,47185 | −0,00061 | **+0,00220** | 0,13928 | 0,23592 | 0,97183 |
+
+Sn1 wechselt das Vorzeichen, die Invarianten stehen. Konstant sind: der volle 3×3-Tensor
+`M = Σ 6w_i c_i c_iᵀ`, **Snn** (der Code sagt es selbst, `kernel.cpp:2252`), det(G′), tr(G′),
+|Sn′|². Das ALPHA2-Downdate (`kernel.cpp:2189`) schleust übrigens **keine** Strömungsgröße ein
+— `S1` und `S0` sind reine Linkgewichtssummen, das Downdate ist exakt die Projektion des
+Rang-1-Downdates. Nur nützt das nichts, weil die Basis strömungsabhängig ist.
+
+Folge für die Zweigwahl, und die ist gemischt:
+- **Geometrie** ist das Entkopplungs-Gate `kernel.cpp:2336` (`Snn<1e-8f || kop<=1e-6f*Snn*(G11+G22)`) — alle drei Größen invariant.
+- **Nicht Geometrie** sind die det-ε-Wächter `kernel.cpp:2338` und `:2382`: `G11*G22` und die
+  Einzeldiagonalen wandern mit dem Azimut. Genau diese Schwellen entscheiden über Vollrang
+  gegen Rückfall. Sie lassen sich nicht einfrieren.
+
+Obergrenze von A1, falls man trotzdem alles fertig gedowndatet aus einem Puffer läse:
+7221 → 6928 = **−4,1 %**, und zwar für **113 MB**, nicht die von mir genannten 51 MiB.
+
+### Variante B — derselbe Gewinn zu zwei Dritteln, für null Speicher
+
+Im Loop den **3×3-Tensor mit konstanten Inkrementen** akkumulieren (`M_ab += 6w_i c_a c_b`,
+Koeffizienten 0/±konstant), P über den Vektor `Qv = Σ 2 c_i fhn[i]`; **danach einmal**
+projizieren (2 Matvecs + 5 Skalarprodukte). Algebraisch exakt — 2000 Zufallsfälle, max.
+5,8·10⁻¹⁶ in double.
+
+**Gemessen: 7221 → 7022 = −199 Instr. = −2,76 %, null zusätzlicher Speicher.** Das sind 68 %
+von A1s theoretischem Maximum, ohne die Falschannahme und ohne 113 MB.
+
+### Die Tabelle: konstant, langsam, schnell
+
+| Größe | Ort | Klasse | Vorberechnung | Verdikt |
+|---|---|---|---|---|
+| G11/G22/G12/Sn1/Sn2 | `kernel.cpp:2117/2123` | **SCHNELL** | – | A1 trägt nicht; Variante B: −2,76 %, 0 B |
+| **Spalding-Umkehrung** (3× Newton, 2 exp + 2 log je It.) | `kernel.cpp:1652-1677` | **KONSTANT** (feste 1-D-Kurve) | 256 float = **1 kB** | **Ja, klar.** −330 Instr. = −4,57 %, **und 450× genauer** |
+| **Suche „bester Normalenlink"** | `kernel.cpp:4772-4778` | KONSTANT | 1 uint = 12,5 MB | **Ja.** 791 → **75 Instr. = −90,5 %**, `neighbors()` entfällt ganz |
+| **`ywb = yw + c(ib)·n`** | `kernel.cpp:4788/4790` | KONSTANT | 1 float | **Ja** — heute 12,5 MB toter Schreibverkehr je Feinschritt |
+| **Wandlink-Gate, dreimal dieselben 18 Werte** | `kernel.cpp:1857, 2113, 2597` | KONSTANT | 18 Bit = **0 B** (freier fac_geo-Slot) | **Ja.** zwei von drei ersetzt: −130 Instr. = −1,8 % |
+| 6 Solid-Tests in `sgs_fdwand` | `kernel.cpp:4703` | KONSTANT | 6 Bit | **Ja.** 672 → 632 = −6,0 % |
+| **ABSTAND-Scan in `boden_eq`** | `kernel.cpp:3801-3806` | KONSTANT | 1 Flagbit = 0 B | **Ja.** 1267 → **1170 = −7,7 %**; heute 347 M Reads je grobem Schritt für **0,50 % Treffer** |
+| **`cubic_lift_weights`** | `kernel.cpp:4173`, Def. `:4090` | KONSTANT (bei ratio=4 nur 4 innere Sätze) | 1-D-Tabelle ≈ 54 kB | **Ja.** 962 → **683 = −29,0 %** |
+| Blockfluid-Maske in `schale_extract` | `kernel.cpp:4231-4243` | KONSTANT | 64-Bit-Maske, 22 MB | **Ja** — 119 M flags-Reads je grobem Schritt |
+| SISM-EMA `fac_sb` | `kernel.cpp:4749` | **LANGSAM**, echter Zustand | – | **Nein**, sbar geht je Schritt in w ein |
+| `neighbors(n,j)` in `stream_collide` | `kernel.cpp:2903` | KONSTANT | **76 B/Zelle** gegen 57 B Budget | **Nein** — würde den Speicher mehr als verdoppeln. Zu Recht je Schritt gerechnet |
+
+### Der Platz für die Vorberechnungen ist schon bezahlt
+
+`lbm.hpp:262` beschreibt `fac_geo` selbst: „8 float je Facette: … ,achse,**[6] reserviert,
+[7] frei — 8 B/Facette ungenutzt**". `lbm.cpp:861` schreibt beide mit `0.0f`, niemand liest
+sie. Slot 5 (`achse`) wird nur in `apply_facette` gelesen, und die Funktion wird unter IMEM
+nie gerufen (`kernel.cpp:2916`). → **25 MB unbedingt frei, 37,5 MB solange IMEM läuft**,
+alloziert und hochgeladen, von nichts gelesen. Genau der Platz für Wandlinkmaske, `nb` und
+`ywb`. **Diese drei Vorberechnungen kosten null zusätzliches VRAM.**
+
+### A2 (Spalding-Tabelle) ist der stärkere Vorschlag — und keine reine Sparmaßnahme
+
+y⁺-Bereich aus `export/p4dt_deteps/yplus_facetten.csv` (n = 3 129 185): **1,15 … 983**,
+daraus Y = u⁺·y⁺ = 1,52 … 2,19·10⁴, also 4,2 Dekaden. Genauigkeit **bevölkerungsgewichtet an
+den 3,13 M echten Facettenwerten** (τ_w-Fehler):
+
+| | max | p99 | Median |
+|---|---|---|---|
+| Newton it=3, FP32 (heute) | **4,36 %** | **2,95 %** | 0,124 % |
+| Tabelle N=64 (256 B) | 0,167 % | 0,109 % | 0,0037 % |
+| **Tabelle N=256 (1 kB)** | **0,010 %** | **0,0066 %** | 0,00023 % |
+
+23,8 % der Facetten liegen bei Y > 2400, wo der Kopfkommentar `kernel.cpp:1656` selbst
+−0,44 % dokumentiert; 0,13 % über 10⁴ (dort −4,4 %). Derselbe Kommentar sagt „bei hohem
+Re_tau Iterationszahl erhöhen" — **bei 4 mm ist der Fall eingetreten und die Zahl wurde nie
+erhöht.** Die Tabelle ist also rund **450× genauer (p99) und spart 330 Instruktionen.**
+
+Zur Bauform, und das ist nicht verhandelbar: **globaler Puffer, kein `__constant`, kein
+privates Array** — ein laufzeitindiziertes privates Array ist exakt die Scratch-Falle, die
+dieser Fork schon einmal mit Faktor 100 bezahlt hat. Gemessen mit globalem Puffer:
+private 0 / spill 0 auf beiden Geräten.
+
+**Kombination Variante B + Spalding-Tabelle: 7221 → 6700 = −7,2 % (B70), 8396 → 7776 = −7,4 %
+(iGPU)**, private 0 / spill 0 beidseitig.
+
+### Mehrfachberechnungen
+
+1. **`fid` zweimal je Facettenzelle und Schritt im selben Launch** — `kernel.cpp:1970` und
+   `:3090`. Einmal gerechnet und durchgereicht: −21 Instr. plus 2 globale uint-Reads.
+   (Deckt sich mit dem `cbit`-Befund aus 3.2.)
+2. **Zwei Kernel über dieselbe Zellliste im selben Schritt** — `sgs_fdwand` (`:4677`) und
+   `fac_nachbar_ab` (`:4754`), beide über `gd_zellen`, beide mit `neighbors(n,j)`, beide
+   dieselben flags. Zusammen 1463 Instr. in zwei Starts; zusammengelegt und mit den beiden
+   Vorberechnungen **707 in einem Start**. (Zweiter unabhängiger Agent, gleiche Empfehlung.)
+3. **Dasselbe Gate-Prädikat dreimal für dieselben 18 Werte** — −130 Instr. für zwei davon.
+4. **Host liest `fac_tau_n` ganz vom Gerät, um ein Maximum zu bilden** (`setup.cpp:3534`):
+   12,5 MB je Sample für einen **monoton wachsenden** Zähler, dessen 2²⁰-Schwelle genau
+   einmal im Lauf überschritten wird.
+
+### Geprüft und verworfen
+
+`coordinates(n)`, `f_bbox`, `is_halo` sind reine Arithmetik. `fac_q` und `fac_geo[0..4]` sind
+**bereits** vorberechnet — richtig gemacht. `tau0 = 1/def_w` und `a_ = 1/def_sgs_sism_T` sind
+Compile-Zeit-Konstanten, der Übersetzer faltet sie. Der SGS-Block in `stream_collide` ist echt
+schnell (Pi-Tensor aus fneq je Schritt); konstant ist daran nur der fid-Lookup.
+
+### Was Runde 2 hier nicht prüfen konnte
+
+- **Laufzeit** — alles sind statische Instruktionszahlen, ein Lauf war gesperrt.
+- **Ob G11/G22/G12 in der Praxis doch langsam drehen.** Das wäre die einzige abgeschwächte
+  Rettung für A1 (Momente nur alle k Schritte neu projizieren). Messbar wäre die
+  Winkeländerung von u_t je Facette und Schritt — dafür gibt es heute keinen Ausgang.
+- **Bitgleichheit.** Variante B ist algebraisch exakt, aber die Summationsreihenfolge ändert
+  sich; die Tabelle erst recht. Beide brauchen ein gepaartes A/B.
+- **exp/log-Latenz.** `instCount` zählt eine transzendente Instruktion wie eine Addition —
+  der Laufzeitgewinn der Spalding-Tabelle ist eher **größer** als 4,6 %.
+- Ob der 1-kB-Tabellenpuffer im Konstantcache landet.

@@ -42,10 +42,21 @@ needs the total.
 | Metric | Value | Context |
 |---|---|---|
 | **Wall clock, 4 mm production** | ~1.5 h for 501 ms physical | the full wall-model chain costs nothing measurable |
-| **B70 kernel (8 mm screening rung)** | **1 534 MLUPs / 189 GB/s** | **+63 %** vs. the pre-optimisation era (939 MLUPs) |
+| **B70 kernel (8 mm screening rung)** | **+63 %** vs. the pre-optimisation era (939 → 1 534 displayed) | ratio only — see the display-convention note below |
 | **Dual-GPU overlap** | **CONCURRENT 96.1 %** | B70 93.9 % busy @ 2.5 GHz mean, iGPU 91.0 % (fdinfo profiler, 180 s) |
 | **VRAM (4 mm production)** | 27 452 / 32 655 MB, **3 168 MiB measured free** | was 29 318 MB; the September memory work bought back 2.1 GB at 0.11 % throughput cost |
-| Single-domain B70 baseline | ≈ 5 464 MLUPS | 96–100 % of peak bandwidth (upstream solver quality) |
+| Single-domain B70 baseline | ≈ 5 464 MLUPS | measured in the **predecessor fork** (V1, `MODIFICATIONS.md:251`, 337.5 M cells, no wall model) |
+| **Near-field kernel, true rate** | **≈ 5 028 MLUPs** | dual-domain v2 today, corrected for the display convention — 8 % below the V1 bare baseline, with the whole wall-model chain on top |
+
+> **Display convention — read this before quoting any MLUPs or GB/s number from a log.** In a
+> dual-domain run the progress line divides the **coarse** cell count by the **fine** step time.
+> `Info::print_update` uses `lbm->get_N()` (`src/info.cpp:119`); `info.lbm` is left pointing at the
+> far field because `lbm_c.run(0u)` initialises last (`src/setup.cpp:7045`), while `info.update` is
+> only ever called from `LBM::run` (`src/lbm.cpp:2447`) and the time loop runs `run()` for the near
+> field alone — the far field uses `run_async`, which never reports a time. The displayed figure is
+> therefore too small by **N_far / N_near = 2.551** at 4 mm and 2.561 at 8 mm. **Ratios between two
+> runs stay valid** (both arms carry the same factor); absolute values do not. Corrected: the 4 mm
+> near-field kernel runs at **≈ 5 028 MLUPs**, not 1 946.
 
 > **On an older headline figure.** Earlier versions of this file led with Cd 0.805 / Cz −1.180 from
 > the run `f4_vollumfang_mls` (2026-08-27). Those were *post-hoc artefact-corrected* values whose
@@ -74,7 +85,7 @@ x_v2 = x_OF13 + 2.2063): **RMS 4.26 m/s, median −0.57 m/s, only 1.66 % of cell
 
 A fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D) tuned for **vehicle
 aerodynamics on a single Intel Arc Pro B70 (Battlemage) + Arrow-Lake iGPU**. The base solver runs
-at **96–100 % of peak memory bandwidth (≈ 5 464 MLUPS)** on the B70 via OpenCL. On top of that this
+at **≈ 5 464 MLUPS** on the B70 via OpenCL (measured in the predecessor fork, single-domain). On top of that this
 fork adds a force-resolving, multi-resolution dual-GPU stack for a Toyota MR2 race car, validated
 against an OpenFOAM 13 k-ω-SST reference (34 M cells: **Cd 0.599 / Cz −1.301**) on the **same STL**.
 
@@ -662,8 +673,13 @@ it out and watch `journalctl -k --since "1 min ago" | grep xe`.
 
 ## Performance baseline
 
-- **Single-domain B70:** ≈ 5 464 MLUPS at 96–100 % of peak bandwidth (FluidX3D's class-leading
-  efficiency; ~4× an RTX 3060 Ti).
+- **Single-domain B70:** ≈ 5 464 MLUPS — measured in the **predecessor fork** V1
+  (`MODIFICATIONS.md:251`, 337.5 M cells, baseline without the wall model; 3 289 with it).
+  Upstream's own table gives 6 750 MLUPS FP32/FP16S for this card at 85 % of 608 GB/s
+  (`README_UPSTREAM.md:1223`).
+- **Near-field kernel in v2 today:** ≈ **5 028 MLUPs** true rate, i.e. 8 % below the V1 bare
+  baseline while carrying the full facet chain, SISM, P-TRT and DETEPS. The progress line
+  shows 1 946 — see the display-convention note near the top.
 - **Dual-domain (V2, measured 2026-08-27 on the full-chain 4 mm production run):**
   **Performance index 10 958 s_wall/s_phys** (total wall / T_END; steady-state from the step
   counter: 10 638) — parity with the same run **without** the wall-model chain (92 min, index
