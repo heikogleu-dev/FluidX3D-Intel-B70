@@ -365,7 +365,19 @@ uint LBM_Domain::s_fac_kraft = 0u;
 static double spald_S(const double X) { const double kap=0.41, emkB=0.104874; const double kX=kap*X, e=exp(kX);
 	return X + emkB*(e-1.0-kX-0.5*kX*kX-kX*kX*kX/6.0); }
 static string spalding_tabelle() {
-	if(env_u("CFD_SPALDING_TAB", 0u)==0u) return (string)"";
+	// ★ 11.09.2026 nach der Messung auf DEFAULT AN gestellt (Heiko: "nur was messbar positiv
+	// ist wird uebernommen"). Belegt am 8-mm-Fahrzeug gegen o8_it8 (acht Newton-Schritte,
+	// praktisch auskonvergiert), sechs 50-ms-Fenster, cd_reib als Zeiger:
+	//   Newton it=3 : Abstand -0,00077, SECHSMAL negativ -- ein systematischer Versatz
+	//   Tabelle     : Abstand -0,00024, Vorzeichen wechselnd -- 69 % des Versatzes weg
+	// KEIN Tempogewinn: 402 s gegen 403 s bei 4 s Streuung. Die -4,57 % Instruktionen aus
+	// der Analyse schlagen NICHT auf die Wanduhr durch, weil der Facettenpfad nur 0,6 % der
+	// Zellen betrifft. Das ist zum zweiten Mal an einem Tag dieselbe Lehre: eine
+	// Instruktionszahl ist kein Laufzeitmass. Die Tabelle bleibt trotzdem, weil sie einen
+	// GEMESSENEN systematischen Fehler beseitigt und nichts kostet.
+	// CFD_SPALDING_TAB=0 stellt den alten Newton-Pfad her, bitgleich geprueft (o8_tab0
+	// gegen o8_e5: 28 von 28 Dateien identisch).
+	if(env_u("CFD_SPALDING_TAB", 1u)==0u) return (string)"";
 	const uint N = 512u; const double Ylo = 1e-1, Yhi = 1e6;
 	const double l0 = log(Ylo), dl = (log(Yhi)-l0)/(double)(N-1u);
 	string r = "\n	#define SPALDING_TAB";

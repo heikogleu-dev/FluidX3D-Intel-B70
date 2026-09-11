@@ -149,6 +149,62 @@ Mittel-Klasse M1 bis M9 ist unangetastet.
 
 ---
 
+## 1b. Spalding-Tabelle (M1) — umgesetzt, mit einer widerlegten Behauptung
+
+Von Heiko am 11.09. freigegeben. **Nicht bitgleich** — hier entscheidet Messbarkeit.
+
+**Bauform:** `__constant` im Dateibereich, 512 Stützstellen à 2 kB, Emission über
+`device_defines`. Bewusst **kein** Kernelparameter (Signatur-Splice ist die R()-Klammerfalle,
+in diesem Fork zweimal bezahlt) und **kein** privates Array (Scratch-Falle). Vor dem Einbau
+mit einer Minimalkernel-Probe geprüft: `private_size` 0. Danach offline auf beiden Geräten
+übersetzt: private 0, spill 0.
+
+**Schalter `CFD_SPALDING_TAB`, jetzt Default an.** Der Aus-Zustand ist gegen `o8_e5`
+bitgleich geprüft (28 von 28 Dateien) — der neue Code ist also nachweislich inert, wenn er
+aus ist. Damit war das A/B ein Binary und eine Variable.
+
+**Offline gemessen** (200 000 Punkte log-gleich über den gemessenen Bereich Y = 1,52…2,19·10⁴,
+gegen Bisektion in double), τ_w-Fehler:
+
+| | max | p99 |
+|---|---:|---:|
+| Newton it=3 (Stand bis heute) | 4,364 % | 4,235 % |
+| Newton it=8 | 0,0001 % | 0,0000 % |
+| **Tabelle 512 / 2 kB** | **0,0035 %** | 0,0033 % |
+
+Geprüfte Gegenvariante ohne Tabelle: ein besserer Startwert bringt Faktor 50 (4,364 → 0,086 %),
+erlaubt aber **keine** Iteration weniger (it=2 wäre 4,88 %) und kostet zusätzliche
+Transzendente. Die Tabelle gewinnt.
+
+**Am Fahrzeug gemessen.** Zielmarke ist `o8_it8` — acht Newton-Schritte, praktisch
+auskonvergiert, eigens dafür gefahren. Ohne diesen Arm gäbe es keinen Bezug, gegen den sich
+„messbar positiv" prüfen ließe. Zeiger ist `cd_reib`, weil dort der Spalding-Fehler
+systematisch wirkt; die Druckanteile sind von turbulenter Streuung beherrscht.
+
+| Abstand zu `o8_it8`, sechs 50-ms-Fenster | Mittel | Vorzeichen |
+|---|---:|---|
+| Newton it=3 (`o8_e5`) | **−0,00077** | **sechsmal negativ, systematisch** |
+| Tabelle (`o8_tab1`) | **−0,00024** | wechselnd |
+
+**Der systematische Versatz ist zu 69 % verschwunden.** Das ist der Grund, warum die Tabelle
+bleibt.
+
+### ⚠ Die Tempo-Behauptung ist widerlegt
+
+| | Wanduhr |
+|---|---:|
+| `o8_e5` (Newton) | 403 s |
+| `o8_tab0` (Tabelle aus) | 404 s |
+| `o8_tab1` (Tabelle an) | **402 s** |
+
+**Kein Gewinn** — die Streuung beträgt 4 s. Die in Teil 1 genannten −4,57 % Instruktionen
+schlagen nicht durch, weil der Facettenpfad nur **0,6 % der Zellen** betrifft. Das ist am
+selben Tag zum **zweiten Mal** dieselbe Lehre: beim ELIBB-Test war der Arm mit 2073
+Instruktionen weniger sogar langsamer. **Eine Instruktionszahl ist kein Laufzeitmaß**, und
+alle noch offenen Prozentzahlen in Abschnitt 2 stehen unter diesem Vorbehalt.
+
+---
+
 ## 2. Massnahmenliste
 
 ### Einfach: Schalter oder wenige Zeilen, bitgleich
@@ -168,7 +224,7 @@ Hygiene, keine Kapazität.
 
 | Nr | Massnahme | Gewinn |
 |---|---|---|
-| M1 | **Spalding-Tabelle** (256 float = 1 kB, globaler Puffer) statt 3 Newton-Schritten | −330 Instr. = **−4,57 %** UND **450× genauer** (p99 2,95 % → 0,0066 %) |
+| M1 | ~~Spalding-Tabelle~~ **UMGESETZT, siehe 1b** | Genauigkeit ja, Tempo **nein** |
 | M2 | Geometrie in die **freien `fac_geo`-Slots** (Wandlinkmaske, `nb`, `ywb`) | `fac_nachbar_ab` 791 → 75 (**−90,5 %**), `stream_collide` −1,8 %, **null zusätzliches VRAM** |
 | M3 | Diagnostikzähler hinter ein Emissionsgate, Default an | −340 Instr. = **−5,2 %** Nahkernel |
 | M4 | ~~Volumenkraft nicht emittieren~~ **WIDERLEGT, siehe unten** | – |
