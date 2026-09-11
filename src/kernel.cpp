@@ -955,11 +955,19 @@ uint fac_fid(const global uint* fac_idx, const uxx fbi) {
 // wand-adjazenter SOLID-Zellen liest, also bis zu 2 Zellen weit.
 //
 // Der Trade ist vermessen und strukturell, nicht wegoptimierbar (zwei Anlaeufe brachten zusammen +5 %):
-// jeder Nachbarzugriff braucht einen zusaetzlichen tile_slot-Gather aus einem Buffer, der bei Streuzugriff
-// nicht in L1/L2 passt, und der Registerdruck senkt die Occupancy.
-//     T=8  : -40 % Durchsatz, 1,43 GB gespart      T=16 : -28 % Durchsatz, 0,77 GB gespart
+// jeder Nachbarzugriff braucht einen zusaetzlichen tile_slot-Gather, und der Registerdruck senkt die
+// Occupancy. Der groessere Teil der Strafe ist aber die DDF-Kontiguitaet: beim flachen Dispatch decken
+// 64 Threads bei T=8 acht VERSCHIEDENE Tiles ab, also 8 mal 16 B statt 128 B am Stueck.
+//     ERSPARNIS in v2, gemessen 11.09.2026 am Flag-Export des 4-mm-Laufs:
+//     T=8 : 1287,8 MiB frei      T=16 : 450,1 MiB frei      T=64 und T=128 KOSTEN Speicher
+//     (Aufrundungspolster 3,8 bzw. 6,7 GiB). Obergrenze jeder Halo-2-Kachelung: 2035,4 MiB.
+//     DURCHSATZ: die frueher hier genannten -40 % / -28 % sind V1-Zahlen und in v2 NIE gemessen.
+//     V1s Workgroup=Tile-Dispatch, der sie auf -12 % / -9 % senkte, ist hier NICHT portiert; er
+//     spillt in v2 1152 B, weil sein geteiltes cbj-Array die Rang-1-Remat aufhebt. Einzelheiten in
+//     PERFORMANCE-ANALYSE-2026-09-11.md Teil 3.4 und 3.5.
 // Physikalisch bit-neutral (an der Kugel verifiziert). Default AUS -- es ist ein VRAM-gegen-Tempo-Regler
-// fuer Faelle, die sonst nicht in den Speicher passen, kein genereller Gewinn.
+// fuer Faelle, die sonst nicht in den Speicher passen, kein genereller Gewinn. Das Nahfeld hat KEIN
+// Verlangsamungsbudget: es traegt 95,8 % des Grobschritts, jede Verlangsamung schlaegt sofort durch.
 ulong index_f_impl(const uxx n, const uint i, const global uint* tile_slot) {
 	const uint x = (uint)((ulong)n % (ulong)def_Nx);
 	const uint y = (uint)(((ulong)n / (ulong)def_Nx) % (ulong)def_Ny);
