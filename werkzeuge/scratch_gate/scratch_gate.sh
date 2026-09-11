@@ -5,8 +5,15 @@
 # -> Faktor ~100 Laufzeit (2 statt 240 MLUPs, "0 GB/s"; g13-g15). Dieses Gate baut den
 # AKTUELLEN src/kernel.cpp zur .cl (gen_main.cpp, Defines des Kanal-Referenzfalls),
 # kompiliert offline per ocloc (KEIN GPU-Lauf) fuer iGPU und B70 und schlaegt fehl, sobald
-# stream_collide in IRGENDEINEM Arm private_size>0 ODER spill_size>0 traegt (seit Rang-1-Remat).
+# ein Kernel private_size>0 ODER spill_size>0 traegt (seit Rang-1-Remat).
 # Legitimes Spill-Wachstum erfordert eine BEWUSSTE Lockerung dieses Gates, nie ein stilles.
+#
+# ★ 11.09.2026 — GESAMTDECKUNG. Das Gate prueft ab jetzt JEDEN Kernel, nicht nur
+# stream_collide. Anlass ist ein Befund der zweiten Agentenrunde: fac_nachbar_ab traegt
+# private_size=7296 (= 228 B der c()-Tabelle x 32 Lanes) und ist damit GENAU die
+# Fehlerklasse, gegen die dieses Gate gebaut wurde -- unentdeckt, weil hier bis heute
+# "stream_collide" fest verdrahtet stand. Ein Waechter, der nur an einer Stelle hinsieht,
+# ist kein Waechter.
 #
 # Aufruf: werkzeuge/scratch_gate/scratch_gate.sh    (beliebiges Arbeitsverzeichnis)
 # Exit 0 = sauber, Exit 1 = Scratch ODER Spill zurueck. Referenz 26.08.2026 nachmittags
@@ -16,6 +23,22 @@ set -eu
 HIER="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HIER/../.." && pwd)"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+
+# ── BEKANNTE, AUSDRUECKLICH ERKLAERTE ABWEICHUNGEN ────────────────────────────────────
+# Format: "<kernelname>:<private>:<spill>". Nur exakt diese Werte gelten als bekannt --
+# waechst die Zahl, schlaegt das Gate zu. Ein Eintrag hier ist eine SCHULD, kein Freibrief:
+# er gehoert entfernt, sobald der Befund behoben ist, und er braucht immer eine Begruendung.
+#
+#   fac_nachbar_ab:7296:0  — 11.09.2026, zweite Agentenrunde. Ursache ist NICHT die
+#     18er-Schleife (Unrolling aendert nichts, gemessen), sondern der eine laufzeitindizierte
+#     c(ib)-Zugriff NACH der Schleife (kernel.cpp:4788). Gegenprobe: c(ib) -> 0.0f ergibt
+#     private_size 0 und instCount 791 -> 484 (-39 %). Behebung = c(ib) durch Arithmetik
+#     ersetzen oder den Linkindex vorberechnen; dann diese Zeile loeschen.
+#     Auf der iGPU (0x7d67) faellt derselbe Kernel mit 3648 aus -- dasselbe Muster bei
+#     halber SIMD-Breite. Der Agentenbefund nannte nur die B70; das gesamtdeckende Gate
+#     hat die zweite Haelfte selbst gefunden (11.09.2026, 37 Kernel je Arm geprueft,
+#     ALLE UEBRIGEN 36 sind sauber).
+BEKANNT="fac_nachbar_ab:7296:0 fac_nachbar_ab:3648:0"
 
 g++ -O1 -c "$REPO/src/kernel.cpp" -o "$T/kernel.o"
 g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
@@ -28,24 +51,50 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 "$T/gen" off off "$T/e0p0.cl" >/dev/null
 
 rc=0
+neu_bekannt=""
 for dev in 0x7d67 0xe223; do
   for arm in e1p1 e1p0 e0p1 e0p0; do
-    zeile=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" stream_collide | tail -1)
-    echo "$arm $dev: $zeile"
+    ausgabe=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" ALLE || true)
     # ★ 11.09.2026: BAUFEHLER IST NICHT SCRATCH. Vorher fiel ein gescheiterter Bau in beide
     # Gates, weil die Zeile dann schlicht kein "private_size=0" enthielt -- das Gate meldete
     # also "Scratch zurueck", wo in Wahrheit drei Defines fehlten. Zwei verschiedene Befunde
     # unter einer Meldung sind schlimmer als gar keine Meldung.
-    if echo "$zeile" | grep -q "BUILD FEHLGESCHLAGEN"; then
+    if echo "$ausgabe" | grep -q "BUILD FEHLGESCHLAGEN"; then
       echo ">>> BAUFEHLER (nicht Scratch!) in $arm/$dev -- Defines der Zwillingsliste gegen lbm.cpp pruefen"
       rc=1; continue
     fi
-    if ! echo "$zeile" | grep -q "private_size=0 "; then
-      echo ">>> SCRATCH-GATE VERLETZT: privates Memory in stream_collide ($arm/$dev)"; rc=1
-    fi
-    if ! echo "$zeile" | grep -q "spill_size=0"; then
-      echo ">>> SPILL-GATE VERLETZT: Register-Spill in stream_collide ($arm/$dev) -- Rang-1-Remat-Regression"; rc=1
+    n_kernel=0
+    while IFS= read -r zeile; do
+      case "$zeile" in *": simd="*) ;; *) continue ;; esac
+      n_kernel=$((n_kernel+1))
+      kn=${zeile%%:*}
+      pv=$(echo "$zeile" | grep -oE 'private_size=[0-9]+' | cut -d= -f2)
+      sp=$(echo "$zeile" | grep -oE 'spill_size=[0-9]+'   | cut -d= -f2)
+      if [ "${pv:-0}" = "0" ] && [ "${sp:-0}" = "0" ]; then continue; fi
+      if echo " $BEKANNT " | grep -q " $kn:$pv:$sp "; then
+        echo "    bekannt: $kn private=$pv spill=$sp ($arm/$dev) -- siehe BEKANNT-Liste im Kopf"
+        neu_bekannt="$neu_bekannt $kn"
+        continue
+      fi
+      echo ">>> SCRATCH/SPILL-GATE VERLETZT: $kn private=$pv spill=$sp ($arm/$dev)"
+      rc=1
+    done <<< "$ausgabe"
+    # ★ Ein Gate, das nichts findet, weil es nichts SIEHT, ist der eigentliche Defekt.
+    # Deshalb ist eine leere Kernelliste selbst ein Fehler.
+    if [ "$n_kernel" -lt 5 ]; then
+      echo ">>> GATE BLIND: nur $n_kernel Kernel im .zeinfo von $arm/$dev -- Auswertung pruefen"
+      rc=1
+    else
+      echo "$arm $dev: $n_kernel Kernel geprueft"
     fi
   done
+done
+
+# Eine BEKANNT-Zeile, die nie zutrifft, ist behoben oder falsch -- beides gehoert gemeldet.
+for eintrag in $BEKANNT; do
+  kn=${eintrag%%:*}
+  case " $neu_bekannt " in *" $kn "*) ;; *)
+    echo ">>> BEKANNT-LISTE VERALTET: '$eintrag' trifft nirgends mehr -- Zeile aus dem Kopf entfernen"; rc=1 ;;
+  esac
 done
 exit $rc

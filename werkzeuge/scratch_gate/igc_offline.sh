@@ -8,6 +8,7 @@
 #   device:     0x7d67 = iGPU Arrow Lake-S (ocloc waehlt mtl-u-a0)   [Standard]
 #               0xe223 = Arc Pro B70 / Battlemage G31 (ocloc: bmg-g31)
 #   kernelname: Filter fuer die Auswertung, Standard: stream_collide
+#               ALLE = jeden Kernel des Moduls ausgeben (fuer das gesamtdeckende Gate)
 #
 # Verifiziert 26.08.2026: identische Quelle+Optionen erzeugen im ocloc-Dump denselben
 # Hash (OCL_asm35d6996934529552) und dieselben Zahlen wie der Treiber-Dump des
@@ -53,7 +54,9 @@ import re, sys
 txt = open(sys.argv[1]).read(); want = sys.argv[2]
 for m in re.finditer(r'- name:\s+(\S+)(.*?)(?=\n  - name:|\Z)', txt, re.S):
     name, body = m.group(1), m.group(2)
-    if want not in name or 'simd_size' not in body:   # 2. Eintrag (misc_info) ueberspringen
+    if 'simd_size' not in body:                       # 2. Eintrag (misc_info) ueberspringen
+        continue
+    if want != 'ALLE' and want not in name:           # ALLE = kein Filter (gesamtdeckendes Gate)
         continue
     v = {k: (re.search(rf'\b{k}:\s+(\S+)', body) or [None,'0'])[1]
          for k in ('simd_size','grf_count','private_size','spill_size')}
