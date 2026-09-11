@@ -306,70 +306,60 @@ die 300 MB zu optimistisch war.
 
 ---
 
-## 2. Massnahmenliste
+## 2. Massnahmenliste — Stand nach dem Audittag
 
-### Einfach: Schalter oder wenige Zeilen, bitgleich
+### Umgesetzt und belegt
 
-| Nr | Massnahme | Ort | Gewinn | Stand |
-|---|---|---|---|---|
-| E1 | `c(ib)` durch Arithmetik ersetzen | `kernel.cpp:4788` | `private_size` 7296 → 0, instCount 791 → 484 (**−39 %**) | **Scratch-Falle, dringend** |
-| E2 | Glättungsindex → `std::lower_bound` | `setup.cpp:3005` | **−593,7 MiB** System-RAM | `F` ist scansortiert, Wächter nötig |
-| E3 | `elibb_qmap_dd` nach Gebrauch freigeben | `setup.cpp:6156/6237` | **−174 MB** System-RAM | eine Zeile |
-| E4 | ~~`CFD_FAC_KDIAG=0`~~ **UMGESETZT** | Schalter | **−191 MiB VRAM, −1,26 % Wanduhr, belegt** | drei Facetten-CSVs entfallen |
-| E5 | P-TRT-Zähler auf `t%1000` | `kernel.cpp` | **−18,9 s Wanduhr (0,33 %)** | **einzige A/B-belegte Laufzeitzahl** |
+| Nr | Massnahme | Gewinn (8 mm gepaart gemessen) | Physik |
+|---|---|---|---|
+| E1 | `c(ib)` durch Mitschrift in der Schleife ersetzen | `private_size` 7296 → 0 (B70) und 3648 → 0 (iGPU) | bitgleich |
+| E2 | Glättungsindex → sortierte Liste + Binärsuche | −581 MB System-RAM, +2,5 s Aufbau | bitgleich |
+| E3 | `elibb_qmap_dd` nach Gebrauch freigeben | −174 MB System-RAM | bitgleich |
+| E1–E3 zusammen | | **−11 s Wanduhr, −187 MB RAM** | 28/28 bitgleich |
+| E5 | P-TRT-Zählergatter `t%100` → `t%1000` | **−12 s = −2,9 %** | 28/28 bitgleich |
+| M1 | **Spalding-Tabelle** (512 Stützstellen, `__constant`) | Tempo **±0**; systematischer Reibungsversatz **−69 %** | ändert Zahlen, belegt besser |
+| M3 | **Gemeinsamer Zähltakt** (71 Gatter + 12 Sollformeln) | **−6,5 s = −1,61 %**, Spannen getrennt | 27/28, Abweichler ist die Zählerspur |
+| E4 | `CFD_FAC_KDIAG=0` | **−191 MiB VRAM**, −5 s = −1,26 % | Kräfte und Feld bitgleich |
+| — | **Host-Spiegel freigeben** (5 Puffer, bei 4 mm 292 MB) | **UNBELEGT** — mit VmHWM falsch gemessen | 25/25 bitgleich |
 
-E2 und E3 betreffen System-RAM. **Der ist bei 20,6 von 91 GiB nicht die Bindung** — das ist
-Hygiene, keine Kapazität.
+**Bei 4 mm zusammen gemessen** (`p4_neu` gegen `p4dt_deteps`): **94,5 → 90,4 min (−4,36 %)**,
+VRAM 28 003 → 27 695 MB, Cd_rest und Cz_rest innerhalb der Fehlerbalken.
 
-### Mittel: Umbau, Bitgleichheit zu prüfen
+### Widerlegt
 
-| Nr | Massnahme | Gewinn |
-|---|---|---|
-| M1 | ~~Spalding-Tabelle~~ **UMGESETZT, siehe 1b** | Genauigkeit ja, Tempo **nein** |
-| M2 | Geometrie in die **freien `fac_geo`-Slots** (Wandlinkmaske, `nb`, `ywb`) | `fac_nachbar_ab` 791 → 75 (**−90,5 %**), `stream_collide` −1,8 %, **null zusätzliches VRAM** |
-| M3 | ~~Emissionsgate~~ **UMGESETZT als gemeinsamer Zähltakt, siehe 1c** | **−1,61 % Wanduhr, belegt** |
-| M4 | ~~Volumenkraft nicht emittieren~~ **WIDERLEGT, siehe unten** | – |
-| M5 | `sgs_fdwand` und `fac_nachbar_ab` zu einem Launch verschmelzen | 1463 → 707 Instr., 1–4 % Verkehr |
-| M6 | ABSTAND-Scan in `boden_eq` durch ein Flagbit ersetzen | 1267 → 1170 (**−7,7 %**), 347 M Reads je Grobschritt für 0,50 % Treffer |
-| M7 | `cubic_lift_weights` als 1-D-Tabelle (54 kB) | 962 → 683 (**−29,0 %**) |
-| M8 | 3×3-Tensor mit konstanten Inkrementen, danach einmal projizieren („Variante B") | −199 Instr. = **−2,76 %**, null Speicher |
-| M9 | Sechs von acht Round-Trips bündeln | Obergrenze **3,1 % Wanduhr** |
-
-> **⚠ M4 IST WIDERLEGT (11.09., beim Umsetzen gefunden).** Die Volumenkraft ist im
-> Fahrzeugfall **nicht** tot. `kernel.cpp:2993` speist unter `FACETTEN_KRAFT` das
-> **Wandmodell-Residuum als Volumenkraft** in dieselbe Guo-Kette ein
-> (`fxn += fac_kraft.x`), und `kernel.cpp:3005` addiert unter `FORCE_FIELD` ohne
-> `F_NUR_SOLID` das Kraftfeld dazu. Der Befund aus Teil 1 stützte sich auf die Logzeile
-> „Volume Force 0.00000000" — die meint die **konstante** Kraft `fx/fy/fz`, nicht die lokale
-> `fxn`. Dass die Kette heute still ist, liegt allein daran, dass `CFD_FAC_KRAFT` per Default
-> 0 ist (`lbm.cpp:343`) und `F_NUR_SOLID` per Default an. **Ein Entfernen von `VOLUME_FORCE`
-> würde `CFD_FAC_KRAFT` lautlos wirkungslos machen** — genau die Fehlerklasse, die im
-> Vorgängerfork den Moving-Floor-Fix jahrelang zum No-Op machte.
->
-> Richtig wäre stattdessen eine **Emissionsentscheidung auf dem Host**: `VOLUME_FORCE` nur
-> definieren, wenn der Fall überhaupt eine Kraft tragen kann (konstante Kraft ungleich null
-> ODER `s_fac_kraft>0` ODER `FORCE_FIELD` ohne `F_NUR_SOLID` ODER Temperatur/Partikel). Das
-> ist machbar, aber kein Einzeiler und braucht einen eigenen Wächter. **Bis dahin: nicht
-> anfassen.**
-
-M3 und M4 kombiniert gemessen: Nahkernel 6590 → **6129 (−7,0 %)**, Fernkernel 2219 → 1714
-(−22,8 %). **Die Fernfeld-Ersparnis schlägt nicht auf die Wanduhr durch** — das Fernfeld liegt
-vollständig hinter dem Nahfeld.
-
-**Zu M3 ausdrücklich:** die Zähler sind teuer UND sie sind der Nullbeweis. Vorschlag ist ein
-Emissionsschalter mit Default **an**, nicht Löschen. Ein Produktionslauf ohne Zähler nur, wenn
-zu derselben Konfiguration ein Zählerlauf vorliegt.
-
-### Nicht empfohlen
-
-| Massnahme | Warum nicht |
+| | Warum |
 |---|---|
-| **Sparse Tiles** (Block-Tiling von `fi`) | 1288 MiB bei T=8, kostet aber **8,6 bis 11,5 % Wanduhr** — fast das gesamte Budget. Nur wenn eine Rechnung sonst gar nicht in den Speicher passt. Abschnitt 5. |
-| **Gemischte Kachelgrössen** 8³/16³/32³/64³/128³ | Am fi-Puffer **beweisbar null** Ersparnis. Abschnitt 5. |
-| **Nahkasten beschneiden** | 60,9 MiB je z-Schicht, aber verlustfrei sind **0 MiB** zu holen, und `AUDIT-BEFUNDE.md:5343` führt den Kasten bereits als **zu knapp**. |
-| `rho[n]` nicht jeden Schritt schreiben | 1,82 GB = 4,2 % — aber **nicht bitgleich** und verändert den Druck-Auslass. |
-| Drei 38,2-MiB-Bitmasken zusammenlegen | < 50 MiB für drei getrennte Präfixsummen. |
-| **Andere Schnittstelle** (Vulkan, Level Zero, SYCL) | Die Bindung ist die DRAM-Bandbreite, die keine Schnittstelle ändert. Einziger Angriffspunkt wäre der Host-Takt, und dessen Obergrenze sind dieselben 3,1 % aus M9, erreichbar in OpenCL. |
+| **M4 Volumenkraft nicht emittieren** | Sie ist **nicht** tot: `kernel.cpp:2993` speist das Wandmodell-Residuum als Volumenkraft ein. Entfernen hätte `CFD_FAC_KRAFT` lautlos wirkungslos gemacht. |
+| **Gemischte Kachelgrössen** | Am fi-Puffer **beweisbar null** (`Σ Kinder ≤ T³`). 64³ und 128³ **kosten** 3,8 bzw. 6,7 GiB Polster. |
+| **Tempoversprechen der Spalding-Tabelle** | −4,57 % Instruktionen, null Wanduhr. Der Facettenpfad betrifft 0,6 % der Zellen. |
+| **„1,43 GB bei −12 %"** und **„5 464 MLUPS"** | V1-Zahlen, in v2 nie gemessen. |
+| **A1 „G ist reine Geometrie"** | Die Tangentialbasis kommt aus `calculate_rho_u` und dreht sich jeden Schritt. |
+
+### Offen, mit Begründung die NICHT an Instruktionen hängt
+
+| Nr | Massnahme | Was fehlt |
+|---|---|---|
+| M5 | `sgs_fdwand` und `fac_nachbar_ab` verschmelzen | Kostensonde steckt fest: `CFD_SGS_FDWAND=0` wird abgewiesen, weil SISM ihn verlangt |
+| M6 | ABSTAND-Scan in `boden_eq` durch ein Flagbit | ungemessen; 347 M Reads je Grobschritt für 0,50 % Treffer |
+| M9 | Sechs von acht Round-Trips bündeln | ungemessen; Obergrenze 3,1 % |
+| M2 | Geometrie in die freien `fac_geo`-Slots | **bewusst nicht gebaut**: erst die Kostenzahl von `fac_nachbar_ab` |
+| — | Host-Spiegel: Arbeitssatz statt VmHWM messen, bei 4 mm | die Messung, nicht der Bau |
+
+### Offen, aber nur durch Instruktionszahlen begründet — nicht bauen
+
+M7 (`cubic_lift_weights`-Tabelle) und M8 (3×3-Tensor, „Variante B"). **Zweimal an einem Tag
+ist eine Instruktionszahl folgenlos geblieben**, einmal sogar mit umgekehrtem Vorzeichen.
+
+### Getrennt zu untersuchen
+
+**Block-Tiling.** Der einzige Hebel über 1 GiB VRAM (T=8: netto 1 283,9 MiB) und
+nachweislich bitneutral. Preis am heutigen v2-Stand −40 % Durchsatz; V1s Workgroup=Tile
+senkt ihn auf −12 %, ist aber nicht portiert und **spillt** in v2 bei 1:1-Übernahme
+(1152 B B70, 576 B iGPU). Zwei v2-eigene Fallen: Slot 0 ist ein Papierkorb, und
+`active_tile_id` muss hinter `TS_P` gebunden werden. Details in 3.4 und 3.5 der Rohbefunde.
+
+**Nahkasten beschneiden.** 60,9 MiB je z-Schicht, aber `AUDIT-BEFUNDE.md:5343` führt den
+Kasten bereits als zu knapp. Physikentscheidung, keine Optimierung.
 
 ---
 

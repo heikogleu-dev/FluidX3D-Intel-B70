@@ -41,12 +41,20 @@ needs the total.
 
 | Metric | Value | Context |
 |---|---|---|
-| **Wall clock, 4 mm production** | ~1.5 h for 501 ms physical | the full wall-model chain costs nothing measurable |
+| **Wall clock, 4 mm production** | **90.4 min** for 501 ms physical | was 94.5 min; the 11.09. performance audit bought 4.4 % with forces unchanged inside the error bars |
 | **B70 kernel (8 mm screening rung)** | **+63 %** vs. the pre-optimisation era (939 → 1 534 displayed) | ratio only — see the display-convention note below |
 | **Dual-GPU overlap** | **CONCURRENT 96.1 %** | B70 93.9 % busy @ 2.5 GHz mean, iGPU 91.0 % (fdinfo profiler, 180 s) |
-| **VRAM (4 mm production)** | 27 452 / 32 655 MB, **3 168 MiB measured free** | was 29 318 MB; the September memory work bought back 2.1 GB at 0.11 % throughput cost |
+| **VRAM (4 mm production)** | **27 695 / 32 655 MB**, 4 921 MB free after coupling and shell are bound | was 28 003 MB. The printed peak used to fall 300 MB too early — before `kf_liste` binds — and that is fixed |
 | Single-domain B70 baseline | ≈ 5 464 MLUPS | measured in the **predecessor fork** (V1, `MODIFICATIONS.md:251`, 337.5 M cells, no wall model) |
 | **Near-field kernel, true rate** | **≈ 5 028 MLUPs** | dual-domain v2 today, corrected for the display convention — 8 % below the V1 bare baseline, with the whole wall-model chain on top |
+
+> **Instruction counts are not a runtime measure here — measured twice on 2026-09-11.** An arm
+> with **2073 fewer** instructions in `stream_collide` ran **2.46 % slower**; a Spalding lookup
+> table with **−4.57 %** instructions changed the wall clock by **nothing**. What does show up is
+> **atomics on shared buffers**: thinning the diagnostic counters bought 12 s, a shared counter
+> cadence another 6.5 s, and dropping the class-diagnostics buffer 5 s — each paired-measured on
+> the 8 mm rung. Any optimisation proposal in this repo that rests on an instruction count alone
+> is treated as unproven until a wall clock says otherwise.
 
 > **Display convention — read this before quoting any MLUPs or GB/s number from a log.** In a
 > dual-domain run the progress line divides the **coarse** cell count by the **fine** step time.
