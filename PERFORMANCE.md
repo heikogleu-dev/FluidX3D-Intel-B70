@@ -267,6 +267,45 @@ dann ein Prüflauf, kein Produktionslauf.
 
 ---
 
+## 1e. Die 4-mm-Bestätigung (`p4_neu`, 11.09.2026)
+
+Alles bis hier war am 8-mm-Fahrzeug gemessen. Dieser Lauf prüft, was bei 4 mm zusammen
+ankommt. **Kein A/B** — drei Schalter und neuer Code auf einmal; die Einzelwirkungen sind
+alle bei 8 mm gepaart belegt, jede mit eigenem Arm.
+
+| | Baseline `p4dt_deteps` | `p4_neu` |
+|---|---:|---:|
+| Wanduhr | 94,5 min | **90,4 min (−4,36 %)** |
+| VRAM an vergleichbarer Stelle | 28 003 MB | **27 695 MB (−308 MB)** |
+| `fac_kd` | 190 MB | **nicht alloziert** |
+| System-RAM VmHWM | nicht gemessen | 14 842 MB |
+
+Der Gewinn ist kleiner als die 8 % bei 8 mm. Das ist plausibel: bei 4 mm wiegt der reine
+DDF-Strom schwerer, und an dem ändert keine dieser Maßnahmen etwas.
+
+**Die Kräfte sind unverändert**, obwohl das SGS-Band aus ist und die Spalding-Inversion
+ersetzt wurde:
+
+| | Baseline | `p4_neu` | Δ |
+|---|---:|---:|---:|
+| Cd_rest | 0,5387 ± 0,0122 | 0,5372 ± 0,0118 | −0,0015 |
+| Cz_rest | −1,0306 ± 0,0218 | −1,0224 ± 0,0221 | +0,0082 |
+| cd_reib | 0,0346 ± 0,0006 | 0,0347 ± 0,0005 | **+0,34 %** |
+
+Cd_rest und Cz_rest liegen klar innerhalb der Fehlerbalken. Die Reibung steigt um 0,34 %,
+**in derselben Richtung wie bei 8 mm gemessen** — das ist die Spalding-Tabelle, die den
+systematischen Versatz der drei Newton-Schritte entfernt.
+
+**Der neue ehrliche Spitzenwert steht zum ersten Mal im Log:** 27 734 MB nach gebundener
+Kopplung und Schale, 4 921 MB rechnerisch frei, mit dem ausdrücklichen Hinweis auf
+`kf_liste`, die erst in der Zeitschleife bindet. An derselben Stelle stand vorher eine Zahl,
+die 300 MB zu optimistisch war.
+
+**Das Restrisiko der Wächterarbeit ist erledigt:** der neue Speicherplan bucht 541 MB mehr
+(27 452 → 27 993 MB) und lässt das Gitter trotzdem durch.
+
+---
+
 ## 2. Massnahmenliste
 
 ### Einfach: Schalter oder wenige Zeilen, bitgleich
