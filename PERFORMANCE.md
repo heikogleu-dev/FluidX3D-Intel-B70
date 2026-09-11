@@ -205,6 +205,41 @@ alle noch offenen Prozentzahlen in Abschnitt 2 stehen unter diesem Vorbehalt.
 
 ---
 
+## 1c. Gemeinsamer Zähltakt (M3) — umgesetzt, Gewinn belegt
+
+Die Zähler **abzuschalten** hätte reihenweise Ist=Soll-Abnahmen gebrochen, weil der Host die
+erwartete Zahl aus dem 100er-Raster ausrechnet. Stattdessen laufen Kernel-Gatter **und**
+Sollformeln über **einen** Takt, der an genau einer Stelle steht (`zaehl_takt()` in
+`lbm.cpp`): **71 Gatter** in `kernel.cpp`, **12 Formeln** in `setup.cpp`, darunter alle
+`ceil(n/100)`-Sollwerte der Slots 7/20/21/22/76 und der SGS-Band-Wirkpfad 186.
+
+**Die Begründung stützt sich nicht auf Instruktionszahlen**, sondern auf E5: dort brachte das
+Ausdünnen **eines** Blocks 12 s. Zähler sind Atomics auf einen gemeinsamen Puffer und
+serialisieren.
+
+| Takt | Einzelläufe | Mittel |
+|---|---|---:|
+| 100 (Default) | 402, 406, 401 s | 403,0 s |
+| **1000** | 398, 395 s | **396,5 s** |
+
+**−6,5 s = −1,61 %, und die beiden Spannen überlappen nicht** (schlechtester 1000er-Lauf
+395…398 gegen besten 100er-Lauf 401). Das ist der Grund, warum die Maßnahme bleibt.
+
+**Physik unverändert:** Takt 100 gegen den Vorstand 28 von 28 Dateien bitgleich (die
+Umstellung ist also inert), Takt 1000 gegen Takt 100 **27 von 28** — die eine Abweichung ist
+`slots_verlauf.csv`, die Zählerspur selbst. Keine Abnahme schlug Falschalarm, 0 Fehler.
+
+**Der Code-Default bleibt bei 100.** Bei 8 mm bekäme das Fernfeld mit Takt 1000 nur **eine**
+Stichprobe; bei kürzeren Läufen keine, und dann meldet ein No-Op-Wächter zu Recht nichts oder
+zu Unrecht einen Defekt. Gesetzt wird der Takt deshalb in der **Standardzeile**, wo die
+Schrittzahl bekannt ist: bei 4 mm sind es 50 Stichproben im Nahfeld und 12 im Fernfeld.
+
+**Werkzeugbefund:** der Gate-Bau brach, weil die Zwillingsliste in `gen_main.cpp` den neuen
+Define nicht kannte. Das Gate meldete das als **Baufehler und nicht als Scratch** — diese
+Unterscheidung wurde heute früh eingebaut und hat sich damit zum ersten Mal bewährt.
+
+---
+
 ## 2. Massnahmenliste
 
 ### Einfach: Schalter oder wenige Zeilen, bitgleich
@@ -226,7 +261,7 @@ Hygiene, keine Kapazität.
 |---|---|---|
 | M1 | ~~Spalding-Tabelle~~ **UMGESETZT, siehe 1b** | Genauigkeit ja, Tempo **nein** |
 | M2 | Geometrie in die **freien `fac_geo`-Slots** (Wandlinkmaske, `nb`, `ywb`) | `fac_nachbar_ab` 791 → 75 (**−90,5 %**), `stream_collide` −1,8 %, **null zusätzliches VRAM** |
-| M3 | Diagnostikzähler hinter ein Emissionsgate, Default an | −340 Instr. = **−5,2 %** Nahkernel |
+| M3 | ~~Emissionsgate~~ **UMGESETZT als gemeinsamer Zähltakt, siehe 1c** | **−1,61 % Wanduhr, belegt** |
 | M4 | ~~Volumenkraft nicht emittieren~~ **WIDERLEGT, siehe unten** | – |
 | M5 | `sgs_fdwand` und `fac_nachbar_ab` zu einem Launch verschmelzen | 1463 → 707 Instr., 1–4 % Verkehr |
 | M6 | ABSTAND-Scan in `boden_eq` durch ein Flagbit ersetzen | 1267 → 1170 (**−7,7 %**), 347 M Reads je Grobschritt für 0,50 % Treffer |
