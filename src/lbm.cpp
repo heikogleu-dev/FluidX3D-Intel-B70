@@ -340,7 +340,48 @@ float LBM_Domain::s_fac_utkorr = 1.0f; // 3/2-Abtastpunkt-Messarm
 float LBM_Domain::s_fac_qkappe = 1.0f; // Ex-Stabilitaetskappe des q>0,5-Zweigs: mit der MLS-Blende (Baustein 1, 26.08.) obsolet -- Default 1,0 = keine Kappung; Env-Hebel CFD_FAC_QKAPPE bleibt fuer A/Bs
 uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 2026-08-25)  // q-Boden (P1-Entscheid): darunter HWBB, mit Zaehler
 uint LBM_Domain::s_fac_rdiag = 0u; // ★ 07.09. Rueckfall-Diagnose (CFD_FAC_RDIAG), reine Zaehler
-uint LBM_Domain::s_fac_kraft = 0u; // ★ 30.08. Zellkraft statt Slip (CFD_FAC_KRAFT)
+uint LBM_Domain::s_fac_kraft = 0u;
+
+// ★ 11.09.2026 SPALDING-TABELLE (CFD_SPALDING_TAB, Default AUS).
+// wf_spalding_uplus loest X*S(X)=Y mit DREI Newton-Schritten ohne Konvergenzabfrage. Der
+// Kopfkommentar in kernel.cpp sagt selbst: tau_w-Fehler -0,44 % bei Y~2400, -4,4 % bei Y=1e4,
+// "bei hohem Re_tau Iterationszahl erhoehen" -- bei 4 mm ist der Fall eingetreten und die Zahl
+// stand weiter auf drei. Eigene Messung (200k Punkte log-gleich ueber den gemessenen Bereich
+// Y = 1,52 .. 2,19e4, gegen Bisektion in double):
+//     Newton it=3 (heute) : max 4,364 %   p99 4,235 %
+//     Newton it=8         : max 0,0001 %
+//     Tabelle 512 / 2 kB  : max 0,0035 %  p99 0,0033 %
+// Die Tabelle ist also rund 1250-mal genauer als der heutige Stand UND billiger (kein exp/log
+// je Iteration). Gestuetzt wird sie auf log(Y) gleichverteilt, abgelegt wird log(u+), gelesen
+// linear interpoliert -- beide Achsen logarithmisch, dort ist die Kurve fast gerade.
+//
+// BAUFORM: __constant im Dateibereich, NICHT als privates Array und NICHT als Kernelparameter.
+//  - privates Array mit Laufzeitindex ist die Scratch-Falle (Faktor ~100, siehe scratch_gate).
+//  - ein Kernelparameter waere ein Signatur-Splice, und den hat dieser Fork zweimal bezahlt
+//    (R()-Klammerfalle). Gegenprobe vor dem Bau: eine Minimalkernel-Probe mit genau dieser
+//    Bauform ergab auf der B70 private_size=0, spill_size=0.
+// Die Emission laeuft ueber device_defines und damit NICHT durch get_opencl_c_code(), die
+// Leerzeichen durch Zeilenumbrueche ersetzt -- die Werteliste ist davon unberuehrt.
+static double spald_S(const double X) { const double kap=0.41, emkB=0.104874; const double kX=kap*X, e=exp(kX);
+	return X + emkB*(e-1.0-kX-0.5*kX*kX-kX*kX*kX/6.0); }
+static string spalding_tabelle() {
+	if(env_u("CFD_SPALDING_TAB", 0u)==0u) return (string)"";
+	const uint N = 512u; const double Ylo = 1e-1, Yhi = 1e6;
+	const double l0 = log(Ylo), dl = (log(Yhi)-l0)/(double)(N-1u);
+	string r = "\n	#define SPALDING_TAB";
+	r += "\n	#define def_spald_l0 "+to_string((float)l0, 8u)+"f";
+	r += "\n	#define def_spald_invdl "+to_string((float)(1.0/dl), 8u)+"f";
+	r += "\n	#define def_spald_max "+to_string((float)(N-2u), 1u)+"f";
+	r += "\n__constant float def_spald_tab["+to_string(N)+"]={";
+	for(uint i=0u; i<N; i++) { // Bisektion in double, dieselbe Klemme X<=100 wie im Kernel
+		const double Y = exp(l0+(double)i*dl); double lo=1e-12, hi=100.0;
+		for(uint k=0u; k<200u; k++) { const double m=0.5*(lo+hi); if(m*spald_S(m)<Y) lo=m; else hi=m; }
+		r += (i>0u ? "," : "")+to_string((float)log(0.5*(lo+hi)), 9u)+"f";
+	}
+	r += "};";
+	return r;
+}
+ // ★ 30.08. Zellkraft statt Slip (CFD_FAC_KRAFT)
 bool LBM_Domain::s_fac_quergate = false; // ★ 2026-08-25 CFD_FAC_QUERGATE: BB belassen, wenn der Querrest die Wandschubspannung uebersteigt
 bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefund 4-A/4-B: das ist eine
 // MODELLAENDERUNG, kein Numerikfix. LSQ gewichtet t1 (Stroemungsrichtung, Ziel = Spalding-tau_w, die
@@ -1591,6 +1632,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_isogate "+to_string(s_fac_isogate,4u)+"f"
 	"\n	#define def_fac_deteps "+to_string(s_fac_deteps,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
+	+((s_wandfunktion||s_facetten) ? spalding_tabelle() : (string)"") // ★ Spalding-Tabelle, nur wenn CFD_SPALDING_TAB=1
 	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
 	+((s_facetten&&s_fac_imem&&s_fac_ema>0.0f) ? (string)"\n	#define FACETTEN_EMA"
 	"\n	#define def_fac_ema "+to_string(s_fac_ema,6u)+"f" : (string)"") // EMA nur wenn gesetzt -- ungesetzt bitgleich zum 3x3-ohne-EMA

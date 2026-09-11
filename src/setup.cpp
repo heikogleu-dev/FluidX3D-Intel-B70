@@ -4207,6 +4207,13 @@ void pruefe_ptrt(LBM_Domain* d, const char* ort) {
 	const ulong q202=(ulong)d->rho_clamp_hits[202], q203=(ulong)d->rho_clamp_hits[203];
 	const ulong satt=0xF0000000ull;
 	const string wo = "["+string(ort)+"] ";
+	// ★ 11.09.2026 (Pruefbefund B zu E5): das Zaehlgatter steht auf t%1000, die erste
+	// Stichprobe faellt also bei Schritt 1000. Ein Lauf mit WENIGER Schritten hat
+	// konstruktionsbedingt q199=q202=0 -- der No-Op-Vorwurf waere dann FALSCH und
+	// print_error beendet den Lauf (utilities.hpp: exit(1)). Bindend ist die GROBE Domaene:
+	// bei ratio=4 laeuft sie n/4 Schritte. Muster uebernommen von pruefe_sism_wirkpfad
+	// (setup.cpp:563), das sein t%100-Fenster genauso absichert.
+	if(d->get_t()<1000ull) { print_info(wo+"P-TRT: erst "+to_string(d->get_t())+" Schritte gerechnet, die erste Zaehlstichprobe faellt bei 1000 -- Wirkpfadpruefung uebersprungen (kein No-Op-Vorwurf ohne Stichprobe)."); return; }
 	if(q199==0ull&&q202==0ull) { print_error(wo+"P-TRT war angefordert (CFD_PTRT="+string(getenv("CFD_PTRT"))+"), aber die Slots 199 UND 202 sind null -- stiller No-Op. Wurde PTRT ueberhaupt emittiert? CFD_DUMP_CL=1 pruefen."); return; }
 	// ★★ DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200 (Kernel-Pruefer 10.09. nachts).
 	// 200 und 201 feuern in JEDER Zelle, weil schon das FP16S-Quantisierungsrauschen ein
@@ -4222,7 +4229,15 @@ void pruefe_ptrt(LBM_Domain* d, const char* ort) {
 		+"Vergleichswert Kanal N=20 kipp26 bei omega_g = 1,90: 15,3 %.");
 	// Die groben Zaehler bleiben als Zweitbeleg, aber MIT Saettigungsvorbehalt.
 	if(q199>=satt||q200>=satt||q201>=satt) print_info(wo+"P-TRT: die groben Zaehler 199/200/201 sind gesaettigt ("+to_string(q199)+"/"+to_string(q200)+"/"+to_string(q201)+") -- erwartet bei dieser Zellzahl, der scharfe Test laeuft ueber 202/203.");
-	else if(q201!=q200) print_warning(wo+"P-TRT: Slot 201 ("+to_string(q201)+") weicht von Slot 200 ("+to_string(q200)+") ab, obwohl unterhalb der Saettigung -- erwartet ist Gleichheit, solange omega_g != w.");
+	// ★ 11.09.2026 (Pruefbefund A zu E5): das Soll "201 == 200" war FALSCH formuliert und
+	// fiel nur deshalb nicht auf, weil die Zaehler bis dahin saettigten und der Zweig nie
+	// lebendig wurde. Richtig ist 201 <= 200: wo w <= omega_g, setzt die fmax-Klemme
+	// (kernel.cpp) pt_k = 0, dann meldet 200 Geistanteil, 201 aber keinen Abzug. Die
+	// DIFFERENZ ist also eine echte Groesse -- der Anteil der Zellen mit w <= omega_g --
+	// und kein Fehler. Im Fernfeld warnte schon die Baseline so; das falsche Soll ist
+	// aelter als E5, E5 hat es nur ans Licht gebracht.
+	else if(q201>q200) print_warning(wo+"P-TRT: Slot 201 ("+to_string(q201)+") ist GROESSER als Slot 200 ("+to_string(q200)+") -- das ist unmoeglich, denn ein Abzug ohne Geistanteil gibt es nicht. Zaehler oder Gatter stimmen nicht ueberein.");
+	else if(q201<q200) print_info(wo+"P-TRT: Slot 201 ("+to_string(q201)+") liegt um "+to_string(q200-q201)+" unter Slot 200 ("+to_string(q200)+") = "+to_string((float)(100.0*(double)(q200-q201)/(double)max(1ull,q200)),4u)+" % der Stichproben. Das sind die Zellen mit w <= omega_g, an denen die fmax-Klemme pt_k auf 0 setzt -- erwartet, kein Befund.");
 }
 
 void messe_yplus(LBM& L, const uint Nx, const uint Ny, const uint Nz, const float nu_lat, const float dx, const float dt, const float si_rho, const string& out_dir, const char* wo) {

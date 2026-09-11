@@ -1670,6 +1670,18 @@ float wf_spalding_uplus(const float Y) {
 	// systematisch 16-38 % zu klein in ALLEN Wandmodell-Pfaden (WFB, Paararm, iMEM, PEMA) seit dem
 	// WFB-Bau; erklaert einen Grossteil des -68-%-Kanalbefunds. Die dokumentierte "1e-13"-Genauigkeit
 	// war Bisektion DERSELBEN Gleichung mit DERSELBEN Konstante -- selbstkonsistent, blind dafuer.
+)+"#ifdef SPALDING_TAB"+R(
+	// ★ 11.09.2026: Tabellennachschlag statt drei Newton-Schritten (CFD_SPALDING_TAB=1).
+	// Stuetzstellen log-gleich in Y, abgelegt ist log(u+), linear interpoliert. Beide Achsen
+	// logarithmisch, dort ist die Kurve fast gerade -- gemessen max 0,0035 % tau_w-Fehler
+	// gegen 4,364 % bei it=3. Die Tabelle ist in __constant abgelegt, nicht privat: ein
+	// laufzeitindiziertes privates Array waere die Scratch-Falle.
+	float tl = (log(fmax(Y, 1e-12f))-def_spald_l0)*def_spald_invdl;
+	tl = clamp(tl, 0.0f, def_spald_max);
+	const uint i0 = (uint)tl;
+	const float fr = tl-(float)i0;
+	return fmin(100.0f, exp(def_spald_tab[i0]+fr*(def_spald_tab[i0+1u]-def_spald_tab[i0])));
+)+"#else"+R(
 	const float kap=0.41f, emkB=0.104874f; // exp(-kappa*B) mit B=5,5 = 0.1048735
 	float x = log(fmin(100.0f, sqrt(fmax(Y, 1e-12f))));
 	for(uint it=0u; it<def_wf_spalding_it; it++) { // Iterationszahl als Define (Stufe-2-Auflage 8; Default 3)
@@ -1682,6 +1694,7 @@ float wf_spalding_uplus(const float Y) {
 		x -= g/gp;
 	}
 	return fmin(100.0f, exp(x));
+)+"#endif"+R( // SPALDING_TAB
 } // wf_spalding_uplus()
 )+"#endif"+R( // WANDFUNKTION||FACETTEN
 )+"#ifdef WANDFUNKTION"+R(
