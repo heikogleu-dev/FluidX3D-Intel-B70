@@ -767,6 +767,25 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	}
 	band_N=(ulong)liste.size();
 	if(band_N==0ull) { print_error("alloc_sgs_band: Bandliste leer, obwohl CFD_SGS_BAND >= 2 -- stiller No-Op."); band_on=false; return; }
+	// ★ 11.09.2026 SPEICHERWAECHTER (VRAM-Audit, Befund G3). Diese Funktion pruefte den freien
+	// Speicher GAR NICHT, waehrend die unmittelbar benachbarte alloc_facetten_domain es tut.
+	// Die Bandpuffer fielen damit ungeprueft NACH dem Facettenwaechter -- bei 4 mm sind das
+	// 118,8 MB, die in keinem Waechter und in keinem Reserveposten standen. Wortgleich zum
+	// Vorbild aufgebaut, damit beide Meldungen gleich zu lesen sind.
+	{	const ulong mb_band = (8ull*FNB + 8ull*band_N + (sism_on ? 24ull*band_N : 4ull)) / 1048576ull;
+		const ulong belegt = (ulong)device.info.memory_used, kapazitaet = (ulong)device.info.memory;
+		const ulong frei_gemessen = vram_frei_gemessen();
+		const ulong frei = frei_gemessen>0ull ? frei_gemessen : (kapazitaet>belegt ? kapazitaet-belegt : 0ull);
+		const ulong mindest = (ulong)env_u("CFD_VRAM_MIN_FREI_MB", 1024u);
+		print_info("SGS-BAND: "+to_string(band_N)+" Bandzellen, Puffer "+to_string(mb_band)+" MB | belegt "
+			+to_string(belegt)+" MB von "+to_string(kapazitaet)+" MB"
+			+(frei_gemessen>0ull ? string(", GEMESSEN frei "+to_string(frei_gemessen)+" MB")
+			                     : string(", gemessener Frei-Wert NICHT lesbar")));
+		if(!device.info.uses_ram && mb_band+mindest > frei)
+			print_error("SGS-Bandpuffer passen nicht: "+to_string(mb_band)+" MB noetig, "+to_string(frei)
+				+" MB frei, Mindestluft "+to_string(mindest)+" MB (CFD_VRAM_MIN_FREI_MB). "
+				+to_string(band_N)+" Bandzellen. Lagenzahl senken (CFD_SGS_BAND) oder die Mindestluft bewusst herabsetzen.");
+	}
 	// Maske+Praefixsumme wie fac_idx: der Kernel rechnet aus fbi den Listenindex, ohne ein Feld je Zelle.
 	band_idx=Memory<uint>(device,2ull*FNB);
 	for(ulong i=0ull; i<2ull*FNB; i++) band_idx[i]=0u;
@@ -2217,6 +2236,38 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 	else bytes_bekannt += 12ull*F_N;
 #endif // FORCE_FIELD
 	if(LBM_Domain::s_facetten) bytes_bekannt += (LBM_Domain::s_fac_idx_voll>0u ? 4ull*(ulong)F_N : 8ull*(((ulong)F_N+31ull)/32ull)); // fac_idx als Bitmaske+Praefixsumme (03.09.) -- die Pruefung kannte den Posten frueher gar nicht
+	// ★ 11.09.2026 (VRAM-Audit, Befund G2): bis hier kannte die Bilanz von der Facettenkette
+	// AUSSCHLIESSLICH fac_idx -- die eigentlichen Puffer (bei 4 mm 581,3 MB) und das SGS-Band
+	// (118,8 MB) standen in KEINEM Term und in KEINEM Reserveposten. Netto blieben rund
+	// 596 MB ungedeckt. Dass die Groessenordnung der Bilanz trotzdem stimmte, lag allein am
+	// grosszuegigen Desktop-Posten -- also am Zufall, nicht an der Rechnung.
+	//
+	// Die Facettenzahl steht hier noch nicht fest (sie entsteht erst bei der Voxelisierung),
+	// also wird sie geschaetzt -- wie schon beim F_LISTE-Term darueber und mit derselben
+	// Ehrlichkeit: gemessen sind 3.129.185 Facetten auf 160.106.544 F-BBox-Zellen am
+	// 4-mm-Fahrzeug = 1,954 % (logs/p4dt_deteps.log). Angesetzt werden 3 %, also gut das
+	// Anderthalbfache. KEIN Faktor 40 wie frueher beim Kraftfeld -- ein zu grosser Aufschlag
+	// lehnt Gitter ab, die passen, und genau diese Klage steht in basis/fahrzeug_dd.basis.
+	// Die Bytes je Facette sind AUSGEZAEHLT, nicht geschaetzt, und folgen den Schaltern:
+	//   fac_geo 32 + fac_tau 24 + fac_tau_n 4 = 60 B unbedingt
+	//   + fac_q 18 (ELIBB) + gd_zellen 4 und fac_wfd 4 (FDWAND) + fac_nb 8 (NACHBAR)
+	//   + fac_sb 24 (SISM) + fac_kd 64 (KDIAG)
+	// Der HARTE Schutz bleibt der Waechter in alloc_facetten_domain und der seit heute
+	// ergaenzte in alloc_sgs_band -- beide pruefen gegen den GEMESSENEN Frei-Wert.
+	if(LBM_Domain::s_facetten) {
+		ulong b_fac = 60ull;
+		if(LBM_Domain::s_fac_elibb>0u)  b_fac += 18ull;
+		if(LBM_Domain::s_sgs_fdwand>0u) b_fac += 8ull;
+		if(LBM_Domain::s_fac_nachbar>0u)b_fac += 8ull;
+		if(LBM_Domain::s_sgs_sism>0u)   b_fac += 24ull;
+		if(LBM_Domain::s_fac_kdiag>0u)  b_fac += 64ull;
+		const ulong fac_est = (ulong)(0.03*(double)F_N);
+		bytes_bekannt += fac_est*b_fac;
+		if(LBM_Domain::s_sgs_band>=2u) { // Bandzellen je Lage ~ Facettenzahl (gemessen 0,84x, angesetzt 1,0x)
+			const ulong band_est = fac_est*(ulong)(LBM_Domain::s_sgs_band-1u);
+			bytes_bekannt += 8ull*(((ulong)F_N+31ull)/32ull) + band_est*(LBM_Domain::s_sgs_sism>0u ? 32ull : 8ull);
+		}
+	}
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
 	// D1: RESERVE. ★ Pruefagent A-1: die Pruefung sieht `device_info.memory`, also den
 	// GESAMTspeicher -- `memory_used` wird hier nicht abgezogen (und Device_Info ist eine Kopie,

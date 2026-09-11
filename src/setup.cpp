@@ -7074,16 +7074,24 @@ static void main_setup_fahrzeug_dd() {
 	// ---------------------------------------------------------------- Initialisieren und Kopplung anlegen
 	lbm_f.run(0u); // nur initialisieren
 	lbm_c.run(0u);
-	// ★ SPEICHER-SCHLUSSBILANZ (Heiko 29.08.: "was wir wirklich nutzen"). Die Zeile
+	// ★ SPEICHER-ZWISCHENSTAND (Heiko 29.08.: "was wir wirklich nutzen"). Die Zeile
 	// "Memory Usage" der Info-Box (info.cpp:73) liest memory_used ZU FRUEH -- Kopplungspuffer,
-	// N2F-Schale, kf_liste und slice_flags entstehen erst danach. Hier ist der Aufbau
-	// vollstaendig, also steht hier der SPITZENWERT. Dazu der gemessene freie Speicher aus dem
-	// DRM-Debugfs, der als einziger den Desktop-Anteil mitsieht.
+	// N2F-Schale, kf_liste und slice_flags entstehen erst danach.
+	// ★ 11.09.2026 BERICHTIGT (VRAM-Audit, Befund G1): hier stand "Hier ist der Aufbau
+	// vollstaendig, also steht hier der SPITZENWERT" -- und drei Zeilen weiter unten legt
+	// alloc_coupling_planes an, danach alloc_schale, und kf_liste bindet ueberhaupt erst in der
+	// ZEITSCHLEIFE beim ersten Kraefte-Sample. Bei 4 mm fehlten dem gedruckten "Spitzenwert"
+	// damit 300,6 MB, darunter kf_liste mit 237,3 MB. Der Kommentar zaehlte die Spaetpuffer
+	// sogar selbst auf und behauptete zwei Zeilen spaeter das Gegenteil. Gefaehrlich war das,
+	// weil der wahre Spitzenwert NACH jedem Waechter faellt: ein Lauf kann den ganzen Aufbau
+	// ueberleben und 260 MB spaeter sterben. Die ehrliche Bilanz steht jetzt unten, nach der
+	// Schale. Dazu der gemessene freie Speicher aus dem DRM-Debugfs, der als einziger den
+	// Desktop-Anteil mitsieht.
 	{	const ulong belegt_f = (ulong)lbm_f.lbm_domain[0]->get_device().info.memory_used;
 		const ulong kap_f    = (ulong)lbm_f.lbm_domain[0]->get_device().info.memory;
 		const ulong belegt_c = (ulong)lbm_c.lbm_domain[0]->get_device().info.memory_used;
 		const ulong frei_g   = vram_frei_gemessen();
-		print_info("SPEICHER-SCHLUSSBILANZ (Aufbau vollstaendig, das ist der Spitzenwert):");
+		print_info("SPEICHER-ZWISCHENSTAND (VOR Kopplungsebenen, Schale und kf_liste -- NICHT der Spitzenwert):");
 		print_info("   Nahfeld  belegt "+to_string(belegt_f)+" MB von "+to_string(kap_f)+" MB rekonstruiert"
 			+"  ->  rechnerisch frei "+to_string((ulong)(kap_f>belegt_f?kap_f-belegt_f:0ull))+" MB");
 		print_info("   Fernfeld belegt "+to_string(belegt_c)+" MB (System-RAM, kein VRAM-Deckel)");
@@ -7159,6 +7167,23 @@ static void main_setup_fahrzeug_dd() {
 		lbm_c.alloc_schale(n2f_liste_c, n2f_gewicht, 1u, n2f_modus);      // Schalenzellen; ratio=1 -- hier laeuft nur der Waechter-Extract (mittel=0) und der Blend
 		lbm_f.schale_extract_u(n2f_unear, n2f_mittel);
 		lbm_c.schale_upload_unear(n2f_unear);
+	}
+	// ★ 11.09.2026 (VRAM-Audit, Befund G1): DIE EHRLICHE BILANZ. Hier sind Kopplungsebenen und
+	// Schale gebunden; offen bleibt allein kf_liste, die erst beim ersten Kraefte-Sample
+	// entsteht -- ihre Groesse ist aber schon bekannt und wird benannt, statt sie zu
+	// verschweigen. Damit ist der Spitzenwert das erste Mal vollstaendig ausgewiesen.
+	{	const ulong belegt_f = (ulong)lbm_f.lbm_domain[0]->get_device().info.memory_used;
+		const ulong kap_f    = (ulong)lbm_f.lbm_domain[0]->get_device().info.memory;
+		const ulong frei_g   = vram_frei_gemessen();
+		const ulong frei_r   = kap_f>belegt_f ? kap_f-belegt_f : 0ull;
+		print_info("SPEICHER-SPITZENWERT (Kopplung und Schale gebunden): Nahfeld belegt "+to_string(belegt_f)
+			+" MB von "+to_string(kap_f)+" MB, rechnerisch frei "+to_string(frei_r)+" MB"
+			+(frei_g>0ull ? string("; GEMESSEN frei "+to_string(frei_g)+" MB (enthaelt den Desktop)") : string("")));
+		print_info("   NOCH OFFEN: kf_liste bindet erst in der Zeitschleife beim ersten Kraefte-Sample."
+			" Der wahre Spitzenwert faellt also NACH jedem Speicherwaechter -- ein Lauf kann den"
+			" Aufbau ueberleben und danach am Speicher sterben. Wer knapp faehrt, rechnet sie dazu.");
+	}
+	{
 		swcsv.open(out_dir+"schale_waechter.csv"); swcsv.precision(8);
 		// ★ CSV-SCHEMA-ERWEITERUNG (Gradient-Blend, hiermit ANGESAGT): n_gueltig/rms_lat/max_lat/
 		// rms_rel_uinf beziehen sich jetzt auf die AEUSSERSTE Lage (n2f_lage == N-1; im Kontrollarm
