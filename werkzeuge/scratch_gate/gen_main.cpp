@@ -9,7 +9,7 @@ using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
 
-static string device_defines(const bool elibb) {
+static string device_defines(const bool elibb, const bool ptrt) {
 	string s =
 	"\n#define cl_workgroup_size 64u"
 	"\n#ifdef cl_khr_fp64"
@@ -76,6 +76,11 @@ static string device_defines(const bool elibb) {
 	"\n#define FACETTEN_ALPHA"
 	"\n#define FACETTEN_ALPHA2";
 	if(elibb) s += "\n#define FACETTEN_ELIBB";
+	// ★ P-TRT-ARM 11.09.2026. Ohne ihn prueft das Gate den Produktionsstand NICHT: der
+	// #ifdef PTRT-Block in kernel.cpp bleibt inert, solange PTRT nicht definiert ist.
+	// omega_g = 1,90 ist der gemessene Produktionswert (konvergierte von-Neumann-Kurve).
+	if(ptrt) s += "\n#define PTRT"
+	                "\n#define def_omega_g 1.90000000f";
 	s +=
 	"\n#define TYPE_MS 0x03"
 	"\n#define TYPE_BO 0x03"
@@ -103,17 +108,31 @@ static string device_defines(const bool elibb) {
 	"\n#define def_FBNZ 22u"
 	"\n#define def_FBN 40920ul"
 	"\n#define TS_P"
+	// ★ NACHGEZOGEN 11.09.2026: diese drei fehlten und liessen den BAU scheitern -- das Gate war
+	// damit seit dem 09./10.09. funktionslos. Es meldete den Baufehler ausserdem als
+	// "SCRATCH-GATE VERLETZT", also als etwas voellig anderes. Beides behoben.
+	//   def_fac_isogate / def_fac_deteps: lbm.cpp:1591-1592, unbedingt emittiert, Default 0.
+	//   F_STRIDE: lbm.cpp:1718-1719. Hier die F_LISTE-Fassung, weil die Produktion seit dem
+	//   09.09. mit CFD_F_LISTE=1 faehrt -- sie traegt einen zusaetzlichen Speicherlesezugriff
+	//   und ist damit die schaerfere Variante fuer ein Register-Gate.
+	"\n#define def_fac_isogate 0.0000f"
+	"\n#define def_fac_deteps 0.0000f"
+	"\n#define F_STRIDE ((ulong)f_maske[2ul*((def_FBN+31ul)/32ul)])"
 	"\n#define TS_A";
 	return s;
 }
 
 int main(int argc, char** argv) {
-	const bool elibb = argc>1 && string(argv[1])=="on";
-	const string out = argc>2 ? argv[2] : "kernel_dump.cl";
-	const string code = device_defines(elibb) + get_opencl_c_code();
+	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <ausgabe.cl>
+	if(argc<4) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <ausgabe.cl>\n"; return 2; }
+	const bool elibb = string(argv[1])=="on";
+	const bool ptrt  = string(argv[2])=="on";
+	const string out = argv[3];
+	const string code = device_defines(elibb, ptrt) + get_opencl_c_code();
 	std::ofstream f(out);
 	f << code;
 	f.close();
-	std::cout << "geschrieben: " << out << " (" << code.size() << " Bytes, ELIBB=" << (elibb?"an":"aus") << ")\n";
+	std::cout << "geschrieben: " << out << " (" << code.size() << " Bytes, ELIBB="
+	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ")\n";
 	return 0;
 }
