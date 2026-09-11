@@ -729,3 +729,338 @@ schnell (Pi-Tensor aus fneq je Schritt); konstant ist daran nur der fid-Lookup.
 - **exp/log-Latenz.** `instCount` zählt eine transzendente Instruktion wie eine Addition —
   der Laufzeitgewinn der Spalding-Tabelle ist eher **größer** als 4,6 %.
 - Ob der 1-kB-Tabellenpuffer im Konstantcache landet.
+
+## 3.4 Sparse Tiles — Portierung, Wanduhr-Rechnung, Verdikt
+
+Auftrag von Heiko (11.09.): lässt sich Block-Tiling doch nutzen, ohne nennenswerte
+Einbuße — durch andere Einbindung, andere Codierung, vielleicht mehrere Kachelgrößen
+gleichzeitig?
+
+### Die entscheidende Zahl: das Nahfeld hat KEIN Verlangsamungsbudget
+
+**Das ist eine Korrektur an meiner eigenen Vorgabe.** Ich hatte den Agenten mitgegeben,
+eine Verlangsamung des Nahfelds um bis zu 12 % koste kaum Wanduhr. Das vertauscht
+kritischen und unkritischen Pfad. Selbst nachgerechnet und am Lauflog belegt
+(`[PHASEN]`-Zeile in `logs/p4dt_deteps.log`: Kopplung 0,9 % | Nahfeld 4 Schritte 95,8 % |
+Fernfeld synchronisieren und entnehmen 2,3 % | Kräfte 0,9 %):
+
+| Posten | Wert |
+|---|---:|
+| Grobschritt-Zyklus (Wanduhr) | 434,6 ms |
+| davon Nahfeld (95,8 %) | **416,35 ms** |
+| Fenster fürs Fernfeld (0,9 % + 95,8 %) | 420,26 ms |
+| Fernschritt gemessen | 369 ms |
+| Schlupf | 51,26 ms |
+
+**Der Schlupf gehört dem Fernfeld, nicht dem Nahfeld.** Das Fernfeld läuft asynchron
+daneben und dürfte 13,9 % langsamer werden, ohne einen Millimeter Wanduhr zu kosten. Der
+Taktgeber ist das Nahfeld:
+
+- Verlangsamung um y: `Wanduhr = 434,6 + 416,35·y` — **ab dem ersten Prozent, linear,
+  ohne Freibetrag.**
+- Beschleunigung um x: `Wanduhr = 434,6 − 416,35·x`, gültig nur bis **x = 12,31 %**.
+  Maximal erreichbarer Gewinn **51,3 ms = 11,79 % Wanduhr**, danach bindet die iGPU.
+
+| Nahfeld langsamer | Wanduhr | Aufschlag |
+|---:|---:|---:|
+| 3 % | 447,1 ms | +2,87 % |
+| 9 % (V1: WG, T=16) | 472,1 ms | **+8,62 %** |
+| 12 % (V1: WG, T=8) | 484,6 ms | **+11,50 %** |
+| 40 % (v2 heute, naiv T=8) | 601,1 ms | **+38,32 %** |
+
+**Tiling kauft VRAM gegen Wanduhr, und zwar sofort.**
+
+### Warum das naive Tiling 40 % kostet — die Ursache ist nicht die Indirektion
+
+V1s Quellkommentar (wortgleich in `src/kernel.cpp:958`) nennt den `tile_slot`-Gather als
+Ursache. Der größere Teil ist die **DDF-Kontiguität**. Layout `fi[slot·T³·Q + i·T³ + loc]`:
+
+| Dispatch | 64 Threads decken ab | DDF-Zugriff je Richtung |
+|---|---|---|
+| dicht | 64 aufeinanderfolgende x | **128 B zusammenhängend** |
+| naiv T=8 | 64 x = **8 verschiedene Tiles** | 8 × 16 B → 8 Cache-Zeilen für 128 B = **4× Verkehr** |
+| naiv T=16 | 64 x = 4 Tiles | **2× Verkehr** |
+| **WG=Tile** | eine z-Lage **einer** Tile | **128 B zusammenhängend, wie dicht** |
+
+Der DDF-Strom ist 79,9 % des Verkehrs. Das Modell erklärt V1s Messreihe (naiv −40 %/−28 %,
+WG −12 %/−9 %) ohne Zusatzannahme. **Wer Tiling will, braucht WG=Tile. Das naive Tiling,
+also v2s heutiger Stand, ist keine ernsthafte Option.**
+
+### V1s Bauform ist in v2 nicht 1:1 portierbar — sie spillt
+
+Gemessen am Offline-Compiler, Repo nachweislich unverändert (`git status` leer, selbst
+geprüft). Varianten: **A** ohne Tiling · **B** naiv (v2 heute) · **C** WG=Tile exakt wie V1
+· **D** WG=Tile mit Remat · **E** geteiltes `cbj` ohne WG (Ursachentrennung).
+
+| Variante | Gerät | private | **spill** | **instCount** | Δ zu A | Δ zu B8 |
+|---|---|---:|---:|---:|---:|---:|
+| A ohne Tiling | B70 | 0 | 0 | **6932** | — | |
+| B8 naiv T=8 | B70 | 0 | 0 | 7722 | +11,40 % | — |
+| **C8 WG, V1 1:1** | B70 | 0 | **1152** ❌ | 7456 | +7,56 % | −3,4 % |
+| **E8 geteiltes cbj, kein WG** | B70 | 0 | **1216** ❌ | 7355 | +6,10 % | −4,8 % |
+| **D8 WG + Remat** | B70 | 0 | **0** ✅ | **7978** | +15,09 % | **+3,32 %** |
+| C8 WG, V1 1:1 | iGPU | 0 | **576** ❌ | 8419 | +5,77 % | |
+| **D8 WG + Remat** | iGPU | 0 | **0** ✅ | 9052 | +13,72 % | +2,69 % |
+
+**Variante E beweist die Ursache:** der Spill kommt nicht vom WG-Dispatch, sondern davon,
+dass `cbj[]` (10 lebende 64-Bit-Basen = 20 GRF-Dwords) über die ganze Facettenkette am Leben
+bleibt. Das ist exakt das Gegenteil der **Rang-1-Remat** (`kernel.cpp:3612-3618`), die in v2
+Spill 448/832 → 0/0 gebracht hat. **V1s „Perf-Befund-1" ist in v2 nicht bezahlbar.**
+Variante D ist spillfrei in allen vier Gate-Armen auf beiden Geräten, kostet aber +3,3 %
+gegenüber dem naiven Tiling.
+
+`private_size = 0` in allen Varianten — Tiling löst die Scratch-Falle nicht aus. Über den
+heute gebauten Gesamtdeckungs-Modus geprüft: auch kein anderer Kernel.
+
+### Kein v2-Pfad sperrt die Portierung — aber zwei Fallen sind v2-eigen
+
+In `stream_collide` geht **jeder** `fi`-Zugriff durch `load_f`/`store_f`; die gesamte
+Facetten-, SGS- und Bandkette arbeitet auf dem Registerarray `fhn` und auf linear indizierten
+Feldern, sie fasst `fi` nicht an. `sgs_fdwand`, `fac_nachbar_ab`, `sgs_gdiag`, `schale_blend`
+laufen über eigene Listen mit flachem Dispatch und haben den `is_dead_tile`-Ausstieg bereits.
+V1 wendet WG=Tile ohnehin nur auf `stream_collide` an.
+
+Die Doppeldomäne sperrt **nicht**: `lbm.cpp:533` prüft `get_D()>1u`, aber die Doppeldomäne
+sind **zwei getrennte LBM-Objekte** mit je D=1 — die Prüfung feuert nie. Dass nur das Nahfeld
+Tiling bekommt, regelt der Read-once-Schalter (`lbm.cpp:256-258` nullt ihn sofort).
+
+Zwei v2-eigene Fallen, beide selbst nachgeprüft:
+
+1. **Slot 0 ist ein Papierkorb** (`lbm.cpp:1071-1079`). V1 zählt ab 0 und benutzt `wg_slot`
+   direkt als fi-Slot. **Ein 1:1-Kopieren schreibt die gesamte Simulation um eine Tile
+   versetzt** — kein Absturz, still falsche Physik. Der Kommentar dort hält fest, dass genau
+   daran die ersten T=8- und T=4-Läufe divergiert sind (Cd 18,4 bzw. 22,4).
+2. **`CFD_TILE=4` ist in v2 hart verboten** (`setup.cpp:5683`: T muss 8, 16, 32 oder 64
+   sein). Die in Teil 3.1 genannte Zeile „T=4 → 1661,3 MiB" ist eine reine Rechengröße, kein
+   in v2 erreichbarer Zustand.
+
+### Was Tiling überhaupt einbringt
+
+| T | frei | = Anteil toter Zellen | `tile_slot` | Padding-Zuschlag |
+|---:|---:|---:|---:|---:|
+| 8 | 1287,8 MiB | 6,845 % | 3,96 MiB | +2,39 % |
+| 16 | 450,1 MiB | 2,392 % | 0,51 MiB | +5,38 % |
+
+Nur 6,8 % des Gitters fallen bei T=8 weg, obwohl 12,197 % der Zellen echt solid sind — den
+Rest frisst der zwingende 2-Zell-Halo. Nebenbei: der Quellkommentar `kernel.cpp:958`
+behauptet, `tile_slot` passe nicht in L1/L2. Bei **0,51 MiB** für T=16 ist das unplausibel.
+
+### Portieraufwand
+
+Rund 95 Codezeilen, mit projektüblicher Kommentardichte 150–200, davon 75 im Kernel. Der
+Patch existiert als lauffähige Messfassung im Scratchpad und ist **nachweislich inert, wenn
+`SPARSE_TILES_WG` aus ist** (gepatchter Kernel mit WG aus liefert instCount bitgleich zum
+unveränderten Repo). Die drei riskantesten Eingriffe: Registerdruck (bereits eingetreten),
+der Slot-Versatz +1, und die Parameter-Reihenfolge — `tile_slot` ist per `TS_P` der letzte
+Parameter jedes fi-Kernels, `active_tile_id` muss dahinter, bei einem Kernel, dessen
+Facettenparameter zusätzlich positionsgebunden nachgebunden werden. **Ein Versatz um eine
+Position bindet `fac_geo` als `tile_slot`.**
+
+### Verdikt
+
+**Die Portierung lohnt heute nicht — nicht wegen des Aufwands, sondern wegen der
+Wanduhr-Rechnung.** Selbst V1s bester Wert (−9 bis −12 % Nahfeld) kostet hier **+8,6 bis
++11,5 % Wanduhr**, also 37 bis 50 ms je Grobschritt, für 1288 MiB (T=8) bzw. 450 MiB (T=16).
+Bei T=16 ist das Verhältnis besonders schlecht: 450 MiB für 8,6 % Wanduhr.
+
+**Die Ausnahme, in der es sich lohnt:** wenn eine Rechnung sonst **gar nicht** in den
+Speicher passt. Dann ist +11,5 % Wanduhr der Preis dafür, dass sie überhaupt läuft — genau
+die Rolle, die `kernel.cpp:960` selbst beschreibt („ein VRAM-gegen-Tempo-Regler … kein
+genereller Gewinn"). Mit 1288 MiB bei T=8 deckt es den am 29.08. gemessenen 516-MB-Fehlbetrag
+der verbreiterten y-Box bei 4 mm mit Reserve.
+
+### Der billigste Weg zu einem belastbaren Ja/Nein
+
+**Stufe 1 — null Codezeilen, ~2 min GPU, entscheidet in 80 % der Fälle.** Nahfeld allein
+(Einzeldomäne) auf der B70, 25-s-Paar über die Queue: `CFD_SPARSE_TILES=0` gegen
+`=1 CFD_TILE=8` und `CFD_TILE=16`, Wanduhr je Schritt. Liegt das naive Tiling unter ~3 %, ist
+der ganze Port gegenstandslos. Liegt es bei −30 bis −40 % wie in V1, ist das
+Fragmentierungsmodell bestätigt.
+
+**Stufe 2 — nur wenn Stufe 1 es rechtfertigt UND der VRAM wirklich gebraucht wird:** die
+~95 Zeilen der Remat-Fassung bauen, `scratch_gate.sh` über alle Arme, dann CPU → iGPU → B70,
+dann dasselbe 25-s-Paar.
+
+**Nicht mehr messen, weil entschieden:** V1s geteiltes `cbj` — 1152/1216 B Spill sind offline
+bewiesen.
+
+### Offener Quelltext-Defekt
+
+`src/kernel.cpp:956-957` führt „T=8: −40 % Durchsatz, **1,43 GB** gespart / T=16: −28 %,
+**0,77 GB**" als v2-Zahlen. Das sind wörtlich V1s Erstversuchszahlen. v2s eigene Ersparnis
+ist **1287,8 MiB bzw. 450,1 MiB**. Dieselbe Verwechslung wurde im README bereits korrigiert
+(Commit e16e288), im Quelltextkommentar steht sie noch. **Wird nach dem laufenden A/B
+berichtigt** — der Kommentar liegt im R()-stringifizierten Bereich, das braucht die
+Klammerfallen-Prüfung und keinen Eingriff während einer laufenden Messung.
+
+## 3.5 Gemischte Kachelgrößen 8³/16³/32³/64³/128³ — die Antwort ist nein, und sie ist beweisbar
+
+Datengrundlage: eigene Auszählung am **Flag-Export des Produktionslaufs**
+(`export/p4dt_deteps/feld_nah_000501ms.vtk`, 519 139 485 Bytes, 1:1 das Gitter).
+Eichprobe: die Kachelzählung reproduziert die Werte aus Teil 3.1 exakt (T=4 → 7 395 260 von
+8 215 506 und 1 661,3 MiB; T=8 → 944 536 und 1 287,8 MiB; T=16 → 123 710 und 450,1 MiB).
+
+### Die Fahrbahnplatte ist ein Phantom
+
+| Klasse | Flag | Zellen | Anteil |
+|---|---|---:|---:|
+| Fahrbahn ruhend z=0 | `0x01` | 1 116 429 | 0,215 % |
+| Fahrbahn bewegt z=1 | `0x03` TYPE_MS | 1 102 365 | 0,212 % |
+| **Fahrzeug, voxeliert + lochgefüllt** | `0x41` | **62 201 072** | **11,982 %** |
+| Kopplungsrand TYPE_E | `0x02` | 3 290 677 | 0,634 % |
+| Fluid | `0x00` | 451 428 942 | 86,957 % |
+
+**Die Platte ist zwei Zellen dick.** Zerlegt nach Tiefe (Abstand ≥ 3 zur nächsten aktiven
+Zelle, genau die Halo-2-Bedingung):
+
+| | solid | davon tief | Anteil an der Obergrenze |
+|---|---:|---:|---:|
+| Platte z=0+1 | 80,7 MiB | **0,6 MiB** | **0,03 %** |
+| Fahrzeug z≥2 | 2 253,8 MiB | **2 034,8 MiB** | **99,97 %** |
+
+Die Idee „große Kacheln über der Platte, feine am Fahrzeug" hat keinen Gegenstand: der
+2-Zell-Halo frisst die Platte vollständig. **Der gesamte einsparbare Bestand liegt im
+Fahrzeuginneren**, einem kompakten, aber krummen Körper. Große Kacheln haben dort nichts zu
+holen, was kleine nicht auch holen.
+
+**Harte Obergrenze jeder Halo-2-Kachelung: 2 035,4 MiB, nicht 2 294,6 MiB.** Der Halo allein
+kostet 259,2 MiB (11,3 %), bevor überhaupt ein Korn gewählt ist.
+
+### 64³ und 128³ kosten Speicher, sie sparen keinen
+
+Selbst nachgerechnet, Aufrundungspolster gegen das dichte Gitter:
+
+| T | Raster | Polster | fi frei netto | % von 2 035,4 |
+|---:|---|---:|---:|---:|
+| 4 (**in v2 gesperrt**) | 423×166×117 | +31,3 MiB Tabelle | **1 630,0** | 80,1 % |
+| **8** | 212×83×59 | +449,4 MiB | **1 283,9** | 63,1 % |
+| 16 | 106×42×30 | +1 011,9 MiB | 449,6 | 22,1 % |
+| 32 | 53×21×15 | +1 011,9 MiB | 106,7 | 5,2 % |
+| **64** | 27×11×8 | **+3 758,6 MiB** | **−3 074,6** | — |
+| **128** | 14×6×4 | **+6 722,6 MiB** | **−6 722,6** | — |
+
+Bei 128³ sind 335 von 336 Kacheln aktiv — es gibt schlicht nichts mehr wegzulassen, und das
+Polster allein ist größer als alles, was je einzusparen wäre.
+
+### Ein gemischtes Schema spart am fi-Puffer exakt null Byte
+
+Exakt gerechnet als Oktree-Optimierung über das ganze Gitter
+(`kosten(Knoten) = 0` wenn tot, sonst `min(T³, Σ kosten(Kinder))`):
+
+```
+Blattgrößen 4…128 : fi frei = 1 661,3 MiB   ← identisch flach T=4
+Blattgrößen 8…128 : fi frei = 1 287,8 MiB   ← identisch flach T=8
+```
+
+**Das ist kein Messergebnis, das ist ein Satz.** Acht Kinder der Kante T/2 überdecken genau
+T³ Zellen, tote Kinder kosten 0, also ist `Σ Kinder ≤ T³` **immer**. Eine grobe Kachel kann
+nie billiger sein als ihre Unterteilung, bestenfalls gleich teuer. Auf T=16 wurden 108 426
+von 123 710 Knoten als Blatt genommen — ausnahmslos als **Gleichstand**, nie als Gewinn.
+
+Der einzige Gewinn eines gemischten Schemas liegt in der **Indextabelle**:
+
+| Schema | fi frei | Tabelle | netto | % von 2 035,4 |
+|---|---:|---:|---:|---:|
+| flach T=8 | 1 287,8 | 3,96 | 1 283,9 | 63,1 % |
+| flach T=4 | 1 661,3 | 31,34 | 1 630,0 | 80,1 % |
+| flach T=2 | 1 909,9 | 248,60 | 1 661,3 | 81,6 % |
+| gemischt F=4 / C=16 | 1 661,3 | **4,24** | 1 657,1 | 81,4 % |
+| **gemischt F=2 / C=8** | 1 909,9 | **19,42** | **1 890,5** | **92,9 %** |
+
+Ein gemischtes Schema kann also mehr holen — aber **nicht dort, wo die Frage es vermutet**.
+Nicht durch grobe Kacheln über dem Freistrom, sondern dadurch, dass die zweistufige Tabelle
+ein **noch feineres** Korn bezahlbar macht. Bei den Körnern, die man durchsatzseitig
+überhaupt erwägen würde (T=8, T=4), beträgt der gemischte Gewinn **0,8 bzw. 27,1 MiB** —
+0,04 % bzw. 1,7 %. Das ist Rauschen.
+
+### Der Preis der gemischten Adressrechnung
+
+Billigste gefundene Variante: feines Korn als Allokationseinheit, Grobtabelle mit
+**Größenmarke im Hochbit** — homogen lebendige Grobkacheln leiten ihren Slot arithmetisch ab,
+nur gemischte nehmen eine zweite, **datenabhängige** Last. Gemessen, B70, `private=0
+spill=0` überall:
+
+| Arm | instCount | gegen dicht | gegen flach |
+|---|---:|---:|---:|
+| dicht | 6 875 | — | |
+| flach T=4 / T=8 | 7 679 | +11,7 % | — |
+| **gemischt (C=16 und C=32)** | **8 255** | **+20,1 %** | **+7,5 %** |
+
+Die übrigen Kernel zahlen mehr: `update_fields` 1 295 → 1 842 → 2 179, `update_force_field`
+1 215 → 1 643 → 1 942, `initialize` 1 410 → 1 623 → 1 914.
+
+Verkehr: v2 löst die Basen **zweimal** auf (`load_f` bei `kernel.cpp:1473-1475`, `store_f`
+noch einmal bei `:1492-1494`). Das ergibt 38,54 GB zusätzliche Gather je feinem Schritt gegen
+43,36 GB heute — **+88,9 %**, oder +74,2 B je Gitterzelle gegen 83,5 B heute. **Die
+Indirektion verdoppelt den nominellen Verkehr nahezu.**
+
+**Struktureller Killer:** der einzige bekannte Hebel gegen die Durchsatzstrafe ist
+Workgroup=Tile, und der **setzt eine feste Kachelkante voraus**. Bei gemischten Größen
+bräuchte er einen Launch je Größenklasse, und die Nachbarauflösung über Kachelgrenzen bliebe
+trotzdem der volle zweistufige Resolver. Das gemischte Schema ist ausgerechnet mit seiner
+einzigen Reparatur schlecht verträglich.
+
+### Der Gegenentwurf ohne jede Tiling-Maschinerie: Zuschnitt
+
+Randschichten, die **ohne Verlust einer aktiven Zelle** abgeschnitten werden könnten:
+
+| Achse | voll-solide Randschichten |
+|---|---|
+| z | **1** (z=0) / 0 |
+| y | 0 / 0 |
+| x | 0 / 0 |
+
+**Verlustfreier Zuschnitt: 0 MiB.** Die eine Schicht ist die Bounce-back-Wand, die bleiben
+muss. Fünf der sechs Domänenflächen sind TYPE_E-Kopplungsrand.
+
+Mit Physikänderung dagegen ist es der billigste Hebel überhaupt — null Instruktionen, null
+Indirektion, null Bitgleichheitsrisiko:
+
+| | Zellen | alle Puffer (57,19 B/Zelle) |
+|---|---:|---:|
+| eine z-Schicht (4 mm Höhe) | 1 116 429 | **60,89 MiB** |
+| eine y-Schicht | 785 385 | 42,84 MiB |
+| eine x-Schicht | 307 365 | 16,76 MiB |
+
+**21,1 z-Schichten = 84,6 mm Bauhöhe oben weg ersetzen den gesamten T=8-Gewinn** (1 287,8
+MiB). 27,3 Schichten = 109 mm ersetzen T=4.
+
+**Und trotzdem ist das kein Vorschlag.** `AUDIT-BEFUNDE.md:5343-5349` hält für genau dieses
+Gitter fest: Abstände ab Hülle z+ **651 mm**, y ±401 — und nennt als Ziel eines größeren
+Geräts ausdrücklich `z+ 651 → 1102..1208 mm`. **Der Nahkasten gilt im Projekt bereits als zu
+knapp, nicht als zu groß.** Ein Zuschnitt bewegt sich gegen den dokumentierten Bedarf. Das
+ist eine Entscheidung des Projektleiters, keine Baumaßnahme.
+
+### Verdikt
+
+**Kein gemischtes Schema.** Am fi-Puffer spart es beweisbar null; sein ganzer Gewinn ist die
+Indextabelle, und bei jedem erwägbaren Korn sind das 0,8 bis 27 MiB. Erkauft mit +7,5 %
+Instruktionen über der flachen Variante, einer datenabhängigen zweiten Last und
+Unverträglichkeit mit Workgroup=Tile. „Grobe Kacheln über dem Freistrom" trägt gar nicht:
+64³ und 128³ kosten 3,1 bzw. 6,7 GiB Polster.
+
+**Wenn Tiling, dann eine Einzelgröße.** Die Analyse empfiehlt **T=4** (netto 1 630,0 MiB
+gegen T=8s 1 283,9, bei identischer Instruktionszahl — die 31-MiB-Tabelle kostet Cache, keine
+Befehle). ⚠ **Dagegen steht, dass `CFD_TILE=4` in v2 an drei Stellen gesperrt ist**
+(`setup.cpp:4519`, `:5066`, `:5683` — eine reine Positivliste 8/16/32/64 ohne dokumentierte
+Begründung). Die Sperre wäre also zu heben, bevor T=4 überhaupt messbar ist. Ob der
+Cache-Nachteil der 31-MiB-Tabelle den Mehrgewinn frisst, ist die eine fehlende Messung.
+
+**Vorrangig aber: Tiling lohnt derzeit gar nicht** — das Durchsatzbudget ist null (3.4). Vor
+der Tiling-Maschinerie stehen zwei billigere Hebel: `CFD_FAC_KDIAG=0` bringt **191 MiB** ohne
+Physikänderung, und wenn die Indirektion je gebaut wird, gehört sie im selben Zug auf
+`rho`/`u`/`flags` gezogen — **+576,1 MiB für dieselbe, bereits aufgelöste Adresse**, was das
+Verhältnis von Gewinn zu Adressrechnung um 45 % verbessert.
+
+### Was auch Runde 2 hier nicht messen konnte
+
+1. **Durchsatz von SPARSE auf der B70 in v2** — die −40 % sind eine V1-Zahl. Rezept:
+   8-mm-Paar `CFD_SPARSE_TILES=0/1` bei `CFD_TILE=8` über die Queue, im selben Zug Kräfte
+   auf Bitgleichheit.
+2. **T=4 gegen T=8 als Cache-Experiment** — identische Instruktionszahl, Tabelle 31,3 gegen
+   3,96 MiB, der Durchsatzunterschied **ist** die Cache-Wirkung. Zwei 25-s-Läufe genügen.
+   Die L2-Größe der B70 ist nirgends im Repo belegt.
+3. **Der gemischte Adressierer wurde nur übersetzt, nie ausgeführt** — der Host-Code für die
+   zweistufige Slot-Vergabe existiert nicht.
+4. **Instruktionszahl ≠ Durchsatz** — die Strafe sitzt im Gather, nicht in der Arithmetik.
+   Die +804/+1 380 sind eine untere Schranke.
