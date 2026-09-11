@@ -240,6 +240,33 @@ Unterscheidung wurde heute früh eingebaut und hat sich damit zum ersten Mal bew
 
 ---
 
+## 1d. Klassen-Diagnostik aus (E4) — der erste eingesparte Grafikspeicher
+
+`fac_kd` ist der **einzige** Diagnostikpuffer, der in der Produktion VRAM belegt. Die drei
+übrigen Diagnosepfade (`DIAGZ`, `GDIAG`, `RDIAG`) sind bereits aus, weil ihre Schalter nicht
+gesetzt sind.
+
+| | `d8_kdiag_an` | `d8_kdiag_aus` |
+|---|---:|---:|
+| `fac_kd` (8 mm) | 43 MB | **nicht alloziert** |
+| bei 4 mm | 191,0 MiB | — |
+| Wanduhr | 397 s | **392 s (−1,26 %)** |
+| `forces.csv` | — | **bitgleich** |
+| Nahfeld 500 ms | — | **bitgleich** |
+
+**Es ist reine Diagnostik** — Kräfte und Feld sind byteweise identisch.
+
+**Was bleibt:** der Klassen-Zensus und die Wirkpfadzähler stehen weiter im Log, in beiden
+Armen zeichengleich (n = 266 283, Rang2 74,5 %, `ELIBB[67]` = 14 417 598). Die
+Ein-Variablen-Prüfung eines A/B, wie ich sie heute beim ELIBB-Test gefahren habe, ist also
+**nicht** verloren.
+
+**Was entfällt:** `facetten_klassen.csv` (81 kB), `facetten_persistenz.csv` (37,6 MB) und
+`yplus_facetten_angewandt.csv` (4,6 MB). Wer sie braucht, setzt `CFD_FAC_KDIAG=1` — das ist
+dann ein Prüflauf, kein Produktionslauf.
+
+---
+
 ## 2. Massnahmenliste
 
 ### Einfach: Schalter oder wenige Zeilen, bitgleich
@@ -249,7 +276,7 @@ Unterscheidung wurde heute früh eingebaut und hat sich damit zum ersten Mal bew
 | E1 | `c(ib)` durch Arithmetik ersetzen | `kernel.cpp:4788` | `private_size` 7296 → 0, instCount 791 → 484 (**−39 %**) | **Scratch-Falle, dringend** |
 | E2 | Glättungsindex → `std::lower_bound` | `setup.cpp:3005` | **−593,7 MiB** System-RAM | `F` ist scansortiert, Wächter nötig |
 | E3 | `elibb_qmap_dd` nach Gebrauch freigeben | `setup.cpp:6156/6237` | **−174 MB** System-RAM | eine Zeile |
-| E4 | `CFD_FAC_KDIAG=0` | Schalter | **−191 MiB** VRAM, −0,92 % Verkehr | kostet Diagnostik |
+| E4 | ~~`CFD_FAC_KDIAG=0`~~ **UMGESETZT** | Schalter | **−191 MiB VRAM, −1,26 % Wanduhr, belegt** | drei Facetten-CSVs entfallen |
 | E5 | P-TRT-Zähler auf `t%1000` | `kernel.cpp` | **−18,9 s Wanduhr (0,33 %)** | **einzige A/B-belegte Laufzeitzahl** |
 
 E2 und E3 betreffen System-RAM. **Der ist bei 20,6 von 91 GiB nicht die Bindung** — das ist
