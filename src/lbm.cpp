@@ -660,6 +660,14 @@ void LBM_Domain::alloc_schale(const std::vector<ulong>& liste, const std::vector
 	if(get_N()>0xFFFFFFFFull) print_error("alloc_schale: Gitter ueberschreitet 2^32 Zellen -- schale_liste ist seit 08.09. uint (VRAM).");
 	for(ulong i=0ull; i<n; i++) schale_liste[i] = (uint)liste[i];
 	schale_liste.write_to_device();
+	// ★ 11.09.2026 HOST-SPIEGEL FREIGEBEN (VRAM-Audit). Dieser Puffer wird EINMAL gefuellt,
+	// hochgeladen und danach host-seitig nie wieder angefasst -- weder per read_from_device()
+	// noch per Index. delete_host_buffer() ist seit 03.09. entschaerft (Aux-Zeiger, Double-Free,
+	// Zero-Copy-Waechter), wurde aber nirgends gerufen.
+	// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
+	// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
+	// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
+	if(!device.info.uses_ram) schale_liste.delete_host_buffer();
 	// ★ 08.09. VRAM-Sparmassnahme 4: blendet=false (Nahfeld) legt Blend-Eingang und Gewichte als 1-Element-Dummy an.
 	// Der Blend-Kernel wird trotzdem gebaut -- Signatur und Bindungsreihenfolge bleiben unveraendert; er wird im
 	// Nahfeld nie enqueued (setup.cpp blendet nur lbm_c).
@@ -1087,11 +1095,27 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		if(get_N()>0xFFFFFFFFull) print_error("gd_zellen ist seit 08.09. uint (VRAM) -- bei N > 2^32 wuerde jeder Zellindex still abgeschnitten. Der Waechter darueber prueft die FACETTENzahl, nicht N (Pruefagent-Befund B1).");
 		{ ulong k=0ull; for(const Facette& f : F) { if(f.klasse!=0u) continue; gd_zellen[k++]=(uint)f.n; } }
 		gd_zellen.write_to_device();
+		// ★ 11.09.2026 HOST-SPIEGEL FREIGEBEN (VRAM-Audit). Dieser Puffer wird EINMAL gefuellt,
+		// hochgeladen und danach host-seitig nie wieder angefasst -- weder per read_from_device()
+		// noch per Index. delete_host_buffer() ist seit 03.09. entschaerft (Aux-Zeiger, Double-Free,
+		// Zero-Copy-Waechter), wurde aber nirgends gerufen.
+		// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
+		// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
+		// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
+		if(!device.info.uses_ram) gd_zellen.delete_host_buffer();
 	}
 	if(nachbar_on) { // ★ 03.09. DETERMINISTISCHE NACHBARABTASTUNG: Puffer bauen, Kernel binden, stream_collide-Rebind (fac_wfd-Muster, B70-bewiesen)
 		fac_nb = Memory<float>(device, 2ull*aktiv);
 		for(ulong q=0ull;q<aktiv;q++) { fac_nb[2ull*q]=-1.0f; fac_nb[2ull*q+1ull]=0.0f; } // Init = "kein Wert" -> Eigenzelle (zaehlt als Slot 73); enqueue_initialize fuellt vor dem ersten Schritt
 		fac_nb.write_to_device();
+		// ★ 11.09.2026 HOST-SPIEGEL FREIGEBEN (VRAM-Audit). Dieser Puffer wird EINMAL gefuellt,
+		// hochgeladen und danach host-seitig nie wieder angefasst -- weder per read_from_device()
+		// noch per Index. delete_host_buffer() ist seit 03.09. entschaerft (Aux-Zeiger, Double-Free,
+		// Zero-Copy-Waechter), wurde aber nirgends gerufen.
+		// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
+		// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
+		// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
+		if(!device.info.uses_ram) fac_nb.delete_host_buffer();
 		kernel_fac_nachbar = Kernel(device, aktiv, "fac_nachbar_ab", u, flags, fac_geo, gd_zellen, (uint)aktiv, fac_nb);
 		if(sparse_on) kernel_fac_nachbar.add_parameters(tile_slot); // B-7-Lehre: TS_P haengt an SPARSE_TILES
 		{ const uint nbix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u);
@@ -1102,6 +1126,14 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		fac_wfd = Memory<float>(device, aktiv);
 		for(ulong q=0ull;q<aktiv;q++) fac_wfd[q]=1.0f/get_tau(); // = def_w // Init = molekulares w (erster Schritt ohne nu_t an Wandzellen -- dokumentiert harmlos)
 		fac_wfd.write_to_device();
+		// ★ 11.09.2026 HOST-SPIEGEL FREIGEBEN (VRAM-Audit). Dieser Puffer wird EINMAL gefuellt,
+		// hochgeladen und danach host-seitig nie wieder angefasst -- weder per read_from_device()
+		// noch per Index. delete_host_buffer() ist seit 03.09. entschaerft (Aux-Zeiger, Double-Free,
+		// Zero-Copy-Waechter), wurde aber nirgends gerufen.
+		// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
+		// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
+		// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
+		if(!device.info.uses_ram) fac_wfd.delete_host_buffer();
 		kernel_sgs_fdwand = Kernel(device, aktiv, "sgs_fdwand", u, flags, gd_zellen, (uint)aktiv, fac_wfd);
 		if(sism_on) { // ★ 07.09. SISM: EMA-Puffer (6 float je Facette, Start 0 -- KEIN Warmstart mit S, der liefert nu_t = 0 im ersten Schritt), t + Zaehler als Kernelargumente. Reihenfolge = Kernel-Signatur unter #ifdef SGS_SISM (t, fac_sb, rho_clamp_hits), zwingend VOR tile_slot (TS_P ist der letzte Parameter)
 			fac_sb = Memory<float>(device, 6ull*aktiv);
@@ -1290,6 +1322,14 @@ void LBM_Domain::bind_kraft_facetten(const std::vector<ulong>& liste, const ucha
 	if(get_N()>0xFFFFFFFFull) print_error("kf_liste/kfb_liste sind seit 08.09. uint (VRAM) -- bei N > 2^32 wuerde jeder Zellindex still abgeschnitten. Der Waechter oben prueft die LISTENLAENGE, nicht den Indexwert (Pruefagent-Befund B1).");
 	for(ulong i=0ull; i<liste_n; i++) liste_m[i] = (uint)liste[i];
 	liste_m.write_to_device();
+	// ★ 11.09.2026 HOST-SPIEGEL FREIGEBEN (VRAM-Audit). Dieser Puffer wird EINMAL gefuellt,
+	// hochgeladen und danach host-seitig nie wieder angefasst -- weder per read_from_device()
+	// noch per Index. delete_host_buffer() ist seit 03.09. entschaerft (Aux-Zeiger, Double-Free,
+	// Zero-Copy-Waechter), wurde aber nirgends gerufen.
+	// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
+	// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
+	// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
+	if(!device.info.uses_ram) liste_m.delete_host_buffer();
 	const ulong gruppen = (liste_n+(ulong)WORKGROUP_SIZE-1ull)/(ulong)WORKGROUP_SIZE; // = ceil(liste_n/64.0)
 	psum_m = Memory<float>(device, 3ull*gruppen);
 	pcnt_m = Memory<uint>(device, 3ull*gruppen);
