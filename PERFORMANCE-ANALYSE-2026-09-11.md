@@ -256,7 +256,12 @@ Die Aufbauphase kostet 166 s = 2,93 % und ist nicht instrumentiert. Darin werden
 (**153 MB**, `setup.cpp:3330`). Das benachbarte `guete_vtk` ist korrekt hinter
 `CFD_FACETTEN_VTK` gegatet, diese beiden nicht. Ein Schalter davor ist reiner Gewinn.
 
-## A6 — Die Bandbreitenanzeige überzeichnet um rund 10 %
+## A6 — Die Bandbreitenanzeige überzeichnet (Zahl in Teil 3.2 berichtigt: 47 %, nicht 10 %)
+
+> **⚠ Die Größenordnung unten ist zu klein.** Teil 3.2 hat nachgerechnet: 63,85 gegen 43,36 GB,
+> also **47 %**. Der größere Posten sind nicht die 12 B Kraftfeld, sondern **18 B Nachbar-Flags
+> unter `MOVING_BOUNDARIES`**, die für 100 % der Zellen gebucht und von 0,21 % bezahlt werden.
+
 
 `bandwidth_bytes_per_cell_device()` (`lbm.cpp:54-74`) rechnet 123 B je Zelle und Schritt,
 darin 12 B für das Kraftfeld, das `stream_collide` unter `F_NUR_SOLID` gar nicht liest. Die
