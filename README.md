@@ -260,6 +260,55 @@ Chain result on the 8 mm screening rung: **939 → 1534 MLUPs (+63 %)**, same-en
 | **Slice plane-gather** — read one plane instead of full fields at slice events | Slices moved 11.3 GB per event over PCIe | 11.3 GB → plane-sized transfer; slice windows +12 % on the outer step instead of dominating it |
 | **Offline scratch/spill gate in CI** (`werkzeuge/scratch_gate/`) — ocloc-compile the real kernel for both GPUs on every change | The 100× class of regression is invisible at runtime until someone benchmarks | `private_size = 0 AND spill_size = 0`, or the gate fails the commit. The class can never return silently |
 
+#### The 2026-09-11 performance and VRAM audit — one working day, seven measures adopted
+
+Five agents mapped the whole code per kernel and per buffer; every adopted measure was then
+**paired-measured on the 8 mm rung** and confirmed together on the 4 mm production run.
+
+| Measure | Gain (8 mm, paired) | Physics |
+|---|---|---|
+| Scratch fix in `fac_nachbar_ab` — one runtime-indexed table read moved into the loop | `private_size` **7296 → 0** (B70), **3648 → 0** (iGPU) | bit-identical |
+| Smoothing index → sorted list + binary search | −581 MB host RAM | bit-identical |
+| Free the ELIBB remesh map after use | −174 MB host RAM | bit-identical |
+| *(the three together)* | **−11 s wall clock, −187 MB RAM** | 28/28 files bit-identical |
+| P-TRT counter gate `t%100 → t%1000` | **−12 s = −2.9 %** | 28/28 bit-identical |
+| **Spalding lookup table** (512 nodes, `__constant`) | speed **±0**; systematic friction offset **−69 %** | changes numbers, measurably better |
+| **Shared counter cadence** — one constant for 71 kernel gates *and* 12 host expected-value formulas | **−6.5 s = −1.61 %**, ranges disjoint | 27/28; the one file is the counter trace itself |
+| `CFD_FAC_KDIAG=0` | **−191 MiB VRAM**, −1.26 % | forces and field bit-identical |
+
+**On the 4 mm production run together: 94.5 → 90.4 min (−4.36 %), VRAM 28 003 → 27 695 MB, with
+Cd_rest and Cz_rest inside the error bars** — even though the SGS band was switched off and the
+Spalding inversion was replaced.
+
+**Three latent guard defects were fixed in the same pass**, all found by an adversarial VRAM
+review and none of them cosmetic:
+
+- The printed memory **peak was not the peak**. `setup.cpp` claimed the build was complete and
+  three lines later allocated the coupling planes, then the shell — and `kf_liste` (237 MB at
+  4 mm) binds only inside the time loop. **The true peak falls after every guard has passed**:
+  a run could survive the whole build and die 260 MB later.
+- The memory plan knew **only `fac_idx`** of the entire facet chain — 596 MB stood in no term
+  and no reserve. That the balance still came out right was luck, not arithmetic.
+- `alloc_sgs_band` checked **no free memory at all**, while its immediate neighbour does.
+
+**Five claims were refuted**, three of them from this project's own analysis:
+
+- Removing the volume force would have been a silent break: it is *not* dead — the wall-model
+  residual is injected through the same Guo chain, and `CFD_FAC_KRAFT` would have become a
+  no-op without any error. That is the exact failure class that kept V1's moving-floor fix
+  inert for years.
+- Mixed tile sizes save **provably zero** on the DDF buffer (`Σ children ≤ T³`); 64³ and 128³
+  *cost* 3.8 and 6.7 GiB of rounding padding.
+- Two headline numbers in this README came from **V1**, not from v2 — corrected in place.
+- The claim that the facet moment matrix is pure geometry is wrong: its tangential basis comes
+  from the local velocity and turns every step.
+
+**The scratch gate itself was the sharpest finding.** It had checked exactly one kernel since
+it was built, because the kernel name was hard-wired in the offline-compile wrapper — which is
+precisely why the scratch in `fac_nachbar_ab` went unnoticed. It now checks **all 37 kernels on
+both devices**, carries declared exceptions as named debt with a fix path, and reports an entry
+as stale once it no longer applies. Both new guard functions paid for themselves the same day.
+
 ### 9 · Intel platform robustness (B70 / xe / Arrow-Lake)
 
 | Change | Why | Measured effect |
@@ -346,8 +395,22 @@ essentially closed; the wake length of the near-field box is assumed, not measur
 written and has never been run); and the boundary-layer thickness at 8 mm remains resolution-bound —
 no wall-model switch fixes that.
 
-## What is implemented (2026-09-08)
+## What is implemented (2026-09-11)
 
+- **Ghost-mode purification, P-TRT** (`CFD_PTRT=1.90`) — subtracts the three even ghost modes on
+  D3Q19 at their own rate instead of the shear rate, inserted before the collision switch so the
+  moments are taken before the DDFs are overwritten in place. ω_g was fixed by an independent
+  von-Neumann analysis (`werkzeuge/vonneumann.py`, analytic and numeric Jacobian cross-checked to
+  1.8e-11) — **on a converged 72³ k-grid, because a coarse grid flipped the ordering and made every
+  earlier number too optimistic**. Effect at 4 mm: free-stream velocity outliers **6270 → 91**,
+  maximum 275 → 77 m/s, **with the forces unchanged inside the error bars**.
+- **Spalding lookup table** (512 nodes, `__constant`, `CFD_SPALDING_TAB`, default on) replacing
+  three fixed Newton steps. Measured against bisection in double over the real y⁺ population:
+  τ_w error **4.36 % → 0.0035 %**. Against an eight-step converged arm at the vehicle it removes
+  **69 % of a systematic friction offset**. Costs no wall clock — the facet path is 0.6 % of cells.
+- **Shared diagnostic counter cadence** (`CFD_ZAEHL_TAKT`) — one constant drives 71 kernel gates
+  *and* the 12 host formulas that compute expected counter values, so the two can no longer drift
+  apart. Thinning it 10× buys 1.61 % wall clock with the field bit-identical.
 - **Dual-domain coupling fine↔coarse** (B70 + iGPU, real parallel scheduling, coupling share ~1 %),
   cubic boundary lift, bit-exact coverage-point verification chain, interface instrumentation.
 - **Cell-based facet wall model (iMEM)** — TLS surface fit across the voxel staircase, Spalding
@@ -431,9 +494,57 @@ strictly more physics on board.
 | **Zero-copy blocking-read fix** (iGPU) — all 8 read/write wrappers finish the queue correctly | correctness + removes silent stalls on the far domain |
 | **Scratch/spill gate** (`werkzeuge/scratch_gate/`) — offline ocloc compile of the real kernel for both GPUs on every change | regression protection: `private_size = 0 AND spill_size = 0` or the gate fails — the 100× class can never return silently |
 
-The remaining big levers (FP16S memory compression, UPDATE_FIELDS retirement, dual-B70 halo
-+ iGPU three-device layout) are deliberately parked behind physics work — documented with their
-expected mechanics in the project markdowns.
+### What the 2026-09-11 audit changed about *how* levers are judged here
+
+**Instruction counts stopped counting.** Two measures were built on an offline instruction
+count and both came back with nothing — one of them with the opposite sign. What does move the
+clock on this rig is **atomics on shared buffers** and **memory traffic**, and every open
+proposal that rests on an instruction count alone is now marked unproven in
+[`PERFORMANCE.md`](PERFORMANCE.md).
+
+**A second measurement lesson, paid the same day:** `VmHWM` is a high-water mark. Freeing a
+buffer *after* the peak lowers the steady state and not the mark — so the host-mirror release
+measured 2134.1 against 2134.2 MB and that is a wrong metric, not a result. It ships anyway
+(it provably frees memory that is never touched again, 25/25 files bit-identical) but stands in
+the list as **unproven**.
+
+### Block-Tiling, measured in v2 for the first time (2026-09-11)
+
+Five arms on the 8 mm rung, zero code lines. Until then *every* statement about it rested on V1
+numbers.
+
+| Arm | wall clock | throughput | contiguous |
+|---|---:|---:|---|
+| dense | 390 s | 100 % | — |
+| `CFD_TILE=8` | 549 s | **71 %** | 16 B = ¼ cache line |
+| `CFD_TILE=16` | 497 s | 78 % | 32 B |
+| `CFD_TILE=32` | 490 s | **80 %** | 64 B = one full line |
+| `CFD_TILE=64` | 497 s | 78 % | 128 B |
+
+**Throughput saturates at 80 % and does not come back.** DDF fragmentation explains the first
+nine points, not the remaining twenty — those belong to the dependent `tile_slot` load itself,
+which no tile shape can remove. **Bit neutrality is now proven in v2 too**: T=8 and T=16 are
+byte-identical to dense across all 25 exported files.
+
+**Tile shape: anisotropic beats the cube on both axes.** Counted on the 4 mm flag export with
+the halo the code requires, `16×8×4` frees **1 447 MiB** against the cube's 1 284 MiB *and*
+keeps a full cache line contiguous. Which axis may be coarse is measured as well, at constant
+tile volume: coarse in **x** frees 1 377 MiB, in y 1 125, in z 730 — the car is long and solid
+in x, thin and ragged in y and z, so memory order and geometry pull the same way.
+
+**Verdict: a VRAM-for-time dial, permanently.** ~20 % wall clock is the floor. Worth building
+only when a grid would otherwise not fit — for 3.75 mm, `T=16` is **456 MB short**, `T=8` fits
+with 554 MB (below the project's 1 024 MB minimum), and `16×8×4` fits with 752 MB at the better
+throughput. Not built, because 4 921 MB are free today.
+
+### Still parked
+
+FP16S memory compression, `UPDATE_FIELDS` retirement and the dual-B70 halo + iGPU three-device
+layout remain parked behind physics work — documented with their expected mechanics in the
+project markdowns. Four further levers with a non-instruction justification (merging the two
+facet kernels, replacing a flood scan with a flag bit, bundling the host round-trips,
+precomputing facet geometry into the already-allocated free slots) are listed with their open
+measurements in [`PERFORMANCE.md`](PERFORMANCE.md).
 
 ## The validated production configuration
 
@@ -475,15 +586,37 @@ hard error in this project):
 Reproduce: the exact env line ships in `logs/f4_vollumfang_serie.txt` and — like every run — a
 full copy of the sources plus commit hash lands in `export/<run>/code/` (`LAUF.txt`).
 
-## Where we stand (2026-09-08)
+## Where we stand (2026-09-11)
 
-The current 4 mm production configuration with the subgrid model on the wall cell
-(`km_s4_sism`, paired against `p4_nb`, N = 300) reaches **Cd 0.5747 ± 0.0115 against OF13 0.599**
-and **Cz −0.9687 ± 0.0179 against −1.301**, i.e. drag within 4 % of the reference and **74 % of
-the reference downforce**. Drag is no longer the open item on this configuration; lift is.
+The current 4 mm production baseline is **`p4_neu`**, 90.4 min, rc = 0: facet SISM only (no SGS
+band), P-TRT at ω_g = 1.90, DETEPS and PINV on, the Spalding lookup table, the thinned counter
+cadence and the class diagnostics off. It reaches **Cd_rest 0.5372 ± 0.0118** and
+**Cz_rest −1.0224 ± 0.0221** — both inside the error bars of the run it replaced, which is the
+point: the two working days before it bought a **−4.36 % wall clock and −308 MB VRAM** without
+moving the forces.
 
-The work of the last week went into the subgrid axis, and the honest summary is that **one of four
-candidates works**:
+### Two results from 2026-09-10 that changed what we look for
+
+**Ghost-mode purification (P-TRT) removed the free-stream velocity outliers, and the forces did
+not move.** At 8 mm ω_g = 1.90 removed them entirely; at 4 mm the count fell **6270 → 272**, and
+with DETEPS added **6270 → 91** with the free maximum dropping from 275 to 77 m/s. The forces
+stayed inside the error bars throughout. That decoupling separated two questions this project had
+been conflating: **the outliers were never what drives the force error.** What was won is the
+field and the reach of the wall model, not the coefficient.
+
+**Turning the interpolated bounce-back off is catastrophic at the vehicle, and the channel said
+the opposite.** A paired arm with `CFD_FAC_ELIBB=0` (one variable, geometry classes identical,
+effect-path counter at zero) multiplied the friction drag by ten: `cd_reib` **0.0354 → 0.3583**,
+which would make friction 60 % of total drag instead of 5.9 %. The only clean earlier
+measurement — the 26° channel — had spoken *against* ELIBB. **A channel measurement alone does
+not decide the wall model at the vehicle.** As a by-product the arm with 2073 *fewer*
+instructions ran 2.46 % *slower*, which is where the instruction-count lesson above comes from.
+
+Drag is no longer the open item on this configuration; **lift is**, and none of the performance
+work touched it.
+
+The subgrid axis was worked through earlier in the same week, and the honest summary is that
+**one of four candidates works**:
 
 | | contribution to cz_druck_rest at 4 mm | share of the gap to OF13 |
 |---|---|---|
@@ -708,6 +841,20 @@ it out and watch `journalctl -k --since "1 min ago" | grep xe`.
 - **Near-field kernel in v2 today:** ≈ **5 028 MLUPs** true rate, i.e. 8 % below the V1 bare
   baseline while carrying the full facet chain, SISM, P-TRT and DETEPS. The progress line
   shows 1 946 — see the display-convention note near the top.
+- **4 mm production, measured 2026-09-11 (`p4_neu`, the current baseline):** **90.4 min** for
+  501 ms physical, rc = 0, VRAM peak **27 734 / 32 655 MB** with 4 921 MB free after coupling
+  and shell are bound. Coarse step **434.6 ms**, phase split: near field 4 fine steps **95.8 %**,
+  coupling 0.9 %, far-field sync and harvest 2.4 %, forces 0.9 %, slices 0.0 %.
+- **The near field is the critical path, the far field is not.** The far step takes 369 ms
+  inside a 420 ms window, i.e. **12 % slack on the iGPU**. Slowing the near field costs wall
+  clock from the first percent with no allowance; speeding it up pays only up to **12.31 %**,
+  after which the iGPU becomes the pacer. That ceiling is the yardstick for every proposal in
+  [`PERFORMANCE.md`](PERFORMANCE.md).
+- **Traffic per fine step (counted from the source, near field):** 43.36 GB total — DDF load +
+  store **79.9 %**, rho + u writes 16.8 %, flags 1.2 %, the entire facet-buffer chain **1.8 %**,
+  bitmasks 0.3 %. That is **83.5 B per grid cell** and **420 GB/s achieved** of the card's
+  608 GB/s peak, or 81 % of what upstream reaches on the same card. A facet cell costs 339.5 B
+  against 93 B for a free-stream cell — at 0.60 % of the cells.
 - **Dual-domain (V2, measured 2026-08-27 on the full-chain 4 mm production run):**
   **Performance index 10 958 s_wall/s_phys** (total wall / T_END; steady-state from the step
   counter: 10 638) — parity with the same run **without** the wall-model chain (92 min, index
