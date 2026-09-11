@@ -33,6 +33,8 @@ struct Facette {
 	ulong n;              // Zellindex in der Domaene
 };
 
+ulong zaehl_takt(); // ★ 11.09.2026 gemeinsamer Zaehltakt fuer Kernel-Gatter UND Host-Sollformeln
+
 class LBM_Domain {
 private:
 	uint Nx=1u, Ny=1u, Nz=1u; // (local) lattice dimensions

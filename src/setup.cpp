@@ -419,7 +419,7 @@ static void bericht_vandriest(LBM_Domain* D, const float aplus, const string& or
 	// Letzter t%100-Zaehlslot L: Kernel-t laeuft 1..n_end, get_t() steht danach auf n_end+1 (Inkrement vor dem Schritt).
 	// Die Sperre wird gegen L geprueft, nicht gegen get_t() -- sonst meldete ein Lauf, dessen Sperre erst in den
 	// letzten 99 Schritten faellt, einen stillen No-Op, der keiner ist (Pruefagent 08.09., Befund 5).
-	const ulong t_last = D->get_t()>0ull ? D->get_t()-1ull : 0ull, L = (t_last/100ull)*100ull;
+	const ulong t_last = D->get_t()>0ull ? D->get_t()-1ull : 0ull, L = (t_last/zaehl_takt())*zaehl_takt();
 	if(wp==0ull) { if(D->vandriest_ab>L) { print_info("["+ort+"] VAN DRIEST: Sperre ab = "+to_string(D->vandriest_ab)+" > letzter Zaehlslot L = "+to_string(L)+" -- kein Slot hinter der Sperre, Slots 160..185 = 0 wie gefordert (Bitgleichheit pruefbar, Wirkung nicht)."); return; }
 		print_error("["+ort+"] CFD_SGS_VANDRIEST angefordert, aber Wirkpfad Slot 168 = 0 bei L = "+to_string(L)+" >= ab = "+to_string(D->vandriest_ab)+" -- stiller No-Op (Emission? FDWAND aus? WANDFREI davor?)."); return; }
 	ulong ges=0ull; for(uint b=0u;b<8u;b++) ges+=(ulong)H[160u+b];
@@ -433,7 +433,7 @@ static void bericht_vandriest(LBM_Domain* D, const float aplus, const string& or
 	// LETZT-STICHPROBE (Pruefagent 08.09., Befund 2): der Kernel zaehlt jeden Slot zusaetzlich in Bank (t/100)&1 der Slots
 	// 170..185 und nullt im selben Slot die andere Bank. Nach dem Lauf traegt Bank (L/100)&1 GENAU den Slot L -- ein
 	// Zeitpunkt, kein Integral. Erst der ist gegen den Host-Endzustand vergleichbar (hoechstens 99 Schritte Abstand).
-	const uint bank=(uint)((L/100ull)&1ull); ulong gl=0ull, ga=0ull;
+	const uint bank=(uint)((L/zaehl_takt())&1ull); ulong gl=0ull, ga=0ull;
 	for(uint b=0u;b<8u;b++) { gl+=(ulong)H[170u+8u*bank+b]; ga+=(ulong)H[170u+8u*(1u-bank)+b]; }
 	if(ga!=0ull) print_error("["+ort+"] VAN DRIEST Letzt-Stichprobe: die inaktive Bank "+to_string(1u-bank)+" traegt "+to_string(ga)+" Eintraege, muesste im Slot L genullt sein -- der Bankwechsel im Kernel passt nicht zu L = "+to_string(L)+".");
 	if(gl==0ull) print_error("["+ort+"] VAN DRIEST Letzt-Stichprobe LEER (Bank "+to_string(bank)+", L = "+to_string(L)+") obwohl Wirkpfad "+to_string(wp)+" > 0.");
@@ -511,7 +511,7 @@ static void sgs_sism_selbsttest() {
 static void pruefe_band_wirkpfad(const LBM_Domain* D, const ulong t_ende, const string& ort) {
 	if(D==nullptr||!D->band_on||D->band_N==0ull) return;
 	const ulong wp=(ulong)D->rho_clamp_hits.data()[186];
-	const ulong slots=(t_ende>0ull?(t_ende-1ull)/100ull:0ull)+1ull; // Kernel-t laeuft 1..t_ende-1; Slots sind 0,100,200,...
+	const ulong slots=(t_ende>0ull?(t_ende-1ull)/zaehl_takt():0ull)+1ull; // Kernel-t laeuft 1..t_ende-1; Slots sind 0,100,200,...
 	const ulong soll=D->band_N*slots;
 	string je; for(uint L=2u; L<8u; L++) if(D->band_n_lage[L]>0ull) je += (je.empty()?"":" + ")+to_string(D->band_n_lage[L])+" (Lage "+to_string(L)+")";
 	if(wp==0ull) { print_error("["+ort+"] SGS-BAND angefordert ("+to_string(D->band_N)+" Bandzellen), aber Slot 186 = 0 -- STILLER NO-OP. Emission? Rebind der Signaturposition? WANDFREI davor?"); return; }
@@ -560,7 +560,7 @@ static void pruefe_sism_wirkpfad(const uint* H, const ulong t_ende, const ulong 
 		else print_info("["+ort+"] SISM: Sperre ab = "+to_string(ab)+" >= Laufende "+to_string(t_ende)+" -- ganzer Lauf in Phase 1 (klassisch), Slots 126/127 = 0 wie gefordert (Bitgleichheits-Arm gegen FDWAND).");
 		return;
 	}
-	{ const ulong erste=((ab+99ull)/100ull)*100ull; // ★ Pruefbefund 2 (07.09.): erste t%100-Stichprobe in Phase 2 -- liegt keine im Fenster, ist 126 = 0 KORREKT und kein No-Op
+	{ const ulong erste=((ab+zaehl_takt()-1ull)/zaehl_takt())*zaehl_takt(); // ★ Pruefbefund 2 (07.09.): erste t%100-Stichprobe in Phase 2 -- liegt keine im Fenster, ist 126 = 0 KORREKT und kein No-Op
 	  if(erste>=t_ende) { print_info("["+ort+"] SISM: keine t%100-Stichprobe im Phase-2-Fenster ["+to_string(ab)+", "+to_string(t_ende)+") -- Wirkpfad nicht pruefbar; ab+100 <= n_steps waehlen."); return; } }
 	if(t_ende-ab<(ulong)T) print_warning("["+ort+"] SISM: Phase 2 ("+to_string(t_ende-ab)+" Schritte) ist KUERZER als T = "+to_string((ulong)T)+" -- Sbar ist im Abzugsfenster nicht eingeschwungen, die Zahlen sind Anlauf, kein Zustand (Pruefbefund 6)."); // ★ 07.09.
 	if(s126==0ull) { print_error("["+ort+"] SISM angefordert und Phase 2 erreicht (ab = "+to_string(ab)+" < t = "+to_string(t_ende)+"), aber Slot 126 = 0 -- stiller No-Op (Emission? add_parameters? t-Update im Enqueue?)."); return; }
@@ -3923,7 +3923,7 @@ void main_setup_kanal() {
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) { // Wirkpfad-Nachweis: Zaehler auslesen
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[2], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[3], sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[4], sp=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[5];
-		const ulong soll=(ulong)Nx*(ulong)Ny*2ull*(ulong)((n_steps+99ull)/100ull);
+		const ulong soll=(ulong)Nx*(ulong)Ny*2ull*(ulong)((n_steps+zaehl_takt()-1ull)/zaehl_takt());
 		// Audit-Nacharbeit 11: Slot 3 = NUR tau-Klemme, Slot 4 = u_t~0-Skips (vorher vermischt)
 		print_info("Wandfunktion-Wirkpfad: "+to_string(wz)+" gezaehlte Wandzellen-Updates (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", Ein-Zellen-Spalte "+to_string(sp));
 		if(wz==0ull) print_error("Wandfunktion war eingeschaltet, aber der Wirkpfad-Zaehler ist NULL -- lautloser No-Op.");
@@ -3935,7 +3935,7 @@ void main_setup_kanal() {
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
 		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
-		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
+		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+zaehl_takt()-1ull)/zaehl_takt());
 		const ulong s12=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[12], s13=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[13], s10=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[10];
 		print_info("Facetten-Wirkpfad: "+to_string(wz)+" (Soll "+to_string(soll)+"; Ereignis-Slots t%100-gesampelt seit 405be0f), tau-Klemme "+to_string(kl)
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
@@ -4971,7 +4971,7 @@ void main_setup_kugel() {
 		if(env_u("CFD_SGS_FDWAND",0u)>0u) { const ulong s76=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[76]; if(s76==0ull) print_error("[Kugel] SGS_FDWAND war angefordert, aber Slot 76 = 0 -- stiller No-Op (Emission? Rebind? Enqueue?)."); else print_info("[Kugel] SGS_FDWAND-Wirkpfad Slot 76 = "+to_string(s76)+" (Soll ~ fac_N * ceil(n/100))."); } // ★ 07.09. abends (Planungsagent SISM): die Kugel hatte als EINZIGER Fall keinen Slot-76-Waechter -- an genau dem Fall, an dem FDWAND erst heute verdrahtet wurde
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[7], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[8];
 		const ulong sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[9], zu=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[11];
-		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+99ull)/100ull);
+		const ulong soll=lbm.lbm_domain[0]->fac_N*(ulong)((n_steps+zaehl_takt()-1ull)/zaehl_takt());
 		print_info("Facetten-Wirkpfad Kugel: "+to_string(wz)+" (Soll "+to_string(soll)+"), tau-Klemme "+to_string(kl)+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
@@ -8071,9 +8071,9 @@ static void main_setup_fahrzeug_dd() {
 					// Das Soll ist hier ohne Geraetelesung ausrechenbar (dieselbe Formel wie in der Abnahme).
 					{	const ulong facN = lbm_f.lbm_domain[0]->fac_N;
 						if(facN>0ull) {
-							const ulong s7 = facN*(ulong)((neu*(ulong)ratio+99ull)/100ull);
+							const ulong s7 = facN*(ulong)((neu*(ulong)ratio+zaehl_takt()-1ull)/zaehl_takt());
 							if(s7>=4294967296ull) {
-								const ulong n_max = (4294967295ull/facN)*100ull/(ulong)ratio;
+								const ulong n_max = (4294967295ull/facN)*zaehl_takt()/(ulong)ratio;
 								print_warning("[ZIEL] ACHTUNG: bei "+to_string((float)ziel_ms,1u)+" ms erreicht der Wirkpfad-Zaehler (Slot 7) "+to_string(s7)
 									+" und ueberlaeuft den uint-Bereich (2^32). Physik, CSVs und Kraefte bleiben davon unberuehrt -- aber jeder ANTEIL mit Slot 7 als Nenner"
 									+" (Solver-Kaskade, Rueckfallquote, Modellabdeckung) ist danach wertlos. Ohne Wickel bleibt der Lauf bis rund "
@@ -8330,7 +8330,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("N2F-SCHALE-Wirkpfad: Fernfeld "+to_string(swc)+" Blend-Zellen (t%100-Stichprobe; Solid-/NaN-Skips senken den Zaehler ehrlich), Nahfeld "+to_string(swf)+" (Soll 0 -- der Blend laeuft NUR im Fernfeld).");
 		// t laeuft im Blend 1..n_outer (Vorlauf-run(1) hatte t=0 VOR alloc_schale) -- t%100 feuert
 		// floor(n_outer/100) mal; bei Laeufen unter 100 groben Schritten ist 0 also KEIN Befund.
-		if(swc==0ull) { if(n_outer_ist<100ull) print_warning("N2F-SCHALE-Wirkpfad 0, aber der Lauf hat unter 100 grobe Schritte -- die t%100-Stichprobe hat nie gefeuert (kein Befund; laenger laufen fuer den Nachweis)."); else print_error("CFD_N2F_SCHALE gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op (Iron Rule 3)."); }
+		if(swc==0ull) { if(n_outer_ist<zaehl_takt()) print_warning("N2F-SCHALE-Wirkpfad 0, aber der Lauf hat unter 100 grobe Schritte -- die t%100-Stichprobe hat nie gefeuert (kein Befund; laenger laufen fuer den Nachweis)."); else print_error("CFD_N2F_SCHALE gesetzt, aber Fernfeld-Wirkpfad NULL -- lautloser No-Op (Iron Rule 3)."); }
 		// ★ PARITAETSNACHWEIS (Pruefagent-M2, 2026-08-22): der FNEQ-Arm muss bei alpha == 0 exakt
 		// degenerieren. Slot 23 zaehlt geraeteintern jede gespeicherte Verteilung, die vom geladenen
 		// Wert abweicht -- ein Dateivergleich kann das im dd-Fall nicht leisten (die Aktivierung
@@ -8388,7 +8388,7 @@ static void main_setup_fahrzeug_dd() {
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];
 		df->rho_clamp_hits.read_from_device();
-		const ulong wz=(ulong)df->rho_clamp_hits[7], soll=df->fac_N*(ulong)((n_outer_ist*(ulong)ratio+99ull)/100ull); // n_outer_IST: nach sauberem Stopp ist die geplante Zahl falsch
+		const ulong wz=(ulong)df->rho_clamp_hits[7], soll=df->fac_N*(ulong)((n_outer_ist*(ulong)ratio+zaehl_takt()-1ull)/zaehl_takt()); // n_outer_IST: nach sauberem Stopp ist die geplante Zahl falsch
 		print_info("Facetten-Wirkpfad Nahfeld: "+to_string(wz)+" (Soll "+to_string(soll)+" mod 2^32), tau-Klemme "+to_string((ulong)df->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)df->rho_clamp_hits[9])
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
@@ -8479,7 +8479,7 @@ static void main_setup_fahrzeug_dd() {
 	if(env_u("CFD_FERN_FACETTEN", 0u)>0u) { // ★ P8: Wirkpfad-Nachweis FERNFELD (Muster Nahfeld; das Grobgitter laeuft n_outer Schritte, Ereignis-Slots t%100-gesampelt)
 		LBM_Domain* dc = lbm_c.lbm_domain[0];
 		dc->rho_clamp_hits.read_from_device();
-		const ulong wzc=(ulong)dc->rho_clamp_hits[7], sollc=dc->fac_N*(ulong)(n_outer_ist/100ull + 1ull); // n_outer_IST (s. o.) // Pruefagent H1: das Grobgitter macht n_outer+1 Schritte (Vorlauf-run(1) vor der Schleife!) -- t%100 feuert bei t=0,100,..,<=n_outer = floor(n_outer/100)+1 mal; die ceil-Formel haette bei rundem n_outer falsch hart abgebrochen
+		const ulong wzc=(ulong)dc->rho_clamp_hits[7], sollc=dc->fac_N*(ulong)(n_outer_ist/zaehl_takt() + 1ull); // n_outer_IST (s. o.) // Pruefagent H1: das Grobgitter macht n_outer+1 Schritte (Vorlauf-run(1) vor der Schleife!) -- t%100 feuert bei t=0,100,..,<=n_outer = floor(n_outer/100)+1 mal; die ceil-Formel haette bei rundem n_outer falsch hart abgebrochen
 		print_info("Facetten-Wirkpfad Fernfeld (P8): "+to_string(wzc)+" (Soll "+to_string(sollc)+" mod 2^32), tau-Klemme "+to_string((ulong)dc->rho_clamp_hits[8])
 			+", u_t~0-Skips "+to_string((ulong)dc->rho_clamp_hits[9])
 			+(env_u("CFD_FERN_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)dc->rho_clamp_hits[10])+", Skalar "+to_string((ulong)dc->rho_clamp_hits[12])

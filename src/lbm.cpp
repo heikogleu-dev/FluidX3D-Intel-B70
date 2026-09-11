@@ -342,6 +342,20 @@ uint LBM_Domain::s_fac_qdiag = 0u; // ★ QDIAG-Diagnosearme (Injektionsjagd 202
 uint LBM_Domain::s_fac_rdiag = 0u; // ★ 07.09. Rueckfall-Diagnose (CFD_FAC_RDIAG), reine Zaehler
 uint LBM_Domain::s_fac_kraft = 0u;
 
+// ★ 11.09.2026 GEMEINSAMER ZAEHLTAKT (CFD_ZAEHL_TAKT, Default 100).
+// Die Wirkpfadzaehler feuern alle t%100 Schritte. Das ist Diagnostik, keine Physik -- aber es
+// ist teuer: E5 hat heute belegt, dass allein das Ausduennen EINES Blocks (P-TRT) von 100 auf
+// 1000 zwoelf Sekunden bringt, 2,9 % der Wanduhr am 8-mm-Fahrzeug. Zaehler sind Atomics auf
+// einen gemeinsamen Puffer und serialisieren; das ist eine andere Kostenart als Arithmetik und
+// die einzige, die heute zweimal wirklich durchgeschlagen hat.
+// DER TAKT STEHT AN GENAU EINER STELLE, weil Kernel und Host ihn BEIDE brauchen: der Kernel
+// zum Zaehlen, der Host fuer die Ist=Soll-Abnahmen, die die erwartete Zahl aus dem Raster
+// ausrechnen (Slots 7/20/21/22/76/186). Liefe beides auseinander, meldeten die Abnahmen
+// reihenweise Falschalarm -- genau das hat der Kernel-Pruefer heute fuer E5 vorhergesagt.
+// Funktionslokales static: unabhaengig von der Initialisierungsreihenfolge der Statiken.
+ulong zaehl_takt() { static const ulong t = (ulong)max(1u, env_u("CFD_ZAEHL_TAKT", 100u)); return t; }
+
+
 // ★ 11.09.2026 SPALDING-TABELLE (CFD_SPALDING_TAB, Default AUS).
 // wf_spalding_uplus loest X*S(X)=Y mit DREI Newton-Schritten ohne Konvergenzabfrage. Der
 // Kopfkommentar in kernel.cpp sagt selbst: tau_w-Fehler -0,44 % bei Y~2400, -4,4 % bei Y=1e4,
@@ -1644,6 +1658,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_fac_isogate "+to_string(s_fac_isogate,4u)+"f"
 	"\n	#define def_fac_deteps "+to_string(s_fac_deteps,4u)+"f"
 	"\n	#define def_wf_spalding_it "+to_string(max(1u,env_u("CFD_SPALDING_IT",3u)))+"u" : (string)"")
+	+"\n	#define def_zaehl_takt "+to_string(zaehl_takt())+"ul" // ★ gemeinsamer Zaehltakt, siehe zaehl_takt()
 	+((s_wandfunktion||s_facetten) ? spalding_tabelle() : (string)"") // ★ Spalding-Tabelle, nur wenn CFD_SPALDING_TAB=1
 	+((s_facetten&&s_fac_imem) ? (string)"\n	#define FACETTEN_IMEM" : (string)"") // iMEM-Umbau: Arme 3/4 (Splice ausserhalb R() -- Werkzeugfalle)
 	+((s_facetten&&s_fac_imem&&s_fac_ema>0.0f) ? (string)"\n	#define FACETTEN_EMA"

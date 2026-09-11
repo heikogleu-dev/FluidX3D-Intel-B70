@@ -1714,7 +1714,7 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 	const bool boden = (flags[j[6]]&TYPE_BO)==TYPE_S; // Solid unter der Zelle (-z)
 	const bool decke = (flags[j[5]]&TYPE_BO)==TYPE_S; // Solid ueber der Zelle (+z)
 	if(!boden&&!decke) return;
-	if(boden&&decke) { if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[5]); return; } // Spalt von 1 Zelle: unbehandelt, aber GEZAEHLT
+	if(boden&&decke) { if(zaehle&&t%def_zaehl_takt==0ul) atomic_inc(&wf_hits[5]); return; } // Spalt von 1 Zelle: unbehandelt, aber GEZAEHLT
 	float rhon, uxn, uyn, uzn;
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // Zustand VOR der Korrektur (Hans Abtastpunkt, y = 0,5)
 	const float ut = sqrt(uxn*uxn+uyn*uyn);
@@ -1725,10 +1725,10 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 		const float utau = ut/up;
 		float tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut; // physikalische Klemme; Treffer werden gezaehlt
-		if(tw>tw_max) { tw = tw_max; if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[3]); } // Slot 3: NUR tau-Klemme
+		if(tw>tw_max) { tw = tw_max; if(zaehle&&t%def_zaehl_takt==0ul) atomic_inc(&wf_hits[3]); } // Slot 3: NUR tau-Klemme
 		tau_x = -def_wf_tau*tw*uxn/ut; // Widerstand GEGEN u_t (Han Gl. 15)
 		tau_y = -def_wf_tau*tw*uyn/ut;
-	} else if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[4]); // Slot 4: u_t~0-Skips (Audit: vorher mit Slot 3 vermischt)
+	} else if(zaehle&&t%def_zaehl_takt==0ul) atomic_inc(&wf_hits[4]); // Slot 4: u_t~0-Skips (Audit: vorher mit Slot 3 vermischt)
 	if(boden) { // einlaufende Diagonalen: 9=(+1,0,+1)/16=(-1,0,+1) und 11=(0,+1,+1)/18=(0,-1,+1)
 		const float a=fhn[9]; fhn[9]=fhn[16]+0.5f*tau_x; fhn[16]=a-0.5f*tau_x;
 		const float b=fhn[11]; fhn[11]=fhn[18]+0.5f*tau_y; fhn[18]=b-0.5f*tau_y;
@@ -1736,7 +1736,7 @@ void apply_wall_function(float* fhn, const uxx* j, const global uchar* flags, gl
 		const float a=fhn[15]; fhn[15]=fhn[10]+0.5f*tau_x; fhn[10]=a-0.5f*tau_x;
 		const float b=fhn[17]; fhn[17]=fhn[12]+0.5f*tau_y; fhn[12]=b-0.5f*tau_y;
 	}
-	if(zaehle&&t%100ul==0ul) atomic_inc(&wf_hits[2]); // Wirkpfad-Zaehler, gegatet gegen uint-Ueberlauf
+	if(zaehle&&t%def_zaehl_takt==0ul) atomic_inc(&wf_hits[2]); // Wirkpfad-Zaehler, gegatet gegen uint-Ueberlauf
 } // apply_wall_function()
 )+"#endif"+R( // WANDFUNKTION
 )+"#ifdef FACETTEN"+R(
@@ -1781,11 +1781,11 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 		const float utau = ut/up;
 		tw = rhon*utau*utau;
 		const float tw_max = 0.5f*rhon*ut;
-		if(tw>tw_max) { tw = tw_max; if(t%100ul==0ul) atomic_inc(&hits[8]); } // Slot 8: Facetten-tau-Klemme (gegatet t%100 -- Audit R3: Fahrzeugmassstab wickelte ungegatet ueber)
+		if(tw>tw_max) { tw = tw_max; if(t%def_zaehl_takt==0ul) atomic_inc(&hits[8]); } // Slot 8: Facetten-tau-Klemme (gegatet t%100 -- Audit R3: Fahrzeugmassstab wickelte ungegatet ueber)
 		const float twf = tw*faca; // R2-Flaechenfaktor
-		if(twf>tw_max&&t%100ul==0ul) atomic_inc(&hits[8]); // Zweitklemme, Slot 8 = beide (gegatet t%100 seit R3)
+		if(twf>tw_max&&t%def_zaehl_takt==0ul) atomic_inc(&hits[8]); // Zweitklemme, Slot 8 = beide (gegatet t%100 seit R3)
 		twe = fmin(twf, tw_max); // am Kanal faca==1: twf==tw, nach Erstklemme nie >tw_max -> bitgleich und zaehlerneutral
-	} else if(t%100ul==0ul) atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip, gegatet t%100 (Tausch passiert trotzdem, wie z-WFB)
+	} else if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); // Slot 9: u_t~0-Skip, gegatet t%100 (Tausch passiert trotzdem, wie z-WFB)
 	uint getauscht = 0u; float fk_x=0.0f, fk_y=0.0f, fk_z=0.0f; // angewandte Wandkraft je Komponente (Cd-Pfad)
 	// Paartabelle FACETTEN-STUFE2.md Abschnitt B; Gate-Maske wie z-WFB: (flags&TYPE_BO)==TYPE_S
 	// schliesst TYPE_E und TYPE_MS (0x03) linkweise aus. Paarreihenfolge: tangentiale Achsen aufsteigend.
@@ -1823,8 +1823,8 @@ void apply_facette(const uxx n, float* fhn, const uxx* j, const global uchar* fl
 	if(getauscht>0u) { // 1 Zelle = 1 Facette: kein Atomic noetig; Layout 6 float (iMEM-Umbau): [0] tw physisch (y+), [1..3] angewandte Wandkraft (Cd-Reibung), [4] Delta-m (Paararm 0), [5] Normalkontamination (Paararm 0)
 		fac_tau_acc[6ul*(uxx)fid] += tw; fac_tau_acc[6ul*(uxx)fid+1ul] += fk_x; fac_tau_acc[6ul*(uxx)fid+2ul] += fk_y; fac_tau_acc[6ul*(uxx)fid+3ul] += fk_z;
 		fac_tau_cnt[fid] += 1u; }
-	else if(t%100ul==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
-	if(t%100ul==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)
+	else if(t%def_zaehl_takt==0ul) atomic_inc(&hits[11]); // Slot 11: Facette da, aber kein Paar offen (gegatet)
+	if(t%def_zaehl_takt==0ul) atomic_inc(&hits[7]);       // Slot 7: Wirkpfad, Soll = N_aktiv * ceil(n_steps/100)
 } // apply_facette()
 )+"#endif"+R( // FACETTEN
 )+"#ifdef FACETTEN_IMEM"+R(
@@ -1925,7 +1925,7 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 			// Eigener Wirkpfad des MLS-Zweigs (Frische-Augen-Audit 26.08., Befund 1): Slot 67
 			// zaehlt BEIDE Zweige (beruehrt), erst dieser Zaehler beweist im Binary, dass der
 			// q>0,5-Zweig Zellen anfasst. Muster Slot 67: saettigend, t%100-gegatet.
-			if(t%100ul==0ul&&hits[68]<0xF0000000u) atomic_inc(&hits[68]);
+			if(t%def_zaehl_takt==0ul&&hits[68]<0xF0000000u) atomic_inc(&hits[68]);
 		}
 		beruehrt = true;
 	}
@@ -1950,7 +1950,7 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 		fac_tau_acc[a3+1ul] += -dpx; fac_tau_acc[a3+2ul] += -dpy; fac_tau_acc[a3+3ul] += -dpz;
 		fac_tau_acc[a3+4ul] += dm_;
 		// dp geht per Wert zurueck (B3-Pruefbefund 1b: +2*Dp_t-Korrektur an der phi-Buchung)
-		if(t%100ul==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
+		if(t%def_zaehl_takt==0ul&&hits[67]<0xF0000000u) atomic_inc(&hits[67]); // Wirkpfad, saettigend
 		return (float3)(dpx, dpy, dpz);
 	}
 	return (float3)(0.0f, 0.0f, 0.0f);
@@ -1999,7 +1999,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// "reine BB"-Arm war an kipp26 in Wahrheit Blende-BB. Jetzt ist MESS-NUR exakt reines Bounce-Back,
 	// auch mit ELIBB-Emission. Slot 7 (Wirkpfad-Soll) und Slot 38 (MESSNUR-Wirkpfad; Umzug von 23,
 	// Pruefbefund B-3: 20-26 gehoeren boden_eq/einlass_eq/schale_blend ueber den diag-Alias) zaehlen hier.
-	if(t%100ul==0ul) { atomic_inc(&hits[7]); atomic_inc(&hits[75]); } // Slot 75 (B70)
+	if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[7]); atomic_inc(&hits[75]); } // Slot 75 (B70)
 	return (float3)(0.0f,0.0f,0.0f);
 )+"#endif"+R( // FACETTEN_MESSNUR
 )+"#ifdef FACETTEN_ELIBB"+R(
@@ -2024,8 +2024,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float und = nx*uxn+ny*uyn+nz*uzn;
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
-	if(t%100ul==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
-	if(ut<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
+	if(t%def_zaehl_takt==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
+	if(ut<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
 	// ★★ NACHBARABTASTUNG (CFD_FAC_NACHBAR, 30.08.2026, Weg-1 Stufe 3). BEFUND, der sie ausloest
 	// (Klassen-Diagnostik CFD_FAC_KDIAG am 26-Grad-Kanal, V3b-Konfiguration): die konkave Eckzelle
 	// (8 eigene Solid-Links, y_w 0,18) tastet u_t = 0,0051 ab, die freie Zelle ueber derselben
@@ -2048,9 +2048,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			// ★ 03.09. SAETTIGUNG wie Slot 76: am 4-mm-Fahrzeug laeuft dieser Zaehler auf 3,13 M Facetten x ~501
 			// Stichproben = 1,57e9 = 37 % des uint-Bereichs (Luft nur Faktor 2,7). Ohne Schutz wickelte er bei
 			// laengerem T_END oder feinerem Gitter STILL und der Report meldete eine falsche Prozentzahl.
-			if(t%100ul==0ul&&hits[72]<0xF0000000u) atomic_inc(&hits[72]); // Slot 72: Nachbarabtastung angewandt (saettigend)
-		} else if(utb<0.0f) { if(t%100ul==0ul&&hits[73]<0xF0000000u) atomic_inc(&hits[73]); } // Slot 73: kein Fluidnachbar in Normalenrichtung -- eigene Zelle (saettigend)
-		else if(t%100ul==0ul&&hits[74]<0xF0000000u) atomic_inc(&hits[74]); // Slot 74: Nachbar gefunden, steht aber still (saettigend)
+			if(t%def_zaehl_takt==0ul&&hits[72]<0xF0000000u) atomic_inc(&hits[72]); // Slot 72: Nachbarabtastung angewandt (saettigend)
+		} else if(utb<0.0f) { if(t%def_zaehl_takt==0ul&&hits[73]<0xF0000000u) atomic_inc(&hits[73]); } // Slot 73: kein Fluidnachbar in Normalenrichtung -- eigene Zelle (saettigend)
+		else if(t%def_zaehl_takt==0ul&&hits[74]<0xF0000000u) atomic_inc(&hits[74]); // Slot 74: Nachbar gefunden, steht aber still (saettigend)
 	}
 )+"#endif"+R( // FACETTEN_NACHBAR
 	float tw=0.0f, twe=0.0f; // Spalding-Kette WOERTLICH wie Paararm (Slots 8 seit R3 gegatet); unter PEMA wird twe unten aus dem gefilterten u ueberschrieben
@@ -2079,7 +2079,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// tau-Klemme N (Host, ohne Nenner) nicht lesbar. Am 4 mm auch eine Kopfhoehenfrage: Slot 8
 		// saettigt nicht und stand im schlimmsten Fall bei 79 Prozent des uint-Bereichs. Die
 		// PEMA/APG-Zweige wurden im Tiefen-Audit R2 genau dafuer saniert; der Basisarm nicht.
-		if((tw>tw_max||tw*faca>tw_max)&&t%100ul==0ul) atomic_inc(&hits[8]);
+		if((tw>tw_max||tw*faca>tw_max)&&t%def_zaehl_takt==0ul) atomic_inc(&hits[8]);
 )+"#endif"+R( // FACETTEN_APG
 )+"#endif"+R( // FACETTEN_PEMA
 		if(tw>tw_max) { tw = tw_max; }
@@ -2114,10 +2114,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		float tw1 = fma(-def_fac_apg*yw, fac_dpds, tw);
 		// ★ Lauf-4-Befund (Fahrzeug): |Korrektur| >> tw an Staupunkt/Heck -- 46 % 0-Klemmen, y+ x10,
 		// +0,085 Cd Reibungsstrafe. RELATIVE Kappung (Planer-Reserve): Ziel bleibt in [0, 2*tw].
-		if(tw1<0.0f) { tw1=0.0f; if(t%100ul==0ul) atomic_inc(&hits[19]); } // Slot 19: beide APG-Klemmen (unten 0 / oben 2*tw)
-		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(t%100ul==0ul) atomic_inc(&hits[19]); }
+		if(tw1<0.0f) { tw1=0.0f; if(t%def_zaehl_takt==0ul) atomic_inc(&hits[19]); } // Slot 19: beide APG-Klemmen (unten 0 / oben 2*tw)
+		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(t%def_zaehl_takt==0ul) atomic_inc(&hits[19]); }
 		tw = tw1;
-		if(tw*faca>0.5f*rhon*ut&&t%100ul==0ul) atomic_inc(&hits[8]); // Tiefen-Audit A1-B2: Klemme der NACH-APG-Kette zaehlen (Kopf zaehlte die verworfene Vor-APG-Kette)
+		if(tw*faca>0.5f*rhon*ut&&t%def_zaehl_takt==0ul) atomic_inc(&hits[8]); // Tiefen-Audit A1-B2: Klemme der NACH-APG-Kette zaehlen (Kopf zaehlte die verworfene Vor-APG-Kette)
 		twe = fmin(tw*faca, 0.5f*rhon*ut);
 	}
 )+"#endif"+R( // FACETTEN_APG
@@ -2159,7 +2159,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float B1o=S1x*t1x+S1y*t1y+S1z*t1z, B2o=S1x*t2x+S1y*t2y+S1z*t2z;
 		// ★ Pruefbefund 3-B (2026-08-25): fac_N ~ 1e6 mal 5000 Abtastungen sprengt uint. Hash-Stichprobe
 		// ueber die Facetten-Nummer (jede 64.), damit die Bins nicht wickeln.
-		if(t%100ul==0ul&&((fid*2654435761u)&4227858432u)==0u) {
+		if(t%def_zaehl_takt==0ul&&((fid*2654435761u)&4227858432u)==0u) {
 			const float zi_ = def_fac_tau*twe; if(zi_>0.0f) { // ★ Pruefbefund B(b): bei Nullziel-Armen (def_fac_tau=0) waere jeder Wert im obersten Bin
 			// ★ FIX 2026-08-27 (Planungsagent Schritt 2, Befund 2.1): hier stand "if(zi_<=0.0f) return;".
 			// Das return verliess die GANZE Funktion, nicht nur diesen Histogrammblock -- in einem
@@ -2243,7 +2243,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float undb = nx*ubx+ny*uby+nz*ubz;
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float utb = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
-		if(utb<1e-6f) { if(t%100ul==0ul) atomic_inc(&hits[17]); return (float3)(0.0f,0.0f,0.0f); } // IR3-Audit M2: KEIN stiller Rueckfall in den widerlegten Instantan-Modus -- BB belassen, Slot 17 zaehlt (Staupunkt-/Abloesezellen)
+		if(utb<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[17]); return (float3)(0.0f,0.0f,0.0f); } // IR3-Audit M2: KEIN stiller Rueckfall in den widerlegten Instantan-Modus -- BB belassen, Slot 17 zaehlt (Staupunkt-/Abloesezellen)
 		{
 			t1x=utxb/utb; t1y=utyb/utb; t1z=utzb/utb;
 			t2x=ny*t1z-nz*t1y; t2y=nz*t1x-nx*t1z; t2z=nx*t1y-ny*t1x;
@@ -2252,7 +2252,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float utaub = utb_wm/upb;
 			float twb = rhon*utaub*utaub;
 			const float twmb = 0.5f*rhon*utb;
-			if((twb>twmb||twb*faca>twmb)&&t%100ul==0ul) atomic_inc(&hits[8]); // Slot 8: Klemmen der ANGEWANDTEN Kette (Audit 1/3 -- vorher zaehlte die verworfene Kopf-Kette)
+			if((twb>twmb||twb*faca>twmb)&&t%def_zaehl_takt==0ul) atomic_inc(&hits[8]); // Slot 8: Klemmen der ANGEWANDTEN Kette (Audit 1/3 -- vorher zaehlte die verworfene Kopf-Kette)
 			if(twb>twmb) twb = twmb;
 			twe = fmin(twb*faca, twmb);
 			ut = utb; // Klemmskalen folgen der gefilterten Basis
@@ -2362,7 +2362,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// musste per Subtraktion geschaetzt werden, dabei griff ich zum naechstbesten Slot (14) und der ist
 		// der gekoppelte SKALAR-Rueckfall. Ein fehlender Zaehler hat hier nicht nur eine Messung verhindert,
 		// sondern eine FALSCHE erzeugt. Jetzt ist die Kaskade lueckenlos: 78+79+12+13+14+15 == Wirkpfad-Rest.
-		if(t%100ul==0ul&&hits[78]<0xF0000000u) atomic_inc(&hits[78]); zweig=1u; }
+		if(t%def_zaehl_takt==0ul&&hits[78]<0xF0000000u) atomic_inc(&hits[78]); zweig=1u; }
 	// ★★ 2026-08-25 KLEINSTE-QUADRATE-RUECKFALL (CFD_FAC_LSQ, Default AUS -- Pruefbefund 4-A: es ist eine MODELLAENDERUNG, keine Fehlerkorrektur). Der alte Skalar-Rueckfall
 	// s1 = R1/G11 erzwingt das Ziel in Richtung 1 EXAKT und ignoriert die zweite Gleichung ganz.
 	// Ist G11 fast entartet, wird s1 riesig -- und weil G12 dabei NICHT klein sein muss, schleppt
@@ -2372,13 +2372,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// laeuft sie gegen R2/G12 statt gegen unendlich. Das Residuum steht dann senkrecht auf dem
 	// Erreichbaren -- das ist die Definition von "so nah am Ziel wie diese Linkmenge es zulaesst".
 )+"#ifdef FACETTEN_LSQ"+R(
-	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } zweig=3u; }
-	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; res2=fabs(G22*s2-R2); if(t%100ul==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } zweig=3u; }
+	else if(G11>=1e-8f) { const float d=fma(G11,G11,G12*G12); s1=(d>0.0f)?(G11*R1+G12*R2)/d:0.0f; s2=0.0f; res2=fabs(G12*s1-R2); if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } zweig=3u; }
+	else if(G22>=1e-8f) { const float d=fma(G22,G22,G12*G12); s2=(d>0.0f)?(G12*R1+G22*R2)/d:0.0f; s1=0.0f; res2=fabs(G22*s2-R2); if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[12]); atomic_inc(&hits[65]); } zweig=3u; }
 )+"#else"+R(
-	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); zweig=3u; } // Slot 12: Skalar-Fallback t1
-	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%100ul==0ul) atomic_inc(&hits[12]); zweig=3u; } // Slot 12: Skalar-Fallback t2
+	else if(G11>=1e-8f) { s1=R1/G11; s2=0.0f; res2=fabs(G12*s1-R2); if(t%def_zaehl_takt==0ul) atomic_inc(&hits[12]); zweig=3u; } // Slot 12: Skalar-Fallback t1
+	else if(G22>=1e-8f) { s1=0.0f; s2=R2/G22; res2=fabs(G22*s2-R2); if(t%def_zaehl_takt==0ul) atomic_inc(&hits[12]); zweig=3u; } // Slot 12: Skalar-Fallback t2
 )+"#endif"+R( // FACETTEN_LSQ
-	else { if(t%100ul==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } rueckfall=true; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten. ★ 03.09.2026 KORRIGIERT: die alte Bezeichnung "die ELIBB-heilbare Klasse" stammt vom 22.08. und ist seit der B2-REVISION vom 25.08. FALSCH. elibb_rekonstruiere iteriert ueber DIESELBE Linkmenge mit demselben Praedikat und aendert nur die WERTE fhn[i] -- G11/G22/G12/S0/S1/Snn sind mit und ohne ELIBB bitgleich, der Rang aendert sich NIE. Empirisch: w_nb lief MIT ELIBB (Slot 67 = 139.185.273) und Slot 27 steht trotzdem bei 15,23 % der Wandbesuche. Heilbar waere die Klasse nur mit der urspruenglich geplanten Blende u_W = u_s gewesen, und genau die wurde am 25.08. zurueckgenommen (sie ist bei q=0,5 die Identitaet, der Wandmodell-impuls waere an jeder ebenen Partie konstruktiv ausgefallen). Der wahre Grund ist Rang: das ALPHA2-Downdate macht aus dem zweiten Moment die KOVARIANZ der Linkrichtungen, bei einem Link ist sie null, und die Massenerhaltung erzwingt dort q_1 = 0 -- unter JEDEM Ansatz [06.09.: UEBERHOLT unter MASSE_ALLE -- dort ist q_1 != 0 erlaubt, es traegt allein J.n = 0; s. 3X3.md Gl. 28 Nachtrag]
+	else { if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[13]); if(G11roh>=1e-8f||G22roh>=1e-8f) atomic_inc(&hits[27]); } rueckfall=true; } // Slot 13: kein tangential wirksamer Link; [27] = Teilmenge mit rohen Tangentialmomenten. ★ 03.09.2026 KORRIGIERT: die alte Bezeichnung "die ELIBB-heilbare Klasse" stammt vom 22.08. und ist seit der B2-REVISION vom 25.08. FALSCH. elibb_rekonstruiere iteriert ueber DIESELBE Linkmenge mit demselben Praedikat und aendert nur die WERTE fhn[i] -- G11/G22/G12/S0/S1/Snn sind mit und ohne ELIBB bitgleich, der Rang aendert sich NIE. Empirisch: w_nb lief MIT ELIBB (Slot 67 = 139.185.273) und Slot 27 steht trotzdem bei 15,23 % der Wandbesuche. Heilbar waere die Klasse nur mit der urspruenglich geplanten Blende u_W = u_s gewesen, und genau die wurde am 25.08. zurueckgenommen (sie ist bei q=0,5 die Identitaet, der Wandmodell-impuls waere an jeder ebenen Partie konstruktiv ausgefallen). Der wahre Grund ist Rang: das ALPHA2-Downdate macht aus dem zweiten Moment die KOVARIANZ der Linkrichtungen, bei einem Link ist sie null, und die Massenerhaltung erzwingt dort q_1 = 0 -- unter JEDEM Ansatz [06.09.: UEBERHOLT unter MASSE_ALLE -- dort ist q_1 != 0 erlaubt, es traegt allein J.n = 0; s. 3X3.md Gl. 28 Nachtrag]
 	} else {
 	// Schur-Reduktion (Gl. 19): Gt_ab = G_ab - Sn_a*Sn_b/Snn; RHS bleibt (R1,R2); sn = -(Sn*s)/Snn.
 	const float Gt11 = G11 - Sn1*Sn1/Snn, Gt22 = G22 - Sn2*Sn2/Snn, Gt12 = G12 - Sn1*Sn2/Snn;
@@ -2401,7 +2401,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// genau 1 Grad von 1,5 auf 92,7 % -- dort endet der Schutz des Waechters bei 2193.
 	const float det_eps = def_fac_deteps*1.1920929e-7f*(G11+G22)*(Snnroh/fmax(Snn,1e-30f));
 	if(dett>=1e-4f*Gt11*Gt22+det_eps&&Gt11>=1e-4f*G11&&Gt22>=1e-4f*G22&&Gt11>=1e-8f&&Gt22>=1e-8f) { s1=(R1*Gt22-R2*Gt12)/dett; s2=(R2*Gt11-R1*Gt12)/dett;
-		if(t%100ul==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); zweig=2u; } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
+		if(t%def_zaehl_takt==0ul&&hits[79]<0xF0000000u) atomic_inc(&hits[79]); zweig=2u; } // ★ Slot 79: der EXAKTE gekoppelte Schur-Solve (Gegenstueck zu 78, s. dort)
 )+"#ifdef FACETTEN_PINV"+R(
 	// ★★ 04.09.2026 RANG-1-PSEUDOINVERSE (CFD_FAC_PINV, Default aus). Der gemessene Befund dahinter:
 	// fuer die ebene Voxelwand ist nach dem ALPHA2-Downdate G' = (1/3)(I - n n^T), und die Schur-
@@ -2426,16 +2426,16 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float tr=Gt11+Gt22, it2=1.0f/(tr*tr);
 		s1=(Gt11*R1+Gt12*R2)*it2; s2=(Gt12*R1+Gt22*R2)*it2;
 		res2=fabs(fma(Gt12,s1,Gt22*s2)-R2);
-		if(t%100ul==0ul) { atomic_inc(&hits[14]); if(hits[80]<0xF0000000u) atomic_inc(&hits[80]); } zweig=4u;
+		if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[14]); if(hits[80]<0xF0000000u) atomic_inc(&hits[80]); } zweig=4u;
 	}
 )+"#elif defined(FACETTEN_LSQ)"+R(
-	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } zweig=4u; } // Slot 14, kleinste Quadrate (s.o.)
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } zweig=4u; } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1, selben Tag): hier stand kurzzeitig -R1. Das mischt die LINKE Seite von Gl. 2 mit der RECHTEN von Gl. 1 und faellt mit s1=0 auf |R2-R1| zusammen -- unabhaengig von Gt UND s. res2 ist per Definition das Gl.-2-Residuum (QUERGATE = Restfehler in Querrichtung t2), und im LSQ-Zweig ist es echt von null verschieden. Ein Mass fuer die Gl.-1-Luecke braucht eine EIGENE Groesse res1 mit eigenem Slot, nicht diese hier.
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { const float d=fma(Gt11,Gt11,Gt12*Gt12); s1=(d>0.0f)?(Gt11*R1+Gt12*R2)/d:0.0f; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } zweig=4u; } // Slot 14, kleinste Quadrate (s.o.)
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { const float d=fma(Gt22,Gt22,Gt12*Gt12); s2=(d>0.0f)?(Gt12*R1+Gt22*R2)/d:0.0f; s1=0.0f; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[14]); atomic_inc(&hits[65]); } zweig=4u; } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1, selben Tag): hier stand kurzzeitig -R1. Das mischt die LINKE Seite von Gl. 2 mit der RECHTEN von Gl. 1 und faellt mit s1=0 auf |R2-R1| zusammen -- unabhaengig von Gt UND s. res2 ist per Definition das Gl.-2-Residuum (QUERGATE = Restfehler in Querrichtung t2), und im LSQ-Zweig ist es echt von null verschieden. Ein Mass fuer die Gl.-1-Luecke braucht eine EIGENE Groesse res1 mit eigenem Slot, nicht diese hier.
 )+"#else"+R(
-	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); zweig=4u; } // Slot 14: gekoppelter Rang-2-Pfad
-	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%100ul==0ul) atomic_inc(&hits[14]); zweig=4u; } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1): res2 ist hier IDENTISCH NULL, und das ist RICHTIG -- der Zweig erfuellt Gl. 2 exakt, also ist das Gl.-2-Residuum null. Dass QUERGATE fuer ihn nie feuert, ist korrektes Verhalten, kein blinder Fleck. Die Gl.-1-Luecke ist eine ANDERE Groesse (s. LSQ-Zweig).
+	else if(Gt11>=1e-4f*G11&&Gt11>=1e-8f) { s1=R1/Gt11; s2=0.0f; res2=fabs(Gt12*s1-R2); if(t%def_zaehl_takt==0ul) atomic_inc(&hits[14]); zweig=4u; } // Slot 14: gekoppelter Rang-2-Pfad
+	else if(Gt22>=1e-4f*G22&&Gt22>=1e-8f) { s1=0.0f; s2=R2/Gt22; res2=fabs(fma(Gt12,s1,Gt22*s2)-R2); if(t%def_zaehl_takt==0ul) atomic_inc(&hits[14]); zweig=4u; } // ★ 04.09. ZURUECKGENOMMEN (Kernel-Audit M1): res2 ist hier IDENTISCH NULL, und das ist RICHTIG -- der Zweig erfuellt Gl. 2 exakt, also ist das Gl.-2-Residuum null. Dass QUERGATE fuer ihn nie feuert, ist korrektes Verhalten, kein blinder Fleck. Die Gl.-1-Luecke ist eine ANDERE Groesse (s. LSQ-Zweig).
 )+"#endif"+R( // FACETTEN_PINV / FACETTEN_LSQ
-	else { if(t%100ul==0ul) atomic_inc(&hits[15]); rueckfall=true; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
+	else { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[15]); rueckfall=true; } // Slot 15: gekoppelt Rang 0 (Einzellink c_n!=0) -- BB belassen (Entscheid Gl. 28: jede Erfuellung injizierte Normalimpuls)
 	}
 	// ★★ 2026-08-25 QUERGATE (CFD_FAC_QUERGATE, Default AUS), Antwort auf Pruefbefund 4-A.
 	// Die Skalar-Rueckfaelle treffen ihr Ziel in Stroemungsrichtung exakt und lassen die zweite
@@ -2445,17 +2445,17 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// die ueberhaupt aufgepraegt werden soll, wird BB belassen statt einen Querimpuls einzuschleppen,
 	// den niemand bestellt hat. Ein exakter 2x2- oder Schur-Solve hat res2 = 0 und passiert immer.
 )+"#ifdef FACETTEN_QUERGATE"+R(
-	if(!rueckfall&&def_fac_tau>0.0f&&res2>def_fac_tau*twe) { if(t%100ul==0ul) { atomic_inc(&hits[64]); if(zweig>0u) atomic_inc(&hits[103u+zweig]); } rueckfall=true; } // Slot 64 -- ★ S2: def_fac_tau>0 als Gate-Vorbedingung, sonst ist der Nullziel-Arm ein Nullschwellen-Gate
+	if(!rueckfall&&def_fac_tau>0.0f&&res2>def_fac_tau*twe) { if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[64]); if(zweig>0u) atomic_inc(&hits[103u+zweig]); } rueckfall=true; } // Slot 64 -- ★ S2: def_fac_tau>0 als Gate-Vorbedingung, sonst ist der Nullziel-Arm ein Nullschwellen-Gate
 )+"#endif"+R( // FACETTEN_QUERGATE
 )+"#ifdef FACETTEN_SATGATE"+R(
 	// ★ (a-strich), Stabilitaetsanalyse G8: der EINZIGE vorzeichen-definite Injektionsterm ist die
 	// GEKLEMMTE Anwendung. Reisst die ungeklemmte Loesung ihr Budget, wird NICHT geklemmt
 	// angewandt, sondern BB belassen und gezaehlt -- iMEM wirkt nur, wenn es sein Ziel im Budget
 	// exakt erreichen kann (Verallgemeinerung des Rang-0-Entscheids von Geometrie auf Dynamik).
-	if(!rueckfall&&((def_fac_isogate>0.5f) ? (s1*s1+s2*s2>4.0f*def_fac_budget*def_fac_budget*ut*ut) : (fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut))) { if(t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
+	if(!rueckfall&&((def_fac_isogate>0.5f) ? (s1*s1+s2*s2>4.0f*def_fac_budget*def_fac_budget*ut*ut) : (fabs(s1)>2.0f*def_fac_budget*ut||fabs(s2)>def_fac_budget*ut))) { if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } rueckfall=true; } // Slot 10: Gate-Rueckfall; Budget-Skalar def_fac_budget (1a-B4t, Default 1.0 = bitidentisch)
 )+"#else"+R(
 	const float s1c = clamp(s1, -2.0f*def_fac_budget*ut, 2.0f*def_fac_budget*ut), s2c = clamp(s2, -def_fac_budget*ut, def_fac_budget*ut); // Klemmen (Gl. 9), Budget-Skalar (1a-B4t)
-	if(!rueckfall&&(s1c!=s1||s2c!=s2)&&t%100ul==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } // Slot 10: u_s-Klemme (nicht an Rueckfallzellen zaehlen -- Pruefbefund 4a)
+	if(!rueckfall&&(s1c!=s1||s2c!=s2)&&t%def_zaehl_takt==0ul) { atomic_inc(&hits[10]); if(zweig>0u) atomic_inc(&hits[95u+zweig]); } // Slot 10: u_s-Klemme (nicht an Rueckfallzellen zaehlen -- Pruefbefund 4a)
 	s1=s1c; s2=s2c;
 )+"#endif"+R( // FACETTEN_SATGATE
 	// 3x3: sn aus den GEKLEMMTEN s1/s2 (Normal-Nullung haelt auch bei Tangentialklemme, Gl. 23);
@@ -2463,10 +2463,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(!rueckfall&&Snn>=1e-8f&&(Sn1*Sn1+Sn2*Sn2)>1e-6f*Snn*(G11+G22)) {
 		sn = -(Sn1*s1+Sn2*s2)/Snn;
 )+"#ifdef FACETTEN_SATGATE"+R(
-		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%100ul==0ul) { atomic_inc(&hits[16]); if(zweig>0u) atomic_inc(&hits[99u+zweig]); } rueckfall=true; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
+		if(fabs(sn)>def_fac_budget_sn*ut) { if(t%def_zaehl_takt==0ul) { atomic_inc(&hits[16]); if(zweig>0u) atomic_inc(&hits[99u+zweig]); } rueckfall=true; } // Slot 16: sn-Gate-Rueckfall; Budget-Skalar (1a-Bsn)
 )+"#else"+R(
 		const float snc = clamp(sn, -def_fac_budget_sn*ut, def_fac_budget_sn*ut); // Budget-Skalar (1a-Bsn)
-		if(snc!=sn&&t%100ul==0ul) { atomic_inc(&hits[16]); if(zweig>0u) atomic_inc(&hits[99u+zweig]); } // Slot 16: s_n-Klemme
+		if(snc!=sn&&t%def_zaehl_takt==0ul) { atomic_inc(&hits[16]); if(zweig>0u) atomic_inc(&hits[99u+zweig]); } // Slot 16: s_n-Klemme
 		sn = snc;
 )+"#endif"+R( // FACETTEN_SATGATE
 	}
@@ -2476,7 +2476,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// ~40 % Facettenbesuche, die bisher per return NICHTS buchten (K2 -7,4 am 26-Grad-Kanal =
 	// Blenden-Korrektur ohne den BB-Anteil, den sie korrigiert). Explizit +0.0f, kein signed-zero-Anker.
 )+"#ifdef FACETTEN_MASSE_X"+R(
-	if(t%100ul==0ul) { // Kreuztabelle roh x Schatten, dieselbe Stichprobe wie Slot 69 und die Kaskade
+	if(t%def_zaehl_takt==0ul) { // Kreuztabelle roh x Schatten, dieselbe Stichprobe wie Slot 69 und die Kaskade
 		if(a2_rueckfall&&!rueckfall) { if(hits[94]<0xF0000000u) atomic_inc(&hits[94]); if(zweig>0u&&hits[107u+zweig]<0xF0000000u) atomic_inc(&hits[107u+zweig]); } // [94] + [108..111] nach rohem Zweig
 		if(rueckfall&&!a2_rueckfall) { if(hits[95]<0xF0000000u) atomic_inc(&hits[95]); if(zweig>0u) { if(hits[111u+zweig]<0xF0000000u) atomic_inc(&hits[111u+zweig]); } else if(hits[116]<0xF0000000u) atomic_inc(&hits[116]); } // [95] + [112..115] nach rohem Zweig, [116] = roh Rang-0
 	}
@@ -2540,14 +2540,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// diese Klemme schneidet also genau den zulaessigen Bereich ab.
 		const float duw = utau_uw*utau_uw*yw_ab/(def_fac_nu*rnu_uw);
 		float uw = ut_ab - duw;
-		if(uw<=0.0f) { uw = 0.0f; if(t%100ul==0ul&&hits[124]<0xF0000000u) atomic_inc(&hits[124]); }
-		if(uw>ut_ab) { uw = ut_ab; if(t%100ul==0ul&&hits[125]<0xF0000000u) atomic_inc(&hits[125]); }
+		if(uw<=0.0f) { uw = 0.0f; if(t%def_zaehl_takt==0ul&&hits[124]<0xF0000000u) atomic_inc(&hits[124]); }
+		if(uw>ut_ab) { uw = ut_ab; if(t%def_zaehl_takt==0ul&&hits[125]<0xF0000000u) atomic_inc(&hits[125]); }
 		s1 = uw; s2 = 0.0f; sn = 0.0f;
 		rueckfall = (uw<=0.0f); // nur die Klemme faellt zurueck -- Rang und Gates gibt es hier nicht
-		if(t%100ul==0ul&&hits[123]<0xF0000000u) atomic_inc(&hits[123]); // Wirkpfad: MUSS feuern
+		if(t%def_zaehl_takt==0ul&&hits[123]<0xF0000000u) atomic_inc(&hits[123]); // Wirkpfad: MUSS feuern
 		{	const float q_uw = (ut_ab>1e-12f) ? uw/ut_ab : 0.0f;         // Histogramm u_w/u_B, 8 Eimer a 0,125
 			const uint b_uw = (uint)fmin(7.0f, fmax(0.0f, floor(8.0f*q_uw)));
-			if(t%100ul==0ul&&hits[128u+b_uw]<0xF0000000u) atomic_inc(&hits[128u+b_uw]); }
+			if(t%def_zaehl_takt==0ul&&hits[128u+b_uw]<0xF0000000u) atomic_inc(&hits[128u+b_uw]); }
 )+"#ifdef FACETTEN_UW_SN"+R(
 		// A/B-Arm: Normalnullung trotz u_w. Dann faellt die Ein-Link-Klasse wie heute zurueck, und die
 		// Differenz der beiden Arme MISST den Preis der Nebenbedingung J.n = 0.
@@ -2563,7 +2563,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(kz) {
 		kraft = (float3)(R1*t1x+R2*t2x, R1*t1y+R2*t2y, R1*t1z+R2*t2z); // = Ziel - P, tangential
 		s1=0.0f; s2=0.0f; sn=0.0f; pass2_an=false;                    // kein Additivterm an Kraftzellen
-		if(t%100ul==0ul&&hits[70]<0xF0000000u) atomic_inc(&hits[70]); // Slot 70: Kraftpfad (saettigend)
+		if(t%def_zaehl_takt==0ul&&hits[70]<0xF0000000u) atomic_inc(&hits[70]); // Slot 70: Kraftpfad (saettigend)
 		if(t<100ul&&hits[71]<0xF0000000u) atomic_inc(&hits[71]); // Slot 71: Kraftzellen im ANLAUF (t<100), UNGEGATET -- Bitanker-Befund 30.08.: kipp0 hat am Startschritt an ALLEN Facettenzellen Rueckfall (3720 = fac_N), die t%100-Stichprobe sieht das nicht
 	}
 )+"#endif"+R( // FACETTEN_KRAFT
@@ -2595,9 +2595,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_MASSE_ALLE"+R(
 	// ★ 04.09. (Diff-Pruefung d6): unter MASSE_ALLE wird beta3 = alph*S0 injiziert, nicht alph. Mit
 	// S0 ~ 0,1..0,3 warnte der Waechter auf einem drei- bis zehnfach zu grossen Wert.
-	if(fabs(-6.0f*(S1x*usx+S1y*usy+S1z*usz))>ut&&t%100ul==0ul) atomic_inc(&hits[18]);
+	if(fabs(-6.0f*(S1x*usx+S1y*usy+S1z*usz))>ut&&t%def_zaehl_takt==0ul) atomic_inc(&hits[18]);
 )+"#else"+R(
-	if(fabs(alph)>ut&&t%100ul==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
+	if(fabs(alph)>ut&&t%def_zaehl_takt==0ul) atomic_inc(&hits[18]); // Slot 18: alpha in Geschwindigkeitsordnung -- Warnsignal
 )+"#endif"+R(
 )+"#ifdef FACETTEN_MASSE_ALLE"+R(
 	// ★★ 04.09.2026 STUFE 3: DIESELBE Masse, aber ueber ALLE 19 Links statt nur ueber die Wandlinks.
@@ -2642,11 +2642,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// Geschwindigkeitsklemme 14.659.833 gegen 1.570 in der Basis (x9.300), f_0 <= 0 bei 2,0 % der
 		// Besuche (Slot 93), cz_druck_rest +0,675. Modus 2 ist VERWORFEN; der Zaehler bleibt als Beleg.
 		fhn[0] += beta3; masse_ist = beta3; // D15: masse_ist == beta3 EXAKT -> die Delta-m-Buchung ist hier konstruktiv 0 (kein Messwert; Modus verworfen 04.09.)
-		if(fhn[0]+0.33333334f<=0.0f&&t%100ul==0ul&&hits[93]<0xF0000000u) atomic_inc(&hits[93]); // [93] f_0 nicht mehr positiv
+		if(fhn[0]+0.33333334f<=0.0f&&t%def_zaehl_takt==0ul&&hits[93]<0xF0000000u) atomic_inc(&hits[93]); // [93] f_0 nicht mehr positiv
 )+"#else"+R(
 		for(uint i=0u; i<def_velocity_set; i++) { fhn[i] += w(i)*beta3; masse_ist += w(i)*beta3; }
 )+"#endif"+R(
-		if(t%100ul==0ul&&hits[92]<0xF0000000u) atomic_inc(&hits[92]); } // [92] Wirkpfad
+		if(t%def_zaehl_takt==0ul&&hits[92]<0xF0000000u) atomic_inc(&hits[92]); } // [92] Wirkpfad
 )+"#endif"+R( // FACETTEN_MASSE_ALLE
 	float phi1 = P1 + fma(G11,s1,G12*s2) + Sn1*sn, phi2 = P2 + fma(G12,s1,G22*s2) + Sn2*sn;
 )+"#ifndef FACETTEN_UW"+R(
@@ -2678,7 +2678,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// mit umgekehrtem Vorzeichen. Das Verhaeltnis JE BESUCH normiert sich selbst.
 	// Stichprobe wie beim Momenten-Histogramm 2129: t%100 UND jede 64. Facette (uint-Wickel).
 	{	const float zi_ze = def_fac_tau*twe;
-		if(t%100ul==0ul&&((fid*2654435761u)&4227858432u)==0u) {
+		if(t%def_zaehl_takt==0ul&&((fid*2654435761u)&4227858432u)==0u) {
 			if(hits[81]<0xF0000000u) atomic_inc(&hits[81]); // [81] Nenner: alle gestichprobten Besuche
 			if(pass2_an) {
 				if(zi_ze>0.0f) {
@@ -2786,7 +2786,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	    fac_kd[k8+12ul]+=a_kd; fac_kd[k8+13ul]+=fabs(a_kd);
 	    fac_kd[k8+14ul]+=(pass2_an?-def_fac_tau*twe:0.0f); fac_kd[k8+15ul]+=(pass2_an?2.0f*b1_kd:0.0f); } } // ★ S1 (04.09. abends): pass2_an statt !rueckfall -- unter KRAFT=2 ist pass2_an ueberall false, rueckfall nicht // [8]/[9]: Abtastwerte (== ut/yw ohne FACETTEN_NACHBAR) // ★ Klassen-Diagnostik: je Facette akkumuliert, Host mittelt je Treppenklasse (Iron Rule 3, Weg-1-Plan Stufe 0)
 )+"#endif"+R( // FACETTEN_KDIAG
-	if(rueckfall&&t%100ul==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
+	if(rueckfall&&t%def_zaehl_takt==0ul&&hits[69]<0xF0000000u) atomic_inc(&hits[69]); // Slot 69: Rueckfall-Buchung (P-only), saettigend; Host prueft 69 == 13+15+64(+10+16 unter SATGATE)
 )+"#ifdef FACETTEN_RDIAG"+R(
 	// ★★ 07.09.2026 RUECKFALL-DIAGNOSE (CFD_FAC_RDIAG, Planungsagent-Schritt K1).
 	// ANLASS: fac_kd[12..15] und die Slots 118..122 sind auf pass2_an gegatet und damit an genau
@@ -2820,7 +2820,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// VOR der Stringifizierung, kernel.hpp:4. Sondern: das Einschalten fuegt echten Code hinzu,
 	// und am 07.09. brach ein Hash zwischen zwei Binaries mit identischem OpenCL-Text -- Ursache
 	// ungeklaert, Kandidat FMA-Kontraktion im Host bei -O. Deshalb: AUS-neu gegen AN-neu.)
-	if(rueckfall&&t%100ul==0ul&&def_fac_tau*twe>0.0f) {
+	if(rueckfall&&t%def_zaehl_takt==0ul&&def_fac_tau*twe>0.0f) {
 		const float b1_rf = S1x*t1x+S1y*t1y+S1z*t1z;
 		const float zi_rf = fabs(def_fac_tau*twe);
 		const float a_rf = 2.0f*(rhon-1.0f)*b1_rf;
@@ -3127,13 +3127,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Kontrollarm zahlt nichts, weil ungesetzt gar nicht emittiert wird.
 	bool sgs_wand = false;
 	for(uint i=1u; i<def_velocity_set; i++) sgs_wand = sgs_wand||(flags[j[i]]&TYPE_BO)==TYPE_S; // ★ WM-Blick D (MITTEL): vorher nur j[1..6] -- Diagonal-Facettenzellen (Kanten/Kugel/Fahrzeug) behielten die nu_t-Rueckkopplung im WANDFREI-Arm; jetzt alle 18
-	if(sgs_wand&&t%100ul==0ul) atomic_inc(&rho_clamp_hits[6]); // R2: Wirkpfad-Nachweis (Befund-2-Rest), Slot 6, gegatet wie der WFB-Zaehler
+	if(sgs_wand&&t%def_zaehl_takt==0ul) atomic_inc(&rho_clamp_hits[6]); // R2: Wirkpfad-Nachweis (Befund-2-Rest), Slot 6, gegatet wie der WFB-Zaehler
 	if(!sgs_wand)
 )+"#endif"+R( // SGS_WANDFREI
 )+"#ifdef SGS_FDWAND"+R(
 	if(fdw_fid!=0xFFFFFFFFu) {
 		w = fac_wfd[fdw_fid];
-		if(t%100ul==0ul&&rho_clamp_hits[76]<0xF0000000u) atomic_inc(&rho_clamp_hits[76]); // Slot 76 (B70; 39 war der oberste SGS_DIAG-Wandlagen-Bin): FDWAND angewandt
+		if(t%def_zaehl_takt==0ul&&rho_clamp_hits[76]<0xF0000000u) atomic_inc(&rho_clamp_hits[76]); // Slot 76 (B70; 39 war der oberste SGS_DIAG-Wandlagen-Bin): FDWAND angewandt
 )+"#ifdef SGS_VANDRIEST"+R(
 		// ★★ VAN-DRIEST-DAEMPFUNG auf der FACETTEN-Architektur (CFD_SGS_VANDRIEST, 08.09.2026).
 		// D = 1 - exp(-y+/A+), A+ = 26 (van Driest 1956, Literatur -- kein Handwert); nu_t <- nu_t * D^2.
@@ -3169,7 +3169,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 				const float vd_yp = sqrt(fmax(0.0f, vd_tw))*fac_geo[8ul*(ulong)fdw_fid+3ul]*(2.0f*def_fac_Y);
 				const float vd_d  = 1.0f-exp(-vd_yp*(1.0f/def_sgs_vd_aplus));
 				const float vd_d2 = vd_d*vd_d;
-				if(t%100ul==0ul) {
+				if(t%def_zaehl_takt==0ul) {
 					const uint vd_bin = min(7u, (uint)(vd_d2*8.0f));
 					if(rho_clamp_hits[160u+vd_bin]<0xF0000000u) atomic_inc(&rho_clamp_hits[160u+vd_bin]);
 					if(rho_clamp_hits[168]<0xF0000000u) atomic_inc(&rho_clamp_hits[168]);
@@ -3182,7 +3182,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 				const float vd_nut  = (1.0f/w-vd_tau0)*(1.0f/3.0f);
 				w = 1.0f/(vd_tau0+3.0f*vd_d2*vd_nut);
 )+"#endif"+R( // SGS_VANDRIEST_ANWENDEN
-			} else if(t%100ul==0ul&&rho_clamp_hits[169]<0xF0000000u) atomic_inc(&rho_clamp_hits[169]);
+			} else if(t%def_zaehl_takt==0ul&&rho_clamp_hits[169]<0xF0000000u) atomic_inc(&rho_clamp_hits[169]);
 		} }
 )+"#endif"+R( // SGS_VANDRIEST
 )+"#ifdef SGS_NUT_SKAL"+R(
@@ -3204,7 +3204,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		{	const float ns_tau0 = 1.0f/def_w, ns_numol = 0.5f/def_fac_Y;
 			const float ns_nut = (1.0f/w-ns_tau0)*(1.0f/3.0f);
 			const float ns_w = 1.0f/(ns_tau0+3.0f*def_sgs_nut_skal*ns_nut);
-			if(t%100ul==0ul) {
+			if(t%def_zaehl_takt==0ul) {
 				if(rho_clamp_hits[188]<0xF0000000u) atomic_inc(&rho_clamp_hits[188]); // Wirkpfad: Zweig besucht, MUSS gleich Slot 76 sein
 				if(ns_nut>0.0f&&rho_clamp_hits[189]<0xF0000000u) atomic_inc(&rho_clamp_hits[189]); // es gab ueberhaupt ein nu_t zum Skalieren
 				if(ns_w!=w&&rho_clamp_hits[190]<0xF0000000u) atomic_inc(&rho_clamp_hits[190]); // w hat sich WIRKLICH geaendert -- gegen den stillen No-Op
@@ -3250,7 +3250,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			// die Rechnung, mit der derselbe Commit die Gatung von Slot 0/1 begruendet hat. Deshalb
 			// zusaetzlich der multiplikative Hash von SGS_DIAG (jede 64. Zelle); die Prozente bleiben
 			// erwartungstreu, der Zaehler bleibt im Bereich.
-			if(t%100ul==0ul&&((n*2654435761ul)&4227858432ul)==0ul) { // Wirkpfad UND Groesse: relative Aenderung von |Pi| in vier Klassen
+			if(t%def_zaehl_takt==0ul&&((n*2654435761ul)&4227858432ul)==0ul) { // Wirkpfad UND Groesse: relative Aenderung von |Pi| in vier Klassen
 				const float Qneu = sq(Hxx)+sq(Hyy)+sq(Hzz)+2.0f*(sq(Hxy)+sq(Hxz)+sq(Hyz));
 				const float qr = sqrt(Qroh), qn = sqrt(Qneu);
 				const float rel = qr>0.0f ? fabs(qn-qr)/qr : (qn>0.0f ? 1.0f : 0.0f);
@@ -3277,7 +3277,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float nut_b = (1.0f/w-tau0)*(1.0f/3.0f);            // nu_t aus dem eben gerechneten Smagorinsky-w
 			const float nut_n = fmax(0.0f, nut_b-0.030021f*band_sbar[band_bid]); // Klemme wie in Lage 1 ZWINGEND
 			w = 1.0f/(tau0+3.0f*nut_n);
-			if(t%100ul==0ul) {
+			if(t%def_zaehl_takt==0ul) {
 				if(rho_clamp_hits[186]<0xF0000000u) atomic_inc(&rho_clamp_hits[186]); // Wirkpfad: Bandzelle behandelt
 				if(nut_n<=0.0f&&rho_clamp_hits[187]<0xF0000000u) atomic_inc(&rho_clamp_hits[187]); // Klemme greift (Sbar >= |S|)
 			}
@@ -3320,7 +3320,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		//      und koennte damit ganze Wandorientierungen systematisch treffen oder verfehlen.
 		//      Der Hash ist gittergroessen-unabhaengig (Pruefbefund 13, 2026-08-23).
 		//  (11) Emission gegatet: ohne CFD_SGS_DIAG wird der Block gar nicht erst erzeugt.
-		if(t>=def_sgs_diag_ab&&t>0ul&&t%100ul==0ul&&((n*2654435761ul)&4227858432ul)==0ul&&(flags[n]&TYPE_E)==0u) {
+		if(t>=def_sgs_diag_ab&&t>0ul&&t%def_zaehl_takt==0ul&&((n*2654435761ul)&4227858432ul)==0ul&&(flags[n]&TYPE_E)==0u) {
 			const float nu0_ = tau0-0.5f;
 			const float nut_ = 1.0f/w-tau0;
 			const float rv_  = nut_/nu0_; // nu0_ > 0 ist Bauvoraussetzung, wird im Host geprueft
@@ -3830,9 +3830,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(xx<0||yy<0||xx>=(int)def_Nx||yy>=(int)def_Ny||zz>=(int)def_Nz) continue;
 			if((flags[index((uint3)((uint)xx,(uint)yy,(uint)zz))]&TYPE_BO)==TYPE_S) nah = true;
 		}
-		if(nah) { if(t%100ul==0ul) atomic_inc(&diag[117]); return; } // ★ S5: Aussparungen zaehlen (Slot 117) -- der Schalter CFD_BODEN_EQ_ABSTAND hatte keinen Wirkpfad
+		if(nah) { if(t%def_zaehl_takt==0ul) atomic_inc(&diag[117]); return; } // ★ S5: Aussparungen zaehlen (Slot 117) -- der Schalter CFD_BODEN_EQ_ABSTAND hatte keinen Wirkpfad
 	}
-	if(t%100ul==0ul) atomic_inc(&diag[20]); // XL-3 M2: Wirkpfad-Nachweis IM Binary (Iron Rule 3; die V1-Vorlage war jahrelang stiller No-Op)
+	if(t%def_zaehl_takt==0ul) atomic_inc(&diag[20]); // XL-3 M2: Wirkpfad-Nachweis IM Binary (Iron Rule 3; die V1-Vorlage war jahrelang stiller No-Op)
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
 	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz); // XL-B8: post-stream-load = Paare vertauscht -> u waere NEGIERT (nur rho ist invariant und wird genutzt); XL-B7: coordinates() lokal -- Multi-Domain braeuchte def_O-Offsets (heute D=1)
@@ -3863,7 +3863,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(nx==0u||xyz.x<1u||xyz.x>nx) return; // nur die Clamp-Schicht hinter dem Einlass; Test VOR dem flags-Load
 	const uchar bo = flags[n]&TYPE_BO;
 	if(bo==TYPE_S||bo==TYPE_E) return; // TYPE_MS wird BEHANDELT (s. o.)
-	if(t%100ul==0ul) atomic_inc(&diag[21]); // Wirkpfad-Nachweis IM Binary (Iron Rule 3)
+	if(t%def_zaehl_takt==0ul) atomic_inc(&diag[21]); // Wirkpfad-Nachweis IM Binary (Iron Rule 3)
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
 	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz); // LOKALES rho (Druck erhalten); post-stream-load = Paare vertauscht -> u waere NEGIERT (nur rho ist invariant und wird genutzt, XL-B8)
@@ -4303,7 +4303,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(bo==TYPE_S||bo==TYPE_E) return; // TYPE_MS ist FLUID und wird BEHANDELT (MS-Guard-Lehre 2f705ba)
 	const float unx=unear[3u*gid], uny=unear[3u*gid+1u], unz=unear[3u*gid+2u];
 	if((as_uint(unx)&0x7F800000u)==0x7F800000u||(as_uint(uny)&0x7F800000u)==0x7F800000u||(as_uint(unz)&0x7F800000u)==0x7F800000u) return; // NaN/Inf-Bit-Test (isfinite ist unter -cl-finite-math-only toter Code, Gross-Audit M)
-	if(t%100ul==0ul) atomic_inc(&diag[22]); // Wirkpfad-Nachweis IM Binary (Iron Rule 3), Slot 22
+	if(t%def_zaehl_takt==0ul) atomic_inc(&diag[22]); // Wirkpfad-Nachweis IM Binary (Iron Rule 3), Slot 22
 	uxx j[def_velocity_set]; neighbors(nn, j);
 	float fhn[def_velocity_set]; load_f(nn, fhn, fi, j, t TS_A);
 	float rho_l, uxm, uym, uzm; calculate_rho_u(fhn, &rho_l, &uxm, &uym, &uzm);
@@ -4338,7 +4338,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// EsoPull-Paare vertauscht, also ist rho invariant und u exakt negiert. Ist die Paarung falsch,
 	// ist ftrue eine andere Permutation und die Momente negieren NICHT -- der Test schlaegt an.
 	// Er laeuft in BEIDEN Armen, die ftrue benutzen (FNEQ und IDENT), und haengt nicht an alpha.
-	if(t%100ul==0ul) {
+	if(t%def_zaehl_takt==0ul) {
 		float rho_t, uxt, uyt, uzt; calculate_rho_u(ftrue, &rho_t, &uxt, &uyt, &uzt);
 		const float su = fmax(fmax(fabs(uxm), fabs(uym)), fmax(fabs(uzm), 1e-4f)); // Bezug: groesste Komponente, Boden 1e-4 gegen Division durch ~0 in Staugebieten
 		const float du = fmax(fmax(fabs(uxt-ulx), fabs(uyt-uly)), fabs(uzt-ulz))/su;
@@ -4366,7 +4366,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// feldwirksam nichtdeterministisch. Gemessen am 2026-08-22: zwei WORTGLEICHE IDENT-Laeufe
 	// liefern verschiedene interface_druck.csv. Der Zaehler haengt dagegen an nichts als der
 	// Arithmetik dieser Zelle.
-	if(t%100ul==0ul) { // Zahl der Abweichungen UND ihr Mass (groesste ULP-Distanz), denn "ungleich"
+	if(t%def_zaehl_takt==0ul) { // Zahl der Abweichungen UND ihr Mass (groesste ULP-Distanz), denn "ungleich"
 		// allein unterscheidet nicht zwischen einem gebrochenen Paar und der Rundung von a+(b-a).
 		uint abw=0u, ulp_max=0u;
 		for(uint i=0u; i<def_velocity_set; i++) if(feq[i]!=ftrue[i]) {
@@ -4761,13 +4761,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		// stream_collide auf dem dort gebildeten Smagorinsky-nu_t (Kipptest-Lehre, s. dort).
 		// Vor der Sperre 0 ausgeben: dann ist der Abzug exakt null und der Arm bitgleich zum Bezug.
 		fac_wfd[gid] = t<def_sgs_sism_ab ? 0.0f : sbar;
-		if(t>=def_sgs_sism_ab&&t%100ul==0ul&&rho_clamp_hits[126]<0xF0000000u) atomic_inc(&rho_clamp_hits[126]);
+		if(t>=def_sgs_sism_ab&&t%def_zaehl_takt==0ul&&rho_clamp_hits[126]<0xF0000000u) atomic_inc(&rho_clamp_hits[126]);
 	} else if(t<def_sgs_sism_ab) {
 		fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*snorm_fd); // Phase 1: klassisch, WORTGLEICH zur Zeile im #ifndef-Zweig
 	} else {
 		const float ds = snorm_fd-sbar;
 		fac_wfd[gid] = 1.0f/(tau0+3.0f*0.030021f*fmax(0.0f, ds)); // Phase 2: Abzug mit Klemme
-		if(t%100ul==0ul) { // Wirkpfad (t%100 wie ueblich, saettigend): 126 = Abzug aktiv, 127 = Klemme greift (|S| < Sbar)
+		if(t%def_zaehl_takt==0ul) { // Wirkpfad (t%100 wie ueblich, saettigend): 126 = Abzug aktiv, 127 = Klemme greift (|S| < Sbar)
 			if(rho_clamp_hits[126]<0xF0000000u) atomic_inc(&rho_clamp_hits[126]);
 			if(ds<0.0f&&rho_clamp_hits[127]<0xF0000000u) atomic_inc(&rho_clamp_hits[127]);
 		}

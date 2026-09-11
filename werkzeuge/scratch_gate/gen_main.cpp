@@ -70,6 +70,11 @@ static string device_defines(const bool elibb, const bool ptrt) {
 	"\n#define def_fac_chifak 0.99998259f" // MLS chi-Nenner 1/(tau0+0,5); hergeleitet aus def_w 1.99993038: tau0=1/w=0.50001741
 	"\n#define def_fac_budget 1.0000f"
 	"\n#define def_fac_budget_sn 1.0000f"
+	// ★ 11.09.2026: def_zaehl_takt ist UNBEDINGT emittiert (lbm.cpp, zaehl_takt()) und steht in
+	// 71 Kernel-Gattern. Fehlt er hier, scheitert der Bau -- das Gate hat genau das gemeldet,
+	// und zwar als BAUFEHLER und nicht als Scratch. Diese Unterscheidung wurde heute frueh
+	// eingebaut und hat sich damit zum ersten Mal bewaehrt.
+	"\n#define def_zaehl_takt 100ul"
 	"\n#define def_wf_spalding_it 3u"
 	"\n#define FACETTEN_IMEM"
 	"\n#define FACETTEN_SATGATE"
