@@ -306,6 +306,90 @@ die 300 MB zu optimistisch war.
 
 ---
 
+## 1f. Block-Tiling — zum ersten Mal in v2 gemessen (11.09.2026 abends)
+
+Bis heute stützte sich jede Aussage dazu auf **V1-Zahlen**. Fünf Arme am 8-mm-Fahrzeug,
+null Codezeilen, Bezug `bt8_aus` mit 390 s.
+
+### Die Durchsatzkurve — und sie läuft in eine Wand
+
+| Arm | Wanduhr | Durchsatz | zusammenhängend |
+|---|---:|---:|---|
+| ohne Tiling | 390 s | 100 % | dicht |
+| T=8 | 549 s | **71 %** | 16 B = ¼ Cache-Zeile |
+| T=16 | 497 s | 78 % | 32 B = ½ Zeile |
+| T=32 | 490 s | **80 %** | 64 B = eine volle Zeile |
+| T=64 | 497 s | 78 % | 128 B = zwei Zeilen |
+
+**Der Durchsatz sättigt bei 80 % und kommt nicht zurück.** Eine volle Cache-Zeile bringt
+gegenüber einer halben nur zwei Punkte, zwei volle Zeilen bringen nichts mehr.
+
+**Damit ist die DDF-Zersplitterung als alleinige Ursache widerlegt** — sie erklärt die ersten
+neun Punkte (71 → 80), nicht die restlichen zwanzig. Die bleiben beim
+`tile_slot`-Zugriff selbst: eine **abhängige Ladung vor jeder Adressrechnung**, die keine
+Kachelform wegformen kann. Das ist genau, was der Quelltextkommentar (`kernel.cpp:958`) seit
+jeher behauptet und was ich heute Mittag noch für die halbe Wahrheit gehalten hatte.
+
+### Bitneutralität — zum ersten Mal in v2 belegt
+
+`bt8_t8` und `bt8_t16` gegen `bt8_aus`: **je 25 von 25 Dateien bitgleich**, Feld und Kräfte.
+Bisher stützte sich das auf eine Kugelmessung in V1. Der Papierkorb-Slot
+(`lbm.cpp:1071-1079`), an dem die ersten Versuche mit Cd 18,4 divergierten, hält.
+
+### Die Kachelform: anisotrop schlägt den Würfel auf BEIDEN Achsen
+
+Ausgezählt am Flag-Export des 4-mm-Laufs (`p4_neu`, 519 139 485 Zellen), Halo 2 wie der Code
+ihn verlangt, Aufrundungspolster und Kacheltabelle eingerechnet:
+
+| Kachel | netto frei | zusammenhängend |
+|---|---:|---|
+| 8×8×8 (heutiger Stand) | 1 284,3 MiB | 8 Zellen |
+| **32×8×2** | **1 454,8 MiB** | 32 Zellen |
+| **16×8×4** | **1 447,2 MiB** | 32 Zellen |
+| 32×4×4 | 1 376,7 MiB | 32 Zellen |
+| 16×16×16 | 450,8 MiB | 16 Zellen |
+
+**Welche Achse grob sein darf, ist gemessen** (Kachelvolumen konstant 512 Zellen):
+
+| | netto frei |
+|---|---:|
+| 32×4×4, grob in **x** | **1 376,7 MiB** |
+| 4×32×4, grob in y | 1 124,6 MiB |
+| 4×4×32, grob in z | 730,0 MiB |
+
+Grob in x ist also nicht nur die einzige Achse, die der lineare Dispatch zulässt, sondern
+auch die **beste**: das Fahrzeug ist in x lang und durchgehend, in y und z dünn und
+zerklüftet. Speicherordnung und Geometrie ziehen in dieselbe Richtung.
+
+Empfohlenes Bauziel ist **16×8×4**, nicht das Randoptimum 32×8×2: die 2 in z bedeutet einen
+Halo, der doppelt so dick ist wie die Kachel, und macht das Ergebnis empfindlich gegen
+Geometrieänderungen. Der Unterschied beträgt 7 MiB.
+
+### Der Anwendungsfall: reicht es für 3,75 mm?
+
+Zellzahl ×1,214 gegenüber 4 mm, Kapazität 32 655 MB:
+
+| | Bedarf | |
+|---|---:|---|
+| dicht | 33 658 MB | **passt nicht**, 1 003 MB zu viel |
+| T=16 | 33 111 MB | **passt nicht**, 456 MB zu viel |
+| T=8 | 32 100 MB | passt, 554 MB Restluft — **unter der Mindestluft von 1 024 MB** |
+| **16×8×4** (Bau nötig) | **31 902 MB** | passt, 752 MB Restluft, bei ~78 % Durchsatz |
+
+**T=16 löst den 3,75-mm-Fall nicht.** Nur T=8 kommt heute in Frage, und dessen Reserve liegt
+unter der Projektvorgabe. Die anisotrope Kachel ist der einzige Weg, der 3,75 mm mit
+vertretbarer Reserve **und** dem besseren Durchsatz erreicht.
+
+### Verdikt
+
+**Block-Tiling bleibt ein Regler, der Speicher gegen Zeit tauscht — dauerhaft.** Rund 20 %
+Wanduhr sind der Boden, und den senkt weder die Kachelform noch, nach dieser Kurve, V1s
+Workgroup=Tile-Dispatch mit seinen behaupteten −12 %. **Nicht bauen, solange 4 921 MB frei
+sind.** Es ist die Reserve für den Tag, an dem eine Rechnung sonst gar nicht passt — und für
+den liegt jetzt belegt vor, was sie kostet und welche Kachelform die richtige ist.
+
+---
+
 ## 2. Massnahmenliste — Stand nach dem Audittag
 
 ### Umgesetzt und belegt

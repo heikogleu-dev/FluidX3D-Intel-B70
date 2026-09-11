@@ -604,6 +604,26 @@ kernel reads solid neighbours up to 2 cells deep). The DDF index becomes
 | `CFD_TILE=8 CFD_TILE_WG=1` *(V1 only)* | 3836 | 410 | 535 | −12 % | 1.43 GB |
 | `CFD_TILE=16 CFD_TILE_WG=1` *(V1 only)* | 3941 | 422 | 520 | −9 % | 0.77 GB |
 
+> **Measured in v2 for the first time on 2026-09-11 — five paired arms on the 8 mm rung.**
+> Throughput against the dense run: **T=8 → 71 %, T=16 → 78 %, T=32 → 80 %, T=64 → 78 %**.
+> It **saturates at 80 % and does not come back**: a full 64-byte cache line buys two points
+> over half a line, two lines buy nothing. DDF fragmentation explains the first nine points,
+> not the remaining twenty — those stay with the dependent `tile_slot` load itself. **Bit
+> neutrality is now proven in v2 as well**: T=8 and T=16 are byte-identical to dense across
+> all 25 exported files, field and forces.
+>
+> **Tile shape: anisotropic beats the cube on both axes.** Counted on the 4 mm flag export
+> with the halo the code requires: `16×8×4` frees **1 447 MiB** against the cube's 1 284 MiB
+> *and* keeps a full cache line contiguous. Which axis may be coarse is measured too, at
+> constant tile volume: coarse in **x** frees 1 377 MiB, in y 1 125, in z 730 — the car is
+> long and solid in x, thin and ragged in y and z, so the memory order and the geometry pull
+> the same way.
+>
+> **Verdict: a VRAM-for-time dial, permanently.** ~20 % wall clock is the floor and no tile
+> shape removes it. Worth building only when a grid would otherwise not fit at all — for
+> 3.75 mm, T=16 is **456 MB short**, T=8 fits with 554 MB (below the project's 1 024 MB
+> minimum), and `16×8×4` fits with 752 MB at the better throughput.
+
 > **Which of these you actually get in this repo.** The first two rows are what v2 does today.
 > The two `CFD_TILE_WG=1` rows were measured in the **predecessor fork** ([FluidX3D-Intel-B70
 > V1](https://github.com/heikogleu-dev/FluidX3D-Intel-B70)) and the dispatch behind them
