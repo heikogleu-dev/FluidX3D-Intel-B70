@@ -29,16 +29,10 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 # waechst die Zahl, schlaegt das Gate zu. Ein Eintrag hier ist eine SCHULD, kein Freibrief:
 # er gehoert entfernt, sobald der Befund behoben ist, und er braucht immer eine Begruendung.
 #
-#   fac_nachbar_ab:7296:0  — 11.09.2026, zweite Agentenrunde. Ursache ist NICHT die
-#     18er-Schleife (Unrolling aendert nichts, gemessen), sondern der eine laufzeitindizierte
-#     c(ib)-Zugriff NACH der Schleife (kernel.cpp:4788). Gegenprobe: c(ib) -> 0.0f ergibt
-#     private_size 0 und instCount 791 -> 484 (-39 %). Behebung = c(ib) durch Arithmetik
-#     ersetzen oder den Linkindex vorberechnen; dann diese Zeile loeschen.
-#     Auf der iGPU (0x7d67) faellt derselbe Kernel mit 3648 aus -- dasselbe Muster bei
-#     halber SIMD-Breite. Der Agentenbefund nannte nur die B70; das gesamtdeckende Gate
-#     hat die zweite Haelfte selbst gefunden (11.09.2026, 37 Kernel je Arm geprueft,
-#     ALLE UEBRIGEN 36 sind sauber).
-BEKANNT="fac_nachbar_ab:7296:0 fac_nachbar_ab:3648:0"
+#   (leer) — der Eintrag fac_nachbar_ab:7296:0 / :3648:0 wurde am 11.09.2026 behoben und
+#   entfernt: der laufzeitindizierte c(ib)-Zugriff in kernel.cpp ist durch eine Mitschrift
+#   in der Schleife ersetzt. Das Gate hat den Eintrag selbst als veraltet gemeldet.
+BEKANNT=""
 
 g++ -O1 -c "$REPO/src/kernel.cpp" -o "$T/kernel.o"
 g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"

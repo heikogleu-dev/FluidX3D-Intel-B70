@@ -3002,17 +3002,27 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 			bx1=max(bx1,xc); by1=max(by1,yc); bz1=max(bz1,zc);
 		}
 		const ulong bnx=(ulong)(bx1-bx0+1u), bny=(ulong)(by1-by0+1u), bnz=(ulong)(bz1-bz0+1u);
-		std::vector<uint> feld(bnx*bny*bnz, 0xFFFFFFFFu);
-		auto bidx=[&](const uint x_,const uint y_,const uint z_)->ulong {
-			return (ulong)(x_-bx0)+((ulong)(y_-by0)+(ulong)(z_-bz0)*bny)*bnx; };
+		// ★ 11.09.2026: der dichte Index ueber die Facetten-BBox belegte bei 4 mm 593,7 MB
+		// (1113x463x302) fuer 3 275 383 Eintraege -- 2,1 % Belegung. Ersetzt durch eine nach
+		// Zellindex sortierte Liste der Facettennummern plus Binaersuche: 4 B je Facette statt
+		// 4 B je BBox-Zelle, bei 4 mm 12,5 MB statt 593,7 MB.
+		// BITGLEICH, und zwar OHNE Annahme ueber die Scanreihenfolge von F: sortiert wird nach
+		// (n, i), und nachgeschlagen wird der GROESSTE i der Gleichheitsgruppe -- genau das, was
+		// das alte feld[...]=i beim Ueberschreiben in aufsteigender i-Reihenfolge hinterliess.
+		std::vector<uint> ord(F.size());
+		for(uint i=0u; i<(uint)F.size(); i++) ord[i]=i;
+		std::stable_sort(ord.begin(), ord.end(), [&](const uint a, const uint b) { return F[a].n < F[b].n; });
+		auto suche=[&](const ulong nn)->uint { // groesster Facettenindex an Zelle nn, sonst 0xFFFFFFFF
+			const auto e = std::upper_bound(ord.begin(), ord.end(), nn,
+				[&](const ulong v, const uint a) { return v < F[a].n; });
+			if(e==ord.begin()) return 0xFFFFFFFFu;
+			const uint kand = *(e-1);
+			return (F[kand].n==nn) ? kand : 0xFFFFFFFFu; };
 		auto in_box=[&](const uint x_,const uint y_,const uint z_) {
 			return x_>=bx0&&x_<=bx1&&y_>=by0&&y_<=by1&&z_>=bz0&&z_<=bz1; };
-		print_info("  Glaettungsindex ueber die Facetten-BBox "+to_string(bnx)+"x"+to_string(bny)+"x"+to_string(bnz)
-			+" = "+to_string((ulong)(bnx*bny*bnz*4ull/1048576ull))+" MB statt "+to_string((ulong)((ulong)Nx*Ny*Nz*4ull/1048576ull))+" MB ueber die Domaene.");
-		for(uint i=0u; i<(uint)F.size(); i++) {
-			const uint zc=(uint)(F[i].n/((ulong)Nx*(ulong)Ny)), yc=(uint)((F[i].n/(ulong)Nx)%(ulong)Ny), xc=(uint)(F[i].n%(ulong)Nx);
-			feld[bidx(xc,yc,zc)]=i;
-		}
+		print_info("  Glaettungsindex: sortierte Facettenliste "+to_string((ulong)F.size())+" Eintraege = "
+			+to_string((ulong)(F.size()*4ull/1048576ull))+" MB, statt dichter BBox "+to_string(bnx)+"x"+to_string(bny)+"x"+to_string(bnz)
+			+" = "+to_string((ulong)(bnx*bny*bnz*4ull/1048576ull))+" MB (Binaersuche, bitgleich).");
 		std::vector<Facette> G=F;
 		for(uint i=0u; i<(uint)F.size(); i++) {
 			if(F[i].klasse&1u) continue;
@@ -3024,7 +3034,7 @@ std::vector<Facette> baue_facetten(LBM& L, const uint Nx, const uint Ny, const u
 				const uint cz2=(uint)(z_per?(int)wz(cz20):cz20);
 				const uint wxx=wx(cx2), wyy=wy(cy2);
 				if(!in_box(wxx,wyy,cz2)) continue; // ausserhalb der Facetten-BBox gibt es keine Facette
-				const uint j = feld[bidx(wxx,wyy,cz2)];
+				const uint j = suche((ulong)wxx+((ulong)wyy+(ulong)cz2*(ulong)Ny)*(ulong)Nx);
 				if(j==0xFFFFFFFFu||(F[j].klasse&1u)) continue;
 				const double w = (double)max(1u, F[j].eigene_links); // Flaechenproxy der FACETTENZELLE (Nachpruefer-Randnotiz: Fenstersummen ueberlappen fast vollstaendig -> de facto uniform)
 				sx+=w*F[j].nx; sy+=w*F[j].ny; sz+=w*F[j].nz;
@@ -6235,6 +6245,12 @@ static void main_setup_fahrzeug_dd() {
 	// (F-BBox 286x123x80), aber Konsistenz ist keine Geschmacksfrage: beide Domaenen oder keine.
 	lbm_c.lbm_domain[0]->alloc_f_liste(&lbm_c.flags[0], cNx, cNy, cNz);
 	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.alloc_facetten(FFn, (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ELIBB",0u)>0u&&!elibb_qmap_dd.empty())?&elibb_qmap_dd:nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u), env_u("CFD_SGS_SISM", 0u)); // vor run(0) -- der run()-Guard verlangt die Bindung; Stufe-2-Karte wenn vorhanden
+	// ★ 11.09.2026: elibb_qmap_dd ist ab hier TOT -- alloc_facetten hat die Karte ausgewertet und
+	// in fac_q uebertragen, gelesen wird sie danach nirgends mehr (einzige weiteren Fundstellen
+	// stehen OBERHALB: Fuellstellen und der empty()-Test). Sie lebte bisher bis zum Laufende und
+	// hielt bei 4 mm rund 174 MB System-RAM fuer ~3,1 Mio Knoten. swap mit einem leeren Objekt,
+	// weil clear() bei unordered_map die Bucket-Tabelle behaelt.
+	{ std::unordered_map<ulong,std::array<uchar,18>> leer; elibb_qmap_dd.swap(leer); }
 	// ★ 08.09. SGS-BAND: unmittelbar nach alloc_facetten -- die Bandlagen werden ab der FACETTENMASKE
 	// dilatiert, fac_idx muss also stehen. Steigt bei CFD_SGS_BAND=0 selbst aus.
 	if(env_u("CFD_FACETTEN", 0u)>0u) lbm_f.lbm_domain[0]->alloc_sgs_band(&lbm_f.flags[0], fNx, fNy, fNz, env_u("CFD_SGS_BAND", 0u));

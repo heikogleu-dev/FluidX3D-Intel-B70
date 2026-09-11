@@ -4777,23 +4777,31 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	neighbors(n, j); // calculate neighbor indices
 	const uxx b = 8ul*(uxx)gid;
 	const float nx=fac_geo[b], ny=fac_geo[b+1ul], nz=fac_geo[b+2ul], yw=fac_geo[b+3ul];
+	// ★ 11.09.2026 SCRATCH-FIX. Frueher wurden nach der Schleife c(ib) und j[ib] mit dem
+	// LAUFZEIT-Index ib gelesen. Ein laufzeitindiziertes privates Array wird speicherheimisch:
+	// gemessen private_size 7296 auf der B70 und 3648 auf der iGPU, also genau die Fehlerklasse,
+	// gegen die scratch_gate.sh gebaut wurde. Gefunden wurde sie erst, als das Gate alle Kernel
+	// prueft statt nur stream_collide. Unrolling half nachweislich NICHT -- es ist der Zugriff,
+	// nicht die Schleife. Abhilfe: die Werte dort mitnehmen, wo der Index ia compilezeitkonstant
+	// ist. Bitgleich, weil es dieselben Werte derselben Iteration sind.
 	float bestp = 0.5f; uint ib = 0u; // Schwelle: Link muss ueberwiegend in Normalenrichtung zeigen
+	float bcx = 0.0f, bcy = 0.0f, bcz = 0.0f; uxx bnb = (uxx)0ul; // Mitschrift des besten Links
 	for(uint ia=1u; ia<def_velocity_set; ia++) {
 		if((flags[j[ia]]&TYPE_BO)!=0u) continue; // nur reines Fluid (kein Solid, kein TYPE_E/MS)
 		const float cxa=c(ia), cya=c(def_velocity_set+ia), cza=c(2u*def_velocity_set+ia);
 		const float cl = sqrt(cxa*cxa+cya*cya+cza*cza);
 		const float pr = (cxa*nx+cya*ny+cza*nz)/cl;
-		if(pr>bestp) { bestp=pr; ib=ia; }
+		if(pr>bestp) { bestp=pr; ib=ia; bcx=cxa; bcy=cya; bcz=cza; bnb=j[ia]; }
 	}
 	float utb = -1.0f, ywb = yw;
 	if(ib>0u) {
-		const uxx nb = j[ib];
+		const uxx nb = bnb;
 		const float ubx=u[nb], uby=u[def_N+(ulong)nb], ubz=u[2ul*def_N+(ulong)nb];
 		const float undb = nx*ubx+ny*uby+nz*ubz;
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float ut2 = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
 		utb = (ut2>1e-6f) ? ut2 : 0.0f;
-		ywb = yw + (c(ib)*nx+c(def_velocity_set+ib)*ny+c(2u*def_velocity_set+ib)*nz);
+		ywb = yw + (bcx*nx+bcy*ny+bcz*nz); // war c(ib)... -- siehe Scratch-Fix oben
 	}
 	fac_nb[2ul*(ulong)gid] = utb; fac_nb[2ul*(ulong)gid+1ul] = ywb;
 } // fac_nachbar_ab()
