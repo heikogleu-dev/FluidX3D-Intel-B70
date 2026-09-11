@@ -15,13 +15,21 @@ ausdrücklichen Gegenhinweis sind statische Instruktionszahlen, keine Laufzeiten
 
 | | Wert | Folge |
 |---|---:|---|
-| Nahfeldanteil am Grobschritt | **95,8 %** (416,35 ms von 434,6 ms) | Das Nahfeld ist der kritische Pfad |
-| Schlupf des Fernfelds | 51,26 ms (369 ms Schritt in 420 ms Fenster) | gehört der **iGPU**, nicht dem Nahfeld |
-| **Maximaler Wanduhr-Gewinn** | **11,79 %** | darüber hinaus bindet die iGPU |
+| Nahfeldanteil am Grobschritt | **95,36 %** (399,7 ms von 419,1 ms) | Das Nahfeld ist der kritische Pfad |
+| Schlupf des Fernfelds | 34,1 ms (369,3 ms Schritt in 403,4 ms Fenster) | gehört der **iGPU**, nicht dem Nahfeld |
+| **Maximaler Wanduhr-Gewinn** | **8,13 %** | darüber hinaus bindet die iGPU |
 | Anteil des DDF-Stroms am Verkehr | **79,9 %** von 43,36 GB je feinem Schritt | bei D3Q19/FP16S nicht reduzierbar |
 
-**Verlangsamung des Nahfelds um y kostet `416,35 ms · y` Wanduhr, ab dem ersten Prozent,
-ohne Freibetrag.** Beschleunigung bringt `416,35 ms · x`, gültig nur bis x = 12,31 %.
+> **⚠ BERICHTIGT am Abend des 11.09. — und die Korrektur ist selbst ein Befund.** Hier standen
+> 434,6 ms, 51,26 ms Schlupf und 11,79 % Deckel. Diese Zahlen stammen aus `p4dt_deteps`, der
+> Baseline **vor** dem Audittag. Der heutige Lauf `p4_neu` liegt bei **419,1 ms** (eigene
+> Gegenrechnung: 5422 s Wanduhr minus 160 s Aufbau minus 12 s Abschluss, geteilt durch 12 526
+> Grobschritte). **Der Schlupf ist keine feste Größe — er schrumpft mit jeder Nahfeld-Maßnahme.**
+> Die heutige Runde hat rund ein Drittel des iGPU-Vorrats mitverbraucht: 51,3 → 34,1 ms. Wer
+> gegen den Deckel optimiert, muss ihn nach jeder Maßnahme neu bestimmen.
+
+**Verlangsamung des Nahfelds um y kostet `399,7 ms · y` Wanduhr, ab dem ersten Prozent,
+ohne Freibetrag.** Beschleunigung bringt `399,7 ms · x`, gültig nur bis **x = 8,53 %**.
 
 Der Kernel erreicht 420 GB/s von 608 GB/s Spitze (69 %) und 81 % dessen, was Upstream auf
 derselben Karte erreicht (520 GB/s). **Der wahre Nahfeld-Durchsatz ist 5028 MLUPs**, nicht
@@ -569,3 +577,205 @@ falsche Physik), und `active_tile_id` muss hinter `TS_P` gebunden werden, sonst 
 | Ist die iGPU bandbreiten- oder rechengebunden? | 25-s-Paar auf Gerät 2 mit `UPDATE_FIELDS` an/aus (−17 % Verkehr) |
 | Freier VRAM real | Debugfs-Rechte fehlen; alle Frei-Werte sind die 20/19-Rekonstruktion |
 | L2-Grösse der B70 | nirgends im Repo belegt |
+
+---
+
+# Teil 4 — Die Zeit- und Architekturachse (11.09.2026 abends)
+
+Fünf Agenten, jeder auf einer Achse, die **keine** der früheren Runden hatte. Der Anlass war
+Heikos Beobachtung, dass alle bisherigen Briefings „was kostet dieser Kernel je Schritt"
+fragten und nie „wann und in welcher Qualität muss das gerechnet werden".
+
+**Alle Zahlen hier sind Wanduhr, Verkehr oder eingesparte Schritte. Keine Instruktionszahl.**
+
+## 4.1 Der Maßstab, den niemand gezogen hatte
+
+`u_lat = 0,075`. Das Strömungsfeld braucht **13,3 feine Schritte, um eine Zelle
+weiterzurücken**. Jedes Teilmodell, dessen Eingang eine advehierte makroskopische Größe ist,
+ist um diesen Faktor überabgetastet. Nur die Kollision und die Randaufprägung gegen die
+Zwei-Schritt-Mode haben eine Eigenzeit von 1–2 Schritten.
+
+**Umrechnung Verkehr → Wanduhr, aus einem gemessenen Paar geeicht:** `d8_kdiag_an/aus`,
+1,68 % Verkehr ergaben 1,33 % Nahfeld-Wanduhr → **Faktor 0,79**.
+
+## 4.2 Der größte Einzelposten: rho und u bedienen eine Leserschaft unter 2 %
+
+**Zwei Agenten haben das unabhängig gefunden.** Selbst nachgeprüft: im ganzen
+`stream_collide` (Zeilen 2866–3650) gibt es genau **sieben** Zugriffe auf `u[]`/`rho[]`, und
+die drei lesenden stehen im **TYPE_E-Zweig** — 0,63 % der Zellen. Jede andere Zelle rechnet
+beides aus `fhn` neu.
+
+Geschrieben werden sie für **87,8 % der Zellen, jeden Schritt**: 7,29 GB = **16,8 % des
+Verkehrs**. `defines.hpp:55-62` beziffert den Preis selbst mit „10 bis 15 Prozent Durchsatz".
+
+| Variante | Verkehr | VRAM | projizierte Wanduhr |
+|---|---|---|---|
+| nur schreiben, wo gelesen wird (F-BBox + Auslassebene, Substep < ratio) | −8,2 bis −12,1 % | — | **−6,5 bis −9,5 %** |
+| beide auf 2 Byte je Komponente | −8,4 % | **−3 961 MiB** | −7,2 % |
+| `rho` nicht jeden Schritt | −4,2 % | — | −3,6 % |
+
+**Und der elegante Teil: `rho` und `u` sind inhaltlich längst halbgenau.** Sie werden jeden
+Schritt aus den FP16S-DDFs zurückgerechnet; das Rauschen dieser Rückrechnung ist am echten
+Feld gemessen **rms 6,06e-6** für rho. Der FP32-Puffer bewahrt eine Genauigkeit auf, die sein
+Inhalt nicht hat.
+
+**Die Formatfrage ist am echten Feld beantwortet, und die Antwort ist nicht die naheliegende:**
+
+| Format für rho | rms-Fehler | Δcp_rms |
+|---|---:|---:|
+| `half(rho)` roh | 1,83e-4 | **0,0217 — tödlich** |
+| **`FP16S(rho−1)`** | **3,36e-7** | **4,0e-5** |
+| int16 auf ±0,5 | 4,41e-6 | 5,2e-4 |
+
+FP16S auf der Störform liegt **18-fach unter dem Rauschen, das die Rückrechnung ohnehin
+erzeugt**. Für `u` dagegen ist Festkomma falsch, obwohl die Bulk-Zahlen dafür sprechen: an der
+Wand liegt u_t um Faktor 8,5 niedriger, int16 wäre dort 47× schlechter **und kippt Gates** —
+`fac_nb` kodiert mit 0 und −1 zwei Sonderfälle, und `apply_facette_imem` steigt bei
+`ut<1e-6f` aus. FP16S mit Untergrenze 1,86e-9 nicht.
+
+**Risiko, benannt:** die Maske ist der gefährliche Teil. Eine übersehene Leserzelle liefert
+einen Wert aus einem beliebig alten Schritt, lautlos. Bauform: Maske konstruktiv als
+**Obermenge**, plus ein Kontrollarm, der alles schreibt und bitgleich sein muss.
+
+**Der dominierende Vorbehalt bei der Formatfrage:** alle Quantisierungszahlen sind ein
+**Standbild bei 501 ms**. Ob ein Fehler von 1e-5 je Schritt über 50 099 Schritte in der
+Rückkopplung gedämpft wird oder driftet, sagt nur ein A/B-Lauf.
+
+## 4.3 Die Zeitachse des Laufs — 41,8 % vergehen vor der ersten verwertbaren Abtastung
+
+| Phase | Wanduhr | Anteil |
+|---|---:|---:|
+| Aufbau | 153,3 s | 2,83 % |
+| **Anwärmphase 0…201 ms** | **2 113 s = 35,2 min** | **38,97 %** |
+| Messphase 201…501 ms | 3 144 s = 52,4 min | 57,99 % |
+| Endauswertung | 11,7 s | 0,22 % |
+
+**Ein Prüfpunkt ist der tragfähige Weg, nicht das grobe Anwärmen.** `ARBEITSLISTE.md:559` sagt
+selbst: „Kein Checkpoint im Code". Zustandsgröße ≈ 28,3 GB, Schreiben und Laden je ~20 s bei
+gemessenen 1,41 GB/s → **netto ~34 min je Folgelauf**. Für Arme, die das Wandmodell anfassen,
+kommt ein Nachlauf von ~100 ms dazu (netto ~17 min).
+
+**Grob anwärmen und hochsetzen ist unterlegen** — und der Grund ist hart: die Schrittzeit des
+Grobgitters ist aus keinem Log ableitbar, weil `run_async` nie `info.update` ruft. Bei
+realistischen 250–430 ms kostet ein Grob-Warmlauf 21–36 min, der Hebel verschwindet.
+
+## 4.4 Der Befund, der kein Performance-Befund ist
+
+**Das Messfenster beginnt mitten im Einschwingen.** Das SGS-Modell wird bei 150 ms
+scharfgeschaltet (`CFD_SGS_SISM_AB=15000`), die Mittelung beginnt bei 201 ms, der Vorgang
+klingt mit τ ≈ 12–16 ms ab und braucht 92–114 ms bis 99 %.
+
+| Zeit | Cd |
+|---|---:|
+| 140 ms | +9,20 |
+| 150 ms (Modell scharf) | +4,57 |
+| **201 ms (Messung beginnt)** | **−2,95** |
+| 290 ms | −3,95 |
+| 450 ms | −3,68 |
+
+Bias auf das Fenstermittel: **+1,34 % auf `cd_druck`**, −2,16 % auf Cd. Für **gepaarte A/B ist
+das harmlos** (beide Arme tragen ihn), für **jede Absolutaussage gegen OF13 nicht** — und das
+ist die offene Hauptfrage dieses Projekts. `CFD_T_WARMUP=0.29` nimmt den Anlauf heraus **und**
+spart 15,6 min.
+
+Zur Einordnung: die Nahfeldbox wird vor Messbeginn nicht einmal **einmal** durchspült
+(0,225 s Durchspülzeit gegen T_WARMUP 0,201 s).
+
+## 4.5 Kadenz — was darf seltener rechnen
+
+| Teilmodell | Eigenzeit | Verdikt |
+|---|---|---|
+| `boden_eq`/`einlass_eq` | 2 Schritte (Staggered-Mode) | muss jeden Schritt |
+| Druckauslass | akustisch, 1,73 Schritte/Zelle | muss jeden Schritt |
+| 3×3-Kaskade, Lösung | aktuelle Populationen | muss jeden Schritt |
+| SISM-EMA, `fac_wfd` | T = 5000 Schritte; Sbar-Drift 1e-6/Schritt | **kadenzierbar, k ∈ {2,4}** |
+| `fac_nb` | advektiv, 13,3 Schritte/Zelle, **kein Zähler, kein t-Argument** | **kadenzierbar, zuerst** |
+| Kräfte | τ = 21–41 ms **gemessen**, Kadenz 1 ms | **kadenzierbar, k ≥ 4** |
+
+**Zwei scharfe Nebenbedingungen:** k muss `ratio` **und** `def_zaehl_takt` teilen, sonst
+schweigen die Wirkpfadzähler still. Und `a_ = 1/def_sgs_sism_T` muss zu `k/T` werden, sonst
+wird aus T = 5000 still T = k·5000.
+
+**Die vermeintliche Falle ist keine:** dass `fac_nachbar_ab` wegen Bitreproduzierbarkeit aus
+`stream_collide` ausgelagert wurde (03.09.), ist genau die Eigenschaft, die eine Kadenz
+**erlaubt** — der Puffer wird ohnehin erst im nächsten Schritt gelesen.
+
+## 4.6 Arbeitsteilung: der Schnitt liegt bei 93,1 % des Optimums
+
+**T_fern = 1,82 ns × N_fern**, gemessen an einer 12-Punkte-Leiter, flach auf ±0,9 % über
+Faktor 15,5 in der Fallgröße. Der vermutete Einbruch an der 4095-MB-Puffergrenze **existiert
+nicht**. Geräteverhältnis **B70 : iGPU = 9,43 : 1**, CPU = 1/54 der B70.
+
+Die iGPU kann damit **nie mehr als 9,59 %** der Gesamtleistung tragen; sie trägt 8,93 %.
+**Das ganze Umverteilungsthema ist 1,61 % Wanduhr groß.**
+
+| Szenario | Wanduhr | Δ |
+|---|---:|---:|
+| heute | 90,4 min | — |
+| **perfekte Balance, Verkehr wie er ist** | **89,0 min** | **−1,61 %** |
+| Nahfeld kostenlos (Arbeit gelöscht, nicht verschoben) | 83,2 min | −8,16 % |
+
+**Drei Vorschläge sind damit erledigt:**
+- **Das Fernfeld ist kein Komplement, sondern eine Überlagerung** — es rechnet auch unter dem
+  Nahkasten (Fußabdruck nur 4,04 %). Ein kleinerer Nahkasten gibt ihm **keine** Arbeit, und
+  das Überspringen des Fußabdrucks läge mit 14,9 ms **komplett im Schlupf**.
+- **Nahkasten beschneiden:** 159 mm in z+ oder 113 mm je y-Seite bis zum Boden — aber
+  `AUDIT-BEFUNDE.md` B71 fordert die **doppelten** Abstände, und die geforderte Box bräuchte
+  **52,3 GiB gegen 31,9 GiB Kapazität**.
+- **Dritte Auflösungsstufe:** softwareseitig 11–26 Stellen, **aber es gibt keinen Ort dafür**.
+  In den Schlupf passen 9,4 M Zellen bei 8 mm — ein Würfel von 1,7 m Kante, kleiner als der
+  Nahkasten, den er umschließen soll.
+
+**Nicht die iGPU ist das ungenutzte Gerät, sondern die CPU.** Sie steht **95,4 % der Laufzeit**
+in Barrieren (`lbm.cpp:2584` synchronisiert nach jedem feinen Schritt), und es gibt im ganzen
+Baum **keine asynchrone Ausgabe**.
+
+**Der eine saubere Neubefund:** die vier `extract_plane_macros` laufen **nach**
+`lbm_c.finish()`. Reiht man sie davor in dieselbe In-Order-Queue, erledigt die iGPU sie im
+eigenen Schlupf. **0,5–1,0 % Wanduhr**, vier blockierende Syncs weniger, bitneutral erwartet.
+
+## 4.7 Berechnet und nie gebraucht — 73,3 s im Remesh
+
+**Gemessen über ein Dateizeitstempel-Paar**, nicht geschätzt: dasselbe Fenster braucht in
+`p4_neu` (ELIBB an) **80,66 s** und in `p4eb_aus` (ELIBB aus, gleiches Gitter) **7,40 s**.
+**Differenz 73,3 s = 1,35 % der Wanduhr.** Darin zwei rein berichtende Rechnungen:
+
+- **Der TREPPE-Scan ist informationell leer.** Er schießt 15 114 078 Links ab und liefert
+  `q: Mittel 0.5000, min 0.5000 | Achs 0.5000, Diag 0.5000` — selbst nachgeprüft im Log. Die
+  Voxelfläche halbiert jeden Link per Konstruktion; das Ergebnis steht analytisch fest, bevor
+  der Scan startet. Verbraucht wird es nur von einer `print_info`-Zeile.
+- **Der STL-Doppelscan** (30,2 M Strahl/Dreieck-Schüsse) misst die Aufdickung — einen Pfad,
+  den die Iron Rule „Kein STL-Rückgriff nach Voxelierung" ohnehin von jeder q-Quelle
+  ausschließt.
+
+**Kein Löschen**, sondern ein Emissionsgatter mit Default an, plus TREPPE als Selbsttest auf
+einer kleinen Teilbox statt auf allen 15,1 M Links.
+
+**Ein früherer Befund ist damit widerlegt:** „153 MB + 249 MB unbedingt geschrieben" ist als
+**Laufzeithebel falsch**. Offline nachgebaut beträgt die reine Schreibzeit **3,09 s = 0,057 %**.
+Die 73,3 s sind Rechnung, nicht Schreiben. Was bleibt, ist ein Plattenbefund: **13,7 GB
+ungelesene Ausgabe** im Archiv.
+
+**Drei Fallen geprüft und entschärft** — die Lehre aus der Volumenkraft hat sich bestätigt:
+`fac_tau[4]`/`[5]` sehen nach Buchhaltung aus, speisen aber `cd_facetten.csv`, die sechs
+Werkzeuge lesen. `schale_waechter.csv` und `band_bilanz.csv` haben keinen Leser, tragen aber
+**vier Abbruchentscheide**.
+
+## 4.8 Rangliste der offenen Hebel nach dieser Runde
+
+| Hebel | Wieviel | Physik | Aufwand |
+|---|---|---|---|
+| **rho/u nur schreiben wo gelesen** | **6,5–9,5 % Wanduhr** | bitgleich beweisbar | hoch |
+| **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** | — | 200–300 Zeilen |
+| **rho/u auf 2 Byte** | −3 961 MiB VRAM, −7,2 % | ändert Zahlen, Fehler beziffert | mittel |
+| **Remesh-Diagnostik gattern** | 1,35 % | keine | klein |
+| Kopplungsernte alle 2 Grobschritte | 1,65 % | Treppenhalteglied | sehr klein |
+| `extract_plane_macros` vorziehen | 0,5–1,0 % | bitneutral erwartet | klein |
+| Kräftekadenz 1 → 4 ms | 0,56 % | keine (41-fach überabgetastet) | eine Variable |
+| `fac_nachbar_ab` auf k = 4 | ≥ 0,83 % | mittel | klein |
+| 150-ms-VTK-Dump, der gelöscht wird | 9 s + 11,7 GB | keine | eine Zeile |
+| **`CFD_T_WARMUP` auf 0,29** | **15,6 min UND +1,3 % Genauigkeit** | Bias entfällt | eine Variable |
+
+**Erledigt und nicht weiterverfolgen:** ratio 4 → 8 (das Nahfeld würde um 0,60 % **wachsen**,
+weil `CFD_NEAR_LY` durch 32 mm nicht aufgeht), dritte Auflösungsstufe, CPU als Rechengerät,
+Nahkasten beschneiden, Fernfeld-Fußabdruck überspringen.

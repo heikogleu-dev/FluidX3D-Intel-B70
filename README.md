@@ -845,11 +845,15 @@ it out and watch `journalctl -k --since "1 min ago" | grep xe`.
   501 ms physical, rc = 0, VRAM peak **27 734 / 32 655 MB** with 4 921 MB free after coupling
   and shell are bound. Coarse step **434.6 ms**, phase split: near field 4 fine steps **95.8 %**,
   coupling 0.9 %, far-field sync and harvest 2.4 %, forces 0.9 %, slices 0.0 %.
-- **The near field is the critical path, the far field is not.** The far step takes 369 ms
-  inside a 420 ms window, i.e. **12 % slack on the iGPU**. Slowing the near field costs wall
-  clock from the first percent with no allowance; speeding it up pays only up to **12.31 %**,
-  after which the iGPU becomes the pacer. That ceiling is the yardstick for every proposal in
-  [`PERFORMANCE.md`](PERFORMANCE.md).
+- **The near field is the critical path, the far field is not.** The far step takes 369.3 ms
+  inside a 403.4 ms window, i.e. **8.13 % slack on the iGPU**. Slowing the near field costs
+  wall clock from the first percent with no allowance; speeding it up pays only up to
+  **8.53 %**, after which the iGPU becomes the pacer.
+- **That ceiling is not a constant — it shrinks with every near-field measure.** Before the
+  2026-09-11 audit the slack was 51.3 ms (11.8 %); the day's optimisations consumed a third of
+  it. The far step itself is fixed: **T_far = 1.82 ns × N_far**, flat to ±0.9 % over a factor
+  15.5 in case size (12-point ladder on the iGPU). Any proposal measured against the ceiling
+  has to re-derive it first.
 - **Traffic per fine step (counted from the source, near field):** 43.36 GB total — DDF load +
   store **79.9 %**, rho + u writes 16.8 %, flags 1.2 %, the entire facet-buffer chain **1.8 %**,
   bitmasks 0.3 %. That is **83.5 B per grid cell** and **420 GB/s achieved** of the card's
