@@ -218,7 +218,7 @@ Two of them are worth spelling out because they are the kind of thing that hides
 | Change | Why | Measured effect |
 |---|---|---|
 | **Force field F over a bounding box** instead of the full grid | F is only needed where the body is; upstream allocates it over every cell — and the constructor pre-check *also* computed it over the full grid and rejected grids that actually fit | F on 1118 × 468 × 306 instead of 519 139 485 cells → **4.31 GB saved** (run log) |
-| **Block-Tiling of the DDF buffer `fi`** — allocate only tiles that are not fully solid (plus a 2-cell halo), with workgroup = tile so the own-cell base needs no lookup | `fi` dominates LBM memory (19 × FP16 × N ≈ 19 GB); a solid car occupies many cells whose DDFs are never streamed | `CFD_TILE=8 CFD_TILE_WG=1`: **1.43 GB freed at −12 %** throughput (3836 vs 4348 MLUPS dense); T=16: 0.77 GB at −9 %. Naive tiling cost −40 % — the whole gap is `tile_slot` indirection, localised in three steps |
+| **Block-Tiling of the DDF buffer `fi`** — allocate only tiles that are not fully solid (plus a 2-cell halo), with workgroup = tile so the own-cell base needs no lookup | `fi` dominates LBM memory (19 × FP16 × N ≈ 19 GB); a solid car occupies many cells whose DDFs are never streamed | **in v2 today: 1.43 GB freed at −40 %** (2624 vs 4348 MLUPS dense, `CFD_TILE=8`). The workgroup=tile dispatch that brings this to −12 % (and T=16 to −9 % for 0.77 GB) exists **only in V1** and is not ported here — see the section below |
 | **Smoothing index over the facet bounding box** | Full-grid allocation for a quantity that only exists near the surface | **593 MB instead of 1980 MB** |
 | **Two-stage memory plan with a hard pre-flight check** | Running out of VRAM 40 minutes in wastes a slot on a single-GPU machine | The plan predicted the production run **to the megabyte**: 29 673 MB predicted vs 29 672 MB in the run log |
 | **Host-mirror release with guards** (`delete_host_buffer`, 2026-09-03) | Freeing a host mirror left dangling aux pointers and a live zero-copy device buffer — a trap for exactly the VRAM work queued next | All ten transfer overloads now refuse to run on a released mirror; zero-copy release is a hard error. Proven by negative tests, both arms bit-identical to the reference run |
@@ -582,8 +582,17 @@ kernel reads solid neighbours up to 2 cells deep). The DDF index becomes
 |---|---:|---:|---:|---:|---:|
 | dense (non-sparse) | 4348 | 465 | 477 | — | — |
 | `CFD_TILE=8` first cut | 2624 | 281 | 770 | −40 % | 1.43 GB |
-| **`CFD_TILE=8 CFD_TILE_WG=1`** | **3836** | **410** | 535 | **−12 %** | **1.43 GB** |
-| **`CFD_TILE=16 CFD_TILE_WG=1`** | **3941** | **422** | 520 | **−9 %** | **0.77 GB** |
+| `CFD_TILE=8 CFD_TILE_WG=1` *(V1 only)* | 3836 | 410 | 535 | −12 % | 1.43 GB |
+| `CFD_TILE=16 CFD_TILE_WG=1` *(V1 only)* | 3941 | 422 | 520 | −9 % | 0.77 GB |
+
+> **Which of these you actually get in this repo.** The first two rows are what v2 does today.
+> The two `CFD_TILE_WG=1` rows were measured in the **predecessor fork** ([FluidX3D-Intel-B70
+> V1](https://github.com/heikogleu-dev/FluidX3D-Intel-B70)) and the dispatch behind them
+> (`SPARSE_TILES_WG`, `active_tile_id`, `load_f_pre`) **was never ported to v2** — `grep -c
+> CFD_TILE_WG src/` returns 0 here. Switching on `CFD_SPARSE_TILES` in v2 therefore costs the
+> **−40 %**, not the −12 %. The source says so itself (`src/lbm.hpp:292`). The three steps below
+> describe how the penalty was brought down **in V1**, and they are the porting recipe, not a
+> description of this code.
 
 Getting from −40 % to −9/−12 % took three steps, each one localising the cost further:
 
