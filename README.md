@@ -1,31 +1,43 @@
 # FluidX3D — Intel Arc Pro B70: Vehicle Aerodynamics (LBM-WMLES vs. OpenFOAM)
 
 **Performance & results at a glance** *(all numbers measured on this rig. Forces from the 4 mm
-production runs `p4_nb` (baseline, 2026-09-03) and `km_s4_sism` (with the subgrid model on the wall
-cell, 2026-09-08), paired, N = 300, window t ≥ 0.201 s. Cd/Cz are the **rest** figures — the moving
-z-band around the wheel contact is split off, because the floor imprint produces ≈ −0.7 of purely
+production run `p4dt_deteps` (2026-09-11), the current baseline: facet SISM wall model, ghost-mode
+purification (P-TRT, ω_g = 1.90) and the det-ε rank guard. N = 300, window t ≥ 0.201 s, uncertainty
+= standard error over six 50 ms window means. Cd/Cz are the **rest** figures — the moving z-band
+around the wheel contact is split off, because the floor imprint produces ≈ −0.7 of purely
 artificial downforce — plus the friction path. Memory and throughput at 4 mm, 519 M fine cells on
 the B70 + 203 M coarse cells @ 16 mm on the iGPU, 501 ms physical.)*
 
-| Metric | Baseline | With wall-cell SISM | Reference |
-|---|---|---|---|
-| **Cd** = pressure (band removed) + friction | 0.5924 ± 0.0140 | **0.5747 ± 0.0115** | OpenFOAM 13: 0.599 |
-| **Cz** = pressure (band removed) + friction | −0.8860 ± 0.0265 | **−0.9687 ± 0.0179** | OF13: −1.301 → **74 % of the reference downforce** |
+| Metric | Current baseline | Reference |
+|---|---|---|
+| **Cd** = pressure (band removed) + friction | **0.5651 ± 0.0131** | OpenFOAM 13: 0.599 → **94.3 %** |
+| **Cz** = pressure (band removed) + friction | **−0.9635 ± 0.0222** | OF13: −1.301 → **74.1 % of the reference downforce** |
+| **Wall-model coverage**, real wall cells | **93.85 %** | was 82.5 % before the det-ε rank guard |
+| **Free velocity outliers** > 60 m/s, t = 501 ms | **91** cells, max 77 m/s | was 6 270 cells, max 275 m/s before ghost-mode purification |
 
-Both are **total** coefficients, because the OF13 reference is one. Their composition, on the SISM
-arm, so that no number here can be confused with another:
+Both force figures are **total** coefficients, because the OF13 reference is one. Their composition,
+so that no number here can be confused with another:
 
 | Component | Value | |
 |---|---|---|
-| `cz_druck` | −0.8252 | pressure including the wheel-contact z-band |
-| `cz_druck_band` | +0.2279 | that band alone — the floor imprint, **an artefact**, which is why it is split off |
-| **`cz_druck_rest`** | **−1.0531** | pressure without the band. **This is the quantity every model comparison in this document is measured on**: SISM moves it by −0.1017 ± 0.0099 (10.3 σ) against the baseline's −0.9514 |
-| `cz_reib` | +0.0844 | friction, and it works *against* downforce |
-| **Cz total** | **−0.9687** | `cz_druck_rest + cz_reib` — the row in the table above |
+| `cz_druck` | −0.8238 | pressure including the wheel-contact z-band |
+| `cz_druck_band` | +0.2176 | that band alone — the floor imprint, **an artefact**, which is why it is split off |
+| **`cz_druck_rest`** | **−1.0414** | pressure without the band. **This is the quantity every model comparison in this document is measured on** |
+| `cz_reib` | +0.0779 | friction, and it works *against* downforce |
+| **Cz total** | **−0.9635** | `cz_druck_rest + cz_reib` — the row in the table above |
 
 Model effects are quoted on `cz_druck_rest` throughout, because the friction path responds to these
 models with the opposite sign and would dilute the signal. The comparison against the reference
 needs the total.
+
+> **What the September 2026 work did and did not buy.** The integrated forces are, within the error
+> bars, where they were before: Cd 0.5747 / Cz −0.9687 on the previous headline arm (`km_s4_sism`,
+> 2026-09-08). What changed is the **field** and the **wall-model reach**. The velocity outliers
+> that made the 4 mm field locally unphysical are gone (6 270 → 91 free cells above 60 m/s, peak
+> 275 → 77 m/s), and the wall model now reaches 93.85 % of the real wall cells instead of 82.5 %.
+> Those two are measured on field data and on visit-weighted counters, not on the force estimator.
+> **The remaining downforce gap against OF13 is therefore not explained by either of them** — it is
+> still the open question of this project.
 
 | Metric | Value | Context |
 |---|---|---|
@@ -42,22 +54,23 @@ needs the total.
 > decomposition instead, which every run since produces directly and identically. The two are not
 > comparable, and the older pair has been retired rather than carried forward.
 
-![f4_vollumfang_mls — near field at 500 ms](docs/f4_vollumfang_nah_500ms.png)
-*First full-configuration 4 mm production run (`f4_vollumfang_mls`): Toyota MR2 at 30 m/s
-(Re ≈ 9 M), near-field |u| at t = 500 ms (15→45 m/s blue→white→red, black = solid). Engine bay
-with radiator fins resolved, rear wing attached, full turbulent wake — and the corrected force
-window of this run is the table above: **the first time this fork produces real downforce.***
+![p4dt_deteps — near field at 500 ms](docs/p4dt_deteps_nah_500ms.png)
+*Current baseline (`p4dt_deteps`, 2026-09-11): Toyota MR2 at 30 m/s (Re ≈ 9 M), near-field |u| at
+t = 500 ms (15→45 m/s blue→white→red, black = solid). Engine bay with radiator fins resolved, rear
+wing attached, full turbulent wake. This is the first 4 mm field without the isolated velocity
+spikes that marked every earlier production run: **91 free cells above 60 m/s instead of 6 270, and
+a free maximum of 77 m/s instead of 275** — the latter had been sitting at the velocity clamp.*
 
-![f4_vollumfang_mls vs OpenFOAM 13 — velocity difference](docs/f4_vollumfang_diff_of13_500ms.png)
-***Today's run against the OpenFOAM 13 reference** on the Y = 0.025 m slice — same convention as
-the V1 header image below: ΔU = |u|_OF13 − |u|_FX, red = OF13 faster, blue = OF13 slower / FX
-over-accelerated, ±15 m/s, black = solid. The over-roof over-acceleration that defined V1 is
-reduced to a pale shadow; the red rim hugging the body is the boundary layer (the wall model
-brakes slightly harder than the RANS reference), and the mottled wake is the snapshot-vs-mean
-caveat (FX is an instantaneous LES field, OF13 a RANS mean — resolved eddies against a smooth
-average; the mean-flow regions are the meaningful comparison). Field statistics of this diff
-(670 217 cells, alignment per the established frame mapping x_v2 = x_OF13 + 2.2063):
-**RMS 5.1 m/s, median −2.2 m/s, only 1.8 % of cells clip the ±15 scale.***
+![p4dt_deteps vs OpenFOAM 13 — velocity difference](docs/diff_p4dt_deteps_vs_of13_501ms.png)
+***The baseline against the OpenFOAM 13 reference** on the Y = 0.025 m slice: ΔU = |u|_OF13 − |u|_FX,
+red = OF13 faster, blue = OF13 slower / FX over-accelerated, ±15 m/s, black = solid. The over-roof
+over-acceleration that defined V1 is reduced to a pale shadow; the red rim hugging the body is the
+boundary layer (the wall model brakes slightly harder than the RANS reference), and the mottled wake
+is the snapshot-vs-mean caveat (FX is an instantaneous LES field, OF13 a RANS mean — resolved eddies
+against a smooth average; the mean-flow regions are the meaningful comparison). Field statistics of
+this diff (636 437 evaluable cells, alignment per the established frame mapping
+x_v2 = x_OF13 + 2.2063): **RMS 4.26 m/s, median −0.57 m/s, only 1.66 % of cells clip the ±15 scale**
+— against RMS 5.1 / median −2.2 / 1.8 % on the previous headline run.*
 
 A fork of [ProjectPhysX/FluidX3D](https://github.com/ProjectPhysX/FluidX3D) tuned for **vehicle
 aerodynamics on a single Intel Arc Pro B70 (Battlemage) + Arrow-Lake iGPU**. The base solver runs
@@ -404,6 +417,24 @@ The remaining big levers (FP16S memory compression, UPDATE_FIELDS retirement, du
 expected mechanics in the project markdowns.
 
 ## The validated production configuration
+
+**Current standard (2026-09-11), as run in the baseline `p4dt_deteps`:**
+
+| Switch | Value | Why |
+|---|---|---|
+| `CFD_SGS_SISM=1` + `_T=5000` `_AB=15000` | facet SISM on the wall cell | the wall-cell subgrid model; shear-improved Smagorinsky subtracts the mean strain |
+| `CFD_SGS_BAND=0` | **off since 2026-09-11** | the band applied SISM to wall layer 2 as well. It was *applied* — the action-path counter matches (layer 1 + band) × phase-2 slots to the last digit — but measured **without effect** on forces or field, because outside the first wall cell the instantaneous strain almost never falls below its time mean. It cost 118.8 MB for nothing. |
+| `CFD_PTRT=1.90` | ghost-mode purification | relaxes the ghost part of the even non-equilibrium at its own rate. Removes the accumulating velocity outliers: 6 270 → 91 free cells above 60 m/s |
+| `CFD_FAC_DETEPS=16` | det-ε rank guard | lifts wall-model coverage 82.5 % → 93.85 %. Costs ≈ +0.011 downforce on `cz_druck_rest`, a deliberate trade |
+| `CFD_FAC_PINV=1` | rank-1 pseudo-inverse | part of the standard since 2026-09-09 |
+| `CFD_T_END=0.501`, `CFD_T_WARMUP=0.201` | run protocol | slices every 50 ms; the runs are **not** converged at 501 ms and this is a known, open conflict |
+
+**Caveat, stated rather than hidden:** the baseline run `p4dt_deteps` still carried
+`CFD_SGS_BAND=2`. The band is switched off *after* that run on the strength of the paired
+measurement that showed it without effect. The combination "standard minus band" has therefore not
+itself been run yet.
+
+---
 
 What `f4_vollumfang_mls` actually ran (every switch audited: 32/32 env vars traced to their
 consumer **and** a runtime action-path proof — a switch without a firing counter is treated as a
