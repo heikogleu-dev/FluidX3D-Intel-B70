@@ -77,10 +77,12 @@ hält (`lbm.cpp:929` ist die einzige Verwendung). Freigabe per `swap`, nicht `cl
 
 ### Wanduhr und Speicher
 
-| | `o8_vor` | `o8_nach` | `o8_nach2` |
-|---|---:|---:|---:|
-| Wanduhr | 426 s | 419 s | 415 s |
-| System-RAM VmHWM | **2321,2 MB** | – | **2134,2 MB** |
+| | `o8_vor` | `o8_nach` | `o8_nach2` | `o8_e5` |
+|---|---:|---:|---:|---:|
+| Wanduhr | 426 s | 419 s | 415 s | **403 s** |
+| System-RAM VmHWM | **2321,2 MB** | – | **2134,2 MB** | – |
+
+**Gesamt 426 s → 403 s = −5,4 % Wanduhr**, bei durchgehend bitgleicher Physik.
 
 **Wanduhr −2,1 %** (Mittel der beiden Wiederholungen gegen den Bezug). Die Streuung zwischen
 den beiden identischen Wiederholungen beträgt 4 s, der Gewinn 9 s — er liegt also über der
@@ -88,9 +90,33 @@ Streuung, aber nicht weit darüber. **Der Wanduhr-Gewinn ist ausdrücklich nicht
 Rechtfertigung.** Die ist, dass eine Fehlerklasse verschwindet, die diesen Fork schon einmal
 einen Faktor 100 gekostet hat.
 
-**System-RAM −187,0 MB = −8,1 %** bei 8 mm. Bei 4 mm ist mehr zu erwarten: der dichte
+**System-RAM −187,0 MB = −8,1 %** bei 8 mm. Die unabhängige Prüfung hat zwei Zahlen dazu
+geschärft: `stable_sort` braucht einen Temporärpuffer von nochmals rund 12,5 MB, der
+Nettogewinn bei 4 mm ist also etwa **581 MB statt 593,7**. Und der Nachschlag ist teurer
+geworden — nachgebaut gemessen **+2,5 s Aufbauzeit bei 4 mm** gegen 594 MB. Bei einem
+24-Minuten-Lauf ist das ein guter Tausch, aber die Zahl gehört genannt. Bei 4 mm ist mehr zu erwarten: der dichte
 Glättungsindex skaliert mit der Facetten-BBox und belegte dort 593,7 MB statt der 258 MB bei
 8 mm. Gemessen wird das erst am nächsten 4-mm-Lauf.
+
+### E5 — P-TRT-Zählergatter von `t%100` auf `t%1000`
+
+Eigener Arm `o8_e5` gegen `o8_nach2`. Vorher geprüft, dass keine Abnahme aus dem 100er-Raster
+eine Sollzahl ausrechnet: `pruefe_ptrt` vergleicht nur relativ (203 gegen 202) und auf
+Ungleichnull. Der Helfer in `setup.cpp:514`, der Zählslots aus `(t_ende-1)/100` berechnet,
+gehört dem SGS-Band-Test (Slot 186) und ist nicht betroffen.
+
+| | `o8_nach2` | `o8_e5` |
+|---|---:|---:|
+| CSV + Feld-Dumps | — | **28 von 28 bitgleich** |
+| ausgedünnte P-TRT-Stichproben | 14 017 095 | **1 451 970** (Faktor 9,65) |
+| Wanduhr | 415 s | **403 s (−2,9 %)** |
+
+**Das ist der größte Einzelgewinn dieser Runde** — größer als E1, E2 und E3 zusammen, und
+die Streuung zwischen zwei identischen Läufen beträgt 4 s gegen 12 s Gewinn.
+
+**Ausdrücklich deklariert:** die Zählerwerte 199 bis 203 fallen um Faktor 10. Ein A/B, das
+diese Slots gegen eine Baseline **vor** E5 vergleicht, meldet zu Recht eine Abweichung. Das
+ist gewollt und kein Fehler.
 
 ### Zwei Nebenbefunde aus der Abnahme
 
@@ -145,12 +171,29 @@ Hygiene, keine Kapazität.
 | M1 | **Spalding-Tabelle** (256 float = 1 kB, globaler Puffer) statt 3 Newton-Schritten | −330 Instr. = **−4,57 %** UND **450× genauer** (p99 2,95 % → 0,0066 %) |
 | M2 | Geometrie in die **freien `fac_geo`-Slots** (Wandlinkmaske, `nb`, `ywb`) | `fac_nachbar_ab` 791 → 75 (**−90,5 %**), `stream_collide` −1,8 %, **null zusätzliches VRAM** |
 | M3 | Diagnostikzähler hinter ein Emissionsgate, Default an | −340 Instr. = **−5,2 %** Nahkernel |
-| M4 | Volumenkraft im Fahrzeugfall nicht emittieren | −132 Instr. = **−2,0 %** Nahkernel |
+| M4 | ~~Volumenkraft nicht emittieren~~ **WIDERLEGT, siehe unten** | – |
 | M5 | `sgs_fdwand` und `fac_nachbar_ab` zu einem Launch verschmelzen | 1463 → 707 Instr., 1–4 % Verkehr |
 | M6 | ABSTAND-Scan in `boden_eq` durch ein Flagbit ersetzen | 1267 → 1170 (**−7,7 %**), 347 M Reads je Grobschritt für 0,50 % Treffer |
 | M7 | `cubic_lift_weights` als 1-D-Tabelle (54 kB) | 962 → 683 (**−29,0 %**) |
 | M8 | 3×3-Tensor mit konstanten Inkrementen, danach einmal projizieren („Variante B") | −199 Instr. = **−2,76 %**, null Speicher |
 | M9 | Sechs von acht Round-Trips bündeln | Obergrenze **3,1 % Wanduhr** |
+
+> **⚠ M4 IST WIDERLEGT (11.09., beim Umsetzen gefunden).** Die Volumenkraft ist im
+> Fahrzeugfall **nicht** tot. `kernel.cpp:2993` speist unter `FACETTEN_KRAFT` das
+> **Wandmodell-Residuum als Volumenkraft** in dieselbe Guo-Kette ein
+> (`fxn += fac_kraft.x`), und `kernel.cpp:3005` addiert unter `FORCE_FIELD` ohne
+> `F_NUR_SOLID` das Kraftfeld dazu. Der Befund aus Teil 1 stützte sich auf die Logzeile
+> „Volume Force 0.00000000" — die meint die **konstante** Kraft `fx/fy/fz`, nicht die lokale
+> `fxn`. Dass die Kette heute still ist, liegt allein daran, dass `CFD_FAC_KRAFT` per Default
+> 0 ist (`lbm.cpp:343`) und `F_NUR_SOLID` per Default an. **Ein Entfernen von `VOLUME_FORCE`
+> würde `CFD_FAC_KRAFT` lautlos wirkungslos machen** — genau die Fehlerklasse, die im
+> Vorgängerfork den Moving-Floor-Fix jahrelang zum No-Op machte.
+>
+> Richtig wäre stattdessen eine **Emissionsentscheidung auf dem Host**: `VOLUME_FORCE` nur
+> definieren, wenn der Fall überhaupt eine Kraft tragen kann (konstante Kraft ungleich null
+> ODER `s_fac_kraft>0` ODER `FORCE_FIELD` ohne `F_NUR_SOLID` ODER Temperatur/Partikel). Das
+> ist machbar, aber kein Einzeiler und braucht einen eigenen Wächter. **Bis dahin: nicht
+> anfassen.**
 
 M3 und M4 kombiniert gemessen: Nahkernel 6590 → **6129 (−7,0 %)**, Fernkernel 2219 → 1714
 (−22,8 %). **Die Fernfeld-Ersparnis schlägt nicht auf die Wanduhr durch** — das Fernfeld liegt

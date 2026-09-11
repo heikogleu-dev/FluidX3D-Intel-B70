@@ -3500,7 +3500,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float pt_e1 = def_we*(pt_a1+pt_a2+pt_a3);
 	const float pt_e2 = def_we*(pt_a1+pt_a2-pt_a3);
 	const float pt_e3 = def_we*(pt_a1-2.0f*pt_a2);
-	if(t%100ul==0ul) {
+	// ★ 11.09.2026 (E5): Gatter von t%100 auf t%1000. Der Block kostete 0,33 % Wanduhr
+	// (-18,9 s bei 4 mm, A/B-belegt). Die Aussagekraft bleibt: bei 4 mm sind das noch 50
+	// Stichprobenschritte statt 501, und die Abnahme pruefe_ptrt vergleicht ohnehin nur
+	// relativ (203 gegen 202) und auf Ungleichnull -- sie rechnet KEINE Sollzahl aus dem
+	// Raster. Der Saettigungsvorbehalt fuer 199..201 bleibt unveraendert gueltig.
+	if(t%1000ul==0ul) {
 		// Drei Zaehler statt einem: einer allein bewiese nur, dass der Block betreten wurde.
 		// Muster wie am NUT_SKAL-Diskriminator. Saettigend, sonst wickeln sie binnen Sekunden.
 		if(rho_clamp_hits[199]<0xF0000000u) atomic_inc(&rho_clamp_hits[199]); // Wirkpfad: Block besucht
