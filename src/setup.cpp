@@ -1508,7 +1508,14 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		  // die zwanzig Zeilen weiter unten steht. Nicht aufgefallen, weil der Rauchtest an der KUGEL
 		  // lief, und die hat TYPE_E unbedingt. 0 Besuche heisst NICHT "Waechter kaputt", sondern
 		  // "keine Grundgesamtheit" -- das setzt die ABDECKUNG von Slot 210 auf null, mehr nicht.
-		  if(besuche==0ull) print_warning(string("rho-Bereichswaechter ")+wo+": Slot 211 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 210 beweist damit NICHTS; der Bereichswaechter hat hier keine Abdeckung.");
+		  // ★ 12.09. abends (Pruefer B/C): ZWEI Ursachen, eine Meldung -- das war die Fehldiagnose, die
+		  // der Nachbarblock sieben Zeilen darueber fuer 204..207 schon mit zaehlschritt_im_lauf behoben
+		  // hat. Endet der Lauf VOR t = Zaehltakt+2, ist die Null kein Geometriebefund, sondern gar
+		  // keine Messung. Beide Faelle werden jetzt getrennt benannt.
+		  const bool zschritt_erreicht = L.get_t() > zaehl_takt()+1ull;
+		  if(besuche==0ull) print_warning(string("rho-Bereichswaechter ")+wo+(zschritt_erreicht
+			? ": Slot 211 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 210 beweist damit NICHTS; der Bereichswaechter hat hier keine Abdeckung."
+			: ": Slot 211 = 0, aber der Zaehlschritt t = "+to_string((ulong)(zaehl_takt()+2ull))+" lag gar nicht im Lauf (t = "+to_string(L.get_t())+"). Es wurde nicht gemessen -- das ist KEIN Befund ueber die Geometrie."));
 		  // ★ TODO 2 Schritt 4 (12.09.2026) -- dasselbe fuer u, aber gegen die SAETTIGUNG statt gegen
 		  // die Typverwechslung (die faengt bei u ebenfalls nur der Typ-Zensus).
 		  //   Slot 212 = |u| >= 1,0 oder nicht-endlich an der TYPE_E-Lesestelle, UNGEGATET. Soll 0.
@@ -1516,21 +1523,25 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		  //             Abdeckung -- und im Kanalfall ist es strukturell 0, deshalb WARNUNG, nie Fehler.
 		  //   Slot 214 = Betragstor im Kopplungs-Lift, dem einzigen ungeklemmten u-Schreiber. Soll 0;
 		  //             solange er 0 ist, ist das Tor nachweislich ein No-Op und der FP32-Arm bitgleich.
-		  ulong u_ausser=0ull, u_besuche=0ull, u_tor=0ull;
+		  ulong u_ausser=0ull, u_besuche=0ull, u_tor=0ull, u_lift=0ull;
 		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
-			u_ausser+=(ulong)dm->rho_clamp_hits[212]; u_besuche+=(ulong)dm->rho_clamp_hits[213]; u_tor+=(ulong)dm->rho_clamp_hits[214]; }
+			u_ausser+=(ulong)dm->rho_clamp_hits[212]; u_besuche+=(ulong)dm->rho_clamp_hits[213];
+			u_tor+=(ulong)dm->rho_clamp_hits[214]; u_lift+=(ulong)dm->rho_clamp_hits[215]; }
 		  print_info(string("  u-Speicherwort ")+wo+": "+to_string((uint)(8u*sizeof(velxx)))+" bit je Komponente, "
-			+to_string(u_besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(u_ausser)+" mit |u| >= 1,0 oder nicht-endlich (Soll 0); Kopplungs-Lift-Tor "+to_string(u_tor)+" (Soll 0).");
+			+to_string(u_besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(u_ausser)+" mit |u| >= 1,0 oder nicht-endlich (Soll 0); Kopplungs-Lift "+to_string(u_lift)+" Schreibvorgaenge, davon "+to_string(u_tor)+" ueber dem Betragstor (Soll 0 -- das Tor ist eine Invariantenzusicherung, keine Messung: die Klemme 0,57735 und die Lift-Gewichte begrenzen |u| konstruktiv auf 0,9021)."
+			+(u_lift==0ull ? " Der Lift lief in dieser Domaene NICHT -- die Null im Tor hat hier keine Abdeckung." : ""));
 		  if(u_ausser>0ull) print_error(string("u-Saettigungswaechter ")+wo+": "+to_string(u_ausser)+" Lesungen an TYPE_E-Zellen mit |u| >= 1,0 oder nicht-endlich. Die Geschwindigkeitsklemme haelt +-0,57735; unter U_FP16 saettigt das Speicherwort ab 1,99902 still nach +-inf -- der Lauf ist kein Ergebnis.");
 		  if(u_tor>0ull) print_error(string("u-Betragstor im Kopplungs-Lift ")+wo+": "+to_string(u_tor)+" mal gegriffen. Damit ist der FP32-Arm NICHT mehr bitgleich zum Stand vor TODO 2 Schritt 4, und die kubische Interpolation liefert Geschwindigkeiten jenseits jeder Physik.");
-		  if(u_besuche==0ull) print_warning(string("u-Saettigungswaechter ")+wo+": Slot 213 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 212 beweist damit NICHTS.");
+		  if(u_besuche==0ull) print_warning(string("u-Saettigungswaechter ")+wo+(zschritt_erreicht
+			? ": Slot 213 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 212 beweist damit NICHTS."
+			: ": Slot 213 = 0, aber der Zaehlschritt lag gar nicht im Lauf. Es wurde nicht gemessen."));
 		  // ★ 12.09. (Pruefagent, fehlender Punkt 3): ANSAGEN, welcher Freistrom unter U_FP16 wirklich
 		  // im Speicher steht. u_lat ist als half im Allgemeinen nicht exakt, und der Versatz haengt an
 		  // seinem Wert: bei 0,075 sind es +0,0163 %, bei 0,05 aber -0,0244 %, also groesser UND mit
 		  // umgekehrtem Vorzeichen. CFD_U_LAT ist frei setzbar; eine Zahl im Kopf reicht dafuer nicht.
 		  if(sizeof(velxx)<4u&&u_lat>0.0f) { const float u_ist = u_unpack(u_pack(u_lat));
 			print_info("  Freistrom im Speicherwort: u_lat = "+to_string(u_lat,9u)+" liegt als "+to_string(u_ist,9u)
-			  +" (Versatz "+to_string(100.0f*(u_ist-u_lat)/u_lat,4u)+" %, auf die Kraefte "+to_string(100.0f*((u_ist/u_lat)*(u_ist/u_lat)-1.0f),4u)+" %). Die TYPE_E-Einlasszellen HALTEN diesen Wert."); }
+			  +" (Versatz "+to_string(100.0f*(u_ist-u_lat)/u_lat,4u)+" %, auf die Kraefte "+to_string(100.0f*((u_ist/u_lat)*(u_ist/u_lat)-1.0f),4u)+" %). Wo TYPE_E den Wert haelt -- Kugel, Gitter, Fernfeld -- ist das der gerechnete Freistrom; im dd-NAHFELD ueberschreibt der Kopplungs-Lift diese Zellen jeden Grobschritt, dort gilt er nur fuer die Saat. Dieselbe Verschiebung traegt die mitbewegte Fahrbahn (TYPE_S mit u_x = u_lat), gegen die audit_bewegte_waende sein Soll u_lat/3 misst."); }
 		  // Die rho-Quantisierungs-Dekaden (Slots 215..217, urspruenglich 212..217) sind am 12.09. abends
 		  // ENTFERNT worden -- 212/213/214 tragen seither den u-Huellenwaechter, siehe darueber. Der
 		  // Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert und meldete
@@ -7870,7 +7881,7 @@ static void main_setup_fahrzeug_dd() {
 						// der drei groben Komponenten. Das ist genau die Bauform, die der Absatz darueber als
 						// "Anlauf 1" verwirft, nur eine Ebene tiefer: bei u_x ~ 0,075 und u_y ~ 0 haette u_y
 						// dieselbe Schranke 3,67e-5 bekommen, obwohl sein eigenes Quant bei ~1e-8 liegt --
-						// ein Kopplungsdefekt von 3e-5 in u_y (0,049 % von u_inf) waere unentdeckt geblieben.
+						// ein Kopplungsdefekt von 3e-5 in u_y (0,040 % von u_inf) waere unentdeckt geblieben.
 						// Jetzt traegt JEDE Komponente ihre eigene Schranke, hergeleitet aus IHREM Grobwert.
 						bool u_schlecht = false;
 						for(uint k=0u; k<3u; k++) {
@@ -7884,7 +7895,7 @@ static void main_setup_fahrzeug_dd() {
 				}
 				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)
 					+" Deckungspunkte (plus "+to_string(n_outlet_edge)+" auf der Auslasskante, dort gilt der Auslass); groesste Abweichung dort "+to_string(maxdev,9u)
-					+(n_bad? (" -- "+to_string(n_bad)+" ueber der Schranke (rho: 1e-6 bzw. |rho-1|*2^-11 unter RHO_FP16; u: 1e-6 bzw. |u|*2^-11 unter U_FP16), erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : " (identisch)")
+					+(n_bad? (" -- "+to_string(n_bad)+" ueber der Schranke (rho: 1e-6 bzw. |rho-1|*2^-11 unter RHO_FP16; u: 1e-6 bzw. |u|*2^-11 unter U_FP16), erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : (sizeof(velxx)<4u||sizeof(rhoxx)<4u ? " (innerhalb der Formatschranke)" : " (identisch)"))
 					+"; groesste Abweichung vom Freistrom "+to_string(100.0f*maxrel,2u)+" % von u_inf");
 				if(n_e==0ull) print_warning(string("Flaeche ")+face_name[p]+" hat KEINE TYPE_E-Zelle -- diese Kopplungsflaeche ist wirkungslos.");
 				// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle folgt dem Speicherformat, sonst VERLIERT dieser
@@ -8606,10 +8617,10 @@ static void main_setup_fahrzeug_dd() {
 				// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle 1e-3 laege unter U_FP16 nur 1,23-fach ueber dem
 				// Quantisierungsrauschen -- ein half-Quant bei u_lat = 0,075 ist 6,10e-5 lat, in u_inf-Einheiten
 				// also 8,14e-4. Gezaehlt wuerden dann Vorzeichenwechsel der RUNDUNG statt der Physik. Vier
-				// Quanten. BERICHTIGT 12.09. (Pruefagent, NIEDRIG): die erste Fassung schrieb 6,103516e-5 als
+				// VOLLE Quanten. BERICHTIGT 12.09. (Pruefagent, NIEDRIG): die erste Fassung schrieb 6,103516e-5 als
 			// Konstante und behauptete trotzdem, an u_lat zu haengen -- das ist das Quant nur fuer
 			// |u| in [0,0625; 0,125). Bei u_lat = 0,3 waere es 2,44e-4 und die Formel 3,3-fach zu klein.
-				const float quant_u = exp2(floor(log2(fmax(u_lat, 1.0e-6f)*32768.0f))-10.0f)/32768.0f; // half-ULP BEI u_lat, nicht bei 0,075
+				const float quant_u = exp2(floor(log2(fmax(u_lat, 1.0e-6f)*32768.0f))-10.0f)/32768.0f; // VOLLER half-ULP bei u_lat (berichtigt 12.09. abends, Pruefer B: stand faelschlich als halber ULP)
 			const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*quant_u/u_lat) : 1.0e-3f;
 				if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>tol_flip&&fabs(letzte_d)>tol_flip) flips+=1.0; letzte_d=d; } else letzte_d=0.0f;
 				vor=ux; hat_vor=true; }
@@ -9025,10 +9036,10 @@ static void main_setup_fernfeld() {
 			// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle 1e-3 laege unter U_FP16 nur 1,23-fach ueber dem
 			// Quantisierungsrauschen -- ein half-Quant bei u_lat = 0,075 ist 6,10e-5 lat, in u_inf-Einheiten
 			// also 8,14e-4. Gezaehlt wuerden dann Vorzeichenwechsel der RUNDUNG statt der Physik. Vier
-			// Quanten. BERICHTIGT 12.09. (Pruefagent, NIEDRIG): die erste Fassung schrieb 6,103516e-5 als
+			// VOLLE Quanten. BERICHTIGT 12.09. (Pruefagent, NIEDRIG): die erste Fassung schrieb 6,103516e-5 als
 			// Konstante und behauptete trotzdem, an u_lat zu haengen -- das ist das Quant nur fuer
 			// |u| in [0,0625; 0,125). Bei u_lat = 0,3 waere es 2,44e-4 und die Formel 3,3-fach zu klein.
-			const float quant_u = exp2(floor(log2(fmax(u_lat, 1.0e-6f)*32768.0f))-10.0f)/32768.0f; // half-ULP BEI u_lat, nicht bei 0,075
+			const float quant_u = exp2(floor(log2(fmax(u_lat, 1.0e-6f)*32768.0f))-10.0f)/32768.0f; // VOLLER half-ULP bei u_lat (berichtigt 12.09. abends, Pruefer B: stand faelschlich als halber ULP)
 			const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*quant_u/u_lat) : 1.0e-3f;
 			if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>tol_flip&&fabs(letzte_d)>tol_flip) flips+=1.0; letzte_d=d; }
 			vor=ux; hat_vor=true; }

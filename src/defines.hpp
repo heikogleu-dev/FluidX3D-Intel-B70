@@ -36,7 +36,7 @@
 //   KEIN UEBERLAUF: die Skalierung traegt bis |rho-1| = 1,999; RHO_CLAMP (unten) garantiert 0,5 und
 //   das Tor im Kopplungs-Lift (kernel.cpp, v[0] in (0,5; 2,0)) garantiert 1,0. Marge Faktor 2.
 //   Werkzeug zum Umschalten: werkzeuge/rho_format.sh FP32|FP16
-//#define U_FP16 // ★ FORK 2026-09-12, TODO 2 Schritt 4: u im GERAETE- und Hostspeicher als drei FP16S
+#define U_FP16 // ★ FORK 2026-09-12, TODO 2 Schritt 4: u im GERAETE- und Hostspeicher als drei FP16S
 // statt drei float32. Spart bei 4 mm 2971 MiB VRAM im Nahfeld (519.139.485 Zellen x 6 B) und noch
 // einmal dieselbe Menge System-RAM (die B70 ist kein Zero-Copy-Geraet, u liegt dort zweimal); im
 // Fernfeld (iGPU, Zero-Copy) sind es 1164 MiB einfach. u ist damit der GROSSE Hebel -- dreimal rho.

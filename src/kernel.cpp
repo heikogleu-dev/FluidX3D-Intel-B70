@@ -1591,6 +1591,10 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 				flagsn = (flagsn&~TYPE_SU)|TYPE_I; // cell must be interface
 				phin = 0.5f;
 				float rhon, uxn, uyn, uzn; // initialize interface cells with average density/velocity of fluid neighbors
+				// ★ 12.09. abends (Pruefer A): SURFACE-Zweig. average_neighbors_fluid traegt den
+				// float-Zeigertyp, u ist hier velxx -- unter -w meldet ocloc dazu nur "incompatible
+				// pointer types" und baut. Heute unerreichbar (defines.hpp sperrt U_FP16 x SURFACE),
+				// steht aber als Zwilling zum surface_0-Befund hier angesagt statt still.
 				average_neighbors_fluid(n, rho, u, flags, &rhon, &uxn, &uyn, &uzn); // get average rho/u from all fluid neighbors
 				calculate_f_eq(rhon, uxn, uyn, uzn, feq); // calculate equilibrium DDFs
 			}
@@ -3060,9 +3064,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// mehr -- dort steht jetzt ein eigenes Betragstor, dieser Waechter kann jene Klasse also
 		// konstruktiv nicht mehr sehen. Was er WEITERHIN abdeckt: die Hostsaat (u wird an 56 Stellen
 		// gesaet und mit write_to_device hochgeladen, ohne je durch die Klemme zu laufen) und
-		// insert_rho_u_flags, das Halowerte einer FREMDEN Domaene uebernimmt. Gegen Slot 214 ist er
-		// Redundanz -- und die ist hier gewollt, weil 214 im Kernel sitzt und 212 am Leser.
-		// Schwelle 1,0 statt 1,99902: das ist Faktor 1,73 ueber der Klemme und Faktor 2,1 unter der
+		// voxelize_mesh. NICHT gedeckt ist insert_rho_u_flags -- BERICHTIGT 12.09. abends (Pruefer A):
+		// dessen Schreibziele sind genau die Halozellen, und stream_collide steigt bei is_halo(n) aus,
+		// bevor es hier ankommt. Der Waechter sieht sie also nie. Heute latent, weil beide Domaenen
+		// mit D=1 fahren und die Transferkernel gar nicht laufen; bei D>1 waere es eine Luecke.
+		// Gegen Slot 214 ist er Redundanz -- und die ist hier gewollt, weil 214 im Kernel sitzt.
+		// Schwelle 1,0 statt 1,99902: das ist Faktor 1,73 ueber der Klemme und Faktor 2,0 unter der
 		// Saettigung -- der Waechter feuert, BEVOR das Wort kippt, nicht danach. Gemessenes Maximum im
 		// 4-mm-Nahfeld bei 501 ms: 0,4764. Soll ueber den ganzen Lauf: 0.
 		// Der Bit-Test auf Exponent 0xFF steht daneben, weil unter -cl-finite-math-only ein Vergleich
@@ -3829,9 +3836,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			// hart). Ein load_u darauf waere STILL falsch -- ocloc meldet dazu nur "incompatible
 			// pointer types", und der Produktionsbau haengt -w an (opencl.hpp), die Warnung ist weg.
 			// Vom Pruefagenten am 12.09. gefunden: erst stand hier load_u, die Signatur aber nicht.
-			// Und der Zensus hat die ERSTE Fassung DIESES Kommentars gefangen: sie schrieb den
-			// Zeigertyp woertlich aus, und Kommentare in R()-Bloecken landen im emittierten
-			// Quelltext -- der Zensus haette 22 statt 21 gezaehlt und in jedem Lauf Alarm geschlagen.
+			// ★ BERICHTIGT 12.09. abends (Pruefer C, und nachgemessen): hier stand, Kommentare in
+			// R()-Bloecken landeten im emittierten Quelltext und haetten den Typ-Zensus auf 22
+			// getrieben. DAS IST FALSCH. Der Praeprozessor entfernt Kommentare in Phase 3, die
+			// Stringbildung ist Phase 4 -- mit demselben R()-Makro nachgestellt: ein Kommentar mit
+			// dem Zeigertyp darin erscheint NICHT im Ergebnis. Die 22 kamen aus einem grep ueber die
+			// QUELLDATEI, nicht aus dem emittierten Code; ich hatte sie falsch zugeordnet. Die echte
+			// Falle an dieser Stelle ist die andere Richtung: ein "//" MITTEN in einer Kernelzeile
+			// frisst den Code dahinter, weil er vor der Stringbildung verschwindet.
 			uxn  = u[                 n];
 			uyn  = u[    def_N+(ulong)n];
 			uzn  = u[2ul*def_N+(ulong)n];
@@ -4384,12 +4396,24 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// Bit-Test auf Exponent 0xFF faengt NaN/Inf treiberunabhaengig.
 	if((as_uint(v[0])&0x7F800000u)==0x7F800000u||(as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return; // R2: auch rho bit-testen (Bereichsvergleich ist unter finite-math NaN-unzuverlaessig)
 	// ★ TODO 2 Schritt 4 (12.09.2026): Betragstor auf u, Zwilling zum rho-Tor zwei Zeilen darueber.
-	// Dies ist der EINZIGE u-Schreiber im ganzen Kernel ohne Geschwindigkeitsklemme -- stream_collide
-	// und update_fields klemmen beide auf +-def_c, bevor sie speichern. Die kubische Interpolation
+	// stream_collide und update_fields klemmen beide auf +-def_c, bevor sie speichern; dieser hier
+	// nicht. BERICHTIGT 12.09. abends (Pruefer C): er ist nicht der EINZIGE ungeklemmte -- das sind
+	// auch voxelize_mesh (schreibt ein hostgegebenes u_set) und insert_rho_u_flags (uebernimmt
+	// Halowerte einer Nachbardomaene). Er ist der einzige, der einen WERT AUSRECHNET statt einen
+	// durchzureichen, und deshalb der einzige, der ueberschwingen kann. Die kubische Interpolation
 	// kann ueberschwingen; der Eingang ist zwar selbst geklemmt, aber Catmull-Rom traegt Gewichte
 	// ausserhalb [0,1]. Unter U_FP16 wuerde ein Wert ab |u| = 1,99902 still nach +-inf saettigen.
 	// Schwelle 1,0 wie am Huellenwaechter Slot 212, Wirkpfad-Zaehler Slot 214, Soll 0 -- und weil er
 	// 0 ist, bleibt der FP32-Arm bitgleich: das Tor greift nie, es beweist nur, dass es nie greift.
+	// ★ BERICHTIGT 12.09. abends (Pruefer B, HOCH): dieses Tor kann konstruktiv NIE greifen, und das
+	// gehoert hierhin statt "Soll 0". Der Eingang ist auf +-def_c = 0,57735 geklemmt, und die
+	// Catmull-Rom-Gewichte tragen je Achse hoechstens 1,25 in der Summe der Betraege, im 2D-Produkt
+	// also 1,5625. Damit ist |v| <= 1,5625*0,57735 = 0,9021 < 1,0. Es ist eine INVARIANTENZUSICHERUNG,
+	// kein Messinstrument: sie feuert erst, wenn jemand die Klemme oder die Lift-Gewichte aendert.
+	// Slot 215 ist der Besuchszaehler dazu -- ohne ihn beweist die Null in 214 nichts, genau wie bei
+	// 210/211 und 212/213 (dort war er von Anfang an da, hier fehlte er; im selben Block, sieben
+	// Zeilen auseinander -- gefunden von zwei Pruefern unabhaengig).
+	if(hits[215]<0xF0000000u) atomic_inc(&hits[215]); // Besuche des Lift-Schreibpfads
 	if(fabs(v[1])>=1.0f||fabs(v[2])>=1.0f||fabs(v[3])>=1.0f) { if(hits[214]<0xF0000000u) atomic_inc(&hits[214]); return; }
 	store_rho(rho, n, v[0]);
 	store_u(u, n, v[1]);

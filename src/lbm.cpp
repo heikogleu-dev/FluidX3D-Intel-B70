@@ -246,13 +246,21 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// ★ TODO 2 Schritt 4 (12.09.2026) -- ANSAGE, kein Abbruch: der regularisierte Rand ist der einzige
 	// GEMESSENE u-Leser mit zweistelligem Quantisierungsfehler.
 	// EINGEORDNET 12.09. abends (Pruefagent, MITTEL): dieselbe Arithmetik 0,5*(up_-um_) auf
-	// quantisierten Nachbarn steht auch in sgs_gdiag, sgs_fdwand und fac_nachbar_ab -- und die DREI
+	// quantisierten Nachbarn steht auch in sgs_gdiag und sgs_fdwand -- und die BEIDEN
 	// laufen, waehrend deriv_reg an CFD_REG_BC haengt und aus ist. Gemessen wurde davon sgs_fdwand
 	// (identische Arithmetik wie sgs_gdiag): 0,018 % auf |S|_FD und auf nu_t, also 150-fach
 	// unempfindlicher als der Rand. Grund ist die umgekehrte Paarung -- an der Facettenzelle ist |u|
 	// klein (Faktor 7 gegen den Einlassrand) und der Gradient gross (Faktor 75), und 92,6 % der
 	// Facettenzellen haben mindestens einen Solidnachbarn, der als exakte 0 eingeht und nicht rundet.
-	// NICHT GEMESSEN ist fac_nachbar_ab (ein Link statt sechs). Das ist die offene Luecke. Am 4-mm-Feld bei 501 ms voll nachgerechnet
+	// NICHT GEMESSEN ist fac_nachbar_ab. Es bildet KEINE Differenz (es liest einen einzigen Nachbarn) --
+	// der Verstaerker dort ist eine AUSLOESCHUNG: die Tangentialprojektion ut = u - (u.n)n zieht gleich
+	// grosse Terme voneinander ab, der Quantisierungsfehler skaliert aber mit |u|, nicht mit |u_t|. Wo
+	// die Stroemung fast wandnormal steht -- Stufenschatten, Abloesekanten, also genau die Faelle, fuer
+	// die CFD_FAC_NACHBAR gebaut ist -- entscheidet die Rundung mit ueber das Tor ut2 > 1e-6.
+	// Und die 0,018 % oben gelten fuer den klassischen FDWAND-Zweig, wo nu_t ~ |S|_FD. Im SISM-Zweig
+	// ist nu_t ~ max(0, |S|_FD - Sbar); der absolute Fehler bleibt, steht dann aber auf der Differenz
+	// statt auf dem Betrag, und der relative waechst um denselben Faktor, um den SISM abzieht.
+	// Beides ist die offene Luecke, und beides braucht einen Lauf, keine Nachrechnung. Am 4-mm-Feld bei 501 ms voll nachgerechnet
 	// (alle 3.290.677 TYPE_E-Zellen, alle neun Ableitungen): auf f_neq stehen 2,69 % relativer RMS,
 	// Median je Zelle 3,8 %, p90 28 %. Die beiden x-Flaechen tragen 1,94 % des Signals und 53 % des
 	// Fehlers -- dort ist |u| am groessten und der Gradient am kleinsten, die schlechteste Paarung.
@@ -344,8 +352,9 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		// geschlagen -- gefunden, bevor die Zahl eingetragen war, weil sie am emittierten Quelltext
 		// abgelesen und nicht geschaetzt wurde.
 		// Deshalb: gezaehlt wird nur, wenn hinter dem "u" KEIN Bezeichnerzeichen mehr steht. Die drei
-		// vorkommenden Fortsetzungen sind "," (19x), ")" (1x, graphics_q hat u als letzten Parameter)
-		// und der Zeilenumbruch (1x, die "// ) {"-Splice-Form).
+		// vorkommenden Fortsetzungen sind "," (19x), ")" (1x -- calculate_Q, dort ist u der letzte
+		// Parameter) und der Zeilenumbruch (1x -- graphics_q, dessen Parameterliste per Splice
+		// weitergeht). [Zuordnung berichtigt 12.09. abends, Pruefer C; die Zahlen stimmten.]
 		// SOLL 21 x float: SURFACE 4 (average_neighbors_non_gas/_fluid, surface_0, surface_2),
 		// PARTICLES 1 (integrate_particles), GRAPHICS 13, und DREI ungegatete Hilfsfunktionen --
 		// closest_u (wird NIRGENDS aufgerufen, toter Code), interpolate_u (nur von integrate_particles)
@@ -569,7 +578,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 215 (204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift, dem einzigen ungeklemmten u-Schreiber, Soll 0. 215..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden und sind FREI: der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	// letzten Slot L. NAECHSTER FREIER SLOT: 216 (204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift (Invariantenzusicherung, konstruktiv unerreichbar: Klemme 0,57735 x Lift-Gewichte 1,5625 = 0,9021 < 1,0), Soll 0; 215 = Besuche des Lift-Schreibpfads, ohne die die Null in 214 nichts beweist. 216..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden und sind FREI: der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue

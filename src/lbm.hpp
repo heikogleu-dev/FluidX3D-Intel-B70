@@ -89,11 +89,21 @@ inline rhoxx rho_pack(const float r) { // rho -> Speicherwort
 // Kanalprofil) statt nur zurueckzuschreiben, was er geladen hat. float_to_half addiert 0x1000 und
 // schneidet ab (Gleichstand VOM NULLPUNKT WEG), vstore_half_rte rundet zur GERADEN Zahl. Deshalb
 // nachgemessen statt angenommen: an 4.000.000 zufaelligen u innerhalb der Geschwindigkeitsklemme
-// weichen 267 Speicherwoerter ab, also 0,007 % (bei rho sind es 12,6 %, weil rho-1 nahe null viel
-// haeufiger genau auf einem Gleichstand liegt). Und die Werte, die der Host WIRKLICH saet, stimmen
+// weichen 267 Speicherwoerter ab, also 0,007 % (Ziehung: rand() ueber +-def_c, Saat 12345 -- ein
+// zweiter Pruefer kommt mit mt19937 und uniform_real_distribution auf 0,062 %, weil dessen
+// 24-Bit-Raster ueberproportional viele Gleichstaende erzeugt. Die ZAHL haengt am Ziehungsverfahren
+// und ist ohne dessen Angabe nicht reproduzierbar; belastbar ist nur die Richtung: die Abweichung
+// ist immer genau EIN half-ULP und tritt nur an Gleichstaenden auf). Und die Werte, die der Host WIRKLICH saet, stimmen
 // exakt ueberein: 0,0 / 0,05 / 0,075 / 0,1 / 0,125 liefern in beiden Packern dasselbe Wort.
-// Der laufende Nachweis dafuer ist pruefe_slice_ebene (CFD_SLICE_PRUEF) -- er gehoert unter U_FP16
-// in jede Abnahme, weil er genau diese Deckung an den tatsaechlich vorkommenden Werten prueft.
+// ★ BERICHTIGT 12.09. abends (Pruefer B und C, unabhaengig): hier stand, pruefe_slice_ebene sei der
+// "laufende Nachweis" dieser Deckung. DAS KANN ER NICHT SEIN. Der Gather-Pfad legt dem Hostpacker
+// ausschliesslich Werte vor, die selbst aus u_unpack stammen -- also exakt darstellbare half-Werte.
+// An denen trifft float_to_half nie eine Rundungsentscheidung, dmax ist per Wort-Fixpunkt exakt 0,
+// und ein Gleichstand, an dem sich die Packer unterscheiden, kann dort nicht auftreten. Genau die
+// Bauform, die dieser Commit an anderer Stelle als Lehre festhaelt: ein Waechter, der nicht feuern
+// kann. Fuer Indexabbildung, Transfer, rho und flags bleibt er wertvoll.
+// Was die Deckung WIRKLICH belegen wuerde: die Saatwerte selbst pruefen (unten aufgezaehlt) oder ein
+// Wort, das der GERAETECODE schreibt und der Host roh zurueckliest. Nicht gebaut.
 inline float u_unpack(const velxx w) { // Speicherwort -> Geschwindigkeitskomponente
 #ifdef U_FP16
 	// ★★ Derselbe HOCH-Befund wie bei rho_unpack, und er wiegt hier schwerer: half_to_float ist
@@ -318,7 +328,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 215 (212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 216 (212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift, 215 = dessen Besuchszaehler; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
@@ -832,8 +842,9 @@ public:
 	// ★ TODO 2 Schritt 4 (12.09.2026) -- u liegt NICHT mehr als Memory_Container offen.
 	// WARUM NICHT DIESELBE BAUFORM WIE Rho_Feld (get/set, geloeschter operator[])? Weil rho SIEBEN
 	// Hostzugriffsstellen hat und u HUNDERTNEUNUNDZWANZIG. Einhundertneunundzwanzig Handumbauten sind
-	// nicht sicherer als einer -- sie sind hunderteinunddreissig Gelegenheiten, einen zu verpatzen.
-	// (131 nachgezaehlt, nicht 129: 130 ueber den Stellvertreter plus der eine rohe Domaenenzugriff.)
+	// nicht sicherer als einer -- sie sind hundertfuenfunddreissig Gelegenheiten, einen zu verpatzen.
+	// (135 nachgezaehlt: 134 ueber den Stellvertreter plus der eine rohe Domaenenzugriff. Zwei frueher
+	// hier stehende Zahlen, 129 und 131, zaehlten setup.cpp nach Vorkommen und lbm.cpp nach ZEILEN.)
 	// Deshalb hier ein Stellvertreter je Komponente: "lbm.u.x[n]" bleibt an allen Stellen WOERTLICH
 	// stehen und rechnet trotzdem richtig, und ein roher velxx& ist nirgends mehr erreichbar. Die
 	// rho-Falle (ushort& wandelt still nach float, ohne Warnung) ist damit KONSTRUKTIV ausgeschlossen
