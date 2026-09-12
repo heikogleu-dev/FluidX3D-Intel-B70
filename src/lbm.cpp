@@ -295,12 +295,12 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		// Die 18 verbliebenen Stellen sind AUSSCHLIESSLICH SURFACE (5) und GRAPHICS (13); beide sind
 		// in diesem Bau aus, und defines.hpp schliesst sie unter RHO_FP16 hart aus. Aendert jemand
 		// die Zahl, ist das eine bewusste Entscheidung und diese Zeile gehoert mitgeaendert.
-		const string muster = "global\nfloat*\nrho", muster_t = "global\nrho_t*\nrho";
+		const string muster = "global\nfloat*\nrho", muster_t = "global\nrhoxx*\nrho";
 		uint n_float=0u, n_t=0u;
 		for(size_t i=opencl_c_code.find(muster); i!=string::npos; i=opencl_c_code.find(muster, i+1ull)) n_float++;
 		for(size_t i=opencl_c_code.find(muster_t); i!=string::npos; i=opencl_c_code.find(muster_t, i+1ull)) n_t++;
 		if(n_float!=18u||n_t!=14u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
-			+to_string(n_t)+" x \"global rho_t* rho\" (Soll 14). Ein rho-Kernel ist nicht auf rho_t umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
+			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 14). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
 	}
 	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
@@ -1852,12 +1852,12 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 // seine Abweichungsablage 1e-9 beansprucht -- mit load_rho waere das lautlos 60-fach verfehlt.
 #ifdef RHO_FP16
 	"\n	#define RHO_FP16" // damit kernel.cpp den Arm kennt (Host-Define allein wirkt nicht auf dem Geraet)
-	"\n	#define rho_t half" // rho als range-verschobenes IEEE-754-FP16, 2 statt 4 Byte je Zelle
+	"\n	#define rhoxx half" // rho als range-verschobenes IEEE-754-FP16, 2 statt 4 Byte je Zelle
 	"\n	#define load_rho(p,o) (vload_half(o,p)*3.0517578E-5f+1.0f)"
 	"\n	#define load_drho(p,o) (vload_half(o,p)*3.0517578E-5f)" // rho-1, ohne Ausloeschung
 	"\n	#define store_rho(p,o,x) vstore_half_rte(((x)-1.0f)*32768.0f,o,p)"
 #else // RHO_FP16
-	"\n	#define rho_t float" // unveraendert: rho als float32
+	"\n	#define rhoxx float" // unveraendert: rho als float32
 	"\n	#define load_rho(p,o) ((p)[o])"
 	"\n	#define load_drho(p,o) ((p)[o]-1.0f)"
 	"\n	#define store_rho(p,o,x) ((p)[o]=(x))"

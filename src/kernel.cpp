@@ -1531,7 +1531,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 
 
-)+R(kernel void initialize)+"("+R(global fpxx* fi, const global rho_t* rho, global float* u, global uchar* flags // ) { // initialize LBM
+)+R(kernel void initialize)+"("+R(global fpxx* fi, const global rhoxx* rho, global float* u, global uchar* flags // ) { // initialize LBM
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex, global float* phi // argument order is important
 )+"#endif"+R( // SURFACE
@@ -1976,7 +1976,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , global float* fac_diag // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds) der Diagnose-Facette
 )+"#endif"+R( // FACETTEN_DIAGZ
 )+"#ifdef FACETTEN_APG"+R(
-                        , const global rho_t* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
+                        , const global rhoxx* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
 )+"#endif"+R( // FACETTEN_APG
 )+"#ifdef FACETTEN_ELIBB"+R(
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
@@ -2873,7 +2873,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 // Rueckleserei reine Bandbreite ohne Aussage und der Block entfaellt.
 // Der Rueckleser kostet 2 Byte je GESCHRIEBENER Zelle und nur an jedem def_zaehl_takt-ten Schritt --
 // unter CFD_RHO_SPARSAM sind das rund 0,1 % der Zellen, also nichts.
-)+R(void store_rho_diag(global rho_t* rho, const uxx n, const float rhon, const ulong t, global uint* hits) {
+)+R(void store_rho_diag(global rhoxx* rho, const uxx n, const float rhon, const ulong t, global uint* hits) {
 	store_rho(rho, n, rhon);
 )+"#ifdef RHO_FP16"+R(
 	if(t%(ulong)def_zaehl_takt==0ul) {
@@ -2884,7 +2884,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // RHO_FP16
 }
 
-)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rho_t* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
+)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -3973,7 +3973,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	store_f(n, feq, fi, j, t TS_A);
 }
 )
-+R(kernel void update_fields)+"("+R(const global fpxx* fi, global rho_t* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
++R(kernel void update_fields)+"("+R(const global fpxx* fi, global rhoxx* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -4075,7 +4075,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float old = val; while((old=atomic_xchg(addr, atomic_xchg(addr, 0.0f)+old))!=0.0f);
 )+"#endif"+R(
 }
-)+R(kernel void po_reduce_mean(const global rho_t* rho, const global uint* po_interior, const uint N_po, global float* po_part) {
+)+R(kernel void po_reduce_mean(const global rhoxx* rho, const global uint* po_interior, const uint N_po, global float* po_part) {
 	// Mittelwert der Dichte ueber die INNENZELLEN der Auslassebene: erst im lokalen Speicher
 	// zusammenfassen, dann schreibt jede Gruppe exklusiv ihren Slot. Die Endsumme bildet
 	// po_final_mean in Indexordnung -- OHNE Atomik (Umbau 2026-08-24, siehe dort).
@@ -4119,7 +4119,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	po_mean[0] = s/(float)N_po;
 } // po_final_mean()
 
-)+R(kernel void apply_pressure_outlet(global float* u, global rho_t* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
+)+R(kernel void apply_pressure_outlet(global float* u, global rhoxx* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
 	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
 	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
@@ -4178,7 +4178,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
 } // apply_pressure_outlet()
 
-)+R(kernel void apply_velocity_inlet(global rho_t* rho, const global ulong* vi_cells, const global ulong* vi_interior, const uint N_vi) {
+)+R(kernel void apply_velocity_inlet(global rhoxx* rho, const global ulong* vi_cells, const global ulong* vi_interior, const uint N_vi) {
 	// FORK -- Spiegelbild des Druck-Auslasses. Dort wird rho vorgeschrieben und u aus der Innenzelle
 	// genommen; hier wird u vorgeschrieben (das erledigt der TYPE_E-Zweig in stream_collide) und rho
 	// aus der Innenzelle uebernommen. Damit ist je Rand genau EINE Groesse vorgegeben.
@@ -4261,7 +4261,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	return (uxx)x + (uxx)y*(uxx)def_Nx + (uxx)z*(uxx)def_Nx*(uxx)def_Ny;
 } // plane_cell_index()
 
-)+R(kernel void extract_plane_macros(const global rho_t* rho, const global float* u, global float* out,
+)+R(kernel void extract_plane_macros(const global rhoxx* rho, const global float* u, global float* out,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b) {
 	// Liest (rho, u_x, u_y, u_z) auf einer achsen-normalen Ebene in einen dichten Puffer.
@@ -4295,7 +4295,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[gid] = (n>=(uxx)def_N) ? (uchar)TYPE_S : flags[n];
 } // extract_plane_flags()
 
-)+R(kernel void drive_boundary_cubic_lift(global rho_t* rho, global float* u, const global uchar* flags,
+)+R(kernel void drive_boundary_cubic_lift(global rhoxx* rho, global float* u, const global uchar* flags,
 	const global float* coarse_plane,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b,
@@ -5134,27 +5134,27 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	insert_fi(a, A, index_insert_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi TS_A);
 }
 
-)+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global rho_t* rho, const global float* u, const global uchar* flags) {
+)+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global rhoxx* rho, const global float* u, const global uchar* flags) {
 	((global float*)transfer_buffer)[      a] = load_rho(rho,      n); // Puffer bleibt float32: Stride 17 unveraendert
 	((global float*)transfer_buffer)[    A+a] = u[                 n];
 	((global float*)transfer_buffer)[ 2u*A+a] = u[    def_N+(ulong)n];
 	((global float*)transfer_buffer)[ 3u*A+a] = u[2ul*def_N+(ulong)n];
 	((global uchar*)transfer_buffer)[16u*A+a] = flags[             n];
 }
-)+R(void insert_rho_u_flags(const uint a, const uint A, const uxx n, const global char* transfer_buffer, global rho_t* rho, global float* u, global uchar* flags) {
+)+R(void insert_rho_u_flags(const uint a, const uint A, const uxx n, const global char* transfer_buffer, global rhoxx* rho, global float* u, global uchar* flags) {
 	store_rho(rho,     n,   ((const global float*)transfer_buffer)[      a]);
 	u[                 n] = ((const global float*)transfer_buffer)[    A+a];
 	u[    def_N+(ulong)n] = ((const global float*)transfer_buffer)[ 2u*A+a];
 	u[2ul*def_N+(ulong)n] = ((const global float*)transfer_buffer)[ 3u*A+a];
 	flags[             n] = ((const global uchar*)transfer_buffer)[16u*A+a];
 }
-)+R(kernel void transfer_extract_rho_u_flags(const uint direction, const ulong t, global char* transfer_buffer_p, global char* transfer_buffer_m, const global rho_t* rho, const global float* u, const global uchar* flags) {
+)+R(kernel void transfer_extract_rho_u_flags(const uint direction, const ulong t, global char* transfer_buffer_p, global char* transfer_buffer_m, const global rhoxx* rho, const global float* u, const global uchar* flags) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
 	extract_rho_u_flags(a, A, index_extract_p(a, direction), transfer_buffer_p, rho, u, flags);
 	extract_rho_u_flags(a, A, index_extract_m(a, direction), transfer_buffer_m, rho, u, flags);
 }
-)+R(kernel void transfer__insert_rho_u_flags(const uint direction, const ulong t, const global char* transfer_buffer_p, const global char* transfer_buffer_m, global rho_t* rho, global float* u, global uchar* flags) {
+)+R(kernel void transfer__insert_rho_u_flags(const uint direction, const ulong t, const global char* transfer_buffer_p, const global char* transfer_buffer_m, global rhoxx* rho, global float* u, global uchar* flags) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
 	insert_rho_u_flags(a, A, index_insert_p(a, direction), transfer_buffer_p, rho, u, flags);
