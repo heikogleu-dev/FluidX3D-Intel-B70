@@ -1100,7 +1100,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+R(float3 load3(const global float* p, const uxx n) {
 	return (float3)(p[n], p[def_N+(ulong)n], p[2ul*def_N+(ulong)n]);
 }
-)+R(void store3(global float* p, const uxx n, const float3 v) {
+)+R(void store3(global float* p, const uxx n, const float3 v) { // ★ 12.09.: seit store3_u OHNE Aufrufstelle (load3 traegt weiter F und GRAPHICS). Bleibt fuer den Fall, dass GRAPHICS wiederbelebt wird.
 	p[                 n] = v.x;
 	p[    def_N+(ulong)n] = v.y;
 	p[2ul*def_N+(ulong)n] = v.z;
@@ -3054,8 +3054,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// kippt oberhalb |u*2^15| = 65504, also ab |u| = 1,99902, still nach +-inf -- und die
 		// Projektlehre dazu steht schon im Code (setup.cpp: "dd_lauf01 kippte bei 0,15 s NICHT in nan,
 		// sondern in die FP16C-Saettigung"). Die Geschwindigkeitsklemme unten haelt +-0,57735 ein, aber
-		// sie deckt nicht JEDEN Schreiber: drive_boundary_cubic_lift schreibt ungeklemmt, und genau
-		// seine Zellen sind TYPE_E, also genau die, die hier gelesen werden.
+		// sie deckt nicht JEDEN Schreiber.
+		// ★ BERICHTIGT 12.09. (Pruefagent, MITTEL): hier stand, der ungeklemmte Schreiber sei
+		// drive_boundary_cubic_lift. Das war beim Schreiben richtig und ist es seit Slot 214 nicht
+		// mehr -- dort steht jetzt ein eigenes Betragstor, dieser Waechter kann jene Klasse also
+		// konstruktiv nicht mehr sehen. Was er WEITERHIN abdeckt: die Hostsaat (u wird an 56 Stellen
+		// gesaet und mit write_to_device hochgeladen, ohne je durch die Klemme zu laufen) und
+		// insert_rho_u_flags, das Halowerte einer FREMDEN Domaene uebernimmt. Gegen Slot 214 ist er
+		// Redundanz -- und die ist hier gewollt, weil 214 im Kernel sitzt und 212 am Leser.
 		// Schwelle 1,0 statt 1,99902: das ist Faktor 1,73 ueber der Klemme und Faktor 2,1 unter der
 		// Saettigung -- der Waechter feuert, BEVOR das Wort kippt, nicht danach. Gemessenes Maximum im
 		// 4-mm-Nahfeld bei 501 ms: 0,4764. Soll ueber den ganzen Lauf: 0.
@@ -3818,9 +3824,17 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 		if(flagsn_bo==TYPE_E) {
 			rhon = rho[               n]; // apply preset velocity/density
-			uxn  = load_u(u, n);
-			uyn  = load_u(u, def_N+(ulong)n);
-			uzn  = load_u(u, 2ul*def_N+(ulong)n);
+			// ★ BEWUSST u[...] und NICHT load_u: die Signatur von surface_0 traegt weiter den
+			// float-Zeigertyp (SURFACE ist nicht gebaut, defines.hpp sperrt die Kombination mit U_FP16
+			// hart). Ein load_u darauf waere STILL falsch -- ocloc meldet dazu nur "incompatible
+			// pointer types", und der Produktionsbau haengt -w an (opencl.hpp), die Warnung ist weg.
+			// Vom Pruefagenten am 12.09. gefunden: erst stand hier load_u, die Signatur aber nicht.
+			// Und der Zensus hat die ERSTE Fassung DIESES Kommentars gefangen: sie schrieb den
+			// Zeigertyp woertlich aus, und Kommentare in R()-Bloecken landen im emittierten
+			// Quelltext -- der Zensus haette 22 statt 21 gezaehlt und in jedem Lauf Alarm geschlagen.
+			uxn  = u[                 n];
+			uyn  = u[    def_N+(ulong)n];
+			uzn  = u[2ul*def_N+(ulong)n];
 		} else {
 			calculate_rho_u(fon, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fon (not fhn)
 		}

@@ -77,8 +77,12 @@ inline rhoxx rho_pack(const float r) { // rho -> Speicherwort
 // DER FIXPUNKT, und er ist staerker als der von rho: 3.0517578E-5f ist bitgenau 2^-15 und 32768.0f
 // ist 2^15, beide Multiplikationen runden also nicht, und einen Unterlauf gibt es nicht (das kleinste
 // Ergebnis ist 1,8e-12). Damit ist u_pack(u_unpack(w)) == w als BITMUSTER, nicht nur als Wert.
-// Mit den Wandlern dieser Datei nachgerechnet: 0 Verletzungen ueber alle 65536 Woerter, auch nach
-// acht Umlaeufen. Daran haengen pruefe_slice_ebene (Soll exakt 0) und apply_pressure_outlet.
+// Mit den Wandlern dieser Datei nachgerechnet: 0 Verletzungen ueber die 63.488 ENDLICHEN Woerter,
+// auch nach acht Umlaeufen. Daran haengen pruefe_slice_ebene (Soll exakt 0) und apply_pressure_outlet.
+// AUSGENOMMEN sind die 2048 Woerter mit Exponent 0x1F (BERICHTIGT 12.09., Pruefagent HOCH -- hier
+// stand "alle 65536"): der Inf/NaN-Durchreicher unten liefert dort +-inf oder NaN, und float_to_half
+// saettigt das auf 0x7FFF. 2046 der 2048 verletzen den Fixpunkt. Kein endliches u erreicht sie --
+// die Geschwindigkeitsklemme haelt +-0,57735, das Format traegt bis 1,99902.
 //
 // HOST- UND GERAETEPACKER SIND NICHT DIESELBE RECHNUNG -- und anders als bei rho ist das hier NICHT
 // von vornherein folgenlos, weil der Host u an 56 Stellen SAET (Freistrom, Wandgeschwindigkeit,
@@ -314,7 +318,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 212 (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 215 (212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
@@ -828,7 +832,8 @@ public:
 	// ★ TODO 2 Schritt 4 (12.09.2026) -- u liegt NICHT mehr als Memory_Container offen.
 	// WARUM NICHT DIESELBE BAUFORM WIE Rho_Feld (get/set, geloeschter operator[])? Weil rho SIEBEN
 	// Hostzugriffsstellen hat und u HUNDERTNEUNUNDZWANZIG. Einhundertneunundzwanzig Handumbauten sind
-	// nicht sicherer als einer -- sie sind hundertneunundzwanzig Gelegenheiten, einen zu verpatzen.
+	// nicht sicherer als einer -- sie sind hunderteinunddreissig Gelegenheiten, einen zu verpatzen.
+	// (131 nachgezaehlt, nicht 129: 130 ueber den Stellvertreter plus der eine rohe Domaenenzugriff.)
 	// Deshalb hier ein Stellvertreter je Komponente: "lbm.u.x[n]" bleibt an allen Stellen WOERTLICH
 	// stehen und rechnet trotzdem richtig, und ein roher velxx& ist nirgends mehr erreichbar. Die
 	// rho-Falle (ushort& wandelt still nach float, ohne Warnung) ist damit KONSTRUKTIV ausgeschlossen
@@ -873,6 +878,11 @@ public:
 		};
 		Komp x, y, z;
 		inline U_Feld() {}
+		// ★ 12.09. (Pruefagent, NIEDRIG): nicht kopierbar. Eine Kopie truege die Komp-Zeiger auf den
+		// Container der QUELLE -- ein Stellvertreter, der still in ein fremdes Feld schreibt. Heute
+		// gibt es keine Kopie; gesperrt wird sie trotzdem, weil sie sonst uebersetzen wuerde.
+		U_Feld(const U_Feld&) = delete;
+		U_Feld& operator=(const U_Feld&) = delete;
 		inline U_Feld(LBM* lbm, Memory<velxx>** buffers, const string& name) : c(lbm, buffers, name) { zeiger_setzen(); }
 		inline U_Feld& operator=(Memory_Container<velxx>&& m) noexcept { c = std::move(m); zeiger_setzen(); return *this; }
 		inline void read_from_device() { c.read_from_device(); }

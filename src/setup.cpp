@@ -1324,7 +1324,7 @@ static // ----------------------------------------------------------------------
 // liegt rho bei 1 +- 0,02. Deshalb ist der Zaehler wichtiger als die Klemme selbst: er sagt, ob ein
 // Lauf ueberhaupt ein Ergebnis ist. Bleibt er null, war die Klemme ein nie ausloesender Waechter.
 // Ist er gross, rechnete der Lauf stellenweise auf einem geklemmten, also verfaelschten Feld.
-void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
+void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_lat=0.0f) { // u_lat nur fuer die Freistrom-Ansage unter U_FP16; 0 = nicht bekannt, dann entfaellt sie
 	// ★ Re-Audit R2 (Rest von Befund 2): SGS_WANDFREI bekommt seinen Wirkpfad-Nachweis -- Slot 6,
 	// im Kernel gegatet t%100. Null Treffer bei gesetztem Schalter = lautloser No-Op = harter Fehler.
 	if(LBM_Domain::s_sgs_wandfrei) {
@@ -1524,7 +1524,15 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		  if(u_ausser>0ull) print_error(string("u-Saettigungswaechter ")+wo+": "+to_string(u_ausser)+" Lesungen an TYPE_E-Zellen mit |u| >= 1,0 oder nicht-endlich. Die Geschwindigkeitsklemme haelt +-0,57735; unter U_FP16 saettigt das Speicherwort ab 1,99902 still nach +-inf -- der Lauf ist kein Ergebnis.");
 		  if(u_tor>0ull) print_error(string("u-Betragstor im Kopplungs-Lift ")+wo+": "+to_string(u_tor)+" mal gegriffen. Damit ist der FP32-Arm NICHT mehr bitgleich zum Stand vor TODO 2 Schritt 4, und die kubische Interpolation liefert Geschwindigkeiten jenseits jeder Physik.");
 		  if(u_besuche==0ull) print_warning(string("u-Saettigungswaechter ")+wo+": Slot 213 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 212 beweist damit NICHTS.");
-		  // Die Quantisierungs-Dekaden (Slots 212..217) sind am 12.09. abends ENTFERNT worden: der
+		  // ★ 12.09. (Pruefagent, fehlender Punkt 3): ANSAGEN, welcher Freistrom unter U_FP16 wirklich
+		  // im Speicher steht. u_lat ist als half im Allgemeinen nicht exakt, und der Versatz haengt an
+		  // seinem Wert: bei 0,075 sind es +0,0163 %, bei 0,05 aber -0,0244 %, also groesser UND mit
+		  // umgekehrtem Vorzeichen. CFD_U_LAT ist frei setzbar; eine Zahl im Kopf reicht dafuer nicht.
+		  if(sizeof(velxx)<4u&&u_lat>0.0f) { const float u_ist = u_unpack(u_pack(u_lat));
+			print_info("  Freistrom im Speicherwort: u_lat = "+to_string(u_lat,9u)+" liegt als "+to_string(u_ist,9u)
+			  +" (Versatz "+to_string(100.0f*(u_ist-u_lat)/u_lat,4u)+" %, auf die Kraefte "+to_string(100.0f*((u_ist/u_lat)*(u_ist/u_lat)-1.0f),4u)+" %). Die TYPE_E-Einlasszellen HALTEN diesen Wert."); }
+		  // Die rho-Quantisierungs-Dekaden (Slots 215..217, urspruenglich 212..217) sind am 12.09. abends
+		  // ENTFERNT worden -- 212/213/214 tragen seither den u-Huellenwaechter, siehe darueber. Der
 		  // Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert und meldete
 		  // deshalb konstruktiv 100 % im kleinsten Bin. Begruendung und Belegzahlen stehen an
 		  // store_rho in kernel.cpp. Gemessen wird die Quantisierung jetzt am Feld-Dump.
@@ -4092,7 +4100,7 @@ void main_setup_kanal() {
 		for(ulong i=0ull; i<3ull*lbm.get_N(); i++) { uint b; const float v=(i<lbm.get_N())?lbm.u.x[i%lbm.get_N()]:((i<2ull*lbm.get_N())?lbm.u.y[i%lbm.get_N()]:lbm.u.z[i%lbm.get_N()]); memcpy(&b,&v,4u); h^=(ulong)b; h*=1099511628211ull; }
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
-	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h); dichteklemme_fazit(h); }
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h, Ub_ziel); dichteklemme_fazit(h); }
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) { // Wirkpfad-Nachweis: Zaehler auslesen
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
 		const ulong wz=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[2], kl=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[3], sk=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[4], sp=(ulong)lbm.lbm_domain[0]->rho_clamp_hits[5];
@@ -5103,7 +5111,7 @@ void main_setup_kugel() {
 		}
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
-	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h); }
 	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd_w.size(); i++) { mcd+=cd_w[i]; mcz+=cz_w[i]; }
@@ -5493,7 +5501,7 @@ static void main_setup_fahrzeug() {
 	const bool stat_ok = cd.size()>=16u; // ★ Audit 2/3: Dichteklemme lief hinter dem _exit nie bei Kurzlaeufen
 	if(!stat_ok) print_warning("Zu wenige Samples -- Cd-Statistik entfaellt, Dichteklemme laeuft trotzdem.");
 	print_info("---------------------------------------------------------------");
-	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h); dichteklemme_fazit(h); }
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h); }
 	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd.size(); i++) { mcd+=cd[i]; mcz+=cz[i]; }
@@ -7843,8 +7851,9 @@ static void main_setup_fahrzeug_dd() {
 						//     207 von 4872 Punkten. 3,58e-6 ist |rho-1|*2^-11 bei |rho-1| = 7e-3, also
 						//     genau ein Quant -- ein Kopplungsdefekt ist es nicht.
 						// Deshalb: rho bekommt eine Schranke, die dem Speicherformat folgt (im FP32-Arm
-						// ist sie exakt die alte 1e-6), u behaelt seine scharfe 1e-6. Getrennt geprueft,
-						// gemeinsam berichtet.
+						// ist sie exakt die alte 1e-6). u bekam erst dieselbe Behandlung am 12.09. abends mit
+						// U_FP16 -- der Satz "u behaelt seine scharfe 1e-6", der hier stand, gilt seitdem nur
+						// noch im FP32-Arm. Getrennt geprueft, gemeinsam berichtet.
 						const float d_rho = fabs(lbm_f.rho.get(n)-face[p][cb]);
 						const float d_u   = fmax(fabs(lbm_f.u.x[n]-face[p][cb+1ull]),
 						                    fmax(fabs(lbm_f.u.y[n]-face[p][cb+2ull]), fabs(lbm_f.u.z[n]-face[p][cb+3ull])));
@@ -7857,9 +7866,20 @@ static void main_setup_fahrzeug_dd() {
 						// Kopplungsdefekt, den es nicht gibt. Genau der Fehler, den der Absatz darueber fuer
 						// rho schon zweimal als "Anlauf 1" und "Anlauf 2" beschreibt. Bezug ist der GROBE
 						// Wert, wie bei rho, und im FP32-Arm ist die Schranke exakt die alte 1e-6.
-						const float u_bez = fmax(fabs(face[p][cb+1ull]), fmax(fabs(face[p][cb+2ull]), fabs(face[p][cb+3ull])));
-						const float tol_u = fmax(1.0e-6f, (sizeof(velxx)<4u ? u_bez*4.89e-4f : 0.0f));
-						if(d_rho>tol_rho||d_u>tol_u) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
+						// ★ BERICHTIGT 12.09. (Pruefagent, MITTEL): erst stand hier EINE Schranke aus dem MAXIMUM
+						// der drei groben Komponenten. Das ist genau die Bauform, die der Absatz darueber als
+						// "Anlauf 1" verwirft, nur eine Ebene tiefer: bei u_x ~ 0,075 und u_y ~ 0 haette u_y
+						// dieselbe Schranke 3,67e-5 bekommen, obwohl sein eigenes Quant bei ~1e-8 liegt --
+						// ein Kopplungsdefekt von 3e-5 in u_y (0,049 % von u_inf) waere unentdeckt geblieben.
+						// Jetzt traegt JEDE Komponente ihre eigene Schranke, hergeleitet aus IHREM Grobwert.
+						bool u_schlecht = false;
+						for(uint k=0u; k<3u; k++) {
+							const float bez = fabs(face[p][cb+1ull+(ulong)k]);
+							const float tol_k = fmax(1.0e-6f, (sizeof(velxx)<4u ? bez*4.89e-4f : 0.0f));
+							const float d_k = fabs((k==0u?(float)lbm_f.u.x[n]:(k==1u?(float)lbm_f.u.y[n]:(float)lbm_f.u.z[n]))-face[p][cb+1ull+(ulong)k]);
+							if(d_k>tol_k) u_schlecht = true;
+						}
+						if(d_rho>tol_rho||u_schlecht) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
 					}
 				}
 				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)
@@ -8512,7 +8532,7 @@ static void main_setup_fahrzeug_dd() {
 		if(nm>0u) print_info("Fernfeld-Fahrzeugkraft Fx (Mittel ab Warmlauf): "+to_string((float)(m/(double)nm),1u)+" N ueber "+to_string(nm)+" Samples (Zeitreihe: Spalte Fx_far_N in forces.csv)"
 			+(env_u("CFD_FERN_FACETTEN",0u)>0u?string(" -- ACHTUNG P8: PHANTOMBEHAFTET (object_force an facettenbehandelten Links des Fernfelds), nur als Arm-DIFFERENZ werten."):string("")));
 	}
-	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h); berichte_dichteklemme(lbm_c, "Fernfeld", h); dichteklemme_fazit(h); }
+	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h, u_lat); berichte_dichteklemme(lbm_c, "Fernfeld", h, u_lat); dichteklemme_fazit(h); }
 	if(stat_ok) {
 	// ★ 03.09.2026 INSTRUMENTEN-ETIKETT (Befund B79). Diese Zeilen stammen aus object_force, also aus
 	// dem Impulsaustausch an den Koerperzellen. Sobald die Facettenkette laeuft, traegt dieser Pfad
@@ -8586,8 +8606,11 @@ static void main_setup_fahrzeug_dd() {
 				// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle 1e-3 laege unter U_FP16 nur 1,23-fach ueber dem
 				// Quantisierungsrauschen -- ein half-Quant bei u_lat = 0,075 ist 6,10e-5 lat, in u_inf-Einheiten
 				// also 8,14e-4. Gezaehlt wuerden dann Vorzeichenwechsel der RUNDUNG statt der Physik. Vier
-				// Quanten, und die Herleitung haengt an u_lat statt an einer Zahl (CFD_U_LAT laesst bis 0,3 zu).
-				const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*6.103516e-5f/u_lat) : 1.0e-3f;
+				// Quanten. BERICHTIGT 12.09. (Pruefagent, NIEDRIG): die erste Fassung schrieb 6,103516e-5 als
+			// Konstante und behauptete trotzdem, an u_lat zu haengen -- das ist das Quant nur fuer
+			// |u| in [0,0625; 0,125). Bei u_lat = 0,3 waere es 2,44e-4 und die Formel 3,3-fach zu klein.
+				const float quant_u = exp2(floor(log2(fmax(u_lat, 1.0e-6f)*32768.0f))-10.0f)/32768.0f; // half-ULP BEI u_lat, nicht bei 0,075
+			const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*quant_u/u_lat) : 1.0e-3f;
 				if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>tol_flip&&fabs(letzte_d)>tol_flip) flips+=1.0; letzte_d=d; } else letzte_d=0.0f;
 				vor=ux; hat_vor=true; }
 			print_info("Einlass-Saeule (x=+0,2 m, y-Mitte): Nachbar-Vorzeichenwechsel in dux/dz = "+to_string((float)flips,0u)+" von "+to_string(cNz-2u)+" moeglichen, max|dux| = "+to_string((float)dmax,4u)+" u_inf (2-Zellen-Oszillation = Staggered-Beweis). CSV: einlass_saeule.csv");
@@ -9002,8 +9025,11 @@ static void main_setup_fernfeld() {
 			// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle 1e-3 laege unter U_FP16 nur 1,23-fach ueber dem
 			// Quantisierungsrauschen -- ein half-Quant bei u_lat = 0,075 ist 6,10e-5 lat, in u_inf-Einheiten
 			// also 8,14e-4. Gezaehlt wuerden dann Vorzeichenwechsel der RUNDUNG statt der Physik. Vier
-			// Quanten, und die Herleitung haengt an u_lat statt an einer Zahl (CFD_U_LAT laesst bis 0,3 zu).
-			const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*6.103516e-5f/u_lat) : 1.0e-3f;
+			// Quanten. BERICHTIGT 12.09. (Pruefagent, NIEDRIG): die erste Fassung schrieb 6,103516e-5 als
+			// Konstante und behauptete trotzdem, an u_lat zu haengen -- das ist das Quant nur fuer
+			// |u| in [0,0625; 0,125). Bei u_lat = 0,3 waere es 2,44e-4 und die Formel 3,3-fach zu klein.
+			const float quant_u = exp2(floor(log2(fmax(u_lat, 1.0e-6f)*32768.0f))-10.0f)/32768.0f; // half-ULP BEI u_lat, nicht bei 0,075
+			const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*quant_u/u_lat) : 1.0e-3f;
 			if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>tol_flip&&fabs(letzte_d)>tol_flip) flips+=1.0; letzte_d=d; }
 			vor=ux; hat_vor=true; }
 		print_info("Einlass-Saeule (x=+0,2 m, y-Mitte): Vorzeichenwechsel dux/dz = "+to_string((float)flips,0u)+" von "+to_string(Nz-2u)+", max|dux| = "+to_string((float)dmax,4u)+" u_inf. CSV: einlass_saeule.csv");
@@ -9015,7 +9041,7 @@ static void main_setup_fernfeld() {
 		print_info("EINLASS_EQ-Wirkpfad: "+to_string(eq)+" Spalten-Resets (t%100-Stichprobe).");
 		if(eq==0ull) print_error("CFD_FERN_EINLASS_EQ gesetzt, aber Wirkpfad NULL -- lautloser No-Op.");
 	}
-	{ ulong h=0ull; berichte_dichteklemme(lbm, "Fernfeld-Diagnose", h); dichteklemme_fazit(h); }
+	{ ulong h=0ull; berichte_dichteklemme(lbm, "Fernfeld-Diagnose", h, u_lat); dichteklemme_fazit(h); }
 	print_info("CSV: "+out_dir+"rauschen.csv");
 	_exit(0);
 }

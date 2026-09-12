@@ -243,8 +243,16 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #ifdef REGULARIZED_BOUNDARIES
 	if(getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) print_warning("CFD_REG_BC=1 unter UPDATE_FIELDS: deriv_reg liest u[] im Wettlauf mit dem Schreiber -- Ergebnisse sind NICHT bitreproduzierbar (Audit-Befund 8).");
 #ifdef U_FP16
-	// ★ TODO 2 Schritt 4 (12.09.2026) -- ANSAGE, kein Abbruch: der regularisierte Rand ist der EINZIGE
-	// u-Leser mit zweistelligem Quantisierungsfehler. Am 4-mm-Feld bei 501 ms voll nachgerechnet
+	// ★ TODO 2 Schritt 4 (12.09.2026) -- ANSAGE, kein Abbruch: der regularisierte Rand ist der einzige
+	// GEMESSENE u-Leser mit zweistelligem Quantisierungsfehler.
+	// EINGEORDNET 12.09. abends (Pruefagent, MITTEL): dieselbe Arithmetik 0,5*(up_-um_) auf
+	// quantisierten Nachbarn steht auch in sgs_gdiag, sgs_fdwand und fac_nachbar_ab -- und die DREI
+	// laufen, waehrend deriv_reg an CFD_REG_BC haengt und aus ist. Gemessen wurde davon sgs_fdwand
+	// (identische Arithmetik wie sgs_gdiag): 0,018 % auf |S|_FD und auf nu_t, also 150-fach
+	// unempfindlicher als der Rand. Grund ist die umgekehrte Paarung -- an der Facettenzelle ist |u|
+	// klein (Faktor 7 gegen den Einlassrand) und der Gradient gross (Faktor 75), und 92,6 % der
+	// Facettenzellen haben mindestens einen Solidnachbarn, der als exakte 0 eingeht und nicht rundet.
+	// NICHT GEMESSEN ist fac_nachbar_ab (ein Link statt sechs). Das ist die offene Luecke. Am 4-mm-Feld bei 501 ms voll nachgerechnet
 	// (alle 3.290.677 TYPE_E-Zellen, alle neun Ableitungen): auf f_neq stehen 2,69 % relativer RMS,
 	// Median je Zelle 3,8 %, p90 28 %. Die beiden x-Flaechen tragen 1,94 % des Signals und 53 % des
 	// Fehlers -- dort ist |u| am groessten und der Gradient am kleinsten, die schlechteste Paarung.

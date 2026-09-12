@@ -40,8 +40,10 @@
 // statt drei float32. Spart bei 4 mm 2971 MiB VRAM im Nahfeld (519.139.485 Zellen x 6 B) und noch
 // einmal dieselbe Menge System-RAM (die B70 ist kein Zero-Copy-Geraet, u liegt dort zweimal); im
 // Fernfeld (iGPU, Zero-Copy) sind es 1164 MiB einfach. u ist damit der GROSSE Hebel -- dreimal rho.
-// Bandbreite je Zelle und Schritt: 123 -> 117 B, also -4,9 %. Zum Vergleich: rho war -3,3 % und hat
-// davon -1,0 % Wanduhr eingeloest; die Erwartung fuer u ist rund -1,5 %, nicht mehr.
+// Bandbreite je Zelle und Schritt: 123 -> 117 B, also -4,9 %. Zum Vergleich: rho war -1,6 % (123 -> 121)
+// und hat davon -1,0 % Wanduhr eingeloest; die Erwartung fuer u ist rund -1,5 %, nicht mehr.
+// (BERICHTIGT 12.09., Pruefagent: hier stand -3,3 % fuer rho. Das ist rhos ANTEIL an den 123 Byte,
+// nicht seine Ersparnis -- gespart werden 2 der 4 Byte.)
 //   FORMAT: FP16S OHNE Verschiebung -- Wort = half(u*2^15), zurueck = Wort*2^-15. KEINE Verschiebung
 //   um u_lat, und das ist kein Versehen: u hat, anders als rho, keinen Sockel. Bei rho sitzt das
 //   Signal auf einer 1 und der half-ULP dort ist 9,8e-4, also so gross wie das Signal -- deshalb
@@ -49,9 +51,15 @@
 //   auch bei u_t = 0,005 an der Wand.
 //   UND die Verschiebung wuerde den WORT-FIXPUNKT zerstoeren. Beide Skalen sind exakte Zweierpotenzen
 //   und es gibt keinen Unterlauf (kleinstes Ergebnis 1,8e-12), also ist h*2^-15 bitgenau und
-//   store_u(load_u(w)) == w. Mit den repo-eigenen Wandlern nachgerechnet: 0 Verletzungen ueber ALLE
-//   65536 Bitmuster, auch nach acht Umlaeufen. Das ist STAERKER als bei rho, wo nur der WERT ein
-//   Fixpunkt ist. Ein Rueckweg "+u_lat" wuerde runden, und Sterbenz traegt nur auf [u_lat/2; 2*u_lat]
+//   store_u(load_u(w)) == w. Mit den repo-eigenen Wandlern nachgerechnet: 0 Verletzungen ueber die
+//   63.488 ENDLICHEN Bitmuster, auch nach acht Umlaeufen. Das ist STAERKER als bei rho, wo nur der WERT ein
+//   Fixpunkt ist. NICHT ueber alle 65536 -- berichtigt 12.09. (Pruefagent, HOCH): die 2048 Woerter
+//   mit Exponent 0x1F sind ausgenommen, und zwar wegen des Inf/NaN-Durchreichers in u_unpack, den
+//   dieselbe Aenderung eingebaut hat. 2046 davon verletzen den Fixpunkt (zwei treffen zufaellig).
+//   Der Entwurfsschluss haengt nicht daran: kein endliches u erreicht diese Woerter, die
+//   Geschwindigkeitsklemme haelt +-0,57735. Die rho-Fassung hat dieselbe Ueberdehnung schon
+//   einmal zuruecknehmen muessen (lbm.hpp, "ES IST KEIN WORT-FIXPUNKT").
+//   Ein Rueckweg "+u_lat" wuerde runden, und Sterbenz traegt nur auf [u_lat/2; 2*u_lat]
 //   = [0,0375; 0,15] -- das Totwasser (u -> 0) und die Beschleunigungszonen (bis 0,4764) liegen
 //   ausserhalb. Daran haengen pruefe_slice_ebene ("Soll exakt 0") und apply_pressure_outlet, das in
 //   JEDEM Schritt auf rund 300.000 Auslasszellen nichts als u[n] = u[m] tut.
