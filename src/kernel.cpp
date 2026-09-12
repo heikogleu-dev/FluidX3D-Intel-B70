@@ -2863,39 +2863,26 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM
 
-// ★ TODO 2 Schritt 4 (12.09.2026) -- rho speichern UND die Quantisierung dabei MESSEN.
-// Iron Rule 3: jeder neue Mechanismus bekommt Zwischenergebnis-Introspektion im Code, nicht nur eine
-// Endzahl. Die Offline-Rechnung am Feld-Dump ist ein Standbild bei 501 ms; dies hier laeuft mit.
-// Gemessen wird der ABSOLUTE Rueckrechenfehler |load_rho(store_rho(x)) - x| in Dekaden, Slots
-// 212..217. Erwartung aus der Offline-Messung am 4-mm-Nahfeld: Schwerpunkt in 213/214, Ausreisser
-// bis 215, und Slot 217 (>=1e-3) EXAKT NULL -- das ist der harte Nullbeweis dieses Schritts.
-// Ohne RHO_FP16 ist store_rho die Identitaet, der Fehler also konstruktiv 0; dann waere die
-// Rueckleserei reine Bandbreite ohne Aussage und der Block entfaellt.
-// Der Rueckleser kostet 2 Byte je GESCHRIEBENER Zelle und nur an jedem def_zaehl_takt-ten Schritt --
-// unter CFD_RHO_SPARSAM sind das rund 0,1 % der Zellen, also nichts.
-)+R(void store_rho_diag(global rhoxx* rho, const uxx n, const float rhon, const ulong t, global uint* hits) {
-	store_rho(rho, n, rhon);
-)+"#ifdef RHO_FP16"+R(
-	// ★ BERICHTIGT 12.09.2026, NACHGERECHNET STATT ERLEBT: die erste Fassung zaehlte an jedem
-	// Zaehlschritt JEDE geschriebene Zelle in eine der sechs Dekaden. Am 8-mm-Fahrzeug sind das
-	// 250 Zaehlschritte x 65.562.705 Zellen = 1,64e10 Zaehlvorgaenge gegen eine Saettigungsschwelle
-	// von 4,03e9 -- die staerkste Dekade waere nach 61 von 250 Schritten stehengeblieben und die
-	// Prozentzahlen waeren Artefakte gewesen. GENAU DIESER FEHLER ist an den Slots 204..207 am
-	// Vormittag desselben Tages schon einmal bezahlt worden. Deshalb zwei getrennte Zaehlweisen:
-	//   Slot 217 (>=1e-3) ist der NULLBEWEIS und bleibt UNAUSGEDUENNT -- er zaehlt nur im
-	//     Fehlerfall, kann also gar nicht saettigen, solange die Aussage stimmt.
-	//   Slots 212..216 sind die VERTEILUNG und laufen ueber n%1024 ausgeduennt (Muster der
-	//     P-TRT-Zweitzaehlung, Slots 202/203). Obergrenze 250 x 65.562.705/1024 = 1,6e7.
-	if(t%(ulong)def_zaehl_takt==0ul) {
-		const float e = fabs(load_rho(rho, n)-rhon);
-		if(e>=1e-3f) { if(hits[217]<0xF0000000u) atomic_inc(&hits[217]); } // Soll 0, ueber ALLE Zellen des Zaehlschritts
-		else if((n&(uxx)1023)==(uxx)0) {
-			const uint b = e<1e-7f ? 212u : (e<1e-6f ? 213u : (e<1e-5f ? 214u : (e<1e-4f ? 215u : 216u)));
-			if(hits[b]<0xF0000000u) atomic_inc(&hits[b]);
-		}
-	}
-)+"#endif"+R( // RHO_FP16
-}
+// ★ TODO 2 Schritt 4 -- rho speichern. NUR speichern.
+//
+// HIER STAND BIS 12.09.2026 ABENDS EINE QUANTISIERUNGSMESSUNG, UND SIE WAR EIN STILLER NO-OP.
+// Sie las den eben geschriebenen Wert an DERSELBEN Adresse im SELBEN Kernel zurueck und binte
+// |load_rho(store_rho(x)) - x| in Dekaden. Der Intel-Uebersetzer entfernt diesen Umlauf: er gibt
+// den Registerwert zurueck, statt neu zu laden. Die Differenz ist damit konstruktiv null.
+// BELEGT, nicht vermutet -- 8-mm-Fahrzeug r8_fp16b gegen das eigene Feld bei 500 ms:
+//   gemeldet   100,00 % unter 1e-7, 0,00 % darueber
+//   verlangt    40,14 % unter 1e-7, 58,98 % unter 1e-6, 0,88 % unter 1e-5
+//              (aus |rho-1| ueber 56.081.419 Fluidzellen des Dumps, mal 2^-12)
+// Auf der CPU lieferte DERSELBE Quelltext 28,24 / 56,87 / 14,85 % -- dort uebersetzt ein anderer
+// Compiler und der Umlauf bleibt stehen. Genau deshalb ist die CPU-Sprosse allein kein Beweis.
+// Der vermeintliche Nullbeweis in Slot 217 war ebenso wertlos: er zaehlte eine Null, die per
+// Konstruktion null war. Ein Waechter, der nicht feuern KANN, ist kein Waechter.
+//
+// WAS STATTDESSEN GILT. Die Quantisierung wird dort gemessen, wo sie sichtbar ist, ohne dass ein
+// Uebersetzer sie wegkuerzen kann: am FELD-DUMP auf dem Host (Iron Rule 5 -- an Felddaten, nicht
+// an einem Registerwert). Am 4-mm-Nahfeld, 451.428.942 Fluidzellen: RMS 3,32e-7, max 5,63e-5.
+// Im BINARY bleibt der Bereichswaechter an der TYPE_E-Lesestelle (Slots 210/211). Der liest einen
+// Wert, den ein ANDERER Kernel-Launch geschrieben hat -- dieser Ladevorgang kann nicht entfallen.
 
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
@@ -3174,9 +3161,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		  // 0 % Ersparnis und der No-Op-Waechter brach den Lauf ab: ein falscher Alarm aus einem falsch
 		  // gewaehlten Messzeitpunkt. Mit +2 liegt die Zaehlung in BEIDEN Domaenen mitten in der Periode.
 		  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[rho_schreiben?205u:204u]<0xF0000000u) atomic_inc(&rho_clamp_hits[rho_schreiben?205u:204u]);
-		  if(rho_schreiben) store_rho_diag(rho, n, rhon, t, rho_clamp_hits); } // update density field
+		  if(rho_schreiben) store_rho(rho, n, rhon); } // update density field
 		)+"#else"+R(
-		store_rho_diag(rho, n, rhon, t, rho_clamp_hits); // update density field
+		store_rho(rho, n, rhon); // update density field
 		)+"#endif"+R( // RHO_SPARSAM
 		)+"#ifdef U_SPARSAM"+R(
 		// ★ TODO 2 Schritt 3 (12.09.2026): u wird nur noch dort geschrieben, wo es VOR dem naechsten
@@ -4181,9 +4168,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// po_hart = 1 stellt den alten Rand bit-genau wieder her (CFD_PO_HART=1).
 	// ★ 12.09.2026: BEWUSST load_rho und nicht load_drho. In Abweichungsraeumen zu rechnen waere hier
 	// genauer, wuerde aber die Arithmetik des Arms OHNE RHO_FP16 aendern -- und dessen Bitgleichheit
-	// zum Stand davor ist das einzige Sicherheitsnetz dieses Umbaus. Der Boden von 5,96e-8 aus der
-	// Addition von 1 liegt unter der Quantisierung selbst (|rho-1|*2^-12 = 2,4e-7 bei rho-1 = 1e-3),
-	// ist hier also nicht der fuehrende Fehler.
+	// zum Stand davor ist das einzige Sicherheitsnetz dieses Umbaus.
+	// BERICHTIGT 12.09. (Pruefagent, NIEDRIG): hier stand, der Boden von 5,96e-8 aus der Addition
+	// von 1 liege "unter der Quantisierung selbst". Das gilt erst ab |rho-1| > 1,2e-4 (Gleichstand
+	// bei 5,96e-8 / 2^-11). Am Druckauslass wird rho konstruktiv gegen rho_out gezogen, also gerade
+	// in die Zone KLEINER |rho-1| -- dort ist der Additionsboden fuehrend. Die Entscheidung bleibt
+	// trotzdem richtig: 6e-8 in rho sind mit dem Umrechenfaktor rho->cp von rund 117 etwa 7e-6 in
+	// cp, gegen die 0,15, um die es geht.
 	store_rho(rho, n, po_hart!=0u ? fma(po_sigma, rho_out-load_rho(rho, m), load_rho(rho, m))
 	                              : fma(po_sigma, (rho_out-1.0f)-po_mean[0], load_rho(rho, m)));
 	u[                  n] = u[                  m];

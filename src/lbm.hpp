@@ -12,15 +12,27 @@
 // Die beiden Funktionen MUESSEN zu den Geraetemakros load_rho/store_rho (lbm.cpp) passen; dort steht
 // dieselbe Rechnung mit vload_half/vstore_half_rte. Ohne RHO_FP16 sind beide die Identitaet.
 //
-// WARUM DAS TRAEGT, und woran es haengt: (r-1.0f) ist fuer r in [0,5; 2,0] nach Sterbenz BITGENAU
-// exakt, und *32768 ist eine Zweierpotenz. Deshalb ist die Kette float->Wort->float ein FIXPUNKT:
-// rho_unpack(rho_pack(rho_unpack(h))) == rho_unpack(h), bitgleich als float32, ueber alle 59.394
-// Bitmuster, die in [0,5; 1,5] landen, auch nach acht Umlaeufen (nachgerechnet 12.09. mit genau
-// diesen Wandlern). Daran haengen zwei Dinge, die sonst still brechen wuerden:
+// WARUM DAS TRAEGT: die Kette float->Wort->float ist ein FIXPUNKT,
+// rho_unpack(rho_pack(rho_unpack(h))) == rho_unpack(h), bitgleich als float32 und auch nach acht
+// Umlaeufen. Nachgerechnet 12.09. mit genau diesen Wandlern: 0 Verletzungen ueber die 59.394
+// Bitmuster, die in [0,5; 1,5] landen, ueber die 60.416 in (0,5; 2,0) -- und ueber ALLE 65.536.
+// Daran haengen zwei Dinge, die sonst still brechen wuerden:
 //   - pruefe_slice_ebene (setup.cpp) behaelt sein "Soll: exakt 0",
 //   - apply_velocity_inlet (kernel.cpp), das nichts als rho[n]=rho[m] tut, driftet nicht.
-// DIE EXAKTHEIT HAENGT AN RHO_CLAMP_MIN 0.5f UND AM 2.0f-TOR IM KOPPLUNGS-LIFT. Wer eine der beiden
-// Grenzen weitet, verliert den Fixpunkt LAUTLOS.
+// WORAN ES HAENGT -- BERICHTIGT 12.09. (Pruefagent): hier stand, die Exaktheit haenge an
+// RHO_CLAMP_MIN 0.5f und am 2.0f-Tor im Kopplungs-Lift. Das ist zu eng. Sterbenz ((r-1.0f) exakt
+// auf [0,5; 2,0]) ist HINREICHEND, aber nicht notwendig: fuer jedes r, das aus load_rho kommen
+// kann, ist (r-1) exakt, und (r-1)*2^15 ist dann per Konstruktion ein half-Wort. Der Fixpunkt
+// haengt allein daran, dass BEIDE Skalen exakte Zweierpotenzen bleiben -- 3.0517578E-5f ist
+// bitgenau 2^-15 und 32768.0f ist 2^15. Wer RHO_CLAMP_MIN senkt, verliert nichts.
+//
+// WAS NICHT GILT (Pruefagent 12.09., MITTEL): Host- und Geraetepacker sind NICHT dieselbe Rechnung.
+// float_to_half (utilities.hpp) addiert 0x1000 und schneidet ab, rundet also bei Gleichstand VOM
+// NULLPUNKT WEG; vstore_half_rte rundet zur geraden Zahl. An 400.000 zufaelligen rho in 1+-5e-4
+// gemessen: 12,6 % abweichende Speicherwoerter. Folgenlos ist das nur, WEIL der Host ausschliesslich
+// Werte packt, die selbst aus load_rho stammen (rho_pack(1.0f) und Rho_Feld::set in
+// lese_yslice_in_host) -- auf diesen 59.394 Werten stimmen beide Packer exakt ueberein.
+// Wer eine Hostschreibstelle ergaenzt, die ein rho-Feld SAET, laeuft still gegen diese Bedingung.
 inline float rho_unpack(const rhoxx w) { // Speicherwort -> rho
 #ifdef RHO_FP16
 	return half_to_float(w)*3.0517578E-5f+1.0f; // NICHT fma: der Fixpunktbeweis und das Geraetemakro rechnen getrennt
@@ -237,7 +249,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 218 (204..207 rho/u-SPARSAM und 210..217 rho-2-Byte, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 212 (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben

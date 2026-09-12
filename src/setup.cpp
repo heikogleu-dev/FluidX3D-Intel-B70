@@ -1476,26 +1476,24 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		  //   Slots 212..217 = Dekaden des Rueckrechenfehlers |load_rho(store_rho(x))-x|.
 		  //             SOLL: 217 (>=1e-3) exakt 0. Nur unter RHO_FP16 belegt; ohne ihn ist
 		  //             store_rho die Identitaet und es gaebe nichts zu messen.
-		  ulong ausser=0ull, besuche=0ull, q[6]={0ull,0ull,0ull,0ull,0ull,0ull}, qs=0ull;
+		  ulong ausser=0ull, besuche=0ull;
 		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
-			ausser+=(ulong)dm->rho_clamp_hits[210]; besuche+=(ulong)dm->rho_clamp_hits[211];
-			for(uint k=0u; k<6u; k++) { const ulong v=(ulong)dm->rho_clamp_hits[212u+k]; q[k]+=v; qs+=v; } }
+			ausser+=(ulong)dm->rho_clamp_hits[210]; besuche+=(ulong)dm->rho_clamp_hits[211]; }
 		  print_info(string("  rho-Speicherwort ")+wo+": "+to_string((uint)(8u*sizeof(rhoxx)))+" bit, "
 			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb 0,25..4,0 (Soll 0).");
 		  if(ausser>0ull) print_error(string("rho-Bereichswaechter ")+wo+": "+to_string(ausser)+" Lesungen ausserhalb 0,25..4,0. Ein Kernel liest den rho-Puffer als falschen Typ (Signatur noch 'global float* rho'?) -- die Werte sind Muell, der Lauf ist kein Ergebnis.");
-		  if(besuche==0ull) print_error(string("rho-Bereichswaechter ")+wo+": Slot 211 = 0, die Lesestelle wurde am Zaehlschritt NIE besucht. Damit beweist die Null in Slot 210 nichts -- lautloser Waechter.");
-		  // ★ Die Dekaden 212..216 sind ueber n%1024 ausgeduennt (Saettigungsschutz, siehe
-		  // store_rho_diag in kernel.cpp); 217 ist es NICHT. Die Prozentzahlen sind deshalb eine
-		  // Stichprobe der Verteilung, die Null in 217 dagegen eine Aussage ueber JEDE Zelle
-		  // jedes Zaehlschritts. Beide stehen bewusst in derselben Zeile -- wer sie verwechselt,
-		  // liest eine Stichprobe als Nullbeweis.
-		  const ulong qv = qs-q[5]; // q[5] ist ungeduennt und gehoert NICHT in den Nenner der Verteilung
-		  if(qv>0ull) print_info(string("  rho-Quantisierung ")+wo+": |Rueckrechenfehler| <1e-7: "+to_string(100.0*(double)q[0]/(double)qv,2u)
-			+"%, <1e-6: "+to_string(100.0*(double)q[1]/(double)qv,2u)+"%, <1e-5: "+to_string(100.0*(double)q[2]/(double)qv,2u)
-			+"%, <1e-4: "+to_string(100.0*(double)q[3]/(double)qv,2u)+"%, <1e-3: "+to_string(100.0*(double)q[4]/(double)qv,2u)
-			+"% ("+to_string(qv)+" Stichproben, jede 1024. Zelle) | >=1e-3 (UNGEDUENNT, Soll 0): "+to_string(q[5]));
-		  if(q[5]>0ull) print_error(string("rho-Quantisierung ")+wo+": "+to_string(q[5])+" Schreibvorgaenge mit Rueckrechenfehler >= 1e-3. Das ist die Groessenordnung des Signals selbst -- das Speicherformat traegt den Wertebereich nicht.");
-		  if(sizeof(rhoxx)<4u&&qv==0ull) print_error(string("rho ist auf 2 Byte gebaut (RHO_FP16), aber die Quantisierungs-Dekaden 212..217 sind ALLE null (")+wo+") -- store_rho_diag wurde nie ausgefuehrt. Lautloser No-Op.");
+		  // ★ BERICHTIGT 12.09. (Pruefagent, HOCH): hier stand print_error -- und print_error ist exit(1).
+		  // Der KANALFALL hat konstruktiv KEINE TYPE_E-Zelle, Slot 211 ist dort strukturell 0. Der
+		  // Waechter haette den Kanal in BEIDEN Armen getoetet, VOR Wandfunktions-Wirkpfad, P-TRT-
+		  // Abnahme, Facetten-Wirkpfad und F-Markerlistenbeweis -- woertlich die Lehre vom 10.09.,
+		  // die zwanzig Zeilen weiter unten steht. Nicht aufgefallen, weil der Rauchtest an der KUGEL
+		  // lief, und die hat TYPE_E unbedingt. 0 Besuche heisst NICHT "Waechter kaputt", sondern
+		  // "keine Grundgesamtheit" -- das setzt die ABDECKUNG von Slot 210 auf null, mehr nicht.
+		  if(besuche==0ull) print_warning(string("rho-Bereichswaechter ")+wo+": Slot 211 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 210 beweist damit NICHTS; der Bereichswaechter hat hier keine Abdeckung.");
+		  // Die Quantisierungs-Dekaden (Slots 212..217) sind am 12.09. abends ENTFERNT worden: der
+		  // Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert und meldete
+		  // deshalb konstruktiv 100 % im kleinsten Bin. Begruendung und Belegzahlen stehen an
+		  // store_rho in kernel.cpp. Gemessen wird die Quantisierung jetzt am Feld-Dump.
 		}
 		{ // ★ Pruefbefund A4: Slot 59 wurde NIRGENDS gelesen -- ein reiner Schreibzaehler.
 			ulong bw=0ull; for(uint d=0u; d<L.get_D(); d++) bw+=(ulong)L.lbm_domain[d]->rho_clamp_hits[59];
@@ -5955,6 +5953,12 @@ static void main_setup_fahrzeug_dd() {
 	    // Maske nicht ab. Der Takt ist die Sample-Kadenz in FEINEN Schritten.
 	    const uint rs_ = env_u("CFD_RHO_SPARSAM", 0u);
 	    LBM_Domain::s_rho_takt = (rs_>0u) ? max(1u, env_u("CFD_SAMPLE_EVERY", 25u))*ratio : 0u;
+	    // ★ 12.09.2026 (Pruefagent, MITTEL): APG misst rho-DIFFERENZEN zwischen Nachbarzellen,
+	    // Groessenordnung 1e-6 bis 1e-5. Der Quantisierungsfehler je Summand ist |rho-1|*2^-11,
+	    // bei |rho-1| = 1e-3 also 4,9e-7 -- DERSELBEN Groessenordnung wie das gemessene Gefaelle.
+	    // Ueberall sonst wird rho als Absolutwert benutzt, dort ist das Verhaeltnis 1:4000.
+	    // APG ist damit der einzige Verbraucher, den das 2-Byte-Format qualitativ trifft.
+	    if(sizeof(rhoxx)<4u&&env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("RHO_FP16 und CFD_FAC_APG schliessen sich aus: der APG-Zweig bildet rho-DIFFERENZEN zwischen Nachbarzellen (Groessenordnung 1e-6..1e-5). Bei rho als FP16S(rho-1) ist der Quantisierungsfehler je Summand |rho-1|*2^-11, bei |rho-1|=1e-3 also 4,9e-7 -- also so gross wie das Signal. Entweder werkzeuge/rho_format.sh FP32 oder CFD_FAC_APG=0.");
 	    if(rs_>0u&&env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_SPARSAM und CFD_FAC_APG schliessen sich aus: der APG-Zweig liest rho an bis zu 18 FACETTENNACHBARN (kernel.cpp, rho[j[ia]]), und die liegen ausserhalb der Auslassschicht. Die Maske waere keine Obermenge mehr und der Wandmodell-Eingang bekaeme lautlos veraltete Werte.");
 	    const uint us_ = env_u("CFD_U_SPARSAM", 0u);
 	    LBM_Domain::s_u_takt = (us_>0u) ? ratio : 0u;
@@ -7789,14 +7793,18 @@ static void main_setup_fahrzeug_dd() {
 						const float d = fmax(fmax(fabs(lbm_f.rho.get(n)-face[p][cb]), fabs(lbm_f.u.x[n]-face[p][cb+1ull])),
 						                     fmax(fabs(lbm_f.u.y[n]-face[p][cb+2ull]), fabs(lbm_f.u.z[n]-face[p][cb+3ull])));
 						maxdev = fmax(maxdev, d);
-						// ★ 12.09.2026, TODO 2 Schritt 4: die Schranke muss mit dem SPEICHERFORMAT von rho wandern.
-						// Bei rho als FP16S(rho-1) ist das Quant |rho-1|*2^-12; am echten Feld gemessen bis 5,6e-5,
-						// also bis zu 56-fach ueber der alten festen Schranke 1e-6. Ohne diese Anpassung meldet die
-						// Kopplungspruefung an JEDEM Deckungspunkt in JEDEM Lauf einen Defekt, den es nicht gibt.
-						// Bewusst NICHT die Schranke pauschal hochsetzen: u steht im selben fmax und soll seine
-						// scharfe 1e-6 behalten. Ohne RHO_FP16 ist tol_rho exakt die alte 1e-6.
-						const float tol_rho = fmax(1.0e-6f, (sizeof(rhoxx)<4u ? fabs(face[p][cb]-1.0f)*3.0e-4f : 0.0f));
-						if(d>tol_rho) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
+						// ★ 12.09.2026, TODO 2 Schritt 4: hier stand kurzzeitig eine mit dem Speicherformat
+						// mitwandernde Schranke, weil die rho-Quantisierung (bis 5,6e-5) 56-fach ueber der
+						// festen 1e-6 liegt. SIE IST UNNOETIG UND WAR FALSCH GEBAUT -- zweimal:
+						//   (1) d ist das gemeinsame fmax ueber rho UND alle drei u-Komponenten. Eine
+						//       rho-abhaengige Schranke lockert damit die u-Pruefung mit, also genau das,
+						//       was der eigene Kommentar daneben ausschloss.
+						//   (2) Sie wird gar nicht gebraucht. Am Deckungspunkt ist die kubische
+						//       Interpolation die IDENTITAET (w[0]=1, Rest 0), und die Wandlung
+						//       float->Wort->float ist ein Fixpunkt. Der Wert kommt also BITGENAU zurueck.
+						// GEMESSEN am 8-mm-Paar r8_fp32/r8_fp16: beide melden auf allen vier Flaechen
+						// "groesste Abweichung dort 0.00000000 (identisch)". Die scharfe Schranke bleibt.
+						if(d>1.0e-6f) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
 					}
 				}
 				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)

@@ -25,5 +25,17 @@ assert n==1, f"RHO_FP16: {n} Treffer statt 1 -- nichts geschrieben"
 io.open(p,"w",encoding="utf-8",newline="").write("\n".join(z))
 PY
 grep -nE '^\s*(//)?#define RHO_FP16' src/defines.hpp | cut -c1-60
-make -j"$(nproc)" Linux 2>&1 | grep -iE ' error|Error ' && { echo "BAU FEHLGESCHLAGEN"; exit 1; }
+# ★ BERICHTIGT 12.09. (Pruefagent, NIEDRIG): hier stand "make ... | grep -i error && exit 1".
+# Ohne pipefail geht der Exit-Status von make verloren, die ganze Bauausgabe verschwindet im grep,
+# und ein Bau, der auf eine Art scheitert die kein " error" druckt, haette "gebaut" gemeldet --
+# mit dem md5 des VORIGEN Binaries. Das ist die Build-RC-Falle dieses Projekts in ihrer dritten
+# Auflage. Jetzt: Ausgabe mitschreiben, RC von make lesen, erst dann melden.
+LOG="$(mktemp)"
+set +e
+make -j"$(nproc)" Linux > "$LOG" 2>&1
+RC=$?
+set -e
+if [ "$RC" -ne 0 ]; then echo "BAU FEHLGESCHLAGEN (make RC=$RC):"; tail -20 "$LOG"; rm -f "$LOG"; exit 1; fi
+grep -iE ' error|Error ' "$LOG" && { echo "BAU FEHLGESCHLAGEN (Fehlertext trotz RC=0)"; rm -f "$LOG"; exit 1; }
+rm -f "$LOG"
 echo "gebaut: rho = $1   ($(md5sum bin/FluidX3D | cut -d' ' -f1))"
