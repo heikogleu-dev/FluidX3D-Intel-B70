@@ -295,12 +295,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		// Die 18 verbliebenen Stellen sind AUSSCHLIESSLICH SURFACE (5) und GRAPHICS (13); beide sind
 		// in diesem Bau aus, und defines.hpp schliesst sie unter RHO_FP16 hart aus. Aendert jemand
 		// die Zahl, ist das eine bewusste Entscheidung und diese Zeile gehoert mitgeaendert.
+		// ★ 14 -> 13 am 12.09. abends: store_rho_diag ist entfallen (der Rueckleser war ein No-Op,
+		// siehe die Begruendung an store_rho in kernel.cpp). Der Waechter hat den Wegfall SELBST
+		// gemeldet und den Lauf angehalten -- so soll es sein.
 		const string muster = "global\nfloat*\nrho", muster_t = "global\nrhoxx*\nrho";
 		uint n_float=0u, n_t=0u;
 		for(size_t i=opencl_c_code.find(muster); i!=string::npos; i=opencl_c_code.find(muster, i+1ull)) n_float++;
 		for(size_t i=opencl_c_code.find(muster_t); i!=string::npos; i=opencl_c_code.find(muster_t, i+1ull)) n_t++;
-		if(n_float!=18u||n_t!=14u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
-			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 14). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
+		if(n_float!=18u||n_t!=13u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
+			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 13). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
 	}
 	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
