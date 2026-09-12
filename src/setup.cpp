@@ -1484,12 +1484,18 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb 0,25..4,0 (Soll 0).");
 		  if(ausser>0ull) print_error(string("rho-Bereichswaechter ")+wo+": "+to_string(ausser)+" Lesungen ausserhalb 0,25..4,0. Ein Kernel liest den rho-Puffer als falschen Typ (Signatur noch 'global float* rho'?) -- die Werte sind Muell, der Lauf ist kein Ergebnis.");
 		  if(besuche==0ull) print_error(string("rho-Bereichswaechter ")+wo+": Slot 211 = 0, die Lesestelle wurde am Zaehlschritt NIE besucht. Damit beweist die Null in Slot 210 nichts -- lautloser Waechter.");
-		  if(qs>0ull) print_info(string("  rho-Quantisierung ")+wo+": |Rueckrechenfehler| <1e-7: "+to_string(100.0*(double)q[0]/(double)qs,2u)
-			+"%, <1e-6: "+to_string(100.0*(double)q[1]/(double)qs,2u)+"%, <1e-5: "+to_string(100.0*(double)q[2]/(double)qs,2u)
-			+"%, <1e-4: "+to_string(100.0*(double)q[3]/(double)qs,2u)+"%, <1e-3: "+to_string(100.0*(double)q[4]/(double)qs,2u)
-			+"%, >=1e-3: "+to_string(100.0*(double)q[5]/(double)qs,2u)+"% ("+to_string(qs)+" Schreibvorgaenge)");
+		  // ★ Die Dekaden 212..216 sind ueber n%1024 ausgeduennt (Saettigungsschutz, siehe
+		  // store_rho_diag in kernel.cpp); 217 ist es NICHT. Die Prozentzahlen sind deshalb eine
+		  // Stichprobe der Verteilung, die Null in 217 dagegen eine Aussage ueber JEDE Zelle
+		  // jedes Zaehlschritts. Beide stehen bewusst in derselben Zeile -- wer sie verwechselt,
+		  // liest eine Stichprobe als Nullbeweis.
+		  const ulong qv = qs-q[5]; // q[5] ist ungeduennt und gehoert NICHT in den Nenner der Verteilung
+		  if(qv>0ull) print_info(string("  rho-Quantisierung ")+wo+": |Rueckrechenfehler| <1e-7: "+to_string(100.0*(double)q[0]/(double)qv,2u)
+			+"%, <1e-6: "+to_string(100.0*(double)q[1]/(double)qv,2u)+"%, <1e-5: "+to_string(100.0*(double)q[2]/(double)qv,2u)
+			+"%, <1e-4: "+to_string(100.0*(double)q[3]/(double)qv,2u)+"%, <1e-3: "+to_string(100.0*(double)q[4]/(double)qv,2u)
+			+"% ("+to_string(qv)+" Stichproben, jede 1024. Zelle) | >=1e-3 (UNGEDUENNT, Soll 0): "+to_string(q[5]));
 		  if(q[5]>0ull) print_error(string("rho-Quantisierung ")+wo+": "+to_string(q[5])+" Schreibvorgaenge mit Rueckrechenfehler >= 1e-3. Das ist die Groessenordnung des Signals selbst -- das Speicherformat traegt den Wertebereich nicht.");
-		  if(sizeof(rhoxx)<4u&&qs==0ull) print_error(string("rho ist auf 2 Byte gebaut (RHO_FP16), aber die Quantisierungs-Dekaden 212..217 sind ALLE null (")+wo+") -- store_rho_diag wurde nie ausgefuehrt. Lautloser No-Op.");
+		  if(sizeof(rhoxx)<4u&&qv==0ull) print_error(string("rho ist auf 2 Byte gebaut (RHO_FP16), aber die Quantisierungs-Dekaden 212..217 sind ALLE null (")+wo+") -- store_rho_diag wurde nie ausgefuehrt. Lautloser No-Op.");
 		}
 		{ // ★ Pruefbefund A4: Slot 59 wurde NIRGENDS gelesen -- ein reiner Schreibzaehler.
 			ulong bw=0ull; for(uint d=0u; d<L.get_D(); d++) bw+=(ulong)L.lbm_domain[d]->rho_clamp_hits[59];

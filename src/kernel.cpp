@@ -2876,10 +2876,23 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+R(void store_rho_diag(global rhoxx* rho, const uxx n, const float rhon, const ulong t, global uint* hits) {
 	store_rho(rho, n, rhon);
 )+"#ifdef RHO_FP16"+R(
+	// ★ BERICHTIGT 12.09.2026, NACHGERECHNET STATT ERLEBT: die erste Fassung zaehlte an jedem
+	// Zaehlschritt JEDE geschriebene Zelle in eine der sechs Dekaden. Am 8-mm-Fahrzeug sind das
+	// 250 Zaehlschritte x 65.562.705 Zellen = 1,64e10 Zaehlvorgaenge gegen eine Saettigungsschwelle
+	// von 4,03e9 -- die staerkste Dekade waere nach 61 von 250 Schritten stehengeblieben und die
+	// Prozentzahlen waeren Artefakte gewesen. GENAU DIESER FEHLER ist an den Slots 204..207 am
+	// Vormittag desselben Tages schon einmal bezahlt worden. Deshalb zwei getrennte Zaehlweisen:
+	//   Slot 217 (>=1e-3) ist der NULLBEWEIS und bleibt UNAUSGEDUENNT -- er zaehlt nur im
+	//     Fehlerfall, kann also gar nicht saettigen, solange die Aussage stimmt.
+	//   Slots 212..216 sind die VERTEILUNG und laufen ueber n%1024 ausgeduennt (Muster der
+	//     P-TRT-Zweitzaehlung, Slots 202/203). Obergrenze 250 x 65.562.705/1024 = 1,6e7.
 	if(t%(ulong)def_zaehl_takt==0ul) {
 		const float e = fabs(load_rho(rho, n)-rhon);
-		const uint b = e<1e-7f ? 212u : (e<1e-6f ? 213u : (e<1e-5f ? 214u : (e<1e-4f ? 215u : (e<1e-3f ? 216u : 217u))));
-		if(hits[b]<0xF0000000u) atomic_inc(&hits[b]);
+		if(e>=1e-3f) { if(hits[217]<0xF0000000u) atomic_inc(&hits[217]); } // Soll 0, ueber ALLE Zellen des Zaehlschritts
+		else if((n&(uxx)1023)==(uxx)0) {
+			const uint b = e<1e-7f ? 212u : (e<1e-6f ? 213u : (e<1e-5f ? 214u : (e<1e-4f ? 215u : 216u)));
+			if(hits[b]<0xF0000000u) atomic_inc(&hits[b]);
+		}
 	}
 )+"#endif"+R( // RHO_FP16
 }
