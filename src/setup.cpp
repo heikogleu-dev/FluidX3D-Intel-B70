@@ -1509,6 +1509,21 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		  // lief, und die hat TYPE_E unbedingt. 0 Besuche heisst NICHT "Waechter kaputt", sondern
 		  // "keine Grundgesamtheit" -- das setzt die ABDECKUNG von Slot 210 auf null, mehr nicht.
 		  if(besuche==0ull) print_warning(string("rho-Bereichswaechter ")+wo+": Slot 211 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 210 beweist damit NICHTS; der Bereichswaechter hat hier keine Abdeckung.");
+		  // ★ TODO 2 Schritt 4 (12.09.2026) -- dasselbe fuer u, aber gegen die SAETTIGUNG statt gegen
+		  // die Typverwechslung (die faengt bei u ebenfalls nur der Typ-Zensus).
+		  //   Slot 212 = |u| >= 1,0 oder nicht-endlich an der TYPE_E-Lesestelle, UNGEGATET. Soll 0.
+		  //   Slot 213 = Besuche derselben Stelle an EINEM Schritt. Soll > 0, sonst hat 212 keine
+		  //             Abdeckung -- und im Kanalfall ist es strukturell 0, deshalb WARNUNG, nie Fehler.
+		  //   Slot 214 = Betragstor im Kopplungs-Lift, dem einzigen ungeklemmten u-Schreiber. Soll 0;
+		  //             solange er 0 ist, ist das Tor nachweislich ein No-Op und der FP32-Arm bitgleich.
+		  ulong u_ausser=0ull, u_besuche=0ull, u_tor=0ull;
+		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
+			u_ausser+=(ulong)dm->rho_clamp_hits[212]; u_besuche+=(ulong)dm->rho_clamp_hits[213]; u_tor+=(ulong)dm->rho_clamp_hits[214]; }
+		  print_info(string("  u-Speicherwort ")+wo+": "+to_string((uint)(8u*sizeof(velxx)))+" bit je Komponente, "
+			+to_string(u_besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(u_ausser)+" mit |u| >= 1,0 oder nicht-endlich (Soll 0); Kopplungs-Lift-Tor "+to_string(u_tor)+" (Soll 0).");
+		  if(u_ausser>0ull) print_error(string("u-Saettigungswaechter ")+wo+": "+to_string(u_ausser)+" Lesungen an TYPE_E-Zellen mit |u| >= 1,0 oder nicht-endlich. Die Geschwindigkeitsklemme haelt +-0,57735; unter U_FP16 saettigt das Speicherwort ab 1,99902 still nach +-inf -- der Lauf ist kein Ergebnis.");
+		  if(u_tor>0ull) print_error(string("u-Betragstor im Kopplungs-Lift ")+wo+": "+to_string(u_tor)+" mal gegriffen. Damit ist der FP32-Arm NICHT mehr bitgleich zum Stand vor TODO 2 Schritt 4, und die kubische Interpolation liefert Geschwindigkeiten jenseits jeder Physik.");
+		  if(u_besuche==0ull) print_warning(string("u-Saettigungswaechter ")+wo+": Slot 213 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 212 beweist damit NICHTS.");
 		  // Die Quantisierungs-Dekaden (Slots 212..217) sind am 12.09. abends ENTFERNT worden: der
 		  // Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert und meldete
 		  // deshalb konstruktiv 100 % im kleinsten Bin. Begruendung und Belegzahlen stehen an
@@ -4480,7 +4495,13 @@ void schreibe_wandprofil(LBM& L, const uint Nx, const uint Ny, const uint xs, co
 	f << t_si;
 	for(uint z=1u; z<8u; z++) {
 		const ulong n = (ulong)xs + ((ulong)ys + (ulong)z*(ulong)Ny)*(ulong)Nx;
-		f << "," << L.lbm_domain[0]->u.x[n]/u_lat;
+		// ★ TODO 2 Schritt 4 (12.09.2026): u_unpack von Hand, und das ist KEINE Stilfrage.
+		// Das hier ist der ROHE Domaenenpuffer (Memory<velxx>::Pointer), nicht der Container --
+		// der Stellvertreter aus U_Feld greift hier NICHT. Unter U_FP16 lieferte die Zeile sonst
+		// ein Speicherwort als Zahl, also Muell, und zwar ohne Warnung: ushort nach float ist
+		// keine Verengung. Es ist die EINZIGE solche Stelle im ganzen Projekt; der Waechter dagegen
+		// ist der Host-Zensus in werkzeuge/u_format.sh (Soll: 0 Treffer auf "->u.x[" und Geschwister).
+		f << "," << u_unpack(L.lbm_domain[0]->u.x[n])/u_lat;
 	}
 	f << "\n" << std::flush; // waehrend des Laufs lesbar, und ein Absturz kostet keine Reihe
 }
@@ -7830,15 +7851,29 @@ static void main_setup_fahrzeug_dd() {
 						const float d = fmax(d_rho, d_u);
 						maxdev = fmax(maxdev, d);
 						const float tol_rho = fmax(1.0e-6f, (sizeof(rhoxx)<4u ? fabs(face[p][cb]-1.0f)*4.89e-4f : 0.0f)); // 2^-11 = worst-case-ULP von half
-						if(d_rho>tol_rho||d_u>1.0e-6f) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
+						// ★ TODO 2 Schritt 4 fuer u (12.09.2026): dieselbe Bauform, und sie ist hier PFLICHT,
+						// nicht Kosmetik. Bei u_lat = 0,075 ist ein half-ULP 0,075*2^-11 = 3,66e-5, also das
+						// 36,6-fache der scharfen Schranke 1e-6 -- ohne diese Zeile meldete JEDER Lauf einen
+						// Kopplungsdefekt, den es nicht gibt. Genau der Fehler, den der Absatz darueber fuer
+						// rho schon zweimal als "Anlauf 1" und "Anlauf 2" beschreibt. Bezug ist der GROBE
+						// Wert, wie bei rho, und im FP32-Arm ist die Schranke exakt die alte 1e-6.
+						const float u_bez = fmax(fabs(face[p][cb+1ull]), fmax(fabs(face[p][cb+2ull]), fabs(face[p][cb+3ull])));
+						const float tol_u = fmax(1.0e-6f, (sizeof(velxx)<4u ? u_bez*4.89e-4f : 0.0f));
+						if(d_rho>tol_rho||d_u>tol_u) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
 					}
 				}
 				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)
 					+" Deckungspunkte (plus "+to_string(n_outlet_edge)+" auf der Auslasskante, dort gilt der Auslass); groesste Abweichung dort "+to_string(maxdev,9u)
-					+(n_bad? (" -- "+to_string(n_bad)+" ueber der Schranke (u: 1e-6; rho: 1e-6 bzw. |rho-1|*2^-11 unter RHO_FP16), erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : " (identisch)")
+					+(n_bad? (" -- "+to_string(n_bad)+" ueber der Schranke (rho: 1e-6 bzw. |rho-1|*2^-11 unter RHO_FP16; u: 1e-6 bzw. |u|*2^-11 unter U_FP16), erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : " (identisch)")
 					+"; groesste Abweichung vom Freistrom "+to_string(100.0f*maxrel,2u)+" % von u_inf");
 				if(n_e==0ull) print_warning(string("Flaeche ")+face_name[p]+" hat KEINE TYPE_E-Zelle -- diese Kopplungsflaeche ist wirkungslos.");
-				if(maxrel<1.0e-6f) print_warning(string("Flaeche ")+face_name[p]+" steht exakt auf Freistrom -- das Fernfeld gibt dort (noch) nichts Eigenes vor.");
+				// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle folgt dem Speicherformat, sonst VERLIERT dieser
+				// Waechter unter U_FP16 seine Bedingung. maxrel misst |u_x - u_lat|/u_lat; ein half-Quant bei
+				// u_lat ist relativ 4,89e-4, maxrel kann also nie wieder unter 1e-6 fallen und die Warnung nie
+				// wieder feuern -- ein Waechter, dessen Bedingung konstruktiv falsch ist, ist schlimmer als keiner.
+				// Im FP32-Arm ist die Schwelle exakt die alte 1e-6.
+				const float tol_frei = sizeof(velxx)<4u ? 1.0e-3f : 1.0e-6f;
+				if(maxrel<tol_frei) print_warning(string("Flaeche ")+face_name[p]+" steht exakt auf Freistrom -- das Fernfeld gibt dort (noch) nichts Eigenes vor.");
 			}
 		}
 
@@ -8548,7 +8583,12 @@ static void main_setup_fahrzeug_dd() {
 			for(uint z=0u; z<cNz; z++) { const ulong n=(ulong)ex+((ulong)ey+(ulong)z*(ulong)cNy)*(ulong)cNx;
 				const float ux=lbm_c.u.x[n]/u_lat, uy=lbm_c.u.y[n]/u_lat, uz=lbm_c.u.z[n]/u_lat;
 				ep << (double)z*(double)dx_c << "," << ux << "," << uy << "," << uz << std::endl;
-				if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>1e-3f&&fabs(letzte_d)>1e-3f) flips+=1.0; letzte_d=d; } else letzte_d=0.0f;
+				// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle 1e-3 laege unter U_FP16 nur 1,23-fach ueber dem
+				// Quantisierungsrauschen -- ein half-Quant bei u_lat = 0,075 ist 6,10e-5 lat, in u_inf-Einheiten
+				// also 8,14e-4. Gezaehlt wuerden dann Vorzeichenwechsel der RUNDUNG statt der Physik. Vier
+				// Quanten, und die Herleitung haengt an u_lat statt an einer Zahl (CFD_U_LAT laesst bis 0,3 zu).
+				const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*6.103516e-5f/u_lat) : 1.0e-3f;
+				if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>tol_flip&&fabs(letzte_d)>tol_flip) flips+=1.0; letzte_d=d; } else letzte_d=0.0f;
 				vor=ux; hat_vor=true; }
 			print_info("Einlass-Saeule (x=+0,2 m, y-Mitte): Nachbar-Vorzeichenwechsel in dux/dz = "+to_string((float)flips,0u)+" von "+to_string(cNz-2u)+" moeglichen, max|dux| = "+to_string((float)dmax,4u)+" u_inf (2-Zellen-Oszillation = Staggered-Beweis). CSV: einlass_saeule.csv");
 		}
@@ -8959,7 +8999,12 @@ static void main_setup_fernfeld() {
 		for(uint z=0u; z<Nz; z++) { const ulong n=(ulong)ex+((ulong)ey+(ulong)z*(ulong)Ny)*(ulong)Nx;
 			const float ux=lbm.u.x[n]/u_lat, uy=lbm.u.y[n]/u_lat, uz=lbm.u.z[n]/u_lat;
 			ep << (double)z*(double)dx << "," << ux << "," << uy << "," << uz << std::endl;
-			if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>1e-3f&&fabs(letzte_d)>1e-3f) flips+=1.0; letzte_d=d; }
+			// ★ TODO 2 Schritt 4 (12.09.2026): die Schwelle 1e-3 laege unter U_FP16 nur 1,23-fach ueber dem
+			// Quantisierungsrauschen -- ein half-Quant bei u_lat = 0,075 ist 6,10e-5 lat, in u_inf-Einheiten
+			// also 8,14e-4. Gezaehlt wuerden dann Vorzeichenwechsel der RUNDUNG statt der Physik. Vier
+			// Quanten, und die Herleitung haengt an u_lat statt an einer Zahl (CFD_U_LAT laesst bis 0,3 zu).
+			const float tol_flip = sizeof(velxx)<4u ? fmax(1.0e-3f, 4.0f*6.103516e-5f/u_lat) : 1.0e-3f;
+			if(hat_vor) { const float d=ux-vor; dmax=fmax(dmax,(double)fabs(d)); if(z>=2u&&((d>0.0f)!=(letzte_d>0.0f))&&fabs(d)>tol_flip&&fabs(letzte_d)>tol_flip) flips+=1.0; letzte_d=d; }
 			vor=ux; hat_vor=true; }
 		print_info("Einlass-Saeule (x=+0,2 m, y-Mitte): Vorzeichenwechsel dux/dz = "+to_string((float)flips,0u)+" von "+to_string(Nz-2u)+", max|dux| = "+to_string((float)dmax,4u)+" u_inf. CSV: einlass_saeule.csv");
 	}

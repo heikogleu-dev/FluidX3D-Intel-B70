@@ -26,7 +26,7 @@ const uint transfers = 9u;
 #endif // D3Q27
 
 uint bytes_per_cell_host() { // returns the number of Bytes per cell allocated in host memory
-	uint bytes_per_cell = 13u+(uint)sizeof(rhoxx); // rho, u, flags (★ TODO 2 Schritt 4: rho 4 oder 2 Byte)
+	uint bytes_per_cell = 1u+3u*(uint)sizeof(velxx)+(uint)sizeof(rhoxx); // flags, u, rho (★ TODO 2 Schritt 4: rho und u je 4 oder 2 Byte)
 #ifdef FORCE_FIELD
 	bytes_per_cell += 12u; // F
 #endif // FORCE_FIELD
@@ -39,7 +39,7 @@ uint bytes_per_cell_host() { // returns the number of Bytes per cell allocated i
 	return bytes_per_cell;
 }
 uint bytes_per_cell_device() { // returns the number of Bytes per cell allocated in device memory
-	uint bytes_per_cell = velocity_set*sizeof(fpxx)+13u+(uint)sizeof(rhoxx); // fi, rho, u, flags (★ TODO 2 Schritt 4: rho 4 oder 2 Byte)
+	uint bytes_per_cell = velocity_set*sizeof(fpxx)+1u+3u*(uint)sizeof(velxx)+(uint)sizeof(rhoxx); // fi, flags, u, rho (★ TODO 2 Schritt 4: rho und u je 4 oder 2 Byte)
 #ifdef FORCE_FIELD
 	bytes_per_cell += 12u; // F
 #endif // FORCE_FIELD
@@ -54,7 +54,7 @@ uint bytes_per_cell_device() { // returns the number of Bytes per cell allocated
 uint bandwidth_bytes_per_cell_device() { // returns the bandwidth in Bytes per cell per time step from/to device memory
 	uint bandwidth_bytes_per_cell = velocity_set*2u*sizeof(fpxx)+1u; // lattice.set()*2*fi, flags
 #ifdef UPDATE_FIELDS
-	bandwidth_bytes_per_cell += 12u+(uint)sizeof(rhoxx); // rho, u (★ TODO 2 Schritt 4)
+	bandwidth_bytes_per_cell += 3u*(uint)sizeof(velxx)+(uint)sizeof(rhoxx); // u, rho (★ TODO 2 Schritt 4)
 #ifdef TEMPERATURE
 	bandwidth_bytes_per_cell += 4u; // T
 #endif // TEMPERATURE
@@ -242,6 +242,21 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// REG-A/B waere nicht bitreproduzierbar. Default ist aus; wer ihn zieht, wird gewarnt.
 #ifdef REGULARIZED_BOUNDARIES
 	if(getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) print_warning("CFD_REG_BC=1 unter UPDATE_FIELDS: deriv_reg liest u[] im Wettlauf mit dem Schreiber -- Ergebnisse sind NICHT bitreproduzierbar (Audit-Befund 8).");
+#ifdef U_FP16
+	// ★ TODO 2 Schritt 4 (12.09.2026) -- ANSAGE, kein Abbruch: der regularisierte Rand ist der EINZIGE
+	// u-Leser mit zweistelligem Quantisierungsfehler. Am 4-mm-Feld bei 501 ms voll nachgerechnet
+	// (alle 3.290.677 TYPE_E-Zellen, alle neun Ableitungen): auf f_neq stehen 2,69 % relativer RMS,
+	// Median je Zelle 3,8 %, p90 28 %. Die beiden x-Flaechen tragen 1,94 % des Signals und 53 % des
+	// Fehlers -- dort ist |u| am groessten und der Gradient am kleinsten, die schlechteste Paarung.
+	// Der zentrale Zweig von deriv_reg feuert dabei NIE (0 von 3,29 Mio Zellen): TYPE_E liegt auf den
+	// Domaenenflaechen, tangentiale Nachbarn sind selbst TYPE_E und der aeussere schlaegt periodisch
+	// auf die Gegenflaeche um. 99,80 % der Randzellen bekommen genau eine einseitige Ableitung.
+	// Gegenmittel, falls dieser Arm je gefahren wird: u in der Randschale der Dicke 2 in float32
+	// halten. deriv_reg liest genau sieben Zellen (n und j[1..6]), die Schale sind 7.684.695 Zellen
+	// = 1,48 % des Nahfelds = 43,97 MiB Mehrbedarf, also 1,48 % des Gewinns von 2971 MiB. Sie nimmt
+	// 100 % des Fehlers weg, und zwar strukturell statt statistisch. NICHT GEBAUT, weil der Arm aus ist.
+	if(getenv("CFD_REG_BC")!=nullptr&&atoi(getenv("CFD_REG_BC"))>0) print_warning("CFD_REG_BC=1 unter U_FP16: deriv_reg bildet Differenzen quantisierter Nachbarn am Rand, wo |u| am groessten und der Gradient am kleinsten ist. Voll gemessen am 4-mm-Feld: 2,69 % relativer RMS auf f_neq, Median je Zelle 3,8 %, p90 28 %; die beiden x-Flaechen tragen 53 % davon. Entweder werkzeuge/u_format.sh FP32 oder die Randschale bauen (43,97 MiB, Begruendung im Quelltext).");
+#endif // U_FP16
 #endif // REGULARIZED_BOUNDARIES
 #endif // UPDATE_FIELDS
 #ifndef REGULARIZED_BOUNDARIES
@@ -313,6 +328,35 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		for(size_t i=opencl_c_code.find(muster_t); i!=string::npos; i=opencl_c_code.find(muster_t, i+1ull)) n_t++;
 		if(n_float!=18u||n_t!=13u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
 			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 13). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
+	}
+	{ // ★ TODO 2 Schritt 4 (12.09.2026) -- derselbe Zensus fuer u, und er braucht ein SCHAERFERES Muster.
+		// Der rho-Zensus zaehlt Teilstrings. Bei u faengt das mehr, als es soll: der Kernel fuehrt einen
+		// zweiten Puffer namens "unear", und "global\nfloat*\nu" steckt in "global\nfloat*\nunear"
+		// drin. Der naive Zensus haette also 22 statt 21 gezaehlt und in JEDEM Lauf falsch Alarm
+		// geschlagen -- gefunden, bevor die Zahl eingetragen war, weil sie am emittierten Quelltext
+		// abgelesen und nicht geschaetzt wurde.
+		// Deshalb: gezaehlt wird nur, wenn hinter dem "u" KEIN Bezeichnerzeichen mehr steht. Die drei
+		// vorkommenden Fortsetzungen sind "," (19x), ")" (1x, graphics_q hat u als letzten Parameter)
+		// und der Zeilenumbruch (1x, die "// ) {"-Splice-Form).
+		// SOLL 21 x float: SURFACE 4 (average_neighbors_non_gas/_fluid, surface_0, surface_2),
+		// PARTICLES 1 (integrate_particles), GRAPHICS 13, und DREI ungegatete Hilfsfunktionen --
+		// closest_u (wird NIRGENDS aufgerufen, toter Code), interpolate_u (nur von integrate_particles)
+		// und calculate_Q (nur von graphics_q_field). Alle drei werden immer mituebersetzt.
+		// SOLL 19 x velxx: die aktiven Traeger. Aendert jemand eine der Zahlen, ist das eine bewusste
+		// Entscheidung und diese Zeile gehoert mitgeaendert.
+		auto zaehle_wortgenau = [&](const string& m) {
+			uint n=0u;
+			for(size_t i=opencl_c_code.find(m); i!=string::npos; i=opencl_c_code.find(m, i+1ull)) {
+				const size_t j = i+m.length();
+				if(j>=opencl_c_code.length()) { n++; continue; }
+				const char c = opencl_c_code[j];
+				if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')) n++;
+			}
+			return n;
+		};
+		const uint n_uf = zaehle_wortgenau("global\nfloat*\nu"), n_uv = zaehle_wortgenau("global\nvelxx*\nu");
+		if(n_uf!=21u||n_uv!=19u) print_error("u-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_uf)+" x \"global float* u\" (Soll 21, alle in SURFACE/PARTICLES/GRAPHICS oder totem Code) und "
+			+to_string(n_uv)+" x \"global velxx* u\" (Soll 19). Ein u-Kernel ist nicht auf velxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-u waere das ein stiller Fehler, kein Absturz: der Kernel laese zwei halbe Geschwindigkeiten als eine.");
 	}
 	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
@@ -483,7 +527,7 @@ void LBM_Domain::allocate(Device& device) {
 	// in finalize gibt so nur den Platzhalter frei, was trivial ist.
 	fi = Memory<fpxx>(device, sparse_on ? 1ull : N, velocity_set, false);
 	rho = Memory<rhoxx>(device, N, 1u, true, true, rho_pack(1.0f)); // ★ TODO 2 Schritt 4: Speicherwort fuer rho=1 (ohne RHO_FP16 ist das weiterhin 1.0f, mit RHO_FP16 das Wort 0x0000)
-	u = Memory<float>(device, N, 3u);
+	u = Memory<velxx>(device, N, 3u); // ★ TODO 2 Schritt 4: Speicherwort, 4 oder 2 Byte je Komponente
 	flags = Memory<uchar>(device, N);
 	if(sparse_on) { // Tile-Raster aufspannen; der Inhalt kommt erst in finalize_sparse_tiles()
 		sparse_tiles_x = ((uint)get_Nx()+sparse_T-1u)/sparse_T;
@@ -517,7 +561,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 212 (204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212..217 waren am 12.09. kurzzeitig Quantisierungs-Dekaden und sind WIEDER FREI: der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	// letzten Slot L. NAECHSTER FREIER SLOT: 215 (204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift, dem einzigen ungeklemmten u-Schreiber, Soll 0. 215..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden und sind FREI: der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -677,7 +721,7 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 	kernel_extract_plane_macros = Kernel(device, max_plane_cells, "extract_plane_macros",
 		rho, u, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u);
 	kernel_drive_boundary_cubic_lift = Kernel(device, max_plane_cells, "drive_boundary_cubic_lift",
-		rho, u, flags, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 4u);
+		rho, u, flags, coupling_plane, 0u, 0u, 0u, 0u, 1u, 1u, 1u, 1u, 4u, rho_clamp_hits); // hits ANGEHAENGT (Slot 214, Betragstor auf u) -- set_parameters(4u, ...) bleibt davon unberuehrt
 	// ★ Slice-Ebenen-Read 2026-08-26 (Hausmuster: Puffer anlegen und Kernel MIT echten Puffern
 	// erzeugen -- kein Platzhalter-Bind-spaeter, die DIAGZ-Use-after-free-Klasse).
 	slice_flags = Memory<uchar>(device, max_plane_cells, 1u);
@@ -1877,6 +1921,29 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define store_rho(p,o,x) ((p)[o]=(x))"
 #endif // RHO_FP16
 
+// ★ TODO 2 Schritt 4 (12.09.2026) -- Speicherformat von u auf der GERAETESEITE.
+// Wortgleich zur fpxx-Form der Verteilungen: KEINE Verschiebung, weil u um 0 zentriert ist und
+// damit keinen Sockel hat, gegen den der half-ULP anlaufen muesste (die vollstaendige Begruendung
+// steht an U_FP16 in defines.hpp). 3.0517578E-5f ist bitgenau 2^-15, 32768.0f ist 2^15; beide
+// Multiplikationen runden nicht, ein Unterlauf ist ausgeschlossen (kleinstes Ergebnis 1,8e-12).
+// Die Kette store_u(load_u(w)) ist deshalb ein WORT-Fixpunkt und nicht nur ein Wert-Fixpunkt --
+// staerker als bei rho, wo die Addition von 1 sehr wohl rundet. Dasselbe Argument macht die Makros
+// unempfindlich gegen -cl-mad-enable (opencl.hpp): auf einem exakten Produkt liefern fma und
+// mul+add dieselbe einzige Rundung.
+// NUR EIN LADEMAKRO, und das ist der Unterschied zu rho: dort gibt es load_rho und load_drho, weil
+// der Umweg "+1, dann -1" den Wert auf das float32-Raster bei 1,0 runden wuerde. Bei u gibt es
+// keinen Sockel und damit auch keine Ausloeschung, gegen die man rechnen muesste.
+#ifdef U_FP16
+	"\n	#define U_FP16" // geraeteseitig heute unbenutzt, bewusst emittiert: CFD_DUMP_DEFINES und CFD_DUMP_CL machen den Arm damit am Quelltext erkennbar
+	"\n	#define velxx half" // u als IEEE-754-FP16 mit fester Skalierung, 2 statt 4 Byte je Komponente
+	"\n	#define load_u(p,o) (vload_half(o,p)*3.0517578E-5f)"
+	"\n	#define store_u(p,o,x) vstore_half_rte((x)*32768.0f,o,p)"
+#else // U_FP16
+	"\n	#define velxx float" // unveraendert: u als drei float32
+	"\n	#define load_u(p,o) ((p)[o])"
+	"\n	#define store_u(p,o,x) ((p)[o]=(x))"
+#endif // U_FP16
+
 #ifdef UPDATE_FIELDS
 	"\n	#define UPDATE_FIELDS"
 #endif // UPDATE_FIELDS
@@ -2241,7 +2308,7 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		for(uint d=0u; d<D; d++) buffers_rho[d] = &(lbm_domain[d]->rho);
 		rho = Memory_Container(this, buffers_rho, "rho");
 	} {
-		Memory<float>** buffers_u = new Memory<float>*[D];
+		Memory<velxx>** buffers_u = new Memory<velxx>*[D];
 		for(uint d=0u; d<D; d++) buffers_u[d] = &(lbm_domain[d]->u);
 		u = Memory_Container(this, buffers_u, "u");
 	} {
@@ -2291,7 +2358,7 @@ LBM::LBM(const uint3 N, const float nu, const Device_Info& device_info, const fl
 		buffers_rho[0] = &(lbm_domain[0]->rho);
 		rho = Memory_Container(this, buffers_rho, "rho");
 	} {
-		Memory<float>** buffers_u = new Memory<float>*[1u];
+		Memory<velxx>** buffers_u = new Memory<velxx>*[1u];
 		buffers_u[0] = &(lbm_domain[0]->u);
 		u = Memory_Container(this, buffers_u, "u");
 	} {

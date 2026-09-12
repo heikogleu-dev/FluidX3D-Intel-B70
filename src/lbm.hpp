@@ -69,6 +69,50 @@ inline rhoxx rho_pack(const float r) { // rho -> Speicherwort
 #endif // RHO_FP16
 }
 
+// ★ TODO 2 Schritt 4 (12.09.2026) -- Speicherformat von u auf der HOSTSEITE. FP16S OHNE Verschiebung:
+// Wort = half(u*2^15), zurueck = Wort*2^-15. Die Begruendung, warum hier KEINE Verschiebung steht,
+// obwohl rho eine hat, steht vollstaendig an U_FP16 in defines.hpp -- kurz: u hat keinen Sockel, und
+// die Verschiebung wuerde den Wort-Fixpunkt zerstoeren.
+//
+// DER FIXPUNKT, und er ist staerker als der von rho: 3.0517578E-5f ist bitgenau 2^-15 und 32768.0f
+// ist 2^15, beide Multiplikationen runden also nicht, und einen Unterlauf gibt es nicht (das kleinste
+// Ergebnis ist 1,8e-12). Damit ist u_pack(u_unpack(w)) == w als BITMUSTER, nicht nur als Wert.
+// Mit den Wandlern dieser Datei nachgerechnet: 0 Verletzungen ueber alle 65536 Woerter, auch nach
+// acht Umlaeufen. Daran haengen pruefe_slice_ebene (Soll exakt 0) und apply_pressure_outlet.
+//
+// HOST- UND GERAETEPACKER SIND NICHT DIESELBE RECHNUNG -- und anders als bei rho ist das hier NICHT
+// von vornherein folgenlos, weil der Host u an 56 Stellen SAET (Freistrom, Wandgeschwindigkeit,
+// Kanalprofil) statt nur zurueckzuschreiben, was er geladen hat. float_to_half addiert 0x1000 und
+// schneidet ab (Gleichstand VOM NULLPUNKT WEG), vstore_half_rte rundet zur GERADEN Zahl. Deshalb
+// nachgemessen statt angenommen: an 4.000.000 zufaelligen u innerhalb der Geschwindigkeitsklemme
+// weichen 267 Speicherwoerter ab, also 0,007 % (bei rho sind es 12,6 %, weil rho-1 nahe null viel
+// haeufiger genau auf einem Gleichstand liegt). Und die Werte, die der Host WIRKLICH saet, stimmen
+// exakt ueberein: 0,0 / 0,05 / 0,075 / 0,1 / 0,125 liefern in beiden Packern dasselbe Wort.
+// Der laufende Nachweis dafuer ist pruefe_slice_ebene (CFD_SLICE_PRUEF) -- er gehoert unter U_FP16
+// in jede Abnahme, weil er genau diese Deckung an den tatsaechlich vorkommenden Werten prueft.
+inline float u_unpack(const velxx w) { // Speicherwort -> Geschwindigkeitskomponente
+#ifdef U_FP16
+	// ★★ Derselbe HOCH-Befund wie bei rho_unpack, und er wiegt hier schwerer: half_to_float ist
+	// ausdruecklich "without infinity" und bildet ALLE 2048 Woerter mit Exponent 0x1F auf ENDLICHE
+	// Floats ab. Ohne die Zeile unten saehe der Host nach einer Geschwindigkeitsexplosion auf dem
+	// Geraet eine glatte 2,0 (0x7C00 -> 2.0, 0x7E00 -> 3.0), und die beiden u-Waechter, die es
+	// wirklich gibt -- std::isnan in pruefe_slice_ebene und std::isfinite in der Sondenauswertung --
+	// waeren KONSTRUKTIV NULL. Genau die Bauform, die dieses Projekt jagt: ein Waechter, der nicht
+	// feuern kann. Kostet den Geraetepfad nichts, das hier ist reine Hostarithmetik.
+	if((w&0x7C00u)==0x7C00u) return as_float((uint)(w&0x8000u)<<16 | 0x7F800000u | (uint)(w&0x03FFu)<<13);
+	return half_to_float(w)*3.0517578E-5f; // NICHT fma: Fixpunktbeweis und Geraetemakro rechnen getrennt
+#else // U_FP16
+	return w;
+#endif // U_FP16
+}
+inline velxx u_pack(const float v) { // Geschwindigkeitskomponente -> Speicherwort
+#ifdef U_FP16
+	return float_to_half(v*32768.0f);
+#else // U_FP16
+	return v;
+#endif // U_FP16
+}
+
 uint bytes_per_cell_host(); // returns the number of Bytes per cell allocated in host memory
 uint bytes_per_cell_device(); // returns the number of Bytes per cell allocated in device memory
 ulong vram_frei_gemessen(); // ★ 29.08.: freier VRAM GEMESSEN aus dem DRM-Debugfs (0 = nicht lesbar);
@@ -366,7 +410,7 @@ public:
 	void finalize_sparse_tiles();  // Tiles klassifizieren, sparse fi allozieren, Kernel neu binden
 
 	Memory<rhoxx> rho; // density of every cell -- Speicherwort, NICHT die Dichte: rho_unpack/rho_pack (TODO 2 Schritt 4)
-	Memory<float> u; // velocity of every cell
+	Memory<velxx> u; // velocity of every cell -- Speicherwort, NICHT die Geschwindigkeit: u_unpack/u_pack (TODO 2 Schritt 4)
 	Memory<uchar> flags; // flags of every cell
 #ifdef FORCE_FIELD
 	Memory<float> F; // individual force for every cell
@@ -781,10 +825,67 @@ public:
 		inline const ulong length() const { return c.length(); }
 	};
 
+	// ★ TODO 2 Schritt 4 (12.09.2026) -- u liegt NICHT mehr als Memory_Container offen.
+	// WARUM NICHT DIESELBE BAUFORM WIE Rho_Feld (get/set, geloeschter operator[])? Weil rho SIEBEN
+	// Hostzugriffsstellen hat und u HUNDERTNEUNUNDZWANZIG. Einhundertneunundzwanzig Handumbauten sind
+	// nicht sicherer als einer -- sie sind hundertneunundzwanzig Gelegenheiten, einen zu verpatzen.
+	// Deshalb hier ein Stellvertreter je Komponente: "lbm.u.x[n]" bleibt an allen Stellen WOERTLICH
+	// stehen und rechnet trotzdem richtig, und ein roher velxx& ist nirgends mehr erreichbar. Die
+	// rho-Falle (ushort& wandelt still nach float, ohne Warnung) ist damit KONSTRUKTIV ausgeschlossen
+	// statt nur weggegrept -- der Container ist privat, es gibt keinen Weg an ihm vorbei.
+	//
+	// DREI ZUSAGEN, an denen das haengt, und jede einzelne ist eine bekannte Stellvertreterfalle:
+	//  1. GENAU EINE Wandlung, operator float(). Mit einer zweiten (etwa operator double()) wuerden
+	//     fabs(), std::isnan() und jede andere ueberladene Gleitkommafunktion SOFORT mehrdeutig --
+	//     heute traegt es, weil alle drei Kandidaten dieselbe Wandlung benutzen und dann die
+	//     Identitaet die Gleitkomma-Promotion schlaegt.
+	//  2. KEIN operator float& und kein operator const float&. Sonst bindet "const float& v = u.x[n]"
+	//     an ein Temporary, das am Semikolon stirbt.
+	//  3. Die Kopierzuweisung ist GELOESCHT. "u.x[a] = u.x[b]" waere sonst eine stille Neubindung des
+	//     Stellvertreters, also ein Schreibvorgang, der nichts schreibt. Heute gibt es keine solche
+	//     Stelle; sie ist die kanonische Falle dieser Bauform und deshalb hart gesperrt.
+	// NICHT weitergereicht werden write_vtk (vtk_type() liefert "unsigned_short" und der SI-Faktor
+	// wuerde auf eine Ganzzahl abgeschnitten), reset(T) und operator[]/operator() -- alle drei geben
+	// rohe Speicherwoerter heraus oder schreiben sie.
+	class U_Feld {
+	private:
+		Memory_Container<velxx> c;
+	public:
+		// Der Stellvertreter setzt auf den KOMPONENTENZEIGERN auf, die Memory_Container ohnehin
+		// oeffentlich fuehrt (Pointer x/y/z). reference() selbst ist dort privat, und das bleibt es --
+		// der Umweg ueber die Zeiger kostet nichts und haelt die Kapselung des Containers unangetastet.
+		class Komp {
+		private:
+			Memory_Container<velxx>::Pointer* p = nullptr;
+		public:
+			inline Komp() {}
+			inline Komp(Memory_Container<velxx>::Pointer* p) : p(p) {}
+			class Ref { // was aus u.x[n] wird: liest ueber u_unpack, schreibt ueber u_pack
+			private:
+				Memory_Container<velxx>::Pointer* p; ulong i;
+			public:
+				inline Ref(Memory_Container<velxx>::Pointer* p, const ulong i) : p(p), i(i) {}
+				inline operator float() const { return u_unpack((*p)[i]); } // Zusage 1: GENAU EINE Wandlung
+				inline Ref& operator=(const float v) { (*p)[i] = u_pack(v); return *this; }
+				inline Ref& operator=(const Ref&) = delete; // Zusage 3: keine stille Neubindung
+			};
+			inline Ref operator[](const ulong i) const { return Ref(p, i); }
+		};
+		Komp x, y, z;
+		inline U_Feld() {}
+		inline U_Feld(LBM* lbm, Memory<velxx>** buffers, const string& name) : c(lbm, buffers, name) { zeiger_setzen(); }
+		inline U_Feld& operator=(Memory_Container<velxx>&& m) noexcept { c = std::move(m); zeiger_setzen(); return *this; }
+		inline void read_from_device() { c.read_from_device(); }
+		inline void write_to_device() { c.write_to_device(); }
+		inline const ulong length() const { return c.length(); }
+	private:
+		inline void zeiger_setzen() { x = Komp(&c.x); y = Komp(&c.y); z = Komp(&c.z); }
+	};
+
 	LBM_Domain** lbm_domain; // one LBM domain per GPU
 
 	Rho_Feld rho; // density of every cell -- Zugriff ueber get/set, siehe Rho_Feld
-	Memory_Container<float> u; // velocity of every cell
+	U_Feld u; // velocity of every cell -- Zugriff ueber u.x/u.y/u.z, siehe U_Feld
 	Memory_Container<uchar> flags; // flags of every cell
 #ifdef FORCE_FIELD
 	Memory_Container<float> F; // individual force for every cell

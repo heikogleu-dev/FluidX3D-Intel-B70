@@ -9,7 +9,7 @@ using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
 
-static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam) {
+static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam, const bool u16) {
 	string s =
 	"\n#define cl_workgroup_size 64u"
 	"\n#ifdef cl_khr_fp64"
@@ -110,6 +110,17 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 	          "\n#define load_rho(p,o) ((p)[o])"
 	          "\n#define load_drho(p,o) ((p)[o]-1.0f)"
 	          "\n#define store_rho(p,o,x) ((p)[o]=(x))";
+	// ★ 12.09.2026: u-Zwilling (TODO 2 Schritt 4). Ohne ihn scheitert der BAU der .cl, sobald
+	// kernel.cpp velxx/load_u/store_u benutzt -- und das Gate meldete das frueher als
+	// "SCRATCH-GATE VERLETZT", also als etwas voellig anderes. Wortgleich zu lbm.cpp.
+	s += u16
+	? (string)"\n#define U_FP16"
+	          "\n#define velxx half"
+	          "\n#define load_u(p,o) (vload_half(o,p)*3.0517578E-5f)"
+	          "\n#define store_u(p,o,x) vstore_half_rte((x)*32768.0f,o,p)"
+	: (string)"\n#define velxx float"
+	          "\n#define load_u(p,o) ((p)[o])"
+	          "\n#define store_u(p,o,x) ((p)[o]=(x))";
 	// ★ 12.09.2026 (Audit-Schleife, Pruefer B): der PRODUKTIONSSTAND nach TODO 2 ist SPARSAM, und
 	// die SPARSAM-Zweige haengen genau dem registerkritischsten Kernel (stream_collide) je eine
 	// coordinates()-Rechnung, zwei Bedingungsketten und eine Atomik an. Ohne diese Defines erklaerte
@@ -155,17 +166,18 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 
 int main(int argc, char** argv) {
 	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <ausgabe.cl>
-	if(argc<6) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <ausgabe.cl>\n"; return 2; }
+	if(argc<7) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <u16:on|off> <ausgabe.cl>\n"; return 2; }
 	const bool elibb   = string(argv[1])=="on";
 	const bool ptrt    = string(argv[2])=="on";
 	const bool rho16   = string(argv[3])=="on";
 	const bool sparsam = string(argv[4])=="on";
-	const string out = argv[5];
-	const string code = device_defines(elibb, ptrt, rho16, sparsam) + get_opencl_c_code();
+	const bool u16     = string(argv[5])=="on";
+	const string out = argv[6];
+	const string code = device_defines(elibb, ptrt, rho16, sparsam, u16) + get_opencl_c_code();
 	std::ofstream f(out);
 	f << code;
 	f.close();
 	std::cout << "geschrieben: " << out << " (" << code.size() << " Bytes, ELIBB="
-	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ", RHO16=" << (rho16?"an":"aus") << ", SPARSAM=" << (sparsam?"an":"aus") << ")\n";
+	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ", RHO16=" << (rho16?"an":"aus") << ", SPARSAM=" << (sparsam?"an":"aus") << ", U16=" << (u16?"an":"aus") << ")\n";
 	return 0;
 }

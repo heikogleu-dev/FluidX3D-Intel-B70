@@ -1105,6 +1105,15 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	p[    def_N+(ulong)n] = v.y;
 	p[2ul*def_N+(ulong)n] = v.z;
 }
+
+)+R(float3 load3_u(const global velxx* p, const uxx n) {
+	return (float3)(load_u(p, n), load_u(p, def_N+(ulong)n), load_u(p, 2ul*def_N+(ulong)n));
+}
+)+R(void store3_u(global velxx* p, const uxx n, const float3 v) {
+	store_u(p,                  n, v.x);
+	store_u(p,     def_N+(ulong)n, v.y);
+	store_u(p, 2ul*def_N+(ulong)n, v.z);
+}
 )+R(float3 closest_u(const global float* u, const float3 p) { // return velocity of closest lattice point to point p
 	return load3(u, index(closest_coordinates(p)));
 }
@@ -1254,12 +1263,12 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#endif"+R( // VOLUME_FORCE
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
-)+R(void apply_moving_boundaries(float* fhn, const uxx* j, const global float* u, const global uchar* flags) { // apply Dirichlet velocity boundaries if necessary (Krueger p.180, rho_solid=1)
+)+R(void apply_moving_boundaries(float* fhn, const uxx* j, const global velxx* u, const global uchar* flags) { // apply Dirichlet velocity boundaries if necessary (Krueger p.180, rho_solid=1)
 	uxx ji; // reads velocities of only neighboring boundary cells, which do not change during simulation
 	for(uint i=1u; i<def_velocity_set; i+=2u) { // loop is entirely unrolled by compiler, no unnecessary memory access is happening
 		const float w6 = -6.0f*w(i); // w6 = -2*w_i*rho_wall/c^2, w(i) = w(i+1) if i is odd, rho_wall is assumed as rho_avg=1 (necessary choice to assure mass conservation)
-		ji = j[i+1u]; fhn[i   ] = (flags[ji]&TYPE_BO)==TYPE_S ? fma(w6, c(i+1u)*u[ji]+c(def_velocity_set+i+1u)*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i+1u)*u[2ul*def_N+(ulong)ji], fhn[i   ]) : fhn[i   ]; // boundary : regular
-		ji = j[i   ]; fhn[i+1u] = (flags[ji]&TYPE_BO)==TYPE_S ? fma(w6, c(i   )*u[ji]+c(def_velocity_set+i   )*u[def_N+(ulong)ji]+c(2u*def_velocity_set+i   )*u[2ul*def_N+(ulong)ji], fhn[i+1u]) : fhn[i+1u];
+		ji = j[i+1u]; fhn[i   ] = (flags[ji]&TYPE_BO)==TYPE_S ? fma(w6, c(i+1u)*load_u(u, ji)+c(def_velocity_set+i+1u)*load_u(u, def_N+(ulong)ji)+c(2u*def_velocity_set+i+1u)*load_u(u, 2ul*def_N+(ulong)ji), fhn[i   ]) : fhn[i   ]; // boundary : regular
+		ji = j[i   ]; fhn[i+1u] = (flags[ji]&TYPE_BO)==TYPE_S ? fma(w6, c(i   )*load_u(u, ji)+c(def_velocity_set+i   )*load_u(u, def_N+(ulong)ji)+c(2u*def_velocity_set+i   )*load_u(u, 2ul*def_N+(ulong)ji), fhn[i+1u]) : fhn[i+1u];
 	}
 } // apply_moving_boundaries()
 )+"#endif"+R( // MOVING_BOUNDARIES
@@ -1531,7 +1540,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 
 
-)+R(kernel void initialize)+"("+R(global fpxx* fi, const global rhoxx* rho, global float* u, global uchar* flags // ) { // initialize LBM
+)+R(kernel void initialize)+"("+R(global fpxx* fi, const global rhoxx* rho, global velxx* u, global uchar* flags // ) { // initialize LBM
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex, global float* phi // argument order is important
 )+"#endif"+R( // SURFACE
@@ -1557,20 +1566,20 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	if(flagsn_bo==TYPE_S) { // cell is solid
 		bool TYPE_ONLY_S = true; // has only solid neighbors
 		for(uint i=1u; i<def_velocity_set; i++) TYPE_ONLY_S = TYPE_ONLY_S&&(flagsj[i]&TYPE_BO)==TYPE_S;
-		if(TYPE_ONLY_S) store3(u, n, (float3)(0.0f, 0.0f, 0.0f)); // reset velocity for solid lattice points with only boundary neighbors
+		if(TYPE_ONLY_S) store3_u(u, n, (float3)(0.0f, 0.0f, 0.0f)); // reset velocity for solid lattice points with only boundary neighbors
 )+"#ifndef MOVING_BOUNDARIES"+R(
-		if(flagsn_bo==TYPE_S) store3(u, n, (float3)(0.0f, 0.0f, 0.0f)); // reset velocity for all solid lattice points
+		if(flagsn_bo==TYPE_S) store3_u(u, n, (float3)(0.0f, 0.0f, 0.0f)); // reset velocity for all solid lattice points
 )+"#else"+R( // MOVING_BOUNDARIES
 	} else if(flagsn_bo!=TYPE_E) { // local lattice point is not solid and not equilibrium boundary
 		bool next_to_moving_boundary = false;
 		for(uint i=1u; i<def_velocity_set; i++) {
-			next_to_moving_boundary = next_to_moving_boundary||((flagsj[i]&TYPE_BO)==TYPE_S&&(u[j[i]]!=0.0f||u[def_N+(ulong)j[i]]!=0.0f||u[2ul*def_N+(ulong)j[i]]!=0.0f));
+			next_to_moving_boundary = next_to_moving_boundary||((flagsj[i]&TYPE_BO)==TYPE_S&&(load_u(u, j[i])!=0.0f||load_u(u, def_N+(ulong)j[i])!=0.0f||load_u(u, 2ul*def_N+(ulong)j[i])!=0.0f));
 		}
 		flags[n] = flagsn = next_to_moving_boundary ? flagsn|TYPE_MS : flagsn&~TYPE_MS; // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 )+"#endif"+R( // MOVING_BOUNDARIES
 	}
 	float feq[def_velocity_set]; // f_equilibrium
-	calculate_f_eq(load_rho(rho, n), u[n], u[def_N+(ulong)n], u[2ul*def_N+(ulong)n], feq);
+	calculate_f_eq(load_rho(rho, n), load_u(u, n), load_u(u, def_N+(ulong)n), load_u(u, 2ul*def_N+(ulong)n), feq);
 )+"#ifdef SURFACE"+R( // automatically generate the interface layer between fluid and gas
 	{ // separate block to avoid variable name conflicts
 		float phin = phi[n];
@@ -1587,7 +1596,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 			}
 		}
 		if((flagsn&TYPE_SU)==TYPE_G) { // cell with updated flags is still gas
-			store3(u, n, (float3)(0.0f, 0.0f, 0.0f)); // reset velocity for gas cells
+			store3_u(u, n, (float3)(0.0f, 0.0f, 0.0f)); // reset velocity for gas cells
 			phin = 0.0f;
 		} else if((flagsn&TYPE_SU)==TYPE_I && (phin<0.0f||phin>1.0f)) {
 			phin = 0.5f; // cell should be interface, but phi was invalid
@@ -1603,7 +1612,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#ifdef TEMPERATURE"+R(
 	{ // separate block to avoid variable name conflicts
 		float geq[7];
-		calculate_g_eq(T[n], u[n], u[def_N+(ulong)n], u[2ul*def_N+(ulong)n], geq);
+		calculate_g_eq(T[n], load_u(u, n), load_u(u, def_N+(ulong)n), load_u(u, 2ul*def_N+(ulong)n), geq);
 		uxx j7[7]; // neighbors of D3Q7 subset
 		neighbors_temperature(n, j7);
 		store_g(n, geq, gi, j7, 1ul);
@@ -1613,7 +1622,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 } // initialize()
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
-)+R(kernel void update_moving_boundaries(const global float* u, global uchar* flags) { // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
+)+R(kernel void update_moving_boundaries(const global velxx* u, global uchar* flags) { // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_moving_boundaries() on halo
 	const uchar flagsn = flags[n];
@@ -1625,7 +1634,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 	if(flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&!(flagsn&TYPE_T)) { // local lattice point is not solid and not equilibrium boundary and not temperature boundary
 		bool next_to_moving_boundary = false;
 		for(uint i=1u; i<def_velocity_set; i++) {
-			next_to_moving_boundary = next_to_moving_boundary||((u[j[i]]!=0.0f||u[def_N+(ulong)j[i]]!=0.0f||u[2ul*def_N+(ulong)j[i]]!=0.0f)&&(flagsj[i]&TYPE_BO)==TYPE_S);
+			next_to_moving_boundary = next_to_moving_boundary||((load_u(u, j[i])!=0.0f||load_u(u, def_N+(ulong)j[i])!=0.0f||load_u(u, 2ul*def_N+(ulong)j[i])!=0.0f)&&(flagsj[i]&TYPE_BO)==TYPE_S);
 		}
 		flags[n] = next_to_moving_boundary ? flagsn|TYPE_MS : flagsn&~TYPE_MS; // mark/unmark cells next to TYPE_S cells with velocity!=0 with TYPE_MS
 	}
@@ -1635,12 +1644,12 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 
 )+"#ifdef REGULARIZED_BOUNDARIES"+R(
-)+R(float deriv_reg(const global float* u, const ulong off, const uxx jp, const uxx jm, const bool fp, const bool fm, const float u0) {
+)+R(float deriv_reg(const global velxx* u, const ulong off, const uxx jp, const uxx jm, const bool fp, const bool fm, const float u0) {
 	// Ableitung einer Geschwindigkeitskomponente entlang einer Achse, aus dem FELD u[].
 	// Zentral, wenn beide Nachbarn echtes Fluid sind; sonst einseitig; sonst null.
 	// Als Funktion und nicht als Makro: #define innerhalb des Kernel-Strings wuerde vom
 	// Host-Praeprozessor verschluckt, nicht vom OpenCL-Uebersetzer.
-	return fp&&fm ? 0.5f*(u[off+(ulong)jp]-u[off+(ulong)jm]) : (fp ? u[off+(ulong)jp]-u0 : (fm ? u0-u[off+(ulong)jm] : 0.0f));
+	return fp&&fm ? 0.5f*(load_u(u, off+(ulong)jp)-load_u(u, off+(ulong)jm)) : (fp ? load_u(u, off+(ulong)jp)-u0 : (fm ? u0-load_u(u, off+(ulong)jm) : 0.0f));
 } // deriv_reg()
 
 )+R(float reg_fneq(const uint i, const float regf, const float Sxx, const float Syy, const float Szz, const float Sxy, const float Sxz, const float Syz, const float trS3) {
@@ -2884,7 +2893,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 // Im BINARY bleibt der Bereichswaechter an der TYPE_E-Lesestelle (Slots 210/211). Der liest einen
 // Wert, den ein ANDERER Kernel-Launch geschrieben hat -- dieser Ladevorgang kann nicht entfallen.
 
-)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
+)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global velxx* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -3036,9 +3045,26 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		//   Es ist ein BESUCHSZAEHLER, kein Ist=Soll -- verglichen wird er auf dem Host mit nichts.
 		if(((as_uint(rhon)&0x7F800000u)==0x7F800000u||rhon<=0.4f||rhon>=2.1f)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0
 		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[211]<0xF0000000u) atomic_inc(&rho_clamp_hits[211]); // Besuche
-		uxn  = u[                 n];
-		uyn  = u[    def_N+(ulong)n];
-		uzn  = u[2ul*def_N+(ulong)n];
+		uxn  = load_u(u, n);
+		uyn  = load_u(u, def_N+(ulong)n);
+		uzn  = load_u(u, 2ul*def_N+(ulong)n);
+		// ★ TODO 2 Schritt 4 (12.09.2026) -- Huellenwaechter fuer u, Zwilling zu Slot 210/211 bei rho,
+		// aber gegen eine ANDERE Fehlerklasse. Bei rho faengt Slot 210 den Typverwechsler; bei u kann
+		// er das nicht (dafuer ist der Typ-Zensus da). Hier geht es um die SAETTIGUNG: vstore_half_rte
+		// kippt oberhalb |u*2^15| = 65504, also ab |u| = 1,99902, still nach +-inf -- und die
+		// Projektlehre dazu steht schon im Code (setup.cpp: "dd_lauf01 kippte bei 0,15 s NICHT in nan,
+		// sondern in die FP16C-Saettigung"). Die Geschwindigkeitsklemme unten haelt +-0,57735 ein, aber
+		// sie deckt nicht JEDEN Schreiber: drive_boundary_cubic_lift schreibt ungeklemmt, und genau
+		// seine Zellen sind TYPE_E, also genau die, die hier gelesen werden.
+		// Schwelle 1,0 statt 1,99902: das ist Faktor 1,73 ueber der Klemme und Faktor 2,1 unter der
+		// Saettigung -- der Waechter feuert, BEVOR das Wort kippt, nicht danach. Gemessenes Maximum im
+		// 4-mm-Nahfeld bei 501 ms: 0,4764. Soll ueber den ganzen Lauf: 0.
+		// Der Bit-Test auf Exponent 0xFF steht daneben, weil unter -cl-finite-math-only ein Vergleich
+		// gegen inf nichts faengt -- dieselbe Begruendung wie bei rho zwei Zeilen darueber.
+		if((fabs(uxn)>=1.0f||fabs(uyn)>=1.0f||fabs(uzn)>=1.0f
+		   ||(as_uint(uxn)&0x7F800000u)==0x7F800000u||(as_uint(uyn)&0x7F800000u)==0x7F800000u||(as_uint(uzn)&0x7F800000u)==0x7F800000u)
+		   &&rho_clamp_hits[212]<0xF0000000u) atomic_inc(&rho_clamp_hits[212]); // Soll 0, UNGEGATET
+		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[213]<0xF0000000u) atomic_inc(&rho_clamp_hits[213]); // Besuche, sonst beweist die Null in 212 nichts
 	} else {
 		calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
 )+"#ifdef RHO_CLAMP"+R(
@@ -3202,10 +3228,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		  }
 		  // Wirkpfad-Zaehler: Slot 206 = uebersprungen, 207 = geschrieben (EIN Schritt, wie bei rho).
 		  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[u_schreiben?207u:206u]<0xF0000000u) atomic_inc(&rho_clamp_hits[u_schreiben?207u:206u]);
-		  if(u_schreiben) store3(u, n, (float3)(uxn, uyn, uzn));
+		  if(u_schreiben) store3_u(u, n, (float3)(uxn, uyn, uzn));
 		}
 		)+"#else"+R(
-		store3(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
+		store3_u(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
 		)+"#endif"+R( // U_SPARSAM
 	}
 )+"#endif"+R( // UPDATE_FIELDS
@@ -3792,9 +3818,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 		if(flagsn_bo==TYPE_E) {
 			rhon = rho[               n]; // apply preset velocity/density
-			uxn  = u[                 n];
-			uyn  = u[    def_N+(ulong)n];
-			uzn  = u[2ul*def_N+(ulong)n];
+			uxn  = load_u(u, n);
+			uyn  = load_u(u, def_N+(ulong)n);
+			uzn  = load_u(u, 2ul*def_N+(ulong)n);
 		} else {
 			calculate_rho_u(fon, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fon (not fhn)
 		}
@@ -3986,7 +4012,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	store_f(n, feq, fi, j, t TS_A);
 }
 )
-+R(kernel void update_fields)+"("+R(const global fpxx* fi, global rhoxx* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
++R(kernel void update_fields)+"("+R(const global fpxx* fi, global rhoxx* rho, global velxx* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -4070,7 +4096,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	{
 		store_rho(rho, n, rhon); // update density field
-		store3(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
+		store3_u(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
 	}
 } // update_fields()
 
@@ -4132,7 +4158,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	po_mean[0] = s/(float)N_po;
 } // po_final_mean()
 
-)+R(kernel void apply_pressure_outlet(global float* u, global rhoxx* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
+)+R(kernel void apply_pressure_outlet(global velxx* u, global rhoxx* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
 	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
 	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
@@ -4190,9 +4216,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// cp, gegen die 0,15, um die es geht.
 	store_rho(rho, n, po_hart!=0u ? fma(po_sigma, rho_out-load_rho(rho, m), load_rho(rho, m))
 	                              : fma(po_sigma, (rho_out-1.0f)-po_mean[0], load_rho(rho, m)));
-	u[                  n] = u[                  m];
-	u[    def_N+(ulong)n] = u[    def_N+(ulong)m];
-	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
+	store_u(u, n, load_u(u, m));
+	store_u(u, def_N+(ulong)n, load_u(u, def_N+(ulong)m));
+	store_u(u, 2ul*def_N+(ulong)n, load_u(u, 2ul*def_N+(ulong)m));
 } // apply_pressure_outlet()
 
 )+R(kernel void apply_velocity_inlet(global rhoxx* rho, const global ulong* vi_cells, const global ulong* vi_interior, const uint N_vi) {
@@ -4278,7 +4304,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	return (uxx)x + (uxx)y*(uxx)def_Nx + (uxx)z*(uxx)def_Nx*(uxx)def_Ny;
 } // plane_cell_index()
 
-)+R(kernel void extract_plane_macros(const global rhoxx* rho, const global float* u, global float* out,
+)+R(kernel void extract_plane_macros(const global rhoxx* rho, const global velxx* u, global float* out,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b) {
 	// Liest (rho, u_x, u_y, u_z) auf einer achsen-normalen Ebene in einen dichten Puffer.
@@ -4294,9 +4320,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
 	if(n>=(uxx)def_N) { out[o]=1.0f; out[o+1ul]=0.0f; out[o+2ul]=0.0f; out[o+3ul]=0.0f; return; }
 	out[o+0ul] = load_rho(rho, n);
-	out[o+1ul] = u[                 n];
-	out[o+2ul] = u[    def_N+(ulong)n];
-	out[o+3ul] = u[2ul*def_N+(ulong)n];
+	out[o+1ul] = load_u(u, n);
+	out[o+2ul] = load_u(u, def_N+(ulong)n);
+	out[o+3ul] = load_u(u, 2ul*def_N+(ulong)n);
 } // extract_plane_macros()
 
 )+R(kernel void extract_plane_flags(const global uchar* flags, global uchar* out,
@@ -4312,11 +4338,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[gid] = (n>=(uxx)def_N) ? (uchar)TYPE_S : flags[n];
 } // extract_plane_flags()
 
-)+R(kernel void drive_boundary_cubic_lift(global rhoxx* rho, global float* u, const global uchar* flags,
+)+R(kernel void drive_boundary_cubic_lift(global rhoxx* rho, global velxx* u, const global uchar* flags,
 	const global float* coarse_plane,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b,
-	const uint coarse_a, const uint coarse_b, const uint ratio) {
+	const uint coarse_a, const uint coarse_b, const uint ratio, global uint* hits) {
 	// Kubische Interpolation der groben Ebene auf die feine Randebene, direkt in rho[]/u[] geschrieben.
 	// Lift und Einspeisung sind bewusst EIN Kernel: ein Zwischenpuffer in feiner Aufloesung waere
 	// mehrere hundert MB gross und wuerde nur weitergereicht.
@@ -4343,10 +4369,18 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// ★ Gross-Audit M: isfinite ist unter -cl-finite-math-only toter Code (Compiler faltet zu true) --
 	// Bit-Test auf Exponent 0xFF faengt NaN/Inf treiberunabhaengig.
 	if((as_uint(v[0])&0x7F800000u)==0x7F800000u||(as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return; // R2: auch rho bit-testen (Bereichsvergleich ist unter finite-math NaN-unzuverlaessig)
+	// ★ TODO 2 Schritt 4 (12.09.2026): Betragstor auf u, Zwilling zum rho-Tor zwei Zeilen darueber.
+	// Dies ist der EINZIGE u-Schreiber im ganzen Kernel ohne Geschwindigkeitsklemme -- stream_collide
+	// und update_fields klemmen beide auf +-def_c, bevor sie speichern. Die kubische Interpolation
+	// kann ueberschwingen; der Eingang ist zwar selbst geklemmt, aber Catmull-Rom traegt Gewichte
+	// ausserhalb [0,1]. Unter U_FP16 wuerde ein Wert ab |u| = 1,99902 still nach +-inf saettigen.
+	// Schwelle 1,0 wie am Huellenwaechter Slot 212, Wirkpfad-Zaehler Slot 214, Soll 0 -- und weil er
+	// 0 ist, bleibt der FP32-Arm bitgleich: das Tor greift nie, es beweist nur, dass es nie greift.
+	if(fabs(v[1])>=1.0f||fabs(v[2])>=1.0f||fabs(v[3])>=1.0f) { if(hits[214]<0xF0000000u) atomic_inc(&hits[214]); return; }
 	store_rho(rho, n, v[0]);
-	u[                 n] = v[1];
-	u[    def_N+(ulong)n] = v[2];
-	u[2ul*def_N+(ulong)n] = v[3];
+	store_u(u, n, v[1]);
+	store_u(u, def_N+(ulong)n, v[2]);
+	store_u(u, 2ul*def_N+(ulong)n, v[3]);
 } // drive_boundary_cubic_lift()
 
 // ★ P9c N2F-SCHALE (Heiko-Idee): near -> far Schalen-RUECKKOPPLUNG. Die Hinkopplung oben ist
@@ -4371,14 +4405,14 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 // Fenster-Konvention: Offsets -ratio/2 .. ratio-ratio/2-1 je Achse (bei ratio=4: -2..+1) -- das
 // Blockzentrum liegt eine HALBE Feinzelle unter dem Deckungspunkt (2 mm bei dx_f=4mm); fuer eine
 // Relaxationsquelle unerheblich, aber deklariert.
-)+R(kernel void schale_extract(const global float* u, const global uchar* flags, const global uint* liste, const uint n, const uint ratio, const uint mittel, global float* out) {
+)+R(kernel void schale_extract(const global velxx* u, const global uchar* flags, const global uint* liste, const uint n, const uint ratio, const uint mittel, global float* out) {
 	const uint gid = get_global_id(0);
 	if(gid>=n) return;
 	const uxx c = (uxx)liste[gid];
 	if(mittel==0u) { // Punktwert (Waechter auf dem Grobgitter): u-FELD-Wert der Schalenzelle
-		out[3u*gid   ] = u[            (ulong)c];
-		out[3u*gid+1u] = u[    def_N+(ulong)c];
-		out[3u*gid+2u] = u[2ul*def_N+(ulong)c];
+		out[3u*gid   ] = load_u(u, (ulong)c);
+		out[3u*gid+1u] = load_u(u, def_N+(ulong)c);
+		out[3u*gid+2u] = load_u(u, 2ul*def_N+(ulong)c);
 		return;
 	}
 	const uint x = (uint)(c%(uxx)def_Nx), y = (uint)((c/(uxx)def_Nx)%(uxx)def_Ny), z = (uint)(c/((uxx)def_Nx*(uxx)def_Ny));
@@ -4390,9 +4424,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		const uxx nn = (uxx)xx+((uxx)yy+(uxx)zz*(uxx)def_Ny)*(uxx)def_Nx;
 		const uchar bo = flags[nn]&TYPE_BO;
 		if(bo==TYPE_S||bo==TYPE_E) continue; // nur Fluid; TYPE_MS wird MITGEZAEHLT (MS-Guard-Lehre)
-		sx += u[            (ulong)nn];
-		sy += u[    def_N+(ulong)nn];
-		sz += u[2ul*def_N+(ulong)nn];
+		sx += load_u(u, (ulong)nn);
+		sy += load_u(u, def_N+(ulong)nn);
+		sz += load_u(u, 2ul*def_N+(ulong)nn);
 		cnt++;
 	}
 	if(cnt==0u) { // kein Fluid im Block -> NaN-Marker, der Blend ueberspringt die Zelle (Bit-Test)
@@ -4515,7 +4549,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // schale_blend()
 
 )+"#ifdef FORCE_FIELD"+R(
-)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F, const global uint* f_maske, const global float* u, global uint* hits TS_P) { // calculate force from the fluid on solid boundaries from fi directly
+)+R(kernel void update_force_field(const global fpxx* fi, const global uchar* flags, const ulong t, global float* F, const global uint* f_maske, const global velxx* u, global uint* hits TS_P) { // calculate force from the fluid on solid boundaries from fi directly
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	if(n>=(uxx)def_N||is_halo(n)) return; // don't execute update_force_field() on halo
 )+"#ifdef SPARSE_TILES"+R(
@@ -4560,7 +4594,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// bitgleich, weil sich die Summationsreihenfolge gegenueber calculate_rho_u aendert.
 	float Fx=0.0f, Fy=0.0f, Fz=0.0f;
 )+"#ifdef MOVING_BOUNDARIES"+R(
-	const float uwx=u[n], uwy=u[def_N+(ulong)n], uwz=u[2ul*def_N+(ulong)n];
+	const float uwx=load_u(u, n), uwy=load_u(u, def_N+(ulong)n), uwz=load_u(u, 2ul*def_N+(ulong)n);
 	const bool bewegt = (uwx!=0.0f||uwy!=0.0f||uwz!=0.0f);
 )+"#endif"+R( // MOVING_BOUNDARIES
 	for(uint i=1u; i<def_velocity_set; i++) {
@@ -4715,7 +4749,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	}
 } // kraft_facetten_gpu()
 
-)+R(kernel void sgs_gdiag(const global fpxx* fi, const global float* u, const global uchar* flags,
+)+R(kernel void sgs_gdiag(const global fpxx* fi, const global velxx* u, const global uchar* flags,
 	const global uint* gd_zellen, const uint gd_N, global float* fac_gd, const ulong t,
 	const float fx, const float fy, const float fz, const uint guo_an TS_P) {
 	// ★★ g-DIAGNOSE (31.08.2026, Pruefagenten-Empfehlung "Messung statt Wette", ARBEITSLISTE Vorzeichen-
@@ -4750,8 +4784,8 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		const bool sp=(flags[np]&TYPE_BO)==TYPE_S, sm=(flags[nm]&TYPE_BO)==TYPE_S;
 		nsolid += (uint)sp+(uint)sm;
 		for(uint i=0u; i<3u; i++) {
-			const float up_ = sp?0.0f:u[(ulong)i*def_N+(ulong)np];
-			const float um_ = sm?0.0f:u[(ulong)i*def_N+(ulong)nm];
+			const float up_ = sp?0.0f:load_u(u, (ulong)i*def_N+(ulong)np);
+			const float um_ = sm?0.0f:load_u(u, (ulong)i*def_N+(ulong)nm);
 			g[i][a] = 0.5f*(up_-um_);
 		}
 	}
@@ -4800,7 +4834,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	load_f(n, fhn, fi, j, t TS_A);
 	float rhon, dux, duy, duz;
 	calculate_rho_u(fhn, &rhon, &dux, &duy, &duz); // dux..duz VERWERFEN (Paritaetsfalle), nur rhon zaehlt
-	const float uxn=u[n], uyn=u[def_N+(ulong)n], uzn=u[2ul*def_N+(ulong)n];
+	const float uxn=load_u(u, n), uyn=load_u(u, def_N+(ulong)n), uzn=load_u(u, 2ul*def_N+(ulong)n);
 	float feq[def_velocity_set];
 	calculate_f_eq(rhon, uxn, uyn, uzn, feq);
 	float Hxx=0.0f, Hyy=0.0f, Hzz=0.0f, Hxy=0.0f, Hxz=0.0f, Hyz=0.0f;
@@ -4830,7 +4864,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	fac_gd[k8+6ul]  += (float)nsolid;
 } // sgs_gdiag()
 
-)+R(kernel void sgs_fdwand)+"("+R(const global float* u, const global uchar* flags,
+)+R(kernel void sgs_fdwand)+"("+R(const global velxx* u, const global uchar* flags,
 	const global uint* gd_zellen, const uint gd_N, global float* fac_wfd // ) {
 )+"#ifdef SGS_SISM"+R(
 	, const ulong t, global float* fac_sb, global uint* rho_clamp_hits, const uint sbar_out // ★ 07.09. SISM: Reihenfolge = add_parameters in alloc_facetten_domain (t, fac_sb, hits), VOR tile_slot. ★ 08.09. sbar_out: 0 = fac_wfd traegt w (Lage 1, Geistermoden-Fix), 1 = es traegt Sbar (Band -- dort ersetzt nichts das w, stream_collide zieht Sbar selbst ab)
@@ -4858,8 +4892,8 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		const uxx np=j[2u*a+1u], nm=j[2u*a+2u];
 		const bool sp=(flags[np]&TYPE_BO)==TYPE_S, sm=(flags[nm]&TYPE_BO)==TYPE_S;
 		for(uint i=0u; i<3u; i++) {
-			const float up_ = sp?0.0f:u[(ulong)i*def_N+(ulong)np];
-			const float um_ = sm?0.0f:u[(ulong)i*def_N+(ulong)nm];
+			const float up_ = sp?0.0f:load_u(u, (ulong)i*def_N+(ulong)np);
+			const float um_ = sm?0.0f:load_u(u, (ulong)i*def_N+(ulong)nm);
 			g[i][a] = 0.5f*(up_-um_);
 		}
 	}
@@ -4907,7 +4941,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+"#endif"+R( // SGS_SISM
 } // sgs_fdwand()
 
-)+R(kernel void fac_nachbar_ab(const global float* u, const global uchar* flags, const global float* fac_geo,
+)+R(kernel void fac_nachbar_ab(const global velxx* u, const global uchar* flags, const global float* fac_geo,
 	const global uint* gd_zellen, const uint gd_N, global float* fac_nb TS_P) {
 	// ★★ DETERMINISTISCHE NACHBARABTASTUNG (CFD_FAC_NACHBAR, 03.09.2026). Der Direktzugriff u[nb] in
 	// apply_facette_imem lief im Kernel stream_collide, der u im selben Launch schreibt -- gemessen NICHT
@@ -4944,7 +4978,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float utb = -1.0f, ywb = yw;
 	if(ib>0u) {
 		const uxx nb = bnb;
-		const float ubx=u[nb], uby=u[def_N+(ulong)nb], ubz=u[2ul*def_N+(ulong)nb];
+		const float ubx=load_u(u, nb), uby=load_u(u, def_N+(ulong)nb), ubz=load_u(u, 2ul*def_N+(ulong)nb);
 		const float undb = nx*ubx+ny*uby+nz*ubz;
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float ut2 = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
@@ -5151,27 +5185,27 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	insert_fi(a, A, index_insert_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi TS_A);
 }
 
-)+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global rhoxx* rho, const global float* u, const global uchar* flags) {
+)+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global rhoxx* rho, const global velxx* u, const global uchar* flags) {
 	((global float*)transfer_buffer)[      a] = load_rho(rho,      n); // Puffer bleibt float32: Stride 17 unveraendert
-	((global float*)transfer_buffer)[    A+a] = u[                 n];
-	((global float*)transfer_buffer)[ 2u*A+a] = u[    def_N+(ulong)n];
-	((global float*)transfer_buffer)[ 3u*A+a] = u[2ul*def_N+(ulong)n];
+	((global float*)transfer_buffer)[    A+a] = load_u(u, n);
+	((global float*)transfer_buffer)[ 2u*A+a] = load_u(u, def_N+(ulong)n);
+	((global float*)transfer_buffer)[ 3u*A+a] = load_u(u, 2ul*def_N+(ulong)n);
 	((global uchar*)transfer_buffer)[16u*A+a] = flags[             n];
 }
-)+R(void insert_rho_u_flags(const uint a, const uint A, const uxx n, const global char* transfer_buffer, global rhoxx* rho, global float* u, global uchar* flags) {
+)+R(void insert_rho_u_flags(const uint a, const uint A, const uxx n, const global char* transfer_buffer, global rhoxx* rho, global velxx* u, global uchar* flags) {
 	store_rho(rho,     n,   ((const global float*)transfer_buffer)[      a]);
-	u[                 n] = ((const global float*)transfer_buffer)[    A+a];
-	u[    def_N+(ulong)n] = ((const global float*)transfer_buffer)[ 2u*A+a];
-	u[2ul*def_N+(ulong)n] = ((const global float*)transfer_buffer)[ 3u*A+a];
+	store_u(u, n, ((const global float*)transfer_buffer)[    A+a]);
+	store_u(u, def_N+(ulong)n, ((const global float*)transfer_buffer)[ 2u*A+a]);
+	store_u(u, 2ul*def_N+(ulong)n, ((const global float*)transfer_buffer)[ 3u*A+a]);
 	flags[             n] = ((const global uchar*)transfer_buffer)[16u*A+a];
 }
-)+R(kernel void transfer_extract_rho_u_flags(const uint direction, const ulong t, global char* transfer_buffer_p, global char* transfer_buffer_m, const global rhoxx* rho, const global float* u, const global uchar* flags) {
+)+R(kernel void transfer_extract_rho_u_flags(const uint direction, const ulong t, global char* transfer_buffer_p, global char* transfer_buffer_m, const global rhoxx* rho, const global velxx* u, const global uchar* flags) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
 	extract_rho_u_flags(a, A, index_extract_p(a, direction), transfer_buffer_p, rho, u, flags);
 	extract_rho_u_flags(a, A, index_extract_m(a, direction), transfer_buffer_m, rho, u, flags);
 }
-)+R(kernel void transfer__insert_rho_u_flags(const uint direction, const ulong t, const global char* transfer_buffer_p, const global char* transfer_buffer_m, global rhoxx* rho, global float* u, global uchar* flags) {
+)+R(kernel void transfer__insert_rho_u_flags(const uint direction, const ulong t, const global char* transfer_buffer_p, const global char* transfer_buffer_m, global rhoxx* rho, global velxx* u, global uchar* flags) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
 	insert_rho_u_flags(a, A, index_insert_p(a, direction), transfer_buffer_p, rho, u, flags);
@@ -5288,7 +5322,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 
 
 
-)+R(kernel void voxelize_mesh)+"("+R(const uint direction, global fpxx* fi, global float* u, global uchar* flags, const ulong t, const uchar flag, const global float* p0, const global float* p1, const global float* p2, const global float* bbu // ) { // voxelize triangle mesh
+)+R(kernel void voxelize_mesh)+"("+R(const uint direction, global fpxx* fi, global velxx* u, global uchar* flags, const ulong t, const uchar flag, const global float* p0, const global float* p1, const global float* p2, const global float* bbu // ) { // voxelize triangle mesh
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex // argument order is important
 )+"#endif"+R( // SURFACE
@@ -5357,10 +5391,18 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		const float3 u_set = (float3)(ux, uy, uz)+cross((float3)(cx, cy, cz)-p, (float3)(rx, ry, rz));
 		if(inside) { // cell is inside of mesh geometry
 			flagsn = (flagsn&~TYPE_BO)|flag; // set flag
-			if(set_u) store3(u, n, u_set); // set solid velocity
+			if(set_u) store3_u(u, n, u_set); // set solid velocity
 		} else { // cell is outside of mesh geometry
 			if((flagsn&TYPE_BO)==TYPE_S&&(flagsn&TYPE_XY)==(flag&TYPE_XY)) { // cell was previously marked solid
-				const float3 un = load3(u, n); // load previous velocity
+				// ★ TODO 2 Schritt 4 (12.09.2026) -- LATENT, heute inert, und deshalb hier angesagt statt
+				// repariert. Die Zeile darunter vergleicht das ZURUECKGELESENE u EXAKT gegen u_set.
+				// Unter U_FP16 ist load_u(store_u(x)) fuer beliebiges x NICHT x (nur das Speicherwort
+				// ist ein Fixpunkt, nicht jeder Eingabewert), der Zweig "diese Zelle gehoerte zu dieser
+				// Geometrie" feuerte dann NIE und die Solid-nach-Fluid-Rekonstruktion entfiele lautlos.
+				// Heute inert, weil alle fuenf Aufrufer set_u == false fahren und u_set damit (0,0,0)
+				// ist -- und 0,0f ist unter FP16S ein exakter Fixpunkt (Wort 0x0000). Wer je eine
+				// BEWEGTE oder rotierende Geometrie voxelisiert, braucht hier ein Ein-Quant-Epsilon.
+				const float3 un = load3_u(u, n); // load previous velocity
 				if(un.x==u_set.x&&un.y==u_set.y&&un.z==u_set.z) { // velocity matched: cell belonged to the currently voxelized geometry
 )+"#ifndef SPARSE_TILES"+R(
 					// FORK: bei SPARSE_TILES ist fi zur Voxelisierungszeit noch der 1-Zell-Platzhalter --

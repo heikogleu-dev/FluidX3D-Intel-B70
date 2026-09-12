@@ -36,6 +36,33 @@
 //   KEIN UEBERLAUF: die Skalierung traegt bis |rho-1| = 1,999; RHO_CLAMP (unten) garantiert 0,5 und
 //   das Tor im Kopplungs-Lift (kernel.cpp, v[0] in (0,5; 2,0)) garantiert 1,0. Marge Faktor 2.
 //   Werkzeug zum Umschalten: werkzeuge/rho_format.sh FP32|FP16
+//#define U_FP16 // ★ FORK 2026-09-12, TODO 2 Schritt 4: u im GERAETE- und Hostspeicher als drei FP16S
+// statt drei float32. Spart bei 4 mm 2971 MiB VRAM im Nahfeld (519.139.485 Zellen x 6 B) und noch
+// einmal dieselbe Menge System-RAM (die B70 ist kein Zero-Copy-Geraet, u liegt dort zweimal); im
+// Fernfeld (iGPU, Zero-Copy) sind es 1164 MiB einfach. u ist damit der GROSSE Hebel -- dreimal rho.
+// Bandbreite je Zelle und Schritt: 123 -> 117 B, also -4,9 %. Zum Vergleich: rho war -3,3 % und hat
+// davon -1,0 % Wanduhr eingeloest; die Erwartung fuer u ist rund -1,5 %, nicht mehr.
+//   FORMAT: FP16S OHNE Verschiebung -- Wort = half(u*2^15), zurueck = Wort*2^-15. KEINE Verschiebung
+//   um u_lat, und das ist kein Versehen: u hat, anders als rho, keinen Sockel. Bei rho sitzt das
+//   Signal auf einer 1 und der half-ULP dort ist 9,8e-4, also so gross wie das Signal -- deshalb
+//   braucht rho die Verschiebung. u ist um 0 zentriert, die Aufloesung ist ueberall relativ 2^-11,
+//   auch bei u_t = 0,005 an der Wand.
+//   UND die Verschiebung wuerde den WORT-FIXPUNKT zerstoeren. Beide Skalen sind exakte Zweierpotenzen
+//   und es gibt keinen Unterlauf (kleinstes Ergebnis 1,8e-12), also ist h*2^-15 bitgenau und
+//   store_u(load_u(w)) == w. Mit den repo-eigenen Wandlern nachgerechnet: 0 Verletzungen ueber ALLE
+//   65536 Bitmuster, auch nach acht Umlaeufen. Das ist STAERKER als bei rho, wo nur der WERT ein
+//   Fixpunkt ist. Ein Rueckweg "+u_lat" wuerde runden, und Sterbenz traegt nur auf [u_lat/2; 2*u_lat]
+//   = [0,0375; 0,15] -- das Totwasser (u -> 0) und die Beschleunigungszonen (bis 0,4764) liegen
+//   ausserhalb. Daran haengen pruefe_slice_ebene ("Soll exakt 0") und apply_pressure_outlet, das in
+//   JEDEM Schritt auf rund 300.000 Auslasszellen nichts als u[n] = u[m] tut.
+//   KEIN UEBERLAUF, und zwar konstruktiv statt gemessen: kernel.cpp klemmt jede Komponente auf
+//   +-def_c = 0,57735 VOR dem Speichern (stream_collide und update_fields, beide Zweige, mit
+//   Wirkpfad-Zaehler Slot 28). Die Skalierung traegt bis 1,99902. Marge Faktor 3,46.
+//   WAS ES KOSTET, und es gehoert angesagt statt entdeckt: u_lat = 0,075 ist als half NICHT exakt
+//   darstellbar (Wort 0x68CD = 0,075012207). Die TYPE_E-Einlasszellen HALTEN diesen Wert, der
+//   Freistrom liegt also um +0,0163 % hoeher und die Kraefte um +0,0326 %. Das ist systematisch,
+//   nicht zufaellig -- und es liegt rund fuenfzigfach unter der Eigenstreuung von cd_rest.
+//   Werkzeug zum Umschalten: werkzeuge/u_format.sh FP32|FP16
 //#define FP16C // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to more accurate custom FP16C format; number conversion is emulated in software; all arithmetic is still done in FP32
 
 //#define BENCHMARK // disable all extensions and setups and run benchmark setup instead
@@ -157,11 +184,33 @@
 #define rhoxx float
 #endif // RHO_FP16
 
+// ★ TODO 2 Schritt 4: Speichertyp von u. Host-Seite; die Geraeteseite bekommt velxx/load_u/store_u
+// als JIT-Define (lbm.cpp, neben den fpxx- und rhoxx-Makros). Ohne U_FP16 ist velxx float und jede
+// Wandlung die Identitaet -- der Arm ist dann bitgleich zum Stand vor dieser Aenderung.
+// DER NAME: nicht u_t (kernel.cpp fuehrt u_t als Bezeichner in Kommentaren und der Wandmodellpfad
+// rechnet mit einer Tangentialgeschwindigkeit dieses Namens) und erst recht nicht uxx -- das ist der
+// INDEXTYP (lbm.cpp, uint oder ulong je Gittergroesse). Beim rho-Umbau hat genau diese Falle
+// zugeschlagen: das Makro hiess zuerst rho_t, ueberschrieb eine lokale Variable gleichen Namens und
+// brach den Geraeteuebersetzer mit -11 ab, in BEIDEN Armen.
+#ifdef U_FP16
+#define velxx ushort
+#else // U_FP16
+#define velxx float
+#endif // U_FP16
+
 // Die rho-Leser der nicht gebauten Erweiterungen stehen weiter auf "global float* rho" (kernel.cpp,
 // hinter Geraete-#ifdef). Wer eine davon einschaltet, bekaeme einen Puffer als falschen Typ gelesen --
 // Faktor 1e38 und unter -cl-finite-math-only ohne jede Diagnose. Deshalb hier hart statt dort still.
 #if defined(RHO_FP16) && (defined(SURFACE) || defined(GRAPHICS) || defined(TEMPERATURE) || defined(PARTICLES) || defined(INTERACTIVE_GRAPHICS) || defined(INTERACTIVE_GRAPHICS_ASCII))
 #error RHO_FP16 x SURFACE/GRAPHICS/TEMPERATURE/PARTICLES: deren rho-Leser sind nicht umgestellt (TODO 2 Schritt 4, 12.09.2026)
+#endif
+
+// Dasselbe fuer u, und die Lesermenge ist groesser als bei rho: SURFACE haelt vier Signaturen
+// (average_neighbors_non_gas/_fluid, surface_0, surface_2), GRAPHICS dreizehn, PARTICLES eine.
+// TEMPERATURE ist fuer u KEIN Blocker -- sein einziger u-Leser sitzt im ohnehin umgestellten
+// initialize -- wird aber mitgenommen, damit die Bedingung wortgleich zur rho-Sperre bleibt.
+#if defined(U_FP16) && (defined(SURFACE) || defined(GRAPHICS) || defined(TEMPERATURE) || defined(PARTICLES) || defined(INTERACTIVE_GRAPHICS) || defined(INTERACTIVE_GRAPHICS_ASCII))
+#error U_FP16 x SURFACE/GRAPHICS/TEMPERATURE/PARTICLES: deren u-Leser sind nicht umgestellt (TODO 2 Schritt 4, 12.09.2026)
 #endif
 
 #ifdef BENCHMARK

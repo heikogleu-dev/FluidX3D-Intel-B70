@@ -27,6 +27,40 @@ assert n==1, f"U_FP16: {n} Treffer statt 1 -- nichts geschrieben"
 io.open(p,"w",encoding="utf-8",newline="").write("\n".join(z))
 PY
 grep -nE '^\s*(//)?#define U_FP16' src/defines.hpp | cut -c1-60
+
+# ── HOST-ZENSUS ────────────────────────────────────────────────────────────────────────
+# Das Gegenstueck zum Typ-Zensus auf dem OpenCL-Quelltext (lbm.cpp) -- fuer die HOSTSEITE gibt es
+# keines, und ohne dieses hier haette der einzige stille Hostfehler dieses Umbaus keinen Fang.
+# Die Kapsel U_Feld macht "lbm.u.x[n]" sicher: der Stellvertreter wandelt ueber u_unpack/u_pack,
+# und ein roher velxx& ist nicht erreichbar. Sie deckt aber NICHT den Direktzugriff auf den
+# DOMAENENpuffer, "L.lbm_domain[0]->u.x[n]" -- das ist Memory<velxx>::Pointer und liefert ein
+# rohes Speicherwort. ushort nach float ist keine Verengung und warnt nicht: es uebersetzt, es
+# laeuft, und es rechnet Muell. Genau eine solche Stelle gab es (setup.cpp, schreibe_wandprofil),
+# sie ist von Hand auf u_unpack umgestellt. Soll ab jetzt: jeder Treffer steht in u_unpack(...).
+python3 - <<'PY2'
+import io,re,sys
+schlecht=[]
+for p in ("src/setup.cpp","src/lbm.cpp"):
+    for nr,l in enumerate(io.open(p,encoding="utf-8",newline="").read().split("\n"), 1):
+        if l.lstrip().startswith("//"): continue          # Kommentarzeilen zaehlen nicht
+        for m in re.finditer(r'->u\.[xyz]\[', l):
+            # Zulaessig ist genau ein Kontext: der Zugriff steht als Argument in u_unpack(...).
+            # Dazu vom Treffer aus RUECKWAERTS ueber die Zugriffskette laufen (Bezeichner, Punkte,
+            # Pfeile, Indexklammern) und pruefen, ob davor u_unpack( steht. Ein Test auf "endet
+            # direkt mit u_unpack(" reicht NICHT -- zwischen dem Aufruf und dem ->u.x[ steht die
+            # ganze Kette "L.lbm_domain[0]". Genau daran ist die erste Fassung dieses Waechters
+            # gescheitert: sie meldete die BEHOBENE Stelle als Verletzung, und der Negativtest
+            # sah deshalb gleich aus wie der Positivlauf -- er bewies nichts.
+            k = m.start()
+            while k > 0 and (l[k-1].isalnum() or l[k-1] in "_.[]>-"): k -= 1
+            if not l[:k].endswith("u_unpack("):
+                schlecht.append(f"{p}:{nr}: {l.strip()[:100]}")
+if schlecht:
+    print("HOST-ZENSUS VERLETZT -- roher Zugriff auf den Domaenenpuffer (Soll 0):")
+    for x in schlecht: print("  "+x)
+    sys.exit(1)
+print("Host-Zensus: 0 rohe Zugriffe auf ->u.x/y/z (Soll 0)")
+PY2
 # Bauwaechter wortgleich zu rho_format.sh: ohne pipefail geht der Exit-Status von make verloren
 # (Build-RC-Falle dieses Projekts, dritte Auflage). Ausgabe mitschreiben, RC lesen, dann melden.
 LOG="$(mktemp)"
