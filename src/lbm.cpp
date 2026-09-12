@@ -457,7 +457,20 @@ uint LBM_Domain::s_fac_kraft = 0u;
 // ausrechnen (Slots 7/20/21/22/76/186). Liefe beides auseinander, meldeten die Abnahmen
 // reihenweise Falschalarm -- genau das hat der Kernel-Pruefer heute fuer E5 vorhergesagt.
 // Funktionslokales static: unabhaengig von der Initialisierungsreihenfolge der Statiken.
-ulong zaehl_takt() { static const ulong t = (ulong)max(1u, env_u("CFD_ZAEHL_TAKT", 100u)); return t; }
+// ★ 12.09.2026: die globale Schrittskalierung. Bewusst KEIN static-in-function-Initialisierer mit
+// Nebenwirkung -- ulat_skal_setzen laeuft aus u_lat_schalter, also VOR jeder Domaenenkonstruktion
+// und damit vor jedem Leser. Der Waechter in ulat_skal_setzen faengt die Umkehrung.
+static double g_ulat_skal = 1.0;
+static bool   g_ulat_skal_gelesen = false;
+double ulat_skal() { g_ulat_skal_gelesen = true; return g_ulat_skal; }
+void ulat_skal_setzen(const double s) {
+	if(!(s>0.0)) print_error("ulat_skal_setzen("+to_string((float)s,7u)+"): die Skalierung muss positiv sein.");
+	if(g_ulat_skal_gelesen&&s!=g_ulat_skal) print_error("ulat_skal_setzen: die Schrittskalierung wurde gesetzt, NACHDEM sie schon gelesen wurde. Dann traegt ein Teil der Schalter den alten und ein Teil den neuen Wert -- genau der stille Mischzustand, gegen den diese Mechanik gebaut ist.");
+	g_ulat_skal = s;
+}
+// Der Zaehltakt ist ein SCHRITT-Schalter und skaliert deshalb mit. Ohne das laege die
+// Wirkpfad-Zaehlung bei geaendertem u_lat an einer anderen physikalischen Zeit als in der Vorgabe.
+ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEHL_TAKT", 100u))*ulat_skal()); static const ulong t = (ulong)(r<1ll ? 1ll : r); return t; }
 
 
 // ★ 11.09.2026 SPALDING-TABELLE (CFD_SPALDING_TAB, Default AUS).
@@ -803,10 +816,41 @@ void LBM_Domain::enqueue_schale_blend() { // ★ P9c: post-stream Schalen-Blend 
 // wir wirklich nutzen"). device_info.memory ist eine REKONSTRUKTION: opencl.hpp:170 rechnet NEOs
 // 95-%-Deckel mit 20/19 heraus, der Treiber meldet weniger. Und der Desktop haengt an derselben
 // Karte, ohne dass memory_used davon etwas sieht. Der einzige belastbare Wert steht im
-// DRM-Debugfs. NICHT ueber /proc/*/fdinfo -- der unterzaehlt grob (23.08.: Faktor sieben).
-// Liefert freie MiB, oder 0 wenn nicht lesbar (Debugfs braucht Rechte -- dann bleibt es bei
-// der Rekonstruktion, und der Aufrufer sagt das auch so).
-ulong vram_frei_gemessen() {
+// DRM-Debugfs.
+//
+// ★ 12.09.2026 (Heiko: "den echten freien VRAM messen"): ZWEITER WEG, weil der erste an den
+// Rechten scheitert. /sys/kernel/debug ist root-only, sudo ohne Passwort gibt es hier nicht --
+// der Debugfs-Weg hat auf dieser Maschine noch NIE einen Wert geliefert, jedes Log sagt
+// "gemessener Frei-Wert NICHT lesbar". Der zweite Weg ist /proc/<pid>/fdinfo/<fd> des
+// DRM-Geraets: der xe-Treiber schreibt dort "drm-total-vram0: N KiB" je DRM-Client, und das
+// ist fuer alle Prozesse DESSELBEN Benutzers lesbar -- also auch fuer gnome-shell und den Editor.
+//
+// ★★ DAS WIDERSPRICHT EINER FRUEHEREN NOTIZ, und der Widerspruch gehoert benannt statt aufgeloest:
+// hier stand bis heute "NICHT ueber /proc/*/fdinfo -- der unterzaehlt grob (23.08.: Faktor sieben)".
+// Am 12.09.2026 gemessen, waehrend ein 8-mm-Lauf lief: fdinfo meldet fuer FluidX3D 3265 MiB, die
+// Rekonstruktion im selben Lauf 3162 MB (= 3015 MiB). fdinfo zaehlt also MEHR, nicht sieben Mal
+// weniger. Erklaerbar ist das damit, dass die Karte seit dem Treiberwechsel unter xe laeuft
+// (/dev/dri/renderD129, pdev 0000:04:00.0) und die vram0-Zeilen dort ueberhaupt erst existieren;
+// unter i915 gibt es sie nicht, und genau das war am 23.08. vermutlich der Fall. NACHGEPRUEFT ist
+// das NICHT -- es ist die plausible Erklaerung, nicht der Beweis. Wer die alte Zahl reproduzieren
+// will, braucht den Treiberstand von damals.
+//
+// ZWEI FALLEN, beide beim Bau getroffen:
+//  1. Mehrere Dateideskriptoren desselben Clients tragen DIESELBE Zahl. Ohne Deduplizierung ueber
+//     drm-client-id kam gnome-shell fuenfmal vor und die Summe war mehr als doppelt so gross.
+//  2. Die Kapazitaet aus device.info.memory ist selbst die 20/19-Rekonstruktion. Die Differenz
+//     "Kapazitaet minus gemessene Summe" traegt deren Fehler also mit -- sie ist trotzdem die
+//     bessere Zahl, weil sie den Desktop-Anteil (am 12.09. 1331 MiB) ueberhaupt erst sieht.
+// Liefert freie MiB, oder 0 wenn keiner der beiden Wege trug.
+#include <filesystem>
+#include <sstream>
+#include <set>
+// ★ 12.09.2026: WELCHER WEG getragen hat, steht hier -- die Meldungen behaupteten sonst
+// "DRM-Debugfs", auch wenn der Wert aus fdinfo kam. Im ersten Selbsttest genau so passiert.
+static const char* g_vram_quelle = "keiner";
+const char* vram_quelle() { return g_vram_quelle; }
+ulong vram_frei_gemessen(const ulong kapazitaet_mib) {
+	g_vram_quelle = "keiner";
 	for(const string& pfad : {string("/sys/kernel/debug/dri/0/tile0/vram_mm"), string("/sys/kernel/debug/dri/0/i915_gem_objects")}) {
 		std::ifstream f(pfad);
 		if(!f) continue;
@@ -820,11 +864,52 @@ ulong vram_frei_gemessen() {
 				else if(ziffer) break;
 			}
 			if(!ziffer) continue;
+			g_vram_quelle = "DRM-Debugfs";
 			if(z.find("KiB")!=string::npos||z.find("kB")!=string::npos) return wert/1024ull;
 			if(z.find("MiB")!=string::npos||z.find("MB")!=string::npos) return wert;
 			return wert/1048576ull; // Bytes
 		}
 	}
+	// ── ZWEITER WEG: Summe ueber alle DRM-Clients derselben Karte, aus /proc/*/fdinfo ──────────
+	if(kapazitaet_mib==0ull) return 0ull; // ohne Kapazitaet laesst sich aus einer Belegung kein Freiwert bilden
+	string pdev; // die PCI-Adresse UNSERER Karte, aus den eigenen Deskriptoren
+	auto feld = [](const string& t, const string& schluessel) -> string {
+		const size_t a = t.find(schluessel); if(a==string::npos) return string();
+		const size_t z = t.find('\n', a); const string zeile = t.substr(a+schluessel.length(), z-a-schluessel.length());
+		size_t b=0ull; while(b<zeile.length()&&(zeile[b]==' '||zeile[b]=='\t')) b++;
+		size_t e=b; while(e<zeile.length()&&zeile[e]!=' '&&zeile[e]!='\t'&&zeile[e]!='\r') e++;
+		return zeile.substr(b, e-b);
+	};
+	auto lies = [](const string& pfad) -> string {
+		std::ifstream f(pfad); if(!f) return string();
+		std::stringstream ss; ss << f.rdbuf(); return ss.str();
+	};
+	for(const auto& e : std::filesystem::directory_iterator("/proc/self/fdinfo", std::filesystem::directory_options::skip_permission_denied)) {
+		const string t = lies(e.path().string());
+		if(t.find("drm-total-vram0:")==string::npos) continue;
+		pdev = feld(t, "drm-pdev:"); if(!pdev.empty()) break;
+	}
+	if(pdev.empty()) return 0ull; // keine Karte mit vram0-Zeilen -- iGPU-Lauf oder alter Treiber
+	std::set<string> gesehen; ulong summe_kib = 0ull;
+	std::error_code ec;
+	for(const auto& pe : std::filesystem::directory_iterator("/proc", std::filesystem::directory_options::skip_permission_denied, ec)) {
+		const string pid = pe.path().filename().string();
+		if(pid.empty()||pid[0]<'0'||pid[0]>'9') continue;
+		std::error_code ec2;
+		for(const auto& fe : std::filesystem::directory_iterator(pe.path()/"fdinfo", std::filesystem::directory_options::skip_permission_denied, ec2)) {
+			const string t = lies(fe.path().string());
+			if(t.find("drm-total-vram0:")==string::npos||t.find(pdev)==string::npos) continue;
+			const string cid = feld(t, "drm-client-id:");
+			if(cid.empty()||!gesehen.insert(cid).second) continue; // je Client EINMAL (Falle 1)
+			summe_kib += (ulong)atoll(feld(t, "drm-total-vram0:").c_str());
+		}
+		if(ec2) continue;
+	}
+	if(summe_kib==0ull) return 0ull;
+	const ulong belegt_mib = summe_kib/1024ull;
+	g_vram_quelle = "Summe ueber alle DRM-Clients (/proc/*/fdinfo)";
+	return kapazitaet_mib>belegt_mib ? kapazitaet_mib-belegt_mib : 0ull;
+
 	return 0ull;
 }
 
@@ -888,7 +973,7 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	// Vorbild aufgebaut, damit beide Meldungen gleich zu lesen sind.
 	{	const ulong mb_band = (8ull*FNB + 8ull*band_N + (sism_on ? 24ull*band_N : 4ull)) / 1048576ull;
 		const ulong belegt = (ulong)device.info.memory_used, kapazitaet = (ulong)device.info.memory;
-		const ulong frei_gemessen = vram_frei_gemessen();
+		const ulong frei_gemessen = vram_frei_gemessen(kapazitaet);
 		const ulong frei = frei_gemessen>0ull ? frei_gemessen : (kapazitaet>belegt ? kapazitaet-belegt : 0ull);
 		const ulong mindest = (ulong)env_u("CFD_VRAM_MIN_FREI_MB", 1024u);
 		print_info("SGS-BAND: "+to_string(band_N)+" Bandzellen, Puffer "+to_string(mb_band)+" MB | belegt "
@@ -1025,12 +1110,12 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:8ull)*aktiv : 0ull)  // fac_wfd (4 B) + gd_zellen (4 B seit 08.09.), falls nicht schon von gdiag gebaut
 		                      + (sgs_sism>0u ? 24ull*aktiv : 0ull);   // ★ 07.09. fac_sb (6 float) der SISM-EMA -- Vorschaetzung MUSS mitziehen (KDIAG-Lehre: sonst ist der VRAM-Waechter um 24 B/Facette blind)
 		const ulong mb_fac = bytes_fac/1048576ull;
-		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen();
+		const ulong frei_gemessen = device.info.uses_ram ? 0ull : vram_frei_gemessen((ulong)device.info.memory);
 		const ulong belegt = (ulong)device.info.memory_used;
 		const ulong kapazitaet = (ulong)device.info.memory;
 		print_info("SPEICHER-IST vor den Facettenpuffern: belegt "+to_string(belegt)+" MB von "
 			+to_string(kapazitaet)+" MB (rekonstruiert)"
-			+(frei_gemessen>0ull ? string(", GEMESSEN frei "+to_string(frei_gemessen)+" MB (DRM-Debugfs)")
+			+(frei_gemessen>0ull ? string(", GEMESSEN frei "+to_string(frei_gemessen)+" MB ("+string(vram_quelle())+")")
 			                     : string(", gemessener Frei-Wert NICHT lesbar -- Debugfs braucht Rechte"))
 			+" | Facettenpuffer "+to_string(mb_fac)+" MB fuer "+to_string(aktiv)+" aktive Facetten");
 		// Gegen den GEMESSENEN Wert pruefen, wenn er da ist -- sonst gegen die Rekonstruktion.

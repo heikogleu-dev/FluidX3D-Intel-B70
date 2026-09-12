@@ -129,7 +129,8 @@ inline velxx u_pack(const float v) { // Geschwindigkeitskomponente -> Speicherwo
 
 uint bytes_per_cell_host(); // returns the number of Bytes per cell allocated in host memory
 uint bytes_per_cell_device(); // returns the number of Bytes per cell allocated in device memory
-ulong vram_frei_gemessen(); // ★ 29.08.: freier VRAM GEMESSEN aus dem DRM-Debugfs (0 = nicht lesbar);
+const char* vram_quelle(); // welcher Weg den letzten Wert geliefert hat -- Meldungen nennen ihn, statt ihn zu behaupten
+ulong vram_frei_gemessen(const ulong kapazitaet_mib=0ull); // ★ 29.08.: freier VRAM GEMESSEN -- Debugfs, sonst Summe ueber alle DRM-Clients aus /proc/*/fdinfo (12.09.); 0 = kein Weg trug;
                            // device.info.memory ist nur die 20/19-Rekonstruktion und sieht den Desktop nicht
 uint bandwidth_bytes_per_cell_device(); // returns the bandwidth in Bytes per cell per time step from/to device memory
 uint3 resolution(const float3 box_aspect_ratio, const uint memory); // input: simulation box aspect ratio and VRAM occupation in MB, output: grid resolution
@@ -153,6 +154,19 @@ struct Facette {
 };
 
 ulong zaehl_takt(); // ★ 11.09.2026 gemeinsamer Zaehltakt fuer Kernel-Gatter UND Host-Sollformeln
+
+// ★ 12.09.2026 (Heiko): SCHRITTBASIERTE SCHALTER FOLGEN u_lat JETZT VON SELBST.
+// Bis heute taten sie es ausdruecklich NICHT -- die Begruendung stand an u_lat_schalter in
+// setup.cpp: eine stille Umrechnung waere eine weitere Variable im Arm. Heiko hat das am 12.09.
+// umgedreht, und zwar mit dem besseren Argument: ein Schalter, den man bei jeder Aenderung von
+// Hand nachziehen muss, wird irgendwann vergessen, und dann traegt der Arm ZWEI Aenderungen statt
+// einer -- unsichtbar. Die Umrechnung ist jetzt automatisch und LAUT: jeder betroffene Schalter
+// meldet seinen alten und seinen neuen Wert und die physikalische Zeit dahinter.
+// skal = u_lat(Vorgabe)/u_lat(Lauf). Schritte fuer dieselbe physikalische Zeit skalieren damit,
+// weil dt = u_lat*dx/si_u proportional zu u_lat ist. Gilt fuer feine WIE grobe Schritte, weil
+// dt_c = ratio*dt_f und ratio unberuehrt bleibt.
+double ulat_skal();                     // 1.0, solange u_lat auf der Vorgabe steht
+void   ulat_skal_setzen(const double s); // genau einmal, aus u_lat_schalter, VOR dem ersten Leser
 
 class LBM_Domain {
 private:
