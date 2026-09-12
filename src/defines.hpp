@@ -19,7 +19,7 @@
 //#define TRT // choose two-relaxation-time LBM collision operator
 
 #define FP16S // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to range-shifted IEEE-754 FP16; number conversion is done in hardware; all arithmetic is still done in FP32
-//#define RHO_FP16 // ★ FORK 2026-09-12, TODO 2 Schritt 4: rho im GERAETE- und Hostspeicher als FP16S(rho-1)
+#define RHO_FP16 // ★ FORK 2026-09-12, TODO 2 Schritt 4: rho im GERAETE- und Hostspeicher als FP16S(rho-1)
 // statt float32. Spart bei 4 mm 990 MiB VRAM im Nahfeld (519.139.485 Zellen x 2 B) und noch einmal
 // dieselbe Menge System-RAM, weil die B70 KEIN Zero-Copy hat und rho dort zweimal liegt; im Fernfeld
 // (iGPU, Zero-Copy) sind es 388 MiB einfach. LAUFZEIT ist KEIN Argument: nach Schritt 1

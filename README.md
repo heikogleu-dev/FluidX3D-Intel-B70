@@ -537,9 +537,66 @@ only when a grid would otherwise not fit — for 3.75 mm, `T=16` is **456 MB sho
 with 554 MB (below the project's 1 024 MB minimum), and `16×8×4` fits with 752 MB at the better
 throughput. Not built, because 4 921 MB are free today.
 
+### Two-byte fields — built and measured (2026-09-12)
+
+`rho` and `u` now live in **2 bytes per component** instead of 4, on the device *and* in the host
+mirror. Two independent compile-time switches (`werkzeuge/rho_format.sh`, `werkzeuge/u_format.sh`),
+both **off by default**. Format is range-shifted IEEE-754 FP16: `FP16S(rho−1)` for density —
+storing `rho−1` rather than `rho` is worth a **factor 550 in RMS error**, because the half ULP at
+`rho ≈ 1` is as large as the signal — and plain `FP16S(u)` for velocity, which has no such pedestal
+and where a shift would destroy the word-level fixed point.
+
+| | at 8 mm, measured | at 4 mm, measured |
+|---|---:|---:|
+| near-field VRAM, `u` alone | 3537 → 3162 MB (−375 MiB) | — |
+| near-field VRAM, `rho` **and** `u` | — | **27 734 → 23 773 MB (−3961 MiB)** |
+| host mirror | same reduction again — the B70 is not a zero-copy device | |
+| wall clock, `u` alone, two arms each | 364 / 387 s → **354 / 355 s (−5.6 %)** | |
+| bandwidth per cell per step | 123 → 117 B (`u`), 121 B (`rho`), 115 B (both) | |
+
+**The FP32 arm stays bit-identical.** That is the only safety net this rebuild has, because step 4
+changes values by construction: 45 of 49 output files byte-identical on the 8 mm vehicle against
+the pre-change reference, the four exceptions being PNG plots whose title carries the run name.
+Both FP16 arms are bit-identical to each other, so the case is deterministic and the wall-clock
+spread of 23 s between identical FP32 arms is pure machine noise.
+
+**What it costs, stated rather than discovered.** `u_lat = 0.075` is not exactly representable as
+a half (it becomes 0.075012207), so the free stream sits **+0.0163 %** high and the forces
+**+0.0326 %** — roughly fifty times below the run-to-run scatter of `cd_rest`. On the 8 mm vehicle
+the fields are indistinguishable by this project's own yardstick: FP32 against FP16 at 500 ms gives
+2.929 m/s RMS in |u|, one arm against *itself* 50 ms later gives 2.906. The force shift sits at
+**1.43 σ** on `cd_rest` and 0.24 σ on `cz_rest` — neither established nor excluded.
+
+**The one path with a double-digit quantisation error is a switched-off one.** The regularised
+boundary (`deriv_reg`) carries 2.69 % relative RMS on `f_neq`, measured over all 3 290 677 TYPE_E
+cells of the 4 mm field. It hangs on `CFD_REG_BC`, a runtime switch that is off by default and was
+not set in the baseline — without it the function is never even emitted to the device. The wall
+path that *does* run (`sgs_fdwand`) sits at **0.018 %**, 150× less sensitive, because there |u| is
+small and the gradient is large: the opposite pairing. If that arm is ever switched on, the fix is
+to keep `u` in float32 in the boundary shell — 7 684 695 cells, 43.97 MiB, **1.48 % of the 2971 MiB
+the change buys**. Derived, not built.
+
+### Measuring what was previously reconstructed (2026-09-12)
+
+Three instruments, all built because a number that mattered was an estimate:
+
+* **Real free VRAM, without root.** `/sys/kernel/debug` is root-only and never once produced a
+  value on this rig. The per-client accounting in `/proc/<pid>/fdinfo` of the DRM device does, for
+  every process of the same user — summed over all clients of the card and **deduplicated by
+  `drm-client-id`**. During the 4 mm production run: **7450 MB really free against 8882 MB
+  reconstructed**; the desktop holds 1432 MB that `device.info.memory` cannot see.
+* **Performance index from a mark, not from step zero.** The total index carries the warm-up; for
+  comparing forks and arms the steady-state throughput is what counts. `CFD_PERF_AB` (default
+  0.100 s) sets the mark, and both readings are printed side by side so they cannot be confused.
+* **Steps per cell instead of a decimal.** `CFD_SCHRITTE_PRO_ZELLE=N` sets `u_lat = 1/N`; the
+  default 0.075 is 13.333 steps per cell. **Every step-counting switch now follows automatically**
+  — set *and* unset ones, because their code defaults were chosen for 0.075 too. Until now this had
+  to be done by hand, which meant an arm could silently carry two changes instead of one. The
+  conversion is loud: every affected switch reports its old and new value.
+
 ### Still parked
 
-FP16S memory compression, `UPDATE_FIELDS` retirement and the dual-B70 halo + iGPU three-device
+`UPDATE_FIELDS` retirement and the dual-B70 halo + iGPU three-device
 layout remain parked behind physics work — documented with their expected mechanics in the
 project markdowns. Four further levers with a non-instruction justification (merging the two
 facet kernels, replacing a flood scan with a flag bit, bundling the host round-trips,

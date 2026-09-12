@@ -460,13 +460,37 @@ uint LBM_Domain::s_fac_kraft = 0u;
 // ★ 12.09.2026: die globale Schrittskalierung. Bewusst KEIN static-in-function-Initialisierer mit
 // Nebenwirkung -- ulat_skal_setzen laeuft aus u_lat_schalter, also VOR jeder Domaenenkonstruktion
 // und damit vor jedem Leser. Der Waechter in ulat_skal_setzen faengt die Umkehrung.
-static double g_ulat_skal = 1.0;
-static bool   g_ulat_skal_gelesen = false;
-double ulat_skal() { g_ulat_skal_gelesen = true; return g_ulat_skal; }
+// ★ BERICHTIGT 12.09.2026 abends, und der eigene Waechter hat es gefangen: die erste Fassung
+// war ein SETZER, den u_lat_schalter aufrufen musste. Beim ersten 4-mm-Start brach der Lauf mit
+// "die Schrittskalierung wurde gesetzt, NACHDEM sie schon gelesen wurde" ab -- im dd-Fall liest
+// irgendein Pfad frueher als der Setzer laeuft. Eine Reihenfolge zu reparieren, die man nicht
+// sieht, ist die schlechtere Loesung: die Skalierung ist eine REINE FUNKTION DER UMGEBUNG und
+// wird deshalb jetzt beim ersten Zugriff selbst gebildet. Damit gibt es keine Reihenfolge mehr,
+// die falsch sein koennte. Der Setzer bleibt als Ist=Soll-Pruefung bestehen.
+static double ulat_skal_aus_umgebung() {
+	// ★ DIE RUNDUNG MUSS MITGEHEN: setup.cpp fuehrt u_lat als FLOAT (U_LAT_VORGABE ist 0.075f und
+	// 1/N wird beim Zuweisen auf float gerundet). Rechnete es hier in double, unterschieden sich
+	// die beiden Wege um 1,6e-8 relativ -- und genau daran ist der Ist=Soll-Waechter beim ersten
+	// Selbsttest abgebrochen, obwohl BEIDE Zahlen gleich AUSSAHEN (0.6000001 gegen 0.6000001).
+	// Also: exakt dieselben Rundungen wie drueben, und die Schranke danach grosszuegig.
+	const double vorgabe = (double)0.075f;
+	float u = 0.075f;
+	if(const char* v = getenv("CFD_U_LAT")) { const float x = (float)atof(v); if(x>0.0f) u = x; }
+	if(const char* v = getenv("CFD_SCHRITTE_PRO_ZELLE")) { const double n_ = atof(v); if(n_>0.0) u = (float)(1.0/n_); }
+	return vorgabe/(double)u;
+}
+static double g_ulat_skal = 0.0; // 0 = noch nicht gebildet
+double ulat_skal() { if(g_ulat_skal==0.0) g_ulat_skal = ulat_skal_aus_umgebung(); return g_ulat_skal; }
+// Ist=Soll: u_lat_schalter kennt den wirklich gefahrenen u_lat und prueft damit, dass die aus der
+// Umgebung gebildete Skalierung dieselbe ist. Weichen sie ab, hat eine Sonderbehandlung im Fall
+// (etwa der Kanal, der CFD_U_LAT ausdruecklich NICHT anwendet) einen anderen u_lat gewaehlt --
+// dann waeren die Schritt-Schalter gegen eine andere Geschwindigkeit umgerechnet als gerechnet wird.
 void ulat_skal_setzen(const double s) {
 	if(!(s>0.0)) print_error("ulat_skal_setzen("+to_string((float)s,7u)+"): die Skalierung muss positiv sein.");
-	if(g_ulat_skal_gelesen&&s!=g_ulat_skal) print_error("ulat_skal_setzen: die Schrittskalierung wurde gesetzt, NACHDEM sie schon gelesen wurde. Dann traegt ein Teil der Schalter den alten und ein Teil den neuen Wert -- genau der stille Mischzustand, gegen den diese Mechanik gebaut ist.");
-	g_ulat_skal = s;
+	// 1e-6 und nicht 1e-9: der Vergleich soll eine ANDERE Geschwindigkeit fangen, nicht die
+	// letzte float-Stelle. (Und dieser Kommentar steht UEBER der Zeile, nicht dahinter -- als
+	// Trailer hat er beim ersten Anlauf den halben Ausdruck gefressen.)
+	if(fabs(s-ulat_skal())>1e-6*fmax(1.0, fabs(s))) print_error("Schrittskalierung Ist != Soll: aus der Umgebung "+to_string((float)ulat_skal(),7u)+", aus dem gefahrenen u_lat "+to_string((float)s,7u)+". Die Schritt-Schalter waeren gegen eine andere Gittergeschwindigkeit umgerechnet als gerechnet wird.");
 }
 // Der Zaehltakt ist ein SCHRITT-Schalter und skaliert deshalb mit. Ohne das laege die
 // Wirkpfad-Zaehlung bei geaendertem u_lat an einer anderen physikalischen Zeit als in der Vorgabe.
