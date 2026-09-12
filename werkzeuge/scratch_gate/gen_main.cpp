@@ -9,7 +9,7 @@ using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
 
-static string device_defines(const bool elibb, const bool ptrt) {
+static string device_defines(const bool elibb, const bool ptrt, const bool rho16) {
 	string s =
 	"\n#define cl_workgroup_size 64u"
 	"\n#ifdef cl_khr_fp64"
@@ -98,6 +98,19 @@ static string device_defines(const bool elibb, const bool ptrt) {
 	"\n#define fpxx_copy ushort"
 	"\n#define load(p,o) half_to_float_custom((p)[o])"
 	"\n#define store(p,o,x) (p)[o]=float_to_half_custom(x)"
+	// ★ 12.09.2026 ZWILLING zu lbm.cpp (TODO 2 Schritt 4). Fehlt das hier, baut der Kernel nicht
+	// und das Gate meldet BAUFEHLER statt Scratch -- genau so ist es beim ersten Lauf passiert.
+	; s += rho16
+	? (string)"\n#define RHO_FP16"
+	          "\n#define rhoxx half"
+	          "\n#define load_rho(p,o) (vload_half(o,p)*3.0517578E-5f+1.0f)"
+	          "\n#define load_drho(p,o) (vload_half(o,p)*3.0517578E-5f)"
+	          "\n#define store_rho(p,o,x) vstore_half_rte(((x)-1.0f)*32768.0f,o,p)"
+	: (string)"\n#define rhoxx float"
+	          "\n#define load_rho(p,o) ((p)[o])"
+	          "\n#define load_drho(p,o) ((p)[o]-1.0f)"
+	          "\n#define store_rho(p,o,x) ((p)[o]=(x))";
+	s +=
 	"\n#define UPDATE_FIELDS"
 	"\n#define VOLUME_FORCE"
 	"\n#define MOVING_BOUNDARIES"
@@ -128,16 +141,17 @@ static string device_defines(const bool elibb, const bool ptrt) {
 }
 
 int main(int argc, char** argv) {
-	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <ausgabe.cl>
-	if(argc<4) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <ausgabe.cl>\n"; return 2; }
+	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <ausgabe.cl>
+	if(argc<5) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <ausgabe.cl>\n"; return 2; }
 	const bool elibb = string(argv[1])=="on";
 	const bool ptrt  = string(argv[2])=="on";
-	const string out = argv[3];
-	const string code = device_defines(elibb, ptrt) + get_opencl_c_code();
+	const bool rho16 = string(argv[3])=="on";
+	const string out = argv[4];
+	const string code = device_defines(elibb, ptrt, rho16) + get_opencl_c_code();
 	std::ofstream f(out);
 	f << code;
 	f.close();
 	std::cout << "geschrieben: " << out << " (" << code.size() << " Bytes, ELIBB="
-	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ")\n";
+	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ", RHO16=" << (rho16?"an":"aus") << ")\n";
 	return 0;
 }
