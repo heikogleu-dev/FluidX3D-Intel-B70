@@ -1531,7 +1531,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 
 
 
-)+R(kernel void initialize)+"("+R(global fpxx* fi, const global float* rho, global float* u, global uchar* flags // ) { // initialize LBM
+)+R(kernel void initialize)+"("+R(global fpxx* fi, const global rho_t* rho, global float* u, global uchar* flags // ) { // initialize LBM
 )+"#ifdef SURFACE"+R(
 	, global float* mass, global float* massex, global float* phi // argument order is important
 )+"#endif"+R( // SURFACE
@@ -1570,7 +1570,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#endif"+R( // MOVING_BOUNDARIES
 	}
 	float feq[def_velocity_set]; // f_equilibrium
-	calculate_f_eq(rho[n], u[n], u[def_N+(ulong)n], u[2ul*def_N+(ulong)n], feq);
+	calculate_f_eq(load_rho(rho, n), u[n], u[def_N+(ulong)n], u[2ul*def_N+(ulong)n], feq);
 )+"#ifdef SURFACE"+R( // automatically generate the interface layer between fluid and gas
 	{ // separate block to avoid variable name conflicts
 		float phin = phi[n];
@@ -1976,7 +1976,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , global float* fac_diag // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds) der Diagnose-Facette
 )+"#endif"+R( // FACETTEN_DIAGZ
 )+"#ifdef FACETTEN_APG"+R(
-                        , const global float* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
+                        , const global rho_t* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
 )+"#endif"+R( // FACETTEN_APG
 )+"#ifdef FACETTEN_ELIBB"+R(
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
@@ -2107,7 +2107,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if((flags[j[ia]]&TYPE_BO)==TYPE_S) continue; // nur Fluid/TYPE_E-Nachbarn (gueltiges rho)
 			const float ct1a = c(ia)*t1x+c(def_velocity_set+ia)*t1y+c(2u*def_velocity_set+ia)*t1z;
 			const float wia = w(ia);
-			num = fma(wia*ct1a, rho[j[ia]]-rhon, num);
+			num = fma(wia*ct1a, load_rho(rho, j[ia])-rhon, num);
 			den = fma(wia, ct1a*ct1a, den);
 		}
 		fac_dpds = (den>=1e-6f) ? num/(3.0f*den) : 0.0f; // Entartung (alles solid): Korrektur exakt 0
@@ -2863,7 +2863,28 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM
 
-)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
+// ★ TODO 2 Schritt 4 (12.09.2026) -- rho speichern UND die Quantisierung dabei MESSEN.
+// Iron Rule 3: jeder neue Mechanismus bekommt Zwischenergebnis-Introspektion im Code, nicht nur eine
+// Endzahl. Die Offline-Rechnung am Feld-Dump ist ein Standbild bei 501 ms; dies hier laeuft mit.
+// Gemessen wird der ABSOLUTE Rueckrechenfehler |load_rho(store_rho(x)) - x| in Dekaden, Slots
+// 212..217. Erwartung aus der Offline-Messung am 4-mm-Nahfeld: Schwerpunkt in 213/214, Ausreisser
+// bis 215, und Slot 217 (>=1e-3) EXAKT NULL -- das ist der harte Nullbeweis dieses Schritts.
+// Ohne RHO_FP16 ist store_rho die Identitaet, der Fehler also konstruktiv 0; dann waere die
+// Rueckleserei reine Bandbreite ohne Aussage und der Block entfaellt.
+// Der Rueckleser kostet 2 Byte je GESCHRIEBENER Zelle und nur an jedem def_zaehl_takt-ten Schritt --
+// unter CFD_RHO_SPARSAM sind das rund 0,1 % der Zellen, also nichts.
+)+R(void store_rho_diag(global rho_t* rho, const uxx n, const float rhon, const ulong t, global uint* hits) {
+	store_rho(rho, n, rhon);
+)+"#ifdef RHO_FP16"+R(
+	if(t%(ulong)def_zaehl_takt==0ul) {
+		const float e = fabs(load_rho(rho, n)-rhon);
+		const uint b = e<1e-7f ? 212u : (e<1e-6f ? 213u : (e<1e-5f ? 214u : (e<1e-4f ? 215u : (e<1e-3f ? 216u : 217u))));
+		if(hits[b]<0xF0000000u) atomic_inc(&hits[b]);
+	}
+)+"#endif"+R( // RHO_FP16
+}
+
+)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rho_t* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -2984,7 +3005,24 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R(
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
-		rhon = rho[               n]; // apply preset velocity/density
+		rhon = load_rho(rho,        n); // apply preset velocity/density
+		// ★ TODO 2 Schritt 4 (12.09.2026) -- BEREICHSWAECHTER an der einzigen rho-Lesestelle, ueber die
+		// der Speicherinhalt in die RECHNUNG zurueckfliesst. Er faengt die eine Fehlerklasse, die
+		// dieser Umbau neu aufmacht und die sonst voellig still bliebe: ein Kernel, dessen
+		// rho-Parameter noch "global float*" heisst, liest zwei halbe Dichten als einen float und
+		// bekommt Groessenordnung 1e38 oder 1e-38. setArg ist typgeloescht (opencl.hpp), der
+		// OpenCL-Uebersetzer sieht nur den Kernel, den er gerade baut, und unter
+		// -cl-finite-math-only gibt es dafuer keine Diagnose.
+		//   Slot 210 UNGEGATET und saettigend: ein Nullbeweis, der den Anlauf mitsieht. Er kostet im
+		//   sauberen Fall nichts -- der Vergleich ist ein Register-Test, die Atomik feuert nur im
+		//   Fehlerfall. Soll ueber den ganzen Lauf: 0.
+		//   Slot 211 ist der Gegenbeweis, dass 210 ueberhaupt auf dem ausgefuehrten Pfad liegt (ein
+		//   Waechter ohne feuernden Besuchszaehler ist in diesem Projekt ein harter Fehler): EIN
+		//   Schritt, damit 211 == Zahl der TYPE_E-Zellen ein Ist=Soll ist und kein Schaetzwert.
+		// Die Schranke 0,25/4,0 liegt weit ausserhalb jeder Physik (RHO_CLAMP garantiert 0,5..1,5,
+		// das Tor im Kopplungs-Lift 0,5..2,0) und weit innerhalb dessen, was eine Fehldeutung liefert.
+		if(!(rhon>0.25f&&rhon<4.0f)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0
+		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[211]<0xF0000000u) atomic_inc(&rho_clamp_hits[211]); // Besuche, Ist=Soll
 		uxn  = u[                 n];
 		uyn  = u[    def_N+(ulong)n];
 		uzn  = u[2ul*def_N+(ulong)n];
@@ -3123,9 +3161,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		  // 0 % Ersparnis und der No-Op-Waechter brach den Lauf ab: ein falscher Alarm aus einem falsch
 		  // gewaehlten Messzeitpunkt. Mit +2 liegt die Zaehlung in BEIDEN Domaenen mitten in der Periode.
 		  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[rho_schreiben?205u:204u]<0xF0000000u) atomic_inc(&rho_clamp_hits[rho_schreiben?205u:204u]);
-		  if(rho_schreiben) rho[n] = rhon; } // update density field
+		  if(rho_schreiben) store_rho_diag(rho, n, rhon, t, rho_clamp_hits); } // update density field
 		)+"#else"+R(
-		rho[n] = rhon; // update density field
+		store_rho_diag(rho, n, rhon, t, rho_clamp_hits); // update density field
 		)+"#endif"+R( // RHO_SPARSAM
 		)+"#ifdef U_SPARSAM"+R(
 		// ★ TODO 2 Schritt 3 (12.09.2026): u wird nur noch dort geschrieben, wo es VOR dem naechsten
@@ -3935,7 +3973,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	store_f(n, feq, fi, j, t TS_A);
 }
 )
-+R(kernel void update_fields)+"("+R(const global fpxx* fi, global float* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
++R(kernel void update_fields)+"("+R(const global fpxx* fi, global rho_t* rho, global float* u, const global uchar* flags, const ulong t, const float fx, const float fy, const float fz // ) { // calculate fields from DDFs
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -4018,7 +4056,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(flagsn_bo!=TYPE_E) // only update fields for non-TYPE_E cells
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	{
-		rho[n] = rhon; // update density field
+		store_rho(rho, n, rhon); // update density field
 		store3(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
 	}
 } // update_fields()
@@ -4037,7 +4075,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float old = val; while((old=atomic_xchg(addr, atomic_xchg(addr, 0.0f)+old))!=0.0f);
 )+"#endif"+R(
 }
-)+R(kernel void po_reduce_mean(const global float* rho, const global uint* po_interior, const uint N_po, global float* po_part) {
+)+R(kernel void po_reduce_mean(const global rho_t* rho, const global uint* po_interior, const uint N_po, global float* po_part) {
 	// Mittelwert der Dichte ueber die INNENZELLEN der Auslassebene: erst im lokalen Speicher
 	// zusammenfassen, dann schreibt jede Gruppe exklusiv ihren Slot. Die Endsumme bildet
 	// po_final_mean in Indexordnung -- OHNE Atomik (Umbau 2026-08-24, siehe dort).
@@ -4049,7 +4087,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// 1,2e-5 Fehler im Mittelwert -- das sind 1,4e-3 in cp gegen die 0,15, um die es geht. Mit der
 	// Abweichungsablage sind es 1e-9. Derselbe Kniff steht schon in calculate_rho_u
 	// ("add 1.0f last to avoid digit extinction effects").
-	cache[lid] = gid<N_po ? rho[po_interior[gid]]-1.0f : 0.0f;
+	// ★ 12.09.2026: load_drho, NICHT load_rho. Der Umweg ueber "+1, dann -1" wuerde den Wert auf das
+	// float32-Raster bei 1,0 runden und damit genau den absoluten Boden von 5,96e-8 einbauen, gegen
+	// den der Absatz darueber argumentiert. Ohne RHO_FP16 expandiert load_drho zu (rho[...]-1.0f) --
+	// zeichengleich zu dem, was hier vorher stand.
+	cache[lid] = gid<N_po ? load_drho(rho, po_interior[gid]) : 0.0f;
 	barrier(CLK_LOCAL_MEM_FENCE);
 	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
 		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
@@ -4077,7 +4119,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	po_mean[0] = s/(float)N_po;
 } // po_final_mean()
 
-)+R(kernel void apply_pressure_outlet(global float* u, global float* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
+)+R(kernel void apply_pressure_outlet(global float* u, global rho_t* rho, const global uint* po_cells, const global uint* po_interior, const uint N_po, const float rho_out, const float po_sigma, const global float* po_mean, const uint po_hart) {
 	// FORK -- Druck-Auslass. Setzt an jeder Auslasszelle die vorgeschriebene Dichte und kopiert die
 	// Geschwindigkeit aus der zugehoerigen Innenzelle (Nullgradient). Zusammen mit der TYPE_E-Logik in
 	// stream_collide ergibt das f = f_eq(rho_out, u_innen): Dirichlet auf den Druck, Neumann auf u.
@@ -4124,14 +4166,19 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// und kein sigma-Wert bringt die alte zurueck. Der Kontrollarm war damit still verschwunden, und
 	// der Default lief im neuen Regime, ohne dass es jemandem aufgefallen waere.
 	// po_hart = 1 stellt den alten Rand bit-genau wieder her (CFD_PO_HART=1).
-	rho[n] = po_hart!=0u ? fma(po_sigma, rho_out-rho[m], rho[m])
-	                     : fma(po_sigma, (rho_out-1.0f)-po_mean[0], rho[m]);
+	// ★ 12.09.2026: BEWUSST load_rho und nicht load_drho. In Abweichungsraeumen zu rechnen waere hier
+	// genauer, wuerde aber die Arithmetik des Arms OHNE RHO_FP16 aendern -- und dessen Bitgleichheit
+	// zum Stand davor ist das einzige Sicherheitsnetz dieses Umbaus. Der Boden von 5,96e-8 aus der
+	// Addition von 1 liegt unter der Quantisierung selbst (|rho-1|*2^-12 = 2,4e-7 bei rho-1 = 1e-3),
+	// ist hier also nicht der fuehrende Fehler.
+	store_rho(rho, n, po_hart!=0u ? fma(po_sigma, rho_out-load_rho(rho, m), load_rho(rho, m))
+	                              : fma(po_sigma, (rho_out-1.0f)-po_mean[0], load_rho(rho, m)));
 	u[                  n] = u[                  m];
 	u[    def_N+(ulong)n] = u[    def_N+(ulong)m];
 	u[2ul*def_N+(ulong)n] = u[2ul*def_N+(ulong)m];
 } // apply_pressure_outlet()
 
-)+R(kernel void apply_velocity_inlet(global float* rho, const global ulong* vi_cells, const global ulong* vi_interior, const uint N_vi) {
+)+R(kernel void apply_velocity_inlet(global rho_t* rho, const global ulong* vi_cells, const global ulong* vi_interior, const uint N_vi) {
 	// FORK -- Spiegelbild des Druck-Auslasses. Dort wird rho vorgeschrieben und u aus der Innenzelle
 	// genommen; hier wird u vorgeschrieben (das erledigt der TYPE_E-Zweig in stream_collide) und rho
 	// aus der Innenzelle uebernommen. Damit ist je Rand genau EINE Groesse vorgegeben.
@@ -4141,7 +4188,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const uint gid = get_global_id(0);
 	if(gid>=N_vi) return;
 	const ulong n = vi_cells[gid], m = vi_interior[gid];
-	rho[n] = rho[m];
+	// Reines Kopieren. Dass das unter RHO_FP16 NICHT driftet, haengt am Fixpunkt der Wandlung
+	// (Beweis an rho_pack in lbm.hpp): store_rho(load_rho(w)) liefert dasselbe Wort zurueck.
+	store_rho(rho, n, load_rho(rho, m));
 } // apply_velocity_inlet()
 
 // =====================================================================================
@@ -4212,7 +4261,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	return (uxx)x + (uxx)y*(uxx)def_Nx + (uxx)z*(uxx)def_Nx*(uxx)def_Ny;
 } // plane_cell_index()
 
-)+R(kernel void extract_plane_macros(const global float* rho, const global float* u, global float* out,
+)+R(kernel void extract_plane_macros(const global rho_t* rho, const global float* u, global float* out,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b) {
 	// Liest (rho, u_x, u_y, u_z) auf einer achsen-normalen Ebene in einen dichten Puffer.
@@ -4227,7 +4276,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const ulong o = (ulong)gid*4ul;
 	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
 	if(n>=(uxx)def_N) { out[o]=1.0f; out[o+1ul]=0.0f; out[o+2ul]=0.0f; out[o+3ul]=0.0f; return; }
-	out[o+0ul] = rho[n];
+	out[o+0ul] = load_rho(rho, n);
 	out[o+1ul] = u[                 n];
 	out[o+2ul] = u[    def_N+(ulong)n];
 	out[o+3ul] = u[2ul*def_N+(ulong)n];
@@ -4246,7 +4295,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[gid] = (n>=(uxx)def_N) ? (uchar)TYPE_S : flags[n];
 } // extract_plane_flags()
 
-)+R(kernel void drive_boundary_cubic_lift(global float* rho, global float* u, const global uchar* flags,
+)+R(kernel void drive_boundary_cubic_lift(global rho_t* rho, global float* u, const global uchar* flags,
 	const global float* coarse_plane,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b,
@@ -4277,7 +4326,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// ★ Gross-Audit M: isfinite ist unter -cl-finite-math-only toter Code (Compiler faltet zu true) --
 	// Bit-Test auf Exponent 0xFF faengt NaN/Inf treiberunabhaengig.
 	if((as_uint(v[0])&0x7F800000u)==0x7F800000u||(as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return; // R2: auch rho bit-testen (Bereichsvergleich ist unter finite-math NaN-unzuverlaessig)
-	rho[n] = v[0];
+	store_rho(rho, n, v[0]);
 	u[                 n] = v[1];
 	u[    def_N+(ulong)n] = v[2];
 	u[2ul*def_N+(ulong)n] = v[3];
@@ -5085,27 +5134,27 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	insert_fi(a, A, index_insert_m(a, direction), 2u*direction+1u, t, transfer_buffer_m, fi TS_A);
 }
 
-)+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global float* rho, const global float* u, const global uchar* flags) {
-	((global float*)transfer_buffer)[      a] = rho[               n];
+)+R(void extract_rho_u_flags(const uint a, const uint A, const uxx n, global char* transfer_buffer, const global rho_t* rho, const global float* u, const global uchar* flags) {
+	((global float*)transfer_buffer)[      a] = load_rho(rho,      n); // Puffer bleibt float32: Stride 17 unveraendert
 	((global float*)transfer_buffer)[    A+a] = u[                 n];
 	((global float*)transfer_buffer)[ 2u*A+a] = u[    def_N+(ulong)n];
 	((global float*)transfer_buffer)[ 3u*A+a] = u[2ul*def_N+(ulong)n];
 	((global uchar*)transfer_buffer)[16u*A+a] = flags[             n];
 }
-)+R(void insert_rho_u_flags(const uint a, const uint A, const uxx n, const global char* transfer_buffer, global float* rho, global float* u, global uchar* flags) {
-	rho[               n] = ((const global float*)transfer_buffer)[      a];
+)+R(void insert_rho_u_flags(const uint a, const uint A, const uxx n, const global char* transfer_buffer, global rho_t* rho, global float* u, global uchar* flags) {
+	store_rho(rho,     n,   ((const global float*)transfer_buffer)[      a]);
 	u[                 n] = ((const global float*)transfer_buffer)[    A+a];
 	u[    def_N+(ulong)n] = ((const global float*)transfer_buffer)[ 2u*A+a];
 	u[2ul*def_N+(ulong)n] = ((const global float*)transfer_buffer)[ 3u*A+a];
 	flags[             n] = ((const global uchar*)transfer_buffer)[16u*A+a];
 }
-)+R(kernel void transfer_extract_rho_u_flags(const uint direction, const ulong t, global char* transfer_buffer_p, global char* transfer_buffer_m, const global float* rho, const global float* u, const global uchar* flags) {
+)+R(kernel void transfer_extract_rho_u_flags(const uint direction, const ulong t, global char* transfer_buffer_p, global char* transfer_buffer_m, const global rho_t* rho, const global float* u, const global uchar* flags) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
 	extract_rho_u_flags(a, A, index_extract_p(a, direction), transfer_buffer_p, rho, u, flags);
 	extract_rho_u_flags(a, A, index_extract_m(a, direction), transfer_buffer_m, rho, u, flags);
 }
-)+R(kernel void transfer__insert_rho_u_flags(const uint direction, const ulong t, const global char* transfer_buffer_p, const global char* transfer_buffer_m, global float* rho, global float* u, global uchar* flags) {
+)+R(kernel void transfer__insert_rho_u_flags(const uint direction, const ulong t, const global char* transfer_buffer_p, const global char* transfer_buffer_m, global rho_t* rho, global float* u, global uchar* flags) {
 	const uint a=get_global_id(0), A=get_area(direction); // a = domain area index for each side, A = area of the domain boundary
 	if(a>=A) return; // area might not be a multiple of cl_workgroup_size, so return here to avoid writing in unallocated memory space
 	insert_rho_u_flags(a, A, index_insert_p(a, direction), transfer_buffer_p, rho, u, flags);

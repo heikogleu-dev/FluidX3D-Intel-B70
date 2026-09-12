@@ -1067,16 +1067,16 @@ static void pruefe_slice_ebene(LBM& L, const uint Nx, const uint Ny, const uint 
 	std::vector<float> su(np*3ull), sr(np); std::vector<uchar> sf(np);
 	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
 		const ulong g=(ulong)x+(ulong)z*(ulong)Nx, n=(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
-		su[g*3ull]=L.u.x[n]; su[g*3ull+1ull]=L.u.y[n]; su[g*3ull+2ull]=L.u.z[n]; sr[g]=L.rho[n]; sf[g]=L.flags[n];
+		su[g*3ull]=L.u.x[n]; su[g*3ull+1ull]=L.u.y[n]; su[g*3ull+2ull]=L.u.z[n]; sr[g]=L.rho.get(n); sf[g]=L.flags[n];
 	}
 	L.lese_yslice_in_host(y);
 	float dmax=0.0f; ulong nfl=0ull, nnan=0ull; // nnan: NaN-Zustandswechsel -- fmax ist NaN-blind (Auditor-A NIEDRIG-4)
 	for(uint z=0u; z<Nz; z++) for(uint x=0u; x<Nx; x++) {
 		const ulong g=(ulong)x+(ulong)z*(ulong)Nx, n=(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
 		dmax = fmax(dmax, fabs(su[g*3ull]-L.u.x[n])); dmax = fmax(dmax, fabs(su[g*3ull+1ull]-L.u.y[n]));
-		dmax = fmax(dmax, fabs(su[g*3ull+2ull]-L.u.z[n])); dmax = fmax(dmax, fabs(sr[g]-L.rho[n]));
+		dmax = fmax(dmax, fabs(su[g*3ull+2ull]-L.u.z[n])); dmax = fmax(dmax, fabs(sr[g]-L.rho.get(n)));
 		nnan += (ulong)(std::isnan(su[g*3ull])!=std::isnan(L.u.x[n])) + (ulong)(std::isnan(su[g*3ull+1ull])!=std::isnan(L.u.y[n]))
-		      + (ulong)(std::isnan(su[g*3ull+2ull])!=std::isnan(L.u.z[n])) + (ulong)(std::isnan(sr[g])!=std::isnan(L.rho[n]));
+		      + (ulong)(std::isnan(su[g*3ull+2ull])!=std::isnan(L.u.z[n])) + (ulong)(std::isnan(sr[g])!=std::isnan(L.rho.get(n)));
 		if(sf[g]!=L.flags[n]) nfl++;
 	}
 	print_info("SLICE-PRUEF "+tag+" y="+to_string(y)+": max |Delta| u/rho = "+to_string(dmax,9u)
@@ -1148,7 +1148,7 @@ static void schreibe_vtk_feld(LBM& L, const uint Nx, const uint Ny, const uint N
 	{
 		std::vector<float> buf(Sx);
 		for(uint z=0u; z<Sz; z++) for(uint y=0u; y<Sy; y++) {
-			for(uint x=0u; x<Sx; x++) buf[x] = reverse_bytes(L.rho[(ulong)(x*stride) + (ulong)Nx*((ulong)(y*stride) + (ulong)Ny*(ulong)(z*stride))]);
+			for(uint x=0u; x<Sx; x++) buf[x] = reverse_bytes(L.rho.get((ulong)(x*stride) + (ulong)Nx*((ulong)(y*stride) + (ulong)Ny*(ulong)(z*stride)))); // get() liefert float -- die VTK-Spalte bleibt "SCALARS rho float 1"
 			f.write((char*)buf.data(), (std::streamsize)(buf.size()*sizeof(float)));
 		}
 	}
@@ -1466,6 +1466,30 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 		  if(rho_an&&rs==0ull) print_error(string("rho-SPARSAM ist an, aber Slot 204 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
 		  if(rs+rg>0ull&&us+ug>0ull&&rs+rg!=us+ug) print_error("FELD-SPARSAM Ist=Soll verletzt: rho zaehlt "+to_string(rs+rg)+" Zellen, u aber "+to_string(us+ug)+". Beide Zaehlerpaare sitzen im SELBEN Block und muessen dieselbe Zellmenge sehen -- eine Differenz heisst Saettigung oder ein Zaehler an der falschen Stelle.");
 		  if(u_an&&us==0ull) print_error(string("u-SPARSAM ist an, aber Slot 206 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
+		}
+		{ // ★ TODO 2 Schritt 4 (12.09.2026): rho als 2-Byte-Wort. Drei Aussagen, alle Ist=Soll.
+		  //   Slot 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle. SOLL 0, UNGEGATET.
+		  //             Feuert er, liest irgendein Kernel den Puffer als falschen Typ -- die eine
+		  //             Fehlerklasse, die dieser Umbau aufmacht und die sonst voellig still bliebe.
+		  //   Slot 211 = Besuche derselben Stelle an EINEM Schritt. SOLL > 0. Ohne ihn waere 210 ein
+		  //             Waechter, dessen Null nichts beweist, weil er vielleicht nie ausgefuehrt wird.
+		  //   Slots 212..217 = Dekaden des Rueckrechenfehlers |load_rho(store_rho(x))-x|.
+		  //             SOLL: 217 (>=1e-3) exakt 0. Nur unter RHO_FP16 belegt; ohne ihn ist
+		  //             store_rho die Identitaet und es gaebe nichts zu messen.
+		  ulong ausser=0ull, besuche=0ull, q[6]={0ull,0ull,0ull,0ull,0ull,0ull}, qs=0ull;
+		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
+			ausser+=(ulong)dm->rho_clamp_hits[210]; besuche+=(ulong)dm->rho_clamp_hits[211];
+			for(uint k=0u; k<6u; k++) { const ulong v=(ulong)dm->rho_clamp_hits[212u+k]; q[k]+=v; qs+=v; } }
+		  print_info(string("  rho-Speicherwort ")+wo+": "+to_string((uint)(8u*sizeof(rhoxx)))+" bit, "
+			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb 0,25..4,0 (Soll 0).");
+		  if(ausser>0ull) print_error(string("rho-Bereichswaechter ")+wo+": "+to_string(ausser)+" Lesungen ausserhalb 0,25..4,0. Ein Kernel liest den rho-Puffer als falschen Typ (Signatur noch 'global float* rho'?) -- die Werte sind Muell, der Lauf ist kein Ergebnis.");
+		  if(besuche==0ull) print_error(string("rho-Bereichswaechter ")+wo+": Slot 211 = 0, die Lesestelle wurde am Zaehlschritt NIE besucht. Damit beweist die Null in Slot 210 nichts -- lautloser Waechter.");
+		  if(qs>0ull) print_info(string("  rho-Quantisierung ")+wo+": |Rueckrechenfehler| <1e-7: "+to_string(100.0*(double)q[0]/(double)qs,2u)
+			+"%, <1e-6: "+to_string(100.0*(double)q[1]/(double)qs,2u)+"%, <1e-5: "+to_string(100.0*(double)q[2]/(double)qs,2u)
+			+"%, <1e-4: "+to_string(100.0*(double)q[3]/(double)qs,2u)+"%, <1e-3: "+to_string(100.0*(double)q[4]/(double)qs,2u)
+			+"%, >=1e-3: "+to_string(100.0*(double)q[5]/(double)qs,2u)+"% ("+to_string(qs)+" Schreibvorgaenge)");
+		  if(q[5]>0ull) print_error(string("rho-Quantisierung ")+wo+": "+to_string(q[5])+" Schreibvorgaenge mit Rueckrechenfehler >= 1e-3. Das ist die Groessenordnung des Signals selbst -- das Speicherformat traegt den Wertebereich nicht.");
+		  if(sizeof(rhoxx)<4u&&qs==0ull) print_error(string("rho ist auf 2 Byte gebaut (RHO_FP16), aber die Quantisierungs-Dekaden 212..217 sind ALLE null (")+wo+") -- store_rho_diag wurde nie ausgefuehrt. Lautloser No-Op.");
 		}
 		{ // ★ Pruefbefund A4: Slot 59 wurde NIRGENDS gelesen -- ein reiner Schreibzaehler.
 			ulong bw=0ull; for(uint d=0u; d<L.get_D(); d++) bw+=(ulong)L.lbm_domain[d]->rho_clamp_hits[59];
@@ -7756,10 +7780,17 @@ static void main_setup_fahrzeug_dd() {
 					{
 						n_coin++;
 						const ulong cb = ((ulong)(b/ratio)*(ulong)cp[p].extent_a + (ulong)(a/ratio))*4ull;
-						const float d = fmax(fmax(fabs(lbm_f.rho[n]-face[p][cb]), fabs(lbm_f.u.x[n]-face[p][cb+1ull])),
+						const float d = fmax(fmax(fabs(lbm_f.rho.get(n)-face[p][cb]), fabs(lbm_f.u.x[n]-face[p][cb+1ull])),
 						                     fmax(fabs(lbm_f.u.y[n]-face[p][cb+2ull]), fabs(lbm_f.u.z[n]-face[p][cb+3ull])));
 						maxdev = fmax(maxdev, d);
-						if(d>1.0e-6f) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
+						// ★ 12.09.2026, TODO 2 Schritt 4: die Schranke muss mit dem SPEICHERFORMAT von rho wandern.
+						// Bei rho als FP16S(rho-1) ist das Quant |rho-1|*2^-12; am echten Feld gemessen bis 5,6e-5,
+						// also bis zu 56-fach ueber der alten festen Schranke 1e-6. Ohne diese Anpassung meldet die
+						// Kopplungspruefung an JEDEM Deckungspunkt in JEDEM Lauf einen Defekt, den es nicht gibt.
+						// Bewusst NICHT die Schranke pauschal hochsetzen: u steht im selben fmax und soll seine
+						// scharfe 1e-6 behalten. Ohne RHO_FP16 ist tol_rho exakt die alte 1e-6.
+						const float tol_rho = fmax(1.0e-6f, (sizeof(rhoxx)<4u ? fabs(face[p][cb]-1.0f)*3.0e-4f : 0.0f));
+						if(d>tol_rho) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
 					}
 				}
 				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)
@@ -8179,7 +8210,7 @@ static void main_setup_fahrzeug_dd() {
 					for(uint sz2=0u; sz2<fNz; sz2++) {
 						const ulong n = (ulong)sx+((ulong)sy+(ulong)sz2*(ulong)fNy)*(ulong)fNx;
 						sonde_csv << t_si << "," << sx << "," << sz2 << "," << lbm_f.u.x[n]/u_lat << ","
-						          << lbm_f.u.y[n]/u_lat << "," << lbm_f.u.z[n]/u_lat << "," << lbm_f.rho[n] << ","
+						          << lbm_f.u.y[n]/u_lat << "," << lbm_f.u.z[n]/u_lat << "," << lbm_f.rho.get(n) << ","
 						          << (((lbm_f.flags[n]&TYPE_S)!=0u)?1u:0u) << "\n";
 					}
 				}

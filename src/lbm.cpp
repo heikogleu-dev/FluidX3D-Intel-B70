@@ -26,7 +26,7 @@ const uint transfers = 9u;
 #endif // D3Q27
 
 uint bytes_per_cell_host() { // returns the number of Bytes per cell allocated in host memory
-	uint bytes_per_cell = 17u; // rho, u, flags
+	uint bytes_per_cell = 13u+(uint)sizeof(rhoxx); // rho, u, flags (★ TODO 2 Schritt 4: rho 4 oder 2 Byte)
 #ifdef FORCE_FIELD
 	bytes_per_cell += 12u; // F
 #endif // FORCE_FIELD
@@ -39,7 +39,7 @@ uint bytes_per_cell_host() { // returns the number of Bytes per cell allocated i
 	return bytes_per_cell;
 }
 uint bytes_per_cell_device() { // returns the number of Bytes per cell allocated in device memory
-	uint bytes_per_cell = velocity_set*sizeof(fpxx)+17u; // fi, rho, u, flags
+	uint bytes_per_cell = velocity_set*sizeof(fpxx)+13u+(uint)sizeof(rhoxx); // fi, rho, u, flags (★ TODO 2 Schritt 4: rho 4 oder 2 Byte)
 #ifdef FORCE_FIELD
 	bytes_per_cell += 12u; // F
 #endif // FORCE_FIELD
@@ -54,7 +54,7 @@ uint bytes_per_cell_device() { // returns the number of Bytes per cell allocated
 uint bandwidth_bytes_per_cell_device() { // returns the bandwidth in Bytes per cell per time step from/to device memory
 	uint bandwidth_bytes_per_cell = velocity_set*2u*sizeof(fpxx)+1u; // lattice.set()*2*fi, flags
 #ifdef UPDATE_FIELDS
-	bandwidth_bytes_per_cell += 16u; // rho, u
+	bandwidth_bytes_per_cell += 12u+(uint)sizeof(rhoxx); // rho, u (★ TODO 2 Schritt 4)
 #ifdef TEMPERATURE
 	bandwidth_bytes_per_cell += 4u; // T
 #endif // TEMPERATURE
@@ -285,6 +285,23 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		print_info("CFD_DUMP_DEFINES: "+to_string(n)+" Defines an OpenCL emittiert:");
 		print(out);
 	}
+	{ // ★ TODO 2 Schritt 4 (12.09.2026) -- IST=SOLL auf den emittierten Quelltext, KEIN Grep im Kopf.
+		// Die Falle, gegen die das steht: Kernel::link_parameter reicht nur die cl::Buffer weiter
+		// (opencl.hpp), der Typ ist dort vollstaendig geloescht. Ein vergessenes "global float* rho"
+		// in irgendeinem Kernel liest dann zwei halbe Dichten als einen float -- Groessenordnung 1e38
+		// oder 1e-38, und unter -cl-finite-math-only ohne jede Diagnose. Weil get_opencl_c_code()
+		// alle Leerzeichen durch Zeilenumbrueche ersetzt (kernel.hpp), wird hier auf die UMGEBROCHENE
+		// Form gezaehlt; wer das uebersieht, baut sich einen Waechter, der immer 0 findet.
+		// Die 18 verbliebenen Stellen sind AUSSCHLIESSLICH SURFACE (5) und GRAPHICS (13); beide sind
+		// in diesem Bau aus, und defines.hpp schliesst sie unter RHO_FP16 hart aus. Aendert jemand
+		// die Zahl, ist das eine bewusste Entscheidung und diese Zeile gehoert mitgeaendert.
+		const string muster = "global\nfloat*\nrho", muster_t = "global\nrho_t*\nrho";
+		uint n_float=0u, n_t=0u;
+		for(size_t i=opencl_c_code.find(muster); i!=string::npos; i=opencl_c_code.find(muster, i+1ull)) n_float++;
+		for(size_t i=opencl_c_code.find(muster_t); i!=string::npos; i=opencl_c_code.find(muster_t, i+1ull)) n_t++;
+		if(n_float!=18u||n_t!=14u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
+			+to_string(n_t)+" x \"global rho_t* rho\" (Soll 14). Ein rho-Kernel ist nicht auf rho_t umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
+	}
 	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
 		const string pfad = "/tmp/fx3d_kernel_dump_"+to_string(dump_nr++)+".cl";
@@ -453,7 +470,7 @@ void LBM_Domain::allocate(Device& device) {
 	// allozierten 19-GB-fi-Buffers bringt den Intel-NEO mit CL_OUT_OF_RESOURCES zu Fall. Das Move-Assign
 	// in finalize gibt so nur den Platzhalter frei, was trivial ist.
 	fi = Memory<fpxx>(device, sparse_on ? 1ull : N, velocity_set, false);
-	rho = Memory<float>(device, N, 1u, true, true, 1.0f);
+	rho = Memory<rhoxx>(device, N, 1u, true, true, rho_pack(1.0f)); // ★ TODO 2 Schritt 4: Speicherwort fuer rho=1 (ohne RHO_FP16 ist das weiterhin 1.0f, mit RHO_FP16 das Wort 0x0000)
 	u = Memory<float>(device, N, 3u);
 	flags = Memory<uchar>(device, N);
 	if(sparse_on) { // Tile-Raster aufspannen; der Inhalt kommt erst in finalize_sparse_tiles()
@@ -488,7 +505,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 208 (204..207 = rho/u-SPARSAM, 12.09.; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	// letzten Slot L. NAECHSTER FREIER SLOT: 218 (204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst beweist die Null in 210 nichts; 212..217 = Dekaden von |load_rho(store_rho(x))-x|, <1e-7/<1e-6/<1e-5/<1e-4/<1e-3/>=1e-3, saettigend, nur unter RHO_FP16 belegt, Soll: 217 == 0 -- TODO 2 Schritt 4, 12.09.; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -1820,6 +1837,32 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define store(p,o,x) (p)[o]=(x)" // regular float write
 #endif // FP32
 
+// ★ TODO 2 Schritt 4 (12.09.2026) -- Speicherformat von rho auf der GERAETESEITE.
+// Gespeichert wird rho-1, nicht rho: bei rho ~ 1 ist der half-ULP 9,8e-4 und damit so gross wie das
+// Signal. Die Wandlung ist VERLUSTFREI SKALIERT -- 3.0517578E-5f ist BITGENAU 2^-15 und 32768.0f ist
+// 2^15, beide Multiplikationen runden also nicht. Zusammen mit der Sterbenz-Exaktheit von (x)-1.0f
+// auf [0,5; 2,0] macht das die Kette Laden->Speichern zu einem Fixpunkt (Beweis siehe lbm.hpp bei
+// rho_pack). Es macht die Makros ausserdem unempfindlich gegen -cl-mad-enable (opencl.hpp): eine
+// Kontraktion zu mad() kann nichts aendern, wo nichts zu runden ist.
+//
+// ZWEI LADEMAKROS, und das ist kein Luxus: load_rho liefert rho, load_drho liefert rho-1 OHNE den
+// Umweg ueber die Addition von 1. Wer rho-1 braucht und trotzdem load_rho nimmt, rechnet
+// (h*2^-15 + 1.0f) - 1.0f und hat den Wert auf das float32-Raster bei 1,0 gerundet, also einen
+// absoluten Boden von 5,96e-8 eingebaut. Genau davor warnt der Kommentar an po_reduce_mean, der fuer
+// seine Abweichungsablage 1e-9 beansprucht -- mit load_rho waere das lautlos 60-fach verfehlt.
+#ifdef RHO_FP16
+	"\n	#define RHO_FP16" // damit kernel.cpp den Arm kennt (Host-Define allein wirkt nicht auf dem Geraet)
+	"\n	#define rho_t half" // rho als range-verschobenes IEEE-754-FP16, 2 statt 4 Byte je Zelle
+	"\n	#define load_rho(p,o) (vload_half(o,p)*3.0517578E-5f+1.0f)"
+	"\n	#define load_drho(p,o) (vload_half(o,p)*3.0517578E-5f)" // rho-1, ohne Ausloeschung
+	"\n	#define store_rho(p,o,x) vstore_half_rte(((x)-1.0f)*32768.0f,o,p)"
+#else // RHO_FP16
+	"\n	#define rho_t float" // unveraendert: rho als float32
+	"\n	#define load_rho(p,o) ((p)[o])"
+	"\n	#define load_drho(p,o) ((p)[o]-1.0f)"
+	"\n	#define store_rho(p,o,x) ((p)[o]=(x))"
+#endif // RHO_FP16
+
 #ifdef UPDATE_FIELDS
 	"\n	#define UPDATE_FIELDS"
 #endif // UPDATE_FIELDS
@@ -2180,7 +2223,7 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		lbm_domain[d] = new LBM_Domain(device_infos[d], this->Nx/Dx+2u*Hx, this->Ny/Dy+2u*Hy, this->Nz/Dz+2u*Hz, Dx, Dy, Dz, (int)(x*this->Nx/Dx)-(int)Hx, (int)(y*this->Ny/Dy)-(int)Hy, (int)(z*this->Nz/Dz)-(int)Hz, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
 	} // });
 	{
-		Memory<float>** buffers_rho = new Memory<float>*[D];
+		Memory<rhoxx>** buffers_rho = new Memory<rhoxx>*[D];
 		for(uint d=0u; d<D; d++) buffers_rho[d] = &(lbm_domain[d]->rho);
 		rho = Memory_Container(this, buffers_rho, "rho");
 	} {
@@ -2230,7 +2273,7 @@ LBM::LBM(const uint3 N, const float nu, const Device_Info& device_info, const fl
 	lbm_domain = new LBM_Domain*[1u];
 	lbm_domain[0] = new LBM_Domain(device_info, this->Nx, this->Ny, this->Nz, 1u, 1u, 1u, 0, 0, 0, nu, fx, fy, fz, sigma, alpha, beta, particles_N, particles_rho);
 	{
-		Memory<float>** buffers_rho = new Memory<float>*[1u];
+		Memory<rhoxx>** buffers_rho = new Memory<rhoxx>*[1u];
 		buffers_rho[0] = &(lbm_domain[0]->rho);
 		rho = Memory_Container(this, buffers_rho, "rho");
 	} {
@@ -2947,7 +2990,7 @@ void LBM::lese_yslice_in_host(const uint y) {
 		const ulong g = (ulong)x + (ulong)z*(ulong)Nx;                                // Ebenen-Index (a=x, b=z)
 		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;         // Domaenen-Index
 		const ulong o = g*4ull;
-		rho[n] = ebene[o]; u.x[n] = ebene[o+1ull]; u.y[n] = ebene[o+2ull]; u.z[n] = ebene[o+3ull];
+		rho.set(n, ebene[o]); u.x[n] = ebene[o+1ull]; u.y[n] = ebene[o+2ull]; u.z[n] = ebene[o+3ull];
 		flags[n] = dom->slice_flags[g];
 	}
 }

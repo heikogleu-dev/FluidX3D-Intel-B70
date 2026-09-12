@@ -19,6 +19,23 @@
 //#define TRT // choose two-relaxation-time LBM collision operator
 
 #define FP16S // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to range-shifted IEEE-754 FP16; number conversion is done in hardware; all arithmetic is still done in FP32
+//#define RHO_FP16 // ★ FORK 2026-09-12, TODO 2 Schritt 4: rho im GERAETE- und Hostspeicher als FP16S(rho-1)
+// statt float32. Spart bei 4 mm 990 MiB VRAM im Nahfeld (519.139.485 Zellen x 2 B) und noch einmal
+// dieselbe Menge System-RAM, weil die B70 KEIN Zero-Copy hat und rho dort zweimal liegt; im Fernfeld
+// (iGPU, Zero-Copy) sind es 388 MiB einfach. LAUFZEIT ist KEIN Argument: nach Schritt 1
+// (CFD_RHO_SPARSAM) traegt rho nur noch rund 40 MB je feinem Schritt = 0,1 % des Schrittverkehrs.
+// Dies ist ein reiner KAPAZITAETS-Hebel.
+//   Format: gespeichert wird rho-1, nicht rho. Bei rho ~ 1 hat half einen ULP von 9,8e-4 -- das ist
+//   die Groessenordnung des Signals selbst. Auf rho-1 angewandt ist die Aufloesung relativ 2^-12.
+//   AM ECHTEN FELD GEMESSEN (export/p4_neu/feld_nah_000501ms.vtk, 451.428.942 Fluidzellen):
+//     FP16S(rho-1): Fehler RMS 3,32e-7, max 5,63e-5     half(rho) roh: RMS 1,82e-4, max 4,88e-4
+//   Die Verschiebung um 1 ist also Faktor 550 im RMS, kein Stil.
+//   EHRLICH DAZU: gegen den heutigen float32-Stand ist das ein VERLUST, kein Gewinn. float32 traegt
+//   bei rho nahe 1 einen absoluten Boden von 5,96e-8; FP16S(rho-1) traegt |rho-1|*2^-12, bei
+//   rho-1 = 1e-3 also 2,4e-7. Der Trick macht half ueberhaupt erst brauchbar -- mehr nicht.
+//   KEIN UEBERLAUF: die Skalierung traegt bis |rho-1| = 1,999; RHO_CLAMP (unten) garantiert 0,5 und
+//   das Tor im Kopplungs-Lift (kernel.cpp, v[0] in (0,5; 2,0)) garantiert 1,0. Marge Faktor 2.
+//   Werkzeug zum Umschalten: werkzeuge/rho_format.sh FP32|FP16
 //#define FP16C // optional for 2x speedup and 2x VRAM footprint reduction: compress LBM DDFs to more accurate custom FP16C format; number conversion is emulated in software; all arithmetic is still done in FP32
 
 //#define BENCHMARK // disable all extensions and setups and run benchmark setup instead
@@ -130,6 +147,22 @@
 #else // FP32
 #define fpxx float
 #endif // FP32
+
+// ★ TODO 2 Schritt 4: Speichertyp von rho. Host-Seite; die Geraeteseite bekommt rho_t/load_rho/
+// store_rho als JIT-Define (lbm.cpp, neben den fpxx-Makros). Ohne RHO_FP16 ist rhoxx float und
+// jede Wandlung die Identitaet -- der Arm ist dann bitgleich zum Stand vor dieser Aenderung.
+#ifdef RHO_FP16
+#define rhoxx ushort
+#else // RHO_FP16
+#define rhoxx float
+#endif // RHO_FP16
+
+// Die rho-Leser der nicht gebauten Erweiterungen stehen weiter auf "global float* rho" (kernel.cpp,
+// hinter Geraete-#ifdef). Wer eine davon einschaltet, bekaeme einen Puffer als falschen Typ gelesen --
+// Faktor 1e38 und unter -cl-finite-math-only ohne jede Diagnose. Deshalb hier hart statt dort still.
+#if defined(RHO_FP16) && (defined(SURFACE) || defined(GRAPHICS) || defined(TEMPERATURE) || defined(PARTICLES) || defined(INTERACTIVE_GRAPHICS) || defined(INTERACTIVE_GRAPHICS_ASCII))
+#error RHO_FP16 x SURFACE/GRAPHICS/TEMPERATURE/PARTICLES: deren rho-Leser sind nicht umgestellt (TODO 2 Schritt 4, 12.09.2026)
+#endif
 
 #ifdef BENCHMARK
 #undef UPDATE_FIELDS
