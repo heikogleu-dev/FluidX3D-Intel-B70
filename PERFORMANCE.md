@@ -582,36 +582,49 @@ falsche Physik), und `active_tile_id` muss hinter `TS_P` gebunden werden, sonst 
 
 # Was als Nächstes zu tun ist
 
-Vollständige Herleitung jedes Punktes in `PERFORMANCE-ROHBEFUNDE-2026-09-11.md`, Teil 4.
+**NEU GEORDNET am 12.09.2026, nach der u_lat-Messung.** Die Herleitung jedes Punktes steht in
+`PERFORMANCE-ROHBEFUNDE-2026-09-11.md` Teil 4, die u_lat-Messung in `GITTERGESCHWINDIGKEIT.md`.
 **Alle Zahlen sind Wanduhr, Verkehr oder eingesparte Schritte — keine Instruktionszahl.**
 
-## Die drei großen
+## Was sich am 12.09. geändert hat
+
+**`u_lat` ist gemessen und GEPARKT, nicht erledigt.** Der Schalter `CFD_U_LAT` ist gebaut
+(Vorgabe 0,075, Inertheit zweimal mit 28 von 28 bitgleichen Dateien abgenommen). Die Laufzeit
+folgt streng 1/u_lat: zwei Messungen bei 0,100 ergaben 76,0 % und 77,4 % der Wanduhr. **Aber die
+Kräfte bewegen sich**: Cd_rest +0,0346 ± 0,0157 (2,2 σ) über 200–500 ms. Der Versatz sitzt in den
+ersten vier Fenstern und ist im letzten verschwunden (−0,004 ± 0,017); das Feld bei 500 ms ist
+zwischen den Armen **nicht unterscheidbar** (RMS 2,84 m/s gegen 2,93 m/s, die ein Arm gegen sich
+selbst 50 ms später hat). Damit ist das Einschwingen der einzige verbleibende Verdächtige — und
+genau deshalb rückt `CFD_T_WARMUP` auf Platz 1.
+
+## Die Reihenfolge
 
 | # | Hebel | Gewinn | Physik | Aufwand |
 |---|---|---|---|---|
-| 1 | **`u_lat` von 0,075 anheben** | Laufzeit **∝ 1/u_lat**: 0,10 → **−25 %**, 0,125 → −40 % | Ma 0,130 → 0,173, Kompressibilitätsfehler ×1,8 | **eine Konstante an vier Stellen** |
-| 2 | **rho/u nur schreiben, wo gelesen wird** | **−6,5 bis −9,5 % Wanduhr** | bitgleich beweisbar | hoch |
-| 3 | **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** (Anwärmphase ist 39 %) | — | 200–300 Zeilen |
+| **1** | **`CFD_T_WARMUP` 0,201 → 0,29** | **15,6 min UND +1,3 % Genauigkeit** | beseitigt den +1,34-%-Bias auf cd_druck | **eine Variable** |
+| **2** | **Die sieben Zugriffe: rho/u nur schreiben, wo gelesen wird** | **−6,5 bis −9,5 % Wanduhr** | **bitgleich beweisbar** | hoch |
+| **3** | **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** (Anwärmphase ist 39 %) | — | 200–300 Zeilen |
+| 4 | `u_lat` erneut, HINTER Punkt 1 | −24 % Wanduhr | dann erst deutbar | Schalter liegt fertig |
 
-**Zu 1, und das ist der Fund dieser Runde:** `u_lat = 0.075f` steht **hart verdrahtet an vier
-Stellen** in `setup.cpp`, ohne Schalter und ohne dokumentierte Herleitung. Der Zeitschritt ist
-`dt = u_lat·dx/u_si`, die Laufzeit also streng proportional zu `1/u_lat`. Bei 0,075 rückt das
-Feld erst nach **13,3 Schritten** eine Zelle weiter — jedes Teilmodell mit advehiertem Eingang
-ist um diesen Faktor überabgetastet. Der Preis ist die Mach-Zahl (heute 0,130), der
-Kompressibilitätsfehler skaliert mit Ma². Nebenbei steigt τ von 0,500028 auf 0,500038, also
-**weg** von der Instabilitätsgrenze. **Nie gemessen, ein A/B auf der 8-mm-Sprosse kostet 14 min.**
+**Zu 1, und es ist heute mehr als ein billiger Posten:** das Messfenster beginnt mitten im
+Einschwingen. SISM wird bei 150 ms scharf, die Mittelung startet bei 201 ms, der Vorgang braucht
+92–114 ms. Solange das so ist, trägt **jeder** Arm, der die Zeitschrittweite anfasst, einen
+Einschwingunterschied mit — am 12.09. belegt. Der Punkt zahlt also doppelt: Zeit und Deutbarkeit.
 
-**Zu 2:** Im ganzen `stream_collide` gibt es **sieben** Zugriffe auf `u[]`/`rho[]`, und die drei
-lesenden stehen im TYPE_E-Zweig — **0,63 % der Zellen**. Geschrieben wird für 87,8 %, jeden
-Schritt: 16,8 % des Verkehrs für eine Leserschaft unter zwei. Alternative mit derselben
-Ursache: beide auf 2 Byte → **−3 961 MiB VRAM**, −7,2 % (Format ist am echten Feld
-entschieden: `FP16S(rho−1)`, **nicht** int16 — das kippt Gates am Wandmodell).
+**Zu 2 — die sieben Zugriffe, und das ist derselbe Punkt wie „rho/u nur schreiben":** im ganzen
+`stream_collide` gibt es **sieben** Zugriffe auf `u[]`/`rho[]`. Die vier lesenden stehen im
+TYPE_E-Zweig (`kernel.cpp`, „apply preset velocity/density") — **0,63 % der Zellen**. Geschrieben
+wird für 87,8 %, jeden Schritt: 16,8 % des Verkehrs für eine Leserschaft unter zwei Prozent.
+**Das neue Argument vom 12.09.:** dies ist der einzige grosse Posten der Liste, dessen Abnahme ein
+BYTEVERGLEICH ist und kein Fehlerbalken. Die u_lat-Runde hat gezeigt, was ein Hebel kostet, der
+Zahlen ändert — eine ganze Messkampagne, die im Rauschen endet.
+Alternative gleicher Ursache: beide auf 2 Byte → **−3 961 MiB VRAM**, −7,2 %. Format am echten
+Feld entschieden: `FP16S(rho−1)`, **nicht** int16 für u — das kippt Gates am Wandmodell.
 
 ## Die billigen
 
 | Hebel | Gewinn | Aufwand |
 |---|---|---|
-| **`CFD_T_WARMUP` 0,201 → 0,29** | **15,6 min UND +1,3 % Genauigkeit** | eine Variable |
 | Remesh-Diagnostik gattern | 1,35 % (73,3 s für zwei rein berichtende Rechnungen) | zwei `if` |
 | Kopplungsernte alle 2 Grobschritte | 1,65 % | zwei Zeilen |
 | `extract_plane_macros` vor `lbm_c.finish()` ziehen | 0,5–1,0 % + vier Syncs weniger | klein |
@@ -619,13 +632,107 @@ entschieden: `FP16S(rho−1)`, **nicht** int16 — das kippt Gates am Wandmodell
 | 150-ms-VTK-Dump, der wieder gelöscht wird | 9 s + 11,7 GB Schreiblast | eine Zeile |
 | `fac_geo[6]/[7]` (nie gelesen) | 25 MB VRAM | Stride-Umbau |
 
+## Neu auf der Liste, aber unter PHYSIK, nicht unter Performance
+
+**Abstandsgesteuerte Verfeinerung (12.09., Heiko-Frage).** Gerechnet an der echten STL
+(46,1058 m² benetzte Fläche, 133 766 Dreiecke) und mit der Steiner-Formel für die Schalenvolumen:
+von unserem 4-mm-Nahkasten liegen **2,33 %** innerhalb von 16 mm der Wand (0,744 von 31,96 m³).
+
+| Variante | Zellen | Arbeit je phys. Sekunde | mit gemessener Block-Indirektion (T=8: 71 %) |
+|---|---:|---:|---:|
+| heute (4 mm Nahkasten + 16 mm Fernfeld) | 722,6 M | 1,00 | — |
+| 1 mm bis 16 mm, dann 4/16/64 | 782,5 M | **5,28 ×** | 7,44 × |
+| 1 mm nur bis 4 mm, dann 2/4/8/16 | 338,1 M | 1,63 × | 2,30 × |
+| **2 mm bis 16 mm, dann 4/8/16/32** | **176,4 M** | **0,42 ×** | 0,59 × |
+
+Die innerste Stufe skaliert mit dx⁻⁴ (acht Zellen, zwei Schritte je Halbierung). **1 mm an der
+Wand ist ausgeschlossen** — 743,7 M Zellen allein in der ersten Schale, plus 264 M, wenn die
+Fahrbahn als zweite Wand zählt. **2 mm an der Wand wäre ein Viertel der Zellen und 1,7-fach
+schneller als heute.** Das ist kein Performance-Punkt: die Abtriebslücke (74,1 % von OF13) lebt
+dort, wo der Ablöseort von der Grenzschicht bestimmt wird.
+**Vier Dinge stehen dagegen, drei davon gemessen:** Block-Indirektion 29 % Durchsatz bei T=8,
+2-Zell-Halo 259,2 MiB vor der Kornwahl, die heutige Zwei-Stufen-Kopplung kostet schon 3,4 % des
+Grobschritts fürs Synchronisieren (bei fünf Stufen vier Grenzflächen statt einer). Das Vierte ist
+das eigentliche: **unsere Kopplung ist für genau zwei Domänen auf zwei Geräten gebaut.** Und jede
+Änderung der Wandzellgröße zieht y⁺ und damit die Eichung von Wandmodell, ELIBB und SISM mit.
+**Nicht zu verwechseln mit dem am 11.09. Verworfenen:** dort ging es um eine dritte Stufe IM
+iGPU-Schlupf, und dafür gibt es keinen Ort. Eine Abstandskaskade ist etwas anderes.
+
+**Cauchy-Schwarz-Realisierbarkeitsschranke (12.09., aus OPEN_Ludwig).** Klemmt die
+Nebendiagonalen des zweiten Moments auf |c_αβ| ≤ √(c_αα·c_ββ). Greift eine Stufe VOR unserer
+Geschwindigkeitsklemme, die nachweislich feuert (p4_neu: 56 539 Treffer im Nahfeld). Einzelheiten
+in `FREMDSOLVER-OPENLUDWIG.md` Abschnitt 2.2.
+
+## Eigener Punkt: die Geschwindigkeitsklemme erhaltend bauen (12.09.2026, Heiko)
+
+**Heute ist die Klemme ein Eingriff am Zustand, kein Filter.** `clamp(u, -def_c, def_c)` je
+Komponente schneidet die Geschwindigkeit ab — und die Geschwindigkeit IST das erste Moment.
+Damit nimmt die Klemme dem System Impuls weg, und das Log sagt es selbst, wenn es beim Fernfeld
+„0 Treffer (Impuls ungestoert)" meldet.
+
+**Der Vergleich mit OpenFOAM 13, am eigenen Referenzfall geprüft** (`CFD-Cases/mr2v40H`):
+`fvOptions` ist **leer**, `limitVelocity`/`limitTemperature`/`rhoMin`/`rhoMax` kommen im ganzen
+Fall nicht vor. Was dort steht, sind **Schema-Begrenzer**: `grad(U) cellLimited Gauss linear 1`,
+`div(phi,U) bounded Gauss LUST grad(U)`, `div(phi,k) bounded Gauss limitedLinear 1.0`,
+`default limited corrected 0.33`. Alle vier greifen am **Fluss oder Gradienten** und sind
+**erhaltend** — sie ändern, wie eine Größe transportiert wird, nie die Größe selbst.
+
+**In LBM geht das sauberer als in FVM.** Masse und Impuls sind das nullte und erste Moment von
+f; das Gleichgewicht trägt beide vollständig, der Nichtgleichgewichtsanteil hat beide **exakt
+null**. Jede Begrenzung, die nur f_neq anfasst, ist damit **exakt** erhaltend, nicht
+näherungsweise.
+
+**Und es gibt die parameterfreie Fassung:** Positivität. f_eq + f_neq ≥ 0 je Richtung ist eine
+physikalische Forderung, keine gewählte Zahl — sie wandert nicht mit `u_lat`, anders als die
+heutige Schwelle (0,57735 Gittereinheiten = 230,9 m/s bei u_lat 0,075, aber 138,6 m/s bei 0,125).
+OpenLUDWIG führt genau das als `limiter: "positivity"`; die Cauchy-Schwarz-Variante auf dem
+zweiten Moment ist die schärfere Schwester (`FREMDSOLVER-OPENLUDWIG.md` 2.2).
+
+**Zwischenschritt, der heute schon zählbar wäre:** den **entfernten Impuls** mitzählen statt nur
+die Treffer. Drei Zeilen und ein Slot; danach steht im Bericht nicht „1 421 219 Treffer", sondern
+wieviel Promille des Gesamtimpulses die Klemme genommen hat. Erst damit ist entscheidbar, ob sie
+Filter oder Eingriff ist. Bei 1,13 Treffern je Schritt (Standard) ist das akademisch, bei 47
+(u_lat 0,125) nicht mehr.
+
+**Nicht in TODO 2 mischen.** TODO 2 lässt Schreibvorgänge weg und ändert keinen Wert; seine
+Abnahme ist der Bytevergleich. Eine Klemme ändert Werte und zerstört genau dieses Kriterium.
+
+## Zwei offene Punkte vom 12.09., beide KEINE Performance-Punkte
+
+**1 · Die 4-mm-Sprosse ist nicht als reproduzierbar belegt — und einmal war sie es nachweislich
+nicht.** `p4_u125` und `p4_u125b` (u_lat 0,125, wortgleiche Zeile) unterscheiden sich: identischer
+Commit, alle Quelldateien der gesicherten Code-Kopien byteweise gleich, Binary unverändert
+(md5 `800542b6…`), Umgebung bis auf `CFD_RUN_NAME` gleich, Aufbau-Log identisch — und trotzdem
+weichen bei 50 ms 928 von 930 Sondenpunkten ab, maximal 0,68 m/s. Ein Lauf trug den
+Einlassdefekt, der andere nicht.
+
+**Auf der 8-mm-Sprosse gilt Determinismus dagegen, dreimal belegt:** uv8_vor/uv8_nach2 (über zwei
+verschiedene Binaries), uv8_u100/uv8_u100b, uv8_u125_a/_b — je **28 von 28 Dateien bitgleich**.
+u_lat ist damit als Ursache entlastet.
+
+Die beiden bekannten Fließkomma-Reduktionen sind bereits behoben und im Code vermerkt: `po_mean`
+am 24.08. (`kernel.cpp:3994`) und `object_force` am 25.08. (`:4482`). Die verbliebenen
+`atomic_add_f` sitzen in `object_torque`, `object_center_of_mass` (nicht im dd-Pfad) und
+`spread_force` (PARTICLES nicht gebaut). **Es ist also eine dritte, unbekannte Quelle.**
+
+**Was es entscheidet:** ein Wiederhollauf der 4-mm-Standardzeile gegen `p4_neu`, 90 min. Fällt er
+bitgleich aus, betrifft es nur den 0,125er-Betriebspunkt. Fällt er es nicht, trägt **jeder**
+4-mm-A/B dieses Projekts eine unbezifferte Streuung — auch die Fehlerbalken der Baseline.
+
+**2 · Der reflektierende Fernfeld-Einlass.** `CFD_FERN_VI=0` ist der gemessene Default, und
+`setup.cpp:6362` sagt es selbst: „rho bleibt am Einlass festgenagelt, der Rand reflektiert —
+bekannt und angesagt." Bei u_lat 0,075 bleibt das unter der Sichtbarkeitsschwelle (Sonde
+`einlass_saeule.csv`: **0 von 552** Zellen über 2 %), bei 0,125 riss es in einem von zwei Läufen
+auf (**71 von 552**, kleinstes u_x 21,53 statt 30 m/s, z = 5,74 m). Der dokumentierte Altfall lag
+bei z = 4,62 bis 5,58 m — dieselbe Stelle. Nächster Schritt ist ein Arm mit `CFD_FERN_VI=1`;
+er trennt „der Rand reflektiert" von „die Physik trägt die Mach-Zahl nicht".
+
 ## Der Befund, der kein Performance-Befund ist
 
-**Das Messfenster beginnt mitten im Einschwingen.** SISM wird bei 150 ms scharf, die Mittelung
-beginnt bei 201 ms, der Vorgang braucht 92–114 ms. Bias **+1,34 % auf `cd_druck`**. Für
-gepaarte A/B harmlos, für **jede Absolutaussage gegen OF13 nicht** — und das ist die offene
-Hauptfrage des Projekts. Die Nahfeldbox wird vor Messbeginn nicht einmal **einmal**
-durchspült (0,225 s gegen T_WARMUP 0,201 s).
+**Das Messfenster beginnt mitten im Einschwingen** — siehe Punkt 1 oben, er ist deswegen dort
+hingerückt. Bias **+1,34 % auf `cd_druck`**. Für gepaarte A/B harmlos, für **jede Absolutaussage
+gegen OF13 nicht** — und das ist die offene Hauptfrage des Projekts. Die Nahfeldbox wird vor
+Messbeginn nicht einmal **einmal** durchspült (0,225 s gegen T_WARMUP 0,201 s).
 
 ## Erledigt — nicht noch einmal vorschlagen
 
