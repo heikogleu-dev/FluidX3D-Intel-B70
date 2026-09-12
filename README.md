@@ -1,30 +1,38 @@
 # FluidX3D — Intel Arc Pro B70: Vehicle Aerodynamics (LBM-WMLES vs. OpenFOAM)
 
-**Performance & results at a glance** *(all numbers measured on this rig. Forces from the 4 mm
-production run `p4dt_deteps` (2026-09-11), the current baseline: facet SISM wall model, ghost-mode
-purification (P-TRT, ω_g = 1.90) and the det-ε rank guard. N = 300, window t ≥ 0.201 s, uncertainty
-= standard error over six 50 ms window means. Cd/Cz are the **rest** figures — the moving z-band
-around the wheel contact is split off, because the floor imprint produces ≈ −0.7 of purely
-artificial downforce — plus the friction path. Memory and throughput at 4 mm, 519 M fine cells on
-the B70 + 203 M coarse cells @ 16 mm on the iGPU, 501 ms physical.)*
+**Performance & results at a glance** *(every number measured on this rig. Forces from the 4 mm
+production run `p4_register` (2026-09-12), the current baseline: facet SISM wall model, ghost-mode
+purification (P-TRT, ω_g = 1.90), the det-ε rank guard, `rho` and `u` in two bytes, sparse field
+writes, and 8 steps per cell. N = 300, window t ≥ 0.201 s, uncertainty = standard error over six
+50 ms window means. Cd/Cz are the **rest** figures — the moving z-band around the wheel contact is
+split off, because the floor imprint produces ≈ −0.7 of purely artificial downforce — plus the
+friction path. 519 M fine cells on the B70 + 203 M coarse cells @ 16 mm on the iGPU, 501 ms
+physical.)*
 
-| Metric | Current baseline | Reference |
-|---|---|---|
-| **Cd** = pressure (band removed) + friction | **0.5651 ± 0.0131** | OpenFOAM 13: 0.599 → **94.3 %** |
-| **Cz** = pressure (band removed) + friction | **−0.9635 ± 0.0222** | OF13: −1.301 → **74.1 % of the reference downforce** |
-| **Wall-model coverage**, real wall cells | **93.85 %** | was 82.5 % before the det-ε rank guard |
-| **Free velocity outliers** > 60 m/s, t = 501 ms | **91** cells, max 77 m/s | was 6 270 cells, max 275 m/s before ghost-mode purification |
+| Metric | Current baseline | Previous (`p4_neu`, 2026-09-11) | Reference |
+|---|---|---|---|
+| **Cd** = pressure (band removed) + friction | **0.5822 ± 0.0182** | 0.5718 ± 0.0123 | OpenFOAM 13: 0.599 → **97.2 %** |
+| **Cz** = pressure (band removed) + friction | **−0.9704 ± 0.0236** | −0.9433 ± 0.0236 | OF13: −1.301 → **74.6 %** |
+| **Wall clock**, 501 ms physical | **48.9 min** | 90.4 min | −45.9 % |
+| **Performance index** | **5520** s_wall/s_phys | 10 958 | from the 100 ms mark: 5491 |
+| **Near-field VRAM** | **23 773 MB** | 27 734 MB | −3961 MiB |
+| **Really free VRAM**, measured | **7450 MB** | not readable | reconstruction claimed 8882 |
+| **Bytes per cell**, device | **47 B** | 55 B | upstream FP32: 93 B |
+
+Both force coefficients moved toward the reference in the same run; `cz_druck_rest` gains 0.0212
+at 4.37 σ. That run carries four levers at once and is production, not an A/B — no single-lever
+attribution is possible from it.
 
 Both force figures are **total** coefficients, because the OF13 reference is one. Their composition,
 so that no number here can be confused with another:
 
 | Component | Value | |
 |---|---|---|
-| `cz_druck` | −0.8238 | pressure including the wheel-contact z-band |
-| `cz_druck_band` | +0.2176 | that band alone — the floor imprint, **an artefact**, which is why it is split off |
-| **`cz_druck_rest`** | **−1.0414** | pressure without the band. **This is the quantity every model comparison in this document is measured on** |
-| `cz_reib` | +0.0779 | friction, and it works *against* downforce |
-| **Cz total** | **−0.9635** | `cz_druck_rest + cz_reib` — the row in the table above |
+| `cz_druck` | −0.8847 | pressure including the wheel-contact z-band |
+| `cz_druck_band` | +0.1576 | that band alone — the floor imprint, **an artefact**, which is why it is split off |
+| **`cz_druck_rest`** | **−1.0423** | pressure without the band. **This is the quantity every model comparison in this document is measured on** |
+| `cz_reib` | +0.0720 | friction, and it works *against* downforce |
+| **Cz total** | **−0.9704** | `cz_druck_rest + cz_reib` — the row in the table above |
 
 Model effects are quoted on `cz_druck_rest` throughout, because the friction path responds to these
 models with the opposite sign and would dilute the signal. The comparison against the reference
@@ -622,6 +630,72 @@ Three instruments, all built because a number that mattered was an estimate:
   — set *and* unset ones, because their code defaults were chosen for 0.075 too. Until now this had
   to be done by hand, which meant an arm could silently carry two changes instead of one. The
   conversion is loud: every affected switch reports its old and new value.
+
+### What a cell costs, and what resolution that buys (2026-09-12)
+
+| Device-memory item | bytes |
+|---|---:|
+| 19 distributions as FP16S | 38 |
+| `u`, three half-words | 6 |
+| `rho`, one half-word | 2 |
+| `flags` | 1 |
+| **per cell** | **47** |
+
+`F` lives only over the wall bounding box, not over the domain — worth **4.31 GB** at 4 mm. The
+**measured** figure is therefore 23 734 MB for 519 139 485 cells = **45.7 B per cell**, everything
+included. The host mirror costs 12.1 B per cell, the bandwidth **115 B per cell and step**.
+
+The same solver without our changes: **93 B** per cell with float32 throughout, **55 B** with FP16S
+for the distributions only. We sit at **47 B** — 85 % of the best upstream figure, 51 % of the
+float32 one.
+
+**3.75 mm is reachable, and only since 2026-09-12.** Cells grow by (4/3.75)³ = **+21.4 %**, near
+field 519 → 630 M. Volume-scaling buffers were scaled with dx⁻³, the facet buffers (394 MB) with
+the **wall area**, dx⁻².
+
+| | 4.00 mm measured | 3.75 mm projected |
+|---|---:|---:|
+| near-field VRAM peak | 23 773 MB | **28 822 MB** |
+| really free (desktop included) | 7450 MB | **2401 MB** |
+| wall clock | 48.9 min | **63 min** |
+
+**Without `rho` and `u` in two bytes the peak would be 33 862 MB** — 2.6 GB more than the card has.
+Wall clock grows by 29.5 %, not 21.4 %: cells by 21.4 %, steps per physical second by another
+6.7 %, because dt scales with dx. Work per physical second goes as **dx⁻⁴**.
+
+**The iGPU is not the limit.** Both grids grow by the same factor, `ratio` stays 4, and in the
+phase profile of `p4_register` the far field sits at **2.1 %** of visible time against 95.4 % for
+the near field. The 8.13 % far-field slack quoted elsewhere in `PERFORMANCE.md` predates the sparse
+writes and the two-byte fields and is superseded.
+
+**Not yet checked, and it could kill the arithmetic:** whether the near-field box and the far field
+still land on whole coarse cells at dx_c = 15 mm. At `ratio` 8 that failed by more than half a
+grid point. The first step is a ten-minute setup-only run, not a 63-minute production run.
+
+### Two B70s — the memory arithmetic works, the timing probably does not
+
+| | one card | two cards |
+|---|---:|---:|
+| VRAM budget for the near field | 30 199 MB | 61 830 MB |
+| cells it carries | 661 M | **1352 M** |
+| **reachable dx** | **3.69 mm** | **2.91 mm** |
+
+Budget = 32 655 MB capacity minus the desktop (1432 MB, on one card only) minus 1024 MB minimum
+headroom per card. The **halo is negligible**: splitting in x at 2.9 mm gives a 911×641
+cross-section, 110 MB against a 61 830 MB budget.
+
+**The catch is not memory, it is the iGPU.** At 2.9 mm the work per physical second grows **3.62×**.
+Two cards halve the near-field share to 1.81× — but the far field on the iGPU grows **ungeteilt**
+by 3.62×. Whether it still hides behind the near field is **not measured**: the phase profile
+measures the *wait* (2.1 %), not the far field's work. The only absolute figure is from
+**2026-08-08 at 8 mm and before every optimisation** — "the far field needs 79 % of the fine time".
+If that still held, the iGPU would become the critical path **immediately** on adding a second
+card, and the second accelerator would buy nothing.
+
+**What to measure before buying one:** the absolute time of one coarse step at today's state. That
+is a timer around the far-field kernel, not a rebuild — and it decides whether dual-B70 is a
+resolution investment or an idle one. On top of that, the coupling is built for exactly two domains
+on two devices; a three-device layout is parked and not started.
 
 ### Still parked
 

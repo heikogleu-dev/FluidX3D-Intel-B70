@@ -1,6 +1,6 @@
 # Performance und VRAM — Befundlage und Massnahmenliste
 
-**Stand 11.09.2026.** Konsolidiert aus drei Agentenrunden und eigener Nachprüfung. Die
+**Stand 12.09.2026 (Abschnitte 1e–1g), Rest 11.09.2026.** Konsolidiert aus drei Agentenrunden und eigener Nachprüfung. Die
 vollständigen Rohbefunde mit allen Zwischenrechnungen stehen in
 `PERFORMANCE-ROHBEFUNDE-2026-09-11.md` (1071 Zeilen); dieses Dokument ist die Arbeitsfassung.
 
@@ -395,6 +395,95 @@ Wanduhr sind der Boden, und den senkt weder die Kachelform noch, nach dieser Kur
 Workgroup=Tile-Dispatch mit seinen behaupteten −12 %. **Nicht bauen, solange 4 921 MB frei
 sind.** Es ist die Reserve für den Tag, an dem eine Rechnung sonst gar nicht passt — und für
 den liegt jetzt belegt vor, was sie kostet und welche Kachelform die richtige ist.
+
+---
+
+## 1g. Was eine Zelle kostet, und was damit an Auflösung geht (12.09.2026)
+
+Alle Zahlen aus dem Produktionslauf `p4_register` (4 mm, 12.09.), nicht geschätzt.
+
+### Der Preis je Zelle
+
+| Posten im Gerätespeicher | Byte |
+|---|---:|
+| 19 Verteilungen als FP16S | 38 |
+| `u`, drei Halbwörter | 6 |
+| `rho`, ein Halbwort | 2 |
+| `flags` | 1 |
+| **Summe** | **47** |
+
+`F` liegt nur über der Wand-BBox, nicht über der Domäne — das spart im 4-mm-Fall **4,31 GB**.
+**Gemessen** sind deshalb 23 734 MB für 519 139 485 Zellen = **45,7 B je Zelle**, alles inbegriffen.
+Der Hostspiegel kostet 6288 MB = 12,1 B je Zelle; die Bandbreite 115 B je Zelle **und Schritt**.
+
+Zum Vergleich derselbe Löser ohne unsere Änderungen: **93 B** je Zelle mit float32 durchgehend,
+**55 B** mit FP16S nur für die Verteilungen. Wir liegen bei **47 B**, also bei 85 % des besten
+Upstream-Standes und bei 51 % des float32-Standes.
+
+### 3,75 mm — machbar, und erst seit dem 12.09.
+
+Zellwachstum (4/3,75)³ = **+21,4 %**. Nahfeld 519 → **630 Mio** Zellen, Fernfeld 203 → 247 Mio.
+
+| | 4,00 mm gemessen | 3,75 mm hochgerechnet |
+|---|---:|---:|
+| VRAM-Spitze Nahfeld | 23 773 MB | **28 822 MB** |
+| echt frei (fdinfo, Desktop inbegriffen) | 7450 MB | **2401 MB** |
+| Wanduhr | 48,9 min | **63 min** |
+| Fernfeld im System-RAM | 9124 MB | 11 073 MB (von 80 GB verfügbar) |
+
+Skaliert wurde getrennt: volumenskalierende Puffer mit dx⁻³, die Facettenpuffer (394 MB) mit der
+**Wandfläche**, also dx⁻².
+
+**Ohne rho und u auf zwei Byte läge die Spitze bei 33 862 MB** — 2,6 GB über dem, was die Karte
+hat. Die Zwei-Byte-Arbeit ist exakt das, was diese Sprosse möglich macht.
+
+**Die Laufzeit wächst um 29,5 %, nicht um 21,4 %:** die Zellen um 21,4 %, die Schritte je
+physikalischer Sekunde um weitere 6,7 %, weil dt mit dx skaliert. Arbeit je physikalischer Sekunde
+geht mit **dx⁻⁴**.
+
+**Die iGPU ist nicht der Engpass.** Beide Gitter wachsen um denselben Faktor, `ratio` bleibt 4.
+Im Phasenprofil von `p4_register` steht das Fernfeld bei **2,1 %** sichtbarer Zeit (Nahfeld 95,4 %,
+Kopplung 1,0 %). **Die 8,13 % Schlupf aus Abschnitt 1 sind damit überholt** — sie stammen vom
+11.09., vor den Sparschaltern und den Zwei-Byte-Feldern.
+
+**Drei Vorbehalte, die vor einer Zusage gehören:**
+1. **Gitterausrichtung nicht nachgerechnet.** dx_c wäre 15 mm. Ob Nahfeldbox und Fernfeld darauf
+   aufgehen, ist offen — bei `ratio` 8 ging 12,2720/0,032 „nicht einmal auf einem halben
+   Gitterpunkt auf" (setup.cpp). Geht es nicht auf, wächst die Box und die Rechnung fällt.
+2. **2401 MB Restluft sind 2,3-fach über der Untergrenze** statt heute 7,3-fach. Und `kf_liste`
+   bindet erst **in der Zeitschleife**, hinter jedem Speicherwächter.
+3. **Der Desktop-Anteil schwankt** mit dem, was offen ist (am 12.09. 1432 MB).
+
+**Erster Schritt: ein Aufbaulauf mit kleiner Endzeit** — zeigt Ausrichtung und echten Spitzenwert
+in zehn Minuten statt in 63.
+
+### Zwei B70 — die VRAM-Rechnung geht, die Zeitrechnung vermutlich nicht
+
+| | eine Karte | zwei Karten |
+|---|---:|---:|
+| VRAM-Budget fürs Nahfeld | 30 199 MB | 61 830 MB |
+| tragbare Zellzahl | 661 Mio | **1352 Mio** |
+| **erreichbares dx** | **3,69 mm** | **2,91 mm** |
+
+Budget = Kapazität 32 655 MB minus Desktop (1432, hängt nur an EINER Karte) minus Mindestluft
+1024 MB je Karte. Der **Halo** ist vernachlässigbar: bei Teilung in x und 2,9 mm ist der
+Querschnitt 911×641, also 110 MB gegen 61 830 MB Budget.
+
+**Der Haken sitzt nicht im Speicher, sondern auf der iGPU.** Bei 2,9 mm wächst die Arbeit je
+physikalischer Sekunde um **3,62×**. Zwei Karten halbieren den Nahfeldanteil auf 1,81× — das
+**Fernfeld auf der iGPU wächst aber ungeteilt um 3,62×**. Ob es dann noch hinter dem Nahfeld
+verschwindet, ist **nicht gemessen**: das Phasenprofil misst die WARTEZEIT (2,1 %), nicht die
+Arbeit des Fernfelds. Die einzige absolute Zahl dazu ist vom **08.08.2026 bei 8 mm** und vor allen
+Optimierungen — „das Fernfeld braucht 79 % der feinen Zeit" (setup.cpp). Träfe sie noch zu, wäre
+die iGPU bei zwei Karten **sofort** der kritische Pfad und der zweite Beschleuniger brächte nichts.
+
+**Was gemessen werden müsste, bevor jemand eine zweite Karte kauft:** die absolute Zeit eines
+groben Schritts im heutigen Stand. Das ist ein Timer um den Fernfeld-Kernel, kein Umbau — und es
+entscheidet, ob Dual-B70 eine Auflösungs- oder eine Leerlaufinvestition ist.
+
+**Dazu kommt, dass der Code es heute nicht kann:** die Kopplung ist für genau zwei Domänen auf
+zwei Geräten gebaut. Drei Geräte (zwei B70 im Nahfeld, iGPU im Fernfeld) sind in diesem Dokument
+als geparkt geführt und nicht angefangen.
 
 ---
 
