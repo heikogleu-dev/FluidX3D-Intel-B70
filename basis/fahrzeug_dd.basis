@@ -3,6 +3,15 @@
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
 # --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---
+# EINHEIT GEAENDERT (12.09.2026, Pruefbefund B5 zum u_lat-Schalter): CFD_SLICE_NEAR_STEPS stand als
+#   "zellen_fein" und wurde damit nur mit dx_ref/dx umgerechnet. Der Schalter zaehlt aber FEINE
+#   ZEITSCHRITTE, und die haengen an dt = u_lat*dx/si_u, also an BEIDEN Groessen. Solange u_lat eine
+#   hart verdrahtete Konstante war, war die Umrechnung zufaellig richtig. Seit es CFD_U_LAT gibt,
+#   forderte der Waechter im korrekt kompensierten Arm den physikalisch FALSCHEN Wert (5000 statt der
+#   Schrittzahl, die 50 ms trifft) und brach mit print_error ab -- und im unkompensierten Arm
+#   entwarnte er. Neue Einheit "schritte_fein" rechnet dx UND 1/u_lat. BEI DER VORGABE 0,075 IST DER
+#   FAKTOR EXAKT 1,0: alle bestehenden Serienzeilen und alle 4-mm- und 8-mm-Sollwerte bleiben
+#   unveraendert, geprueft am Arm uv8_nach (28 von 28 Dateien bitgleich).
 # STANDARD GEAENDERT (08.09.2026): CFD_F_LISTE 1 ist Basis. Das Kraftfeld F lief bisher als volles
 #   Feld ueber die F-Bounding-Box (1118x468x306 = 160,1 Mio Zellen, 1832 MiB) bei einer Belegung von
 #   2,336 % -- nur 3.739.681 der 62,7 Mio Solidzellen sind WANDsolid und koennen ueberhaupt eine Kraft
@@ -115,7 +124,7 @@ CFD_NEAR_LY 2.6400 phys
 CFD_NEAR_LZ 1.8560 phys
 CFD_NEAR_VOR_MM 96 phys
 CFD_SGS_FDWAND 1 modus
-CFD_SLICE_NEAR_STEPS 5000 zellen_fein
+CFD_SLICE_NEAR_STEPS 5000 schritte_fein
 CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.501 phys
 CFD_T_WARMUP 0.201 phys

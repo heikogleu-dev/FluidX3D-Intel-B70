@@ -16,8 +16,14 @@ Aufruf: fx_dach.py <band.npz> <out.csv> [x0_m] [x1_m]
 import sys, os
 import numpy as np
 TYPE_S = 0x01
-U_LAT  = 0.075
-CP_FAK = 2.0/(3.0*U_LAT*U_LAT)      # 118.5185: cp aus (rho-1)
+# ★ Pruefbefund B6 (12.09.2026): U_LAT stand hier HART auf 0,075 und damit auch CP_FAK =
+# 2/(3*u_lat^2). Seit es den Schalter CFD_U_LAT gibt, wuerde ein Arm mit abweichendem u_lat
+# LAUTLOS mit dem falschen Faktor ausgewertet -- bei u_lat = 0,1 waere cp um (0,075/0,1)^2,
+# also um 44 %, zu gross. Jetzt aus der Umgebung, mit Ansage auf stderr.
+U_LAT = float(os.environ.get("CFD_U_LAT", 0.075))
+if abs(U_LAT-0.075) > 1e-12:
+    print(f"HINWEIS: u_lat = {U_LAT} aus CFD_U_LAT (Vorgabe 0.075) -- cp-Faktor 2/(3*u_lat^2) = {2.0/(3.0*U_LAT*U_LAT):.4f} statt 118.5185.", file=sys.stderr)
+CP_FAK = 2.0/(3.0*U_LAT*U_LAT)      # 118.5185 bei der Vorgabe: cp aus (rho-1)
 Q_INF  = 0.5*1.225*30.0**2          # 551.25 Pa
 
 def dachlinie(npz, x0=1.6, x1=4.6, zmin=0.30, zmax=1.60):
