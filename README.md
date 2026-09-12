@@ -34,6 +34,47 @@ so that no number here can be confused with another:
 | `cz_reib` | +0.0720 | friction, and it works *against* downforce |
 | **Cz total** | **−0.9704** | `cz_druck_rest + cz_reib` — the row in the table above |
 
+---
+
+## 2026-09-12 — what this day bought
+
+Six numbers, all measured on this rig, all reproducible from the run line in
+`logs/p4_alle_register.txt`:
+
+1. **Wall clock 90.4 → 48.9 min** for the same 501 ms of physics. Performance index 10 958 → 5520;
+   from the 100 ms mark 5491, so the warm-up costs almost nothing at this rung.
+2. **Near-field VRAM 27 734 → 23 773 MB.** `rho` and `u` now live in two bytes per component
+   instead of four, on the device *and* in the host mirror. A cell costs **47 B** where upstream
+   costs 93 B with float32 and 55 B with compressed distributions only.
+3. **The free VRAM is measured for the first time, and it is not what we thought.** 7450 MB really
+   free against 8882 MB reconstructed — the desktop holds 1432 MB that the old arithmetic could not
+   see. Read without root from `/proc/*/fdinfo`, summed over all clients of the card.
+4. **Both force coefficients moved toward OpenFOAM 13.** Cd 0.5718 → 0.5822 (95.5 → 97.2 % of the
+   reference), Cz −0.9433 → −0.9704 (72.5 → 74.6 %). `cz_druck_rest` gains 0.0212 at 4.37 σ over six
+   50 ms window means. **The run carries four levers at once and is production, not an A/B** — which
+   lever did it cannot be read off this run.
+5. **3.75 mm became reachable.** Projected peak 28 822 MB with 2401 MB really free. Without the
+   two-byte fields the same grid would need 33 862 MB — 2.6 GB more than the card has. The grid
+   alignment at dx_c = 15 mm is **not yet checked**, and that could still kill it.
+6. **`u_lat` has a name you can think in.** `CFD_SCHRITTE_PRO_ZELLE=8` sets 8 time steps per cell
+   instead of 13.3, and **every step-counting switch now converts automatically** — set and unset
+   ones alike, because their defaults were chosen for the old value too. That silent second variable
+   is gone.
+
+**What is not established.** The force shift caused by `u` in two bytes sits at **1.43 σ** on its
+own — neither proven nor excluded. The 4 mm rung at 8 steps per cell is **not shown to be
+reproducible** (two word-identical runs differed at 928 of 930 probe points on an earlier date); the
+production run was approved with that caveat on the table. And `fac_nachbar_ab` is the one velocity
+reader still without an error budget — its amplifier is the cancellation in the tangential
+projection, not the number of neighbours.
+
+**What the audit found in our own work that day:** two half-converted kernels that would have failed
+silently, a guard that could never fire, a proof that could not prove what it claimed, and a lesson
+written into the source that was measurably false. All of them are in the commit history with the
+correction beside them rather than in place of them.
+
+---
+
 Model effects are quoted on `cz_druck_rest` throughout, because the friction path responds to these
 models with the opposite sign and would dilute the signal. The comparison against the reference
 needs the total.
