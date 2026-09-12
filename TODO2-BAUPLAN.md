@@ -222,3 +222,218 @@ aber sichtbar über der Streuung — und die Ordnung (AN unter allen AUS) ist da
 
 Schritt 2 (Fernfeldmaske, auf dem kritischen Pfad), Schritt 3 (u-Teil, die grosse Hälfte),
 Schritt 4 (2 Byte, der VRAM-Hebel). Der Deckel ist nach Schritt 1 neu zu bestimmen.
+
+---
+
+## 9 · Schritt 4 ist gebaut (12.09.2026) — rho auf 2 Byte
+
+**Schalter:** `RHO_FP16` in `src/defines.hpp`, Vorgabe AUS. Umschalten mit
+`werkzeuge/rho_format.sh FP32|FP16`. Kein env-Schalter, weil der Puffertyp ein C++-Typ ist
+(`Memory<rhoxx>`) und zur Laufzeit feststeht — dieselbe Bauform wie `FP16S` für die Verteilungen.
+
+### 9.1 Was der Schritt bringt, und was nicht
+
+Die Übergabe nennt 1378 MiB für rho. Das ist die **Summe beider Domänen**. Nur das Nahfeld liegt
+auf der B70; das Fernfeld rechnet auf der iGPU im System-RAM und hat dort keinen Deckel
+(`logs/p4_neu.log`: „Fernfeld belegt 10676 MB (System-RAM, kein VRAM-Deckel)").
+
+| | Zellen | rho 4→2 B | davon VRAM |
+|---|---:|---:|---:|
+| Nahfeld (B70) | 519 139 485 | 990 MiB | **990 MiB** |
+| Fernfeld (iGPU) | 203 489 280 | 388 MiB | 0 |
+
+Dazu kommen im Nahfeld noch einmal 990 MiB **System-RAM**: die B70 ist keine Zero-Copy-Karte
+(`src/opencl.hpp`), rho liegt dort zweimal. Im Fernfeld ist der Puffer Zero-Copy und zählt einfach.
+
+**Und die Laufzeit? Gemessen, 8-mm-Fahrzeug, fünf Arme, Zeile wortgleich:**
+
+| Arm | Wanduhr | gegen | |
+|---|---:|---:|---|
+| `r8_vor` | 397 s | | Stand vor der Änderung |
+| `r8_fp32` | 399 s | | bitgleich dazu |
+| `r8_fp16b` | **395 s** | −1,0 % | nur Schritt 4 |
+| `s8_sfp32` | **369 s** | −7,5 % | nur Schritt 1 bis 3 |
+| `s8_sfp16` | **364 s** | −1,4 % | Schritt 1 bis 3 **und** 4 |
+
+**Schritt 4 gewinnt, er verliert nichts** — in beiden Zusammenhängen rund ein Prozent, zusammen
+mit den Sparschaltern −8,8 % gegen den Ausgangsstand. Vorhergesagt war −1,4 % aus dem
+Verkehrsanteil (rho sind 4 von 123 B je Zelle und Schritt), gemessen −1,0 % ohne und −1,4 % mit
+Sparschaltern.
+
+**Warum es nur ein Prozent ist, und warum das kein Mangel ist:** Schritt 1 bis 3 und Schritt 4
+greifen **dieselben Bytes** an. Die Schritte 1 bis 3 nehmen die rho- und u-Schreibvorgänge weg,
+Schritt 4 halbiert, was davon übrig ist. Was Schritt 1 schon entfernt hat, kann Schritt 4 nicht
+noch einmal einsparen — die Hebel überlappen, und genau das ist der Beweis, dass Schritt 1
+funktioniert hat. Die 19 Verteilungen sind 76 der 123 Byte und liegen längst auf FP16S; rho's
+Anteil ist strukturell klein.
+
+**Ehrlich zur Streuung:** die −1,4 % mit Sparschaltern sind fünf Sekunden und liegen innerhalb
+der für dieses Projekt dokumentierten Streuung gleicher Arme. Ein einzelnes Paar kann einen
+echten Zweiteffekt aus dem kleineren Speicherabdruck nicht von Rauschen trennen. Belastbar ist:
+**kein Verlust, eher ein kleiner Gewinn.** Der eigentliche Ertrag ist die Kapazität, und die
+können die Schritte 1 bis 3 überhaupt nicht liefern: Bandbreite und Platz sind zwei Größen, und
+nur eine davon gewinnt man durch Weglassen von Schreibvorgängen.
+
+### 9.2 Das Format, am echten Feld belegt statt behauptet
+
+Gerechnet auf `export/p4_neu/feld_nah_000501ms.vtk` (451 428 942 Fluidzellen) und
+`feld_fern_000501ms.vtk` (199 949 922):
+
+| Feld | Format | Fehler RMS | Fehler max |
+|---|---|---:|---:|
+| Nahfeld | `FP16S(rho−1)` | 3,320e-7 | 5,633e-5 |
+| Nahfeld | `half(rho)` roh | 1,824e-4 | 4,883e-4 |
+| Fernfeld | `FP16S(rho−1)` | 3,183e-7 | 3,052e-5 |
+
+Die Verschiebung um 1 ist damit **Faktor 550 im RMS**, kein Stil. rho spannt im Nahfeld
+0,769797 bis 1,111411 bei einer Eigenstreuung von 1,420e-3; der Quantisierungsfehler liegt
+4280-fach darunter. Kein Überlauf (die Skalierung trägt bis |rho−1| = 1,999, `RHO_CLAMP`
+garantiert 0,5 und das Tor im Kopplungs-Lift 1,0), keine Denormalzelle in beiden Domänen.
+
+**Ehrlich dazu, weil es sonst als Gewinn gelesen wird:** gegen den heutigen float32-Stand ist das
+ein **Verlust**. float32 trägt bei rho nahe 1 einen absoluten Boden von 5,96e-8; `FP16S(rho−1)`
+trägt |rho−1|·2⁻¹², bei rho−1 = 1e-3 also 2,4e-7. Der Trick macht half überhaupt erst brauchbar —
+mehr nicht.
+
+### 9.3 Warum die Kette nicht driftet
+
+`3.0517578E-5f` ist **bitgenau 2⁻¹⁵** und `32768.0f` ist 2¹⁵; beide Multiplikationen runden also
+nicht. Zusammen mit der Sterbenz-Exaktheit von `(x)-1.0f` auf [0,5; 2,0] ist die Kette
+Laden→Speichern ein **Fixpunkt**: `rho_unpack(rho_pack(rho_unpack(h))) == rho_unpack(h)`,
+bitgleich als float32, über alle 59 394 Bitmuster der Klemmspanne und auch nach acht Umläufen
+(mit den repo-eigenen Wandlern nachgerechnet). Daran hängen zwei Dinge, die sonst still brächen:
+`pruefe_slice_ebene` behält sein „Soll exakt 0", und `apply_velocity_inlet`, das nichts als
+`rho[n] = rho[m]` tut, driftet nicht. Es macht die Makros außerdem unempfindlich gegen
+`-cl-mad-enable`: eine Kontraktion zu `mad()` kann nichts ändern, wo nichts zu runden ist.
+
+**Zwei Lademakros, und das ist kein Luxus.** `load_rho` liefert rho, `load_drho` liefert rho−1
+ohne den Umweg über „+1, dann −1". Wer rho−1 braucht und trotzdem `load_rho` nimmt, rundet auf das
+float32-Raster bei 1,0 und baut damit den Boden von 5,96e-8 ein — genau gegen den der Kommentar an
+`po_reduce_mean` seine 1e-9 beansprucht. Dort steht jetzt `load_drho`. An
+`apply_pressure_outlet` steht bewusst `load_rho`: in Abweichungsräumen zu rechnen wäre genauer,
+würde aber die Arithmetik des Arms OHNE `RHO_FP16` ändern, und dessen Bitgleichheit ist das
+einzige Sicherheitsnetz dieses Umbaus.
+
+### 9.4 Die Wächter
+
+| Wächter | Ort | Soll |
+|---|---|---|
+| `Rho_Feld::get/set` statt `operator[]` | `src/lbm.hpp` | jede vergessene Hostzugriffsstelle ist ein **Übersetzungsfehler**, kein Prüfpunkt |
+| Typ-Zensus auf dem emittierten OpenCL-Quelltext | `src/lbm.cpp` | 18 × `global float* rho` (alle SURFACE/GRAPHICS), 14 × `global rhoxx* rho` |
+| Slot 210 — rho außerhalb 0,25..4,0 an der TYPE_E-Lesestelle | `src/kernel.cpp` | **0**, ungegatet |
+| Slot 211 — Besuche derselben Stelle | `src/kernel.cpp` | **> 0**, sonst beweist die Null in 210 nichts |
+| Slots 212..217 — Dekaden von \|load_rho(store_rho(x))−x\| | `store_rho_diag` | **217 == 0** |
+| `#error` bei `RHO_FP16` × SURFACE/GRAPHICS/TEMPERATURE/PARTICLES | `src/defines.hpp` | deren rho-Leser sind nicht umgestellt |
+| `bytes_per_cell_device/host`, Bandbreitenbilanz | `src/lbm.cpp` | folgen `sizeof(rhoxx)` |
+
+Der Typ-Zensus ist der wichtigste davon. `Kernel::link_parameter` reicht nur die `cl::Buffer`
+weiter, der Typ ist dort **vollständig gelöscht**: ein vergessenes `global float* rho` läse zwei
+halbe Dichten als einen float, Größenordnung 1e38, und unter `-cl-finite-math-only` gäbe es dafür
+keine Diagnose. Weil `get_opencl_c_code()` alle Leerzeichen durch Zeilenumbrüche ersetzt, zählt
+der Wächter auf die **umgebrochene** Form — wer das übersieht, baut sich einen Wächter, der immer
+0 findet. Genau das ist beim ersten Anlauf passiert und wurde gefangen.
+
+**Die Kopplungsprüfung musste mitwandern.** `src/setup.cpp` vergleicht das Nahfeld an den
+Deckungspunkten gegen die grobe Ebene mit der festen Schranke 1e-6. Die Quantisierung liegt bei
+5,6e-5, also **56-fach darüber**. Ohne Anpassung hätte die Abnahme in jedem Lauf einen
+Kopplungsdefekt gemeldet, den es nicht gibt. Die Schranke folgt jetzt dem Speicherformat; u
+behält im selben `fmax` seine scharfe 1e-6.
+
+### 9.5 Zwei Fehler dieser Runde, beide von der Leiter gefangen
+
+1. **Namenszusammenstoß.** Das Typmakro hieß zuerst `rho_t`. `src/kernel.cpp` führt eine lokale
+   Variable `float rho_t` in der Schale-Blend-Prüfung; das Makro hat sie in **beiden** Armen
+   überschrieben, der Geräteübersetzer brach mit −11 ab. Gefangen auf der **CPU**-Sprosse, nicht
+   auf der B70. Der Name ist jetzt `rhoxx`, wie auf der Hostseite.
+2. **Der Wächter, der sich selbst blind gemacht hätte.** Beim Umbenennen traf die
+   Wortgrenzen-Ersetzung das Suchmuster `"global\nrho_t*\nrho"` nicht, weil vor dem `r` das `n`
+   aus `\n` steht. Der Zensus hätte danach **immer 0 gefunden** und in jedem Lauf falsch Alarm
+   geschlagen.
+
+### 9.6 Abnahme
+
+**CPU, Kugel dx = 40, 500 Schritte, drei Arme in einer Kette (Stand davor / FP32 / FP16):**
+
+* Stand davor gegen FP32-Arm: **23 von 23 inhaltlichen Dateien bitgleich** (einzige Abweichung ist
+  der Laufname in `code/LAUF.txt`). Das Sicherheitsnetz steht.
+* FP16-Arm: 0 Fehler. Slot 210/211: 5494 TYPE_E-Lesungen geprüft, **0** außerhalb 0,25..4,0.
+  Quantisierung über 3 698 000 Schreibvorgänge: <1e-7 28,24 % | <1e-6 56,87 % | <1e-5 14,85 % |
+  <1e-4 0,04 % | <1e-3 0,00 % | **≥1e-3 0,00 %**.
+* Von 24 Ausgabedateien weicht zwischen FP32 und FP16 genau **eine** ab: `forces.csv`.
+* **Mechanisch bestätigt:** bei 1 ms und 6 ms sind die Kräfte **exakt gleich**, erst ab 11 ms
+  weichen sie ab. Die Kräfte kommen aus `F` (`update_force_field` liest `fi`, nicht rho); die
+  Quantisierung erreicht Cd **nur über die Randbedingungen** und braucht dafür rund hundert
+  Schritte Laufzeit durch die Domäne.
+
+**Offline-Gate (`werkzeuge/scratch_gate`), erweitert um den rho-Arm:** 8 Arme × 2 Geräte
+(iGPU 0x7d67, B70 0xe223), je 37 Kernel, `private_size` 0 und `spill_size` 0 durchweg. Der
+Rückleser in `store_rho_diag` kostet also kein Register. Die Zwillingsliste in `gen_main.cpp`
+kannte die neuen Makros nicht und meldete BAUFEHLER — nachgezogen.
+
+**8 mm Fahrzeug, drei Arme:** läuft (Stand 12.09. nachmittags).
+
+---
+
+## 10 · u auf 2 Byte — gemessen, und es ist NICHT dieselbe Rechnung wie bei rho
+
+u trägt im Nahfeld **2971 MiB VRAM** gegen 990 MiB bei rho, ist also der eigentliche Hebel.
+Die Übergabe begründet die Reihenfolge mit dem Aufwand (6 gegen 125 Hostzugriffe). Es gibt einen
+**numerischen** Grund, und der ist härter.
+
+### 10.1 Im Feld ist u unauffällig
+
+`FP16S(u)` über alle 451 428 942 Fluidzellen des 4-mm-Nahfelds bei 501 ms:
+
+| | Wert |
+|---|---|
+| Fehler RMS | 9,079e-6 lat = **0,0121 % von u_inf** |
+| Fehler max | 1,188e-4 lat |
+| Überlauf / Denormal | 0 / 28 von 1,354 Mrd. Komponenten |
+
+Kein Skalierungsproblem: |u| erreicht 0,4764 lat, die Skalierung trägt bis 1,999.
+
+### 10.2 Am Gradienten ist es das nicht mehr
+
+Zentraldifferenz `du_x/dx` über die ganze Box (1 686 924 Fluidtripel, jede 16. Zeile):
+
+| | Wert |
+|---|---:|
+| RMS-Gradient | 1,129e-3 |
+| Fehler RMS | 1,092e-5 = **0,97 %** |
+| Median-Gradient | 1,070e-4 → die Quantisierung trägt dort **10,2 %** |
+
+### 10.3 Und am regularisierten Rand ist es ein Befund
+
+`deriv_reg` (`src/kernel.cpp`) an den TYPE_E-Zellen nachgerechnet, Gate genau wie im Code
+(zentral bei zwei Fluidnachbarn, sonst einseitig, sonst null), jede 3. Zeile:
+
+| | Wert |
+|---|---:|
+| TYPE_E-Zellen gesehen | 585 816 |
+| davon mit mindestens einem Fluidnachbarn in x | 67 605 |
+| \|du/dx\| RMS dort | 9,526e-5 |
+| Fehler RMS | 2,331e-5 = **24,5 % des RMS-Gradienten**, 42,5 % des Medians |
+
+**Der Mechanismus ist einfach und unangenehm:** am Einlassrand ist |u| mit ~0,075 der größte
+zusammenhängende Wert im ganzen Feld und der Gradient der kleinste. Der half-ULP bei 0,075 ist
+3,66e-5; die Rundung trägt dort absolut mehr als im Mittelfeld, während der Nenner sein Minimum
+hat. Die schlechteste denkbare Paarung, und sie sitzt genau dort, wo `deriv_reg` den
+Nichtgleichgewichtsanteil des Kopplungsrandes aufbaut.
+
+**Vorbehalt, der dazugehört:** gemessen ist nur die x-Ableitung. `deriv_reg` baut S aus allen drei
+Richtungen; die y- und z-Ableitungen entlang der Schale sind nicht vermessen. Und: 518 210 der
+585 816 TYPE_E-Zellen bekommen in x ohnehin den Gradienten null, betroffen sind also 12 %.
+
+**Folgerung.** u auf 2 Byte ist nicht ausgeschlossen, aber es ist kein Nachziehen von rho. Es
+braucht eine eigene Abnahme mit Blick auf den regularisierten Rand und, wenn der Befund trägt,
+eine Gegenmaßnahme — die naheliegende wäre, die Randschale der Dicke 2 in float32 zu halten
+(rund 8,8 Mio Zellen, 1,7 % des Nahfelds, 101 MiB), also genau die Menge, die `felder_voll` unter
+`U_SPARSAM` ohnehin schon als eigene Maske führt.
+
+### 10.4 Was rho allein einlöst
+
+Der Planungsagent hat vorgerechnet, dass rho allein die Gittersprosse nicht kauft: 990 MiB reichen
+für 3,90 mm (+7,9 % Zellen), erst rho **und** u zusammen reichen für 3,75 mm. Das stimmt — aber es
+ist nicht der einzige Verwendungszweck. Der offene Punkt „verbreiterte Nahfeldbox bei 4 mm" ist
+am 29.08. an **516 MB** gescheitert. Mit 990 MiB passt sie, und es bleiben rund 470 MB übrig.
+Welcher der beiden Wege genommen wird, ist eine Entscheidung für Heiko, keine für mich.
