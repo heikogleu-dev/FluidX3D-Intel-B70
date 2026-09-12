@@ -88,6 +88,7 @@ public:
 	// direkt mit der BBox-Indizierung -- die Huellen-Sicht lbm.F waere die U1-Falle (rechnet mit
 	// voller Domaenengroesse, Puffer ist BBox-gross).
 	uint fbx0=0u, fby0=0u, fbz0=0u, fbnx=0u, fbny=0u, fbnz=0u; // FORK: aktive F-Bounding-Box dieser Domaene
+	uint smx0=0u, smy0=0u, smz0=0u, smnx=0u, smny=0u, smnz=0u; // ★ TODO 2: Schreibmasken-Box dieser Domaene
 private:
 	float po_rho = 1.0f; // vorgeschriebene Dichte am Auslass (LBM-Einheiten); 1.0 = Referenzdruck
 	float po_sigma = 1.0f; // Ankerrate des Flaechenmittels gegen rho_out
@@ -139,6 +140,9 @@ public:
 	// MUSS vor der LBM-Konstruktion gesetzt werden, weil allocate() F sonst auf N legt. Wird nach dem
 	// Lesen zurueckgesetzt (read-once), damit eine zweite Domaene nicht versehentlich dieselbe Box erbt.
 	static uint s_fbbox[6]; // {x0, y0, z0, nx, ny, nz}; nx==0 -> volle Domaene
+	static uint s_smbox[6]; // ★ TODO 2: SCHREIBMASKEN-Box {x0,y0,z0,nx,ny,nz}; nx==0 -> faellt auf die F-BBox zurueck.
+	                        // Nahfeld: die Facetten-BBox (dort lesen sgs_fdwand/fac_nachbar_ab).
+	                        // Fernfeld: der Fussabdruck des Nahfelds (dort entnimmt extract_plane_macros jeden Grobschritt).
 	static void set_force_bbox(const uint x0, const uint y0, const uint z0, const uint nx, const uint ny, const uint nz);
 	void set_velocity_inlet_faces(const uint face_mask); // FORK: Geschwindigkeits-Einlass, rho laeuft mit
 	void enqueue_apply_velocity_inlet();
@@ -213,6 +217,8 @@ public:
 	static uint s_fac_kraft;   // ★ 30.08.: CFD_FAC_KRAFT -- Zellkraft statt Slip: 1 = an Rueckfallzellen, 2 = an allen Facettenzellen (Diskriminator); 0 = aus, bitgleich
 	static uint s_boden_eq_n; static uint s_boden_eq_down; static uint s_boden_eq_split; static float s_boden_eq_u; static uint s_boden_eq_abstand; // ★ BODEN_EQ (V1-Port): Fluidzeilen z=1..N post-stream auf u_road-Equilibrium (lokales rho); 0 = aus. Read an der Konstruktion in Member eingefroren.
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
+	static uint s_u_takt; // ★ TODO 2 Schritt 3 (CFD_U_SPARSAM): 0 = aus, sonst ratio (u voll am letzten Substep jedes Grobschritts)
+	static uint s_rho_takt; // ★ TODO 2 Schritt 1 (CFD_RHO_SPARSAM): Sample-Kadenz in FEINEN Schritten; 0 = aus (dann ist der Geraetecode zeichengleich zu vorher)
 	static uint s_fac_alpha;
 	static bool s_fac_elibb;
 	static uint s_sgs_fdwand;  // ★ 02.09. SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND=1): w an Facettenzellen aus |S|_FD des u-Felds (FD-Kernel, ein Schritt versetzt) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert (B66/B69)
@@ -241,6 +247,10 @@ public:
 	static long s_fac_diagz; // Iron Rule 3: Diagnose-Facette (Zellindex; -1 = aus)
 	uint boden_eq_n = 0u; float boden_eq_u = 0.0f; uint boden_eq_down = 0u, boden_eq_split = 0xFFFFFFFFu, boden_eq_abstand = 0u; // Konstruktionszeit-Kopien (BODEN_EQ)
 	uint einlass_eq_n = 0u; float einlass_eq_u = 0.0f; // Konstruktionszeit-Kopien (EINLASS_EQ)
+	uint rho_takt = 0u;        // Konstruktionszeit-Kopie von s_rho_takt (read-once-Doktrin)
+	uint u_takt = 0u;          // Konstruktionszeit-Kopie von s_u_takt
+	uint felder_voll_h = 3u;   // je Schritt gesetzter Kernelparameter, BITFELD: Bit 0 = rho ueberall, Bit 1 = u ueberall (3 = heutiges Verhalten)
+	bool rho_voll_zwang = false; // Host erzwingt Vollschreiben (Abschlusspfad, unregelmaessige Feldlesung)
 	long fac_diagz_wert = -1l; // Konstruktionszeit-Kopie von s_fac_diagz (Gross-Audit: Spaet-Lese-Pfad geschlossen)
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;

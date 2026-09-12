@@ -2863,7 +2863,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 } // apply_facette_imem()
 )+"#endif"+R( // FACETTEN_IMEM
 
-)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, global uint* rho_clamp_hits // ) { // main LBM kernel
+)+R(kernel void stream_collide)+"("+R(global fpxx* fi, global float* rho, global float* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
 )+"#endif"+R( // FORCE_FIELD
@@ -3090,8 +3090,72 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(flagsn_bo!=TYPE_E) // only update fields for non-TYPE_E cells
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	{
+		)+"#ifdef RHO_SPARSAM"+R(
+		// ★ TODO 2 Schritt 1 (12.09.2026): rho wird nur noch dort geschrieben, wo es im NAECHSTEN
+		// Schritt gelesen wird, plus an den Schritten, nach denen der Host das ganze Feld liest.
+		// LESER von rho je feinem Schritt sind NUR po_reduce_mean und apply_pressure_outlet, und
+		// beide lesen po_interior. Der Druckauslass ist die x_max-Flaeche (face_mask=0x2), die
+		// Innenzelle entsteht aus einer 26er-Nachbarsuche um die Flaechenzelle (lbm.cpp:2717-2724)
+		// -- jeder Kandidat hat damit x >= Nx-2. Die Bedingung ist also KONSTRUKTIV eine Obermenge
+		// und reine Arithmetik (n = x+(y+z*Ny)*Nx, also ist n%def_Nx die x-Koordinate).
+		// rho_voll kommt vom Host und ist 1 an jedem Schritt, nach dem das Feld gelesen wird.
+		// NICHT betroffen: TYPE_E (schreibt dieser Zweig ohnehin nicht) und die u-Schreibstelle --
+		// u hat eine viel groessere Leserschaft (deriv_reg an den 6 Nachbarn JEDER TYPE_E-Zelle,
+		// sgs_fdwand, fac_nachbar_ab, schale_extract).
+		{ // Die rho-Maske ist die Auslassschicht; im FERNFELD kommt die Schreibmasken-Box dazu, weil
+		  // extract_plane_macros dort jeden Grobschritt rho AUF DEN FUENF ENTNAHMEEBENEN liest.
+		  // RHO_SMBOX wird genau dann gesetzt, wenn die Box nicht die F-BBox ist (Fernfeld).
+		  bool rho_schreiben = (felder_voll&1u)!=0u||(uint)(n%(uxx)def_Nx)+2u>=(uint)def_Nx;
+		  )+"#ifdef RHO_SMBOX"+R(
+		  if(!rho_schreiben) { const uint3 rxyz = coordinates(n);
+			rho_schreiben = rxyz.x<2u||rxyz.x+2u>=(uint)def_Nx||rxyz.y<2u||rxyz.y+2u>=(uint)def_Ny||rxyz.z<2u||rxyz.z+2u>=(uint)def_Nz
+				||(rxyz.x+2u>=(uint)def_SMX0&&rxyz.x<(uint)def_SMX0+(uint)def_SMNX+2u&&rxyz.y+2u>=(uint)def_SMY0&&rxyz.y<(uint)def_SMY0+(uint)def_SMNY+2u&&rxyz.z+2u>=(uint)def_SMZ0&&rxyz.z<(uint)def_SMZ0+(uint)def_SMNZ+2u); }
+		  )+"#endif"+R( // RHO_SMBOX
+		  // Wirkpfad-Zaehler (Iron Rule: ein Schalter ohne feuernden Zaehler ist ein harter Fehler).
+		  // Slot 204 = uebersprungen, 205 = geschrieben. GENAU EIN SCHRITT (t == def_zaehl_takt), nicht
+		  // jeder zaehl_takt-te: bei 251 gezaehlten Schritten x 64,9 Mio Zellen lief der 32-Bit-Zaehler in
+		  // die Saettigung (0xF0000000) und die Prozentzahl war ein Artefakt -- am 12.09. genau so passiert
+		  // und AN DEN ZAHLEN erkannt (beide Zaehler standen dicht ueber der Schwelle). Mit einem Schritt
+		  // gilt 204+205 = aktive Zellen, also ein Ist=Soll statt einer Schaetzung.
+		  // ★ +2 BERICHTIGT 12.09.: bei t == def_zaehl_takt traf die Zaehlung im FERNFELD genau einen
+		  // erzwungenen Vollschreib-Schritt -- der Zeitschritt des Fernfelds laeuft dem Grobschritt um
+		  // eins voraus, und 100 fiel damit auf ein Vielfaches der Sample-Kadenz. Der Zaehler meldete
+		  // 0 % Ersparnis und der No-Op-Waechter brach den Lauf ab: ein falscher Alarm aus einem falsch
+		  // gewaehlten Messzeitpunkt. Mit +2 liegt die Zaehlung in BEIDEN Domaenen mitten in der Periode.
+		  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[rho_schreiben?205u:204u]<0xF0000000u) atomic_inc(&rho_clamp_hits[rho_schreiben?205u:204u]);
+		  if(rho_schreiben) rho[n] = rhon; } // update density field
+		)+"#else"+R(
 		rho[n] = rhon; // update density field
+		)+"#endif"+R( // RHO_SPARSAM
+		)+"#ifdef U_SPARSAM"+R(
+		// ★ TODO 2 Schritt 3 (12.09.2026): u wird nur noch dort geschrieben, wo es VOR dem naechsten
+		// Vollschreiben gelesen wird. Die Leser von u je feinem Schritt und ihre Reichweite:
+		//   deriv_reg  -- u an den SECHS Achsnachbarn JEDER TYPE_E-Zelle (kernel.cpp, Zweig
+		//                 flagsn_bo==TYPE_E). TYPE_E liegt auf den Domaenenflaechen, die Leserzellen
+		//                 also im Abstand 1 davon -> Randschale der Dicke 2 deckt sie.
+		//   sgs_fdwand -- u an den sechs Achsnachbarn jeder Facettenzelle
+		//   fac_nachbar_ab -- u am Link-Nachbarn einer Facettenzelle
+		//                 Beide liegen in der F-BBox; um 2 dilatiert ist das eine Obermenge.
+		//   apply_pressure_outlet -- u an po_interior, x >= Nx-2 -> von der Randschale gedeckt.
+		//   schale_extract (N2F) -- 4^3-Bloecke ueber ~23 % der Domaene, ABER erst am Ende des
+		//                 Grobschritts. Deshalb ist Bit 1 an jedem ratio-ten Schritt gesetzt; auf dem
+		//                 letzten Substep wird u ueberall geschrieben. Daran haengt die Deckelung
+		//                 des Gewinns auf (ratio-1)/ratio.
+		// Der Test ist reine Arithmetik (Koordinaten gegen JIT-Defines), kein Speicherzugriff.
+		{ bool u_schreiben = (felder_voll&2u)!=0u;
+		  if(!u_schreiben) {
+			const uint3 uxyz = coordinates(n);
+			const bool rand = uxyz.x<2u||uxyz.x+2u>=(uint)def_Nx||uxyz.y<2u||uxyz.y+2u>=(uint)def_Ny||uxyz.z<2u||uxyz.z+2u>=(uint)def_Nz;
+			const bool bbox = uxyz.x+2u>=(uint)def_SMX0&&uxyz.x<(uint)def_SMX0+(uint)def_SMNX+2u&&uxyz.y+2u>=(uint)def_SMY0&&uxyz.y<(uint)def_SMY0+(uint)def_SMNY+2u&&uxyz.z+2u>=(uint)def_SMZ0&&uxyz.z<(uint)def_SMZ0+(uint)def_SMNZ+2u;
+			u_schreiben = rand||bbox;
+		  }
+		  // Wirkpfad-Zaehler: Slot 206 = uebersprungen, 207 = geschrieben (EIN Schritt, wie bei rho).
+		  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[u_schreiben?207u:206u]<0xF0000000u) atomic_inc(&rho_clamp_hits[u_schreiben?207u:206u]);
+		  if(u_schreiben) store3(u, n, (float3)(uxn, uyn, uzn));
+		}
+		)+"#else"+R(
 		store3(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
+		)+"#endif"+R( // U_SPARSAM
 	}
 )+"#endif"+R( // UPDATE_FIELDS
 

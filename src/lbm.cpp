@@ -114,6 +114,11 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fbbox[3]>0u && s_fbbox[4]>0u && s_fbbox[5]>0u) {
 		fbx0=s_fbbox[0]; fby0=s_fbbox[1]; fbz0=s_fbbox[2]; fbnx=s_fbbox[3]; fbny=s_fbbox[4]; fbnz=s_fbbox[5];
 	} else { fbx0=0u; fby0=0u; fbz0=0u; fbnx=Nx; fbny=Ny; fbnz=Nz; }
+	// ★ TODO 2: die Schreibmasken-Box. Ohne gesetzte Statik ist sie die F-BBox -- damit ist das
+	// Nahfeld ohne Zutun richtig versorgt und die Fassung vor dieser Aenderung bleibt erhalten.
+	if(s_smbox[3]>0u && s_smbox[4]>0u && s_smbox[5]>0u) {
+		smx0=s_smbox[0]; smy0=s_smbox[1]; smz0=s_smbox[2]; smnx=s_smbox[3]; smny=s_smbox[4]; smnz=s_smbox[5];
+	} else { smx0=fbx0; smy0=fby0; smz0=fbz0; smnx=fbnx; smny=fbny; smnz=fbnz; }
 	// ★ 03.09.2026, TEUER GELERNT: BEIDE folgenden Schalter entscheiden JIT-DEFINES (F_LISTE,
 	// FAC_IDX_VOLL) und muessen deshalb hier stehen, nicht in allocate(). Der OpenCL-Quelltext wird
 	// bei der ERSTEN Kernel-Erzeugung uebersetzt -- das ist kernel_stream_collide in allocate(),
@@ -315,10 +320,19 @@ bool LBM_Domain::s_fac_satgate = false;
 uint LBM_Domain::s_boden_eq_n = 0u;
 uint LBM_Domain::s_boden_eq_down = 0u;
 uint LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu;
-float LBM_Domain::s_boden_eq_u = 0.075f;
+float LBM_Domain::s_boden_eq_u = -1.0f; // ★ Pruefbefund B7 (12.09.2026): hier stand 0.075f -- die ZWEITE
+// verdrahtete Kopie der Gittergeschwindigkeit. Solange u_lat eine Konstante war, war der Wert
+// zufaellig richtig; seit CFD_U_LAT existiert, liesse ein Fall, der "s_boden_eq_u = u_lat" vergisst,
+// die Fahrbahn mit 0,075 laufen, waehrend die Stroemung auf dem neuen u_lat laeuft -- plausibel
+// aussehend und damit unentdeckbar. Sentinel < 0 plus Waechter in enqueue_boden_eq: LAUT statt still.
+// (Alle sechs Faelle setzen ihn heute vor der Konstruktion; der Waechter feuert also nie. Genau so
+// soll ein Waechter aussehen.)
 uint LBM_Domain::s_boden_eq_abstand = 0u; // Heiko 2026-08-20: reifennahe Aussparung (Chebyshev-Abstand zu TYPE_S, Boden ausgenommen) // Setup kann eigenes u_lat durchreichen (XL-Audit B6)
 uint LBM_Domain::s_einlass_eq_n = 0u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spaltenzahl x=1..N hinter dem Einlass; 0 = aus
-float LBM_Domain::s_einlass_eq_u = 0.075f; // Setup reicht sein u_lat durch (Konvention wie s_boden_eq_u)
+uint LBM_Domain::s_smbox[6] = {0u,0u,0u,0u,0u,0u}; // ★ TODO 2: Schreibmasken-Box; 0 -> F-BBox
+uint LBM_Domain::s_u_takt = 0u;     // ★ TODO 2 Schritt 3 (CFD_U_SPARSAM): 0 = aus, sonst ratio
+uint LBM_Domain::s_rho_takt = 0u;   // ★ TODO 2 Schritt 1 (CFD_RHO_SPARSAM): 0 = aus, sonst Sample-Kadenz in FEINEN Schritten
+float LBM_Domain::s_einlass_eq_u = -1.0f; // Setup reicht sein u_lat durch (Konvention wie s_boden_eq_u); Sentinel wie dort, Pruefbefund B7
 bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
 uint LBM_Domain::s_fac_alpha = 0u;
@@ -474,13 +488,15 @@ void LBM_Domain::allocate(Device& device) {
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 204 (Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
-	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, rho_clamp_hits);
+	// letzten Slot L. NAECHSTER FREIER SLOT: 208 (204..207 = rho/u-SPARSAM, 12.09.; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
 	boden_eq_n = s_boden_eq_n; boden_eq_u = s_boden_eq_u; boden_eq_down = s_boden_eq_down; boden_eq_split = s_boden_eq_split; boden_eq_abstand = s_boden_eq_abstand; // u_road = u_lat-Projektkonvention; Konstruktionszeit-Kopie (read-once-Doktrin)
 	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
 	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
+	rho_takt = s_rho_takt; // ★ TODO 2: Konstruktionszeit-Kopie wie die uebrigen (read-once-Doktrin)
+	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
 	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
 	schale_alpha = s_schale_alpha; // ★ P9c N2F-SCHALE: Konstruktionszeit-Kopie (read-once-Doktrin); die Kernel entstehen erst in alloc_schale (Indexlisten-Groesse steht erst nach dem Listenbau fest)
 
@@ -1224,17 +1240,36 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 	// ★ Invarianten-Waechter (Pruefagent Rang-1-Remat, NIEDRIG-3): der Remat-Block im Kernel
 	// verlaesst sich darauf, dass t ein monotoner Schrittzaehler < 2^62 bleibt (t>>62 == 0).
 	if(t>=(1ull<<62)) print_error("enqueue_stream_collide: t >= 2^62 -- die Remat-Invariante (t>>62==0) waere verletzt.");
-	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz).enqueue_run();
+	// ★ TODO 2 Schritt 1: rho_voll = 1 heisst "schreibe rho ueberall" (heutiges Verhalten).
+	// rho_takt = 0 -> immer 1, also bitgleich zum Stand vor der Aenderung. Sonst 1 nur an dem
+	// Schritt, NACH dem der Host das ganze Feld liest (Sample-Kadenz = sample_every*ratio feine
+	// Schritte), oder wenn der Host es ausdruecklich erzwingt (Abschlusspfad, unregelmaessige Lesung).
+	// BITFELD: Bit 0 = rho ueberall schreiben, Bit 1 = u ueberall schreiben. Takt 0 heisst "aus",
+	// dann ist das Bit immer gesetzt und das Verhalten bitgleich zum Stand vor der Aenderung.
+	// ★ BERICHTIGT 12.09.2026, nach einer GESCHEITERTEN Abnahme: hier stand fuer beide Felder eine
+	// Takt-Arithmetik ueber t ((t+1)%takt==0). Sie hat im FERNFELD nicht getroffen -- 23.425.595
+	// Zellen standen im Feld-Dump veraltet, exakt die Zahl, die der Zaehler als uebersprungen meldete.
+	// Der Host weiss genau, wann er das ganze Feld liest; er sagt es jetzt ausdruecklich an
+	// (rho_voll_zwang), statt dass die Domaene es aus ihrem Schrittzaehler erraet.
+	// Was BLEIBT ist die Substep-Regel fuer u: dass am letzten Substep jedes Grobschritts voll
+	// geschrieben werden muss, folgt aus der N2F-Entnahme und ist eine Eigenschaft der Domaene,
+	// keine Absprache mit dem Host.
+	const uint rho_bit = (rho_takt==0u||rho_voll_zwang) ? 1u : 0u;
+	const uint u_bit   = (u_takt==0u  ||rho_voll_zwang||((t+1ull)%(ulong)u_takt)==0ull) ? 2u : 0u;
+	felder_voll_h = rho_bit|u_bit;
+	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz, felder_voll_h).enqueue_run();
 	if(fdwand_on&&fac_N>0ull) { if(sism_on) kernel_sgs_fdwand.set_parameters(5u, t); kernel_sgs_fdwand.enqueue_run(); }
 	if(band_on&&band_N>0ull) { if(sism_on) kernel_sgs_band.set_parameters(5u, t); kernel_sgs_band.enqueue_run(); } // ★ 08.09. SGS-BAND: zweiter Launch desselben Kernels ueber die Bandzellen, dieselbe In-Order-Queue -> derselbe Determinismus wie Lage 1 // ★ Audit-Befund 11 (07.09.): Waechter auf fac_N statt fac_wfd.length()>1 -- bei GENAU EINER aktiven Facette ist die Laenge 1 und der FD-Kernel wurde still uebersprungen (Platzhalter und Einzelfacette nicht unterscheidbar; dieselbe Falle wie fac_nb 03.09.). fac_N wird nur in alloc_facetten_domain gesetzt. // ★ 07.09. SISM: t je Schritt nachfuehren (Muster sgs_gdiag/boden_eq), Position 5 = erstes SGS_SISM-Argument; der FD-Kernel sieht dasselbe t wie der eben gerechnete Schritt (increment_time_step folgt erst danach)
 	if(nachbar_on&&fac_N>0ull) kernel_fac_nachbar.enqueue_run(); // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;
+	if(!(boden_eq_u>=0.0f)) print_error("BODEN_EQ ist aktiv (n = "+to_string(boden_eq_n)+"), aber boden_eq_u traegt noch den Sentinel "+to_string(boden_eq_u,4u)+" -- das Setup hat LBM_Domain::s_boden_eq_u nicht auf sein u_lat gesetzt. Die mitbewegte Fahrbahn liefe mit einer anderen Geschwindigkeit als die Stroemung (Pruefbefund B7, 12.09.2026).");
 	kernel_boden_eq.set_parameters(2u, t, boden_eq_u, boden_eq_n, boden_eq_down, boden_eq_split, boden_eq_abstand).enqueue_run();
 }
 void LBM_Domain::enqueue_einlass_eq() { // ★ V1-Port apply_inlet_velocity: post-stream Einlass-Equilibrium x=1..nx; No-Op bei n==0
 	if(einlass_eq_n==0u) return;
+	if(!(einlass_eq_u>=0.0f)) print_error("EINLASS_EQ ist aktiv (n = "+to_string(einlass_eq_n)+"), aber einlass_eq_u traegt noch den Sentinel "+to_string(einlass_eq_u,4u)+" -- das Setup hat LBM_Domain::s_einlass_eq_u nicht auf sein u_lat gesetzt (Pruefbefund B7, 12.09.2026).");
 	kernel_einlass_eq.set_parameters(2u, t, einlass_eq_u, einlass_eq_n).enqueue_run();
 }
 void LBM_Domain::sgs_gdiag_gpu() { // ★ g-Diagnose: ein Mess-Launch ueber die Wandzellenliste (31.08.)
@@ -1735,6 +1770,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_messnur>0u) ? (string)"\n	#define FACETTEN_MESSNUR" : (string)"") // ★ 30.08. BB-Physik, nur messen
 	+((s_facetten&&s_fac_imem&&s_fac_nachbar>0u) ? (string)"\n	#define FACETTEN_NACHBAR" : (string)"") // ★ 30.08. Eingang aus der zweiten Fluidzelle
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik
+	+((s_rho_takt>0u&&s_smbox[3]>0u) ? (string)"\n	#define RHO_SMBOX" : (string)"") // ★ TODO 2: im Fernfeld deckt die rho-Maske auch die Entnahmeebenen ab
+	+((s_u_takt>0u) ? (string)"\n	#define U_SPARSAM" : (string)"") // ★ TODO 2 Schritt 3: gattert die u-Schreibstelle; ohne das Define ist der Geraetecode dort zeichengleich zu vorher
+	+((s_rho_takt>0u) ? (string)"\n	#define RHO_SPARSAM" : (string)"") // ★ TODO 2 Schritt 1: gattert die rho-Schreibstelle in stream_collide; ohne das Define ist der Geraetecode ZEICHENGLEICH zu vorher
 	+((s_facetten&&s_sgs_fdwand>0u) ? (string)"\n	#define SGS_FDWAND" : (string)"") // ★ 02.09. Geistermoden-Fix (braucht Facetten fuer fac_idx, nicht zwingend iMEM -- wirkt auch im MESSNUR/BB-Arm)
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_vandriest>0u) ? (string)"\n	#define SGS_VANDRIEST"
 	"\n	#define def_sgs_vd_aplus "+to_string(s_sgs_vd_aplus,4u)+"f"
@@ -1827,6 +1865,12 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	// FORK -- F-Bounding-Box: der Kernel braucht Ursprung, Ausdehnung und Stride der Box.
 	// Bei voller Domaene ist def_FBN == def_N und der Index identisch -- bit-identisch zu Upstream.
 #ifdef FORCE_FIELD
+	+"\n	#define def_SMX0 "+to_string(smx0)+"u" // ★ TODO 2: Schreibmasken-Box (Nahfeld = F-BBox, Fernfeld = Nahfeld-Fussabdruck)
+	+"\n	#define def_SMY0 "+to_string(smy0)+"u"
+	+"\n	#define def_SMZ0 "+to_string(smz0)+"u"
+	+"\n	#define def_SMNX "+to_string(smnx)+"u"
+	+"\n	#define def_SMNY "+to_string(smny)+"u"
+	+"\n	#define def_SMNZ "+to_string(smnz)+"u"
 	+"\n	#define def_FBX0 "+to_string(fbx0)+"u"
 	+"\n	#define def_FBY0 "+to_string(fby0)+"u"
 	+"\n	#define def_FBZ0 "+to_string(fbz0)+"u"

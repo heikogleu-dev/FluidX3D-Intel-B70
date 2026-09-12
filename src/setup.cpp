@@ -12,6 +12,102 @@ void pruefe_ptrt(LBM_Domain* d, const char* ort); // ★ 10.09.2026: Definition 
 static bool f_nur_solid_an_setup() { const char* e = getenv("CFD_F_NUR_SOLID"); return e==nullptr||e[0]=='\0'||atoi(e)>0; } // Default AN, wortgleich zu lbm.cpp
 extern char** environ;
 
+// ---------------------------------------------------------------------------- Gittergeschwindigkeit
+// ★ 12.09.2026, TODO 1 aus PERFORMANCE.md: u_lat stand an VIER Stellen hart verdrahtet (kugel,
+// fahrzeug, fahrzeug_dd, fernfeld), ohne Schalter und ohne dokumentierte Herleitung. Es gilt
+// dt = u_lat*dx/si_u, die Laufzeit ist also streng proportional zu 1/u_lat -- der groesste
+// Einzelhebel des Projekts (PERFORMANCE.md, "Die drei grossen", Punkt 1).
+//
+// DIE HERLEITUNG IST NACHGERECHNET, NICHT GERATEN (12.09.2026): bei dx = 4 mm und si_u = 30 m/s
+// ist dt = 0,075*0,004/30 = 1,00000e-5 s GENAU. 0,075 ist der Wert, der den Zeitschritt der
+// Produktionssprosse auf runde 10 us legt. NUR DESWEGEN entsprechen die Schalter, die in
+// SCHRITTEN zaehlen, runden Millisekunden: CFD_SGS_SISM_AB 15000 = 150 ms, CFD_SGS_SISM_T
+// 5000 = 50 ms, CFD_SLICE_NEAR_STEPS 5000 = 50 ms (auf der 8-mm-Sprosse von Hand halbiert,
+// weil dt dort 20 us ist -- siehe logs/opt_8mm_serie.txt).
+//
+// WER u_lat AENDERT, VERSCHIEBT DIESE ZEITEN MIT, und zwar lautlos: bei u_lat = 0,100 wuerde
+// SISM erst bei 200 ms scharf, also ERST AM MESSBEGINN (CFD_T_WARMUP 0,201). Der Zeitwaechter
+// unten rechnet das aus. Er rechnet NICHT still um: eine stille Umrechnung waere eine weitere
+// Variable im Arm, und der Arm traegt schon zwei (Ma und tau).
+#define U_LAT_VORGABE 0.075f // ★ Pruefbefund B8: die Zahl stand dreimal im Block -- der Zweck der
+                             // Aenderung war, Kopien zu beseitigen. EINE Stelle, beide Helfer lesen sie.
+
+static float u_lat_schalter(const char* wo) {
+	const float vorgabe = U_LAT_VORGABE;
+	const float u = env_f("CFD_U_LAT", vorgabe);
+	const float ma_soll = vorgabe*1.7320508f; // Ma = u_lat/c_s, c_s = 1/sqrt(3)
+	if(!(u>0.0f)) print_error("CFD_U_LAT = "+to_string(u,7u)+" ist nicht positiv -- dt = u_lat*dx/si_u waere null oder negativ, und nu_lat = si_nu*u_lat/(si_u*dx) damit ebenfalls. Eine Division durch null faellt hier sonst erst im Kernel auf.");
+	if(u>0.3f) print_error("CFD_U_LAT = "+to_string(u,7u)+" ergaebe Ma = "+to_string(u*1.7320508f,3u)+". Die Obergrenze ist bewusst hart bei 0,3 (Ma 0,52): darueber ist der Kompressibilitaetsfehler keine Stoerung mehr, sondern eine andere Physik. Wer das messen will, hebt die Grenze BEGRUENDET im Code an.");
+	if(u!=vorgabe) {
+		// ★ Pruefbefund B10: SIEBEN Nachkommastellen. Mit fuenf las sich ein knapp abweichender
+		// Wert als "0.07500 statt 0.07500" -- eine Warnung, die sich selbst widerspricht.
+		print_warning("GITTERGESCHWINDIGKEIT ABWEICHEND (CFD_U_LAT = "+to_string(u,7u)+" statt "+to_string(vorgabe,7u)+", "+string(wo)+") -- DEKLARIERTER MESSARM, kein Produktionsstand.");
+		print_warning("  (1) Ma = "+to_string(u*1.7320508f,4u)+" statt "+to_string(ma_soll,4u)+"; der Kompressibilitaetsfehler skaliert mit Ma^2, hier Faktor "+to_string((u*u)/(vorgabe*vorgabe),3u)+".");
+		// ★ Pruefbefund B2: die erste Fassung sagte pauschal "tau steigt WEG von 0,5 -- in Richtung
+		// Stabilitaet". Das gilt NUR nach oben. Bei kleinerem u_lat sinkt nu_lat proportional und tau
+		// laeuft AUF 0,5 zu, also in das Gebiet, das defines.hpp:17 als reproduzierbar divergent
+		// dokumentiert. Ein Genauigkeitsarm mit kleinerem u_lat ist der naheliegende Arm -- er haette
+		// die Entwarnung bekommen.
+		if(u>vorgabe) print_warning("  (2) nu_lat = si_nu*u_lat/(si_u*dx) waechst proportional mit, tau steigt also WEG von 0,5 -- in Richtung Stabilitaet.");
+		else          print_warning("  (2) ACHTUNG, die RISKANTE Richtung: nu_lat sinkt proportional mit u_lat, tau laeuft damit AUF 0,5 ZU. defines.hpp dokumentiert fuer tau = 0,50003 reproduzierbare Divergenz (Fz -11,4 Mio N, 7 NaN). Ein kleineres u_lat senkt den Ma-Fehler und kauft ihn mit Stabilitaet.");
+		print_warning("  (3) Die Geschwindigkeitsklemme steht bei 0,57735 GITTEREINHEITEN je Komponente (lbm.cpp def_c). In SI sind das bei si_u = 30 m/s 0,57735*si_u/u_lat = "+to_string(0.57735027f*30.0f/u,1u)+" m/s statt "+to_string(0.57735027f*30.0f/vorgabe,1u)+" m/s -- sie beisst bei hoeherem u_lat FRUEHER. (Alle vier Faelle haben si_u = 30 m/s hart verdrahtet; bei anderem si_u gilt die Formel, nicht die Zahl.)");
+		print_warning("  Ein Befund aus diesem Arm ist ohne diese drei Saetze nicht deutbar.");
+	} else print_info("Gittergeschwindigkeit u_lat = "+to_string(u,5u)+" (Vorgabe; CFD_U_LAT ungesetzt oder gleich), Ma = "+to_string(ma_soll,4u)+".");
+	return u;
+}
+
+// Schrittbasierte Schalter in Zeit umrechnen und die Verschiebung ANSAGEN (Ansage-Doktrin).
+// ★ Pruefbefund B1: die erste Fassung pruefte in ALLEN Faellen dieselben vier Namen. In fahrzeug
+// und fernfeld wirkt davon KEINER (s_sgs_sism_* und s_sgs_vd_ab stehen dort explizit auf 0,
+// CFD_SLICE_NEAR_STEPS ist dort ausdruecklich "NICHT angewandt") -- die Warnung waere die einzige
+// Nennung von SISM im ganzen Log gewesen und haette das Gegenteil der Wahrheit behauptet. Jede
+// Aufrufstelle uebergibt deshalb ihre EIGENE Liste.
+// ★ Pruefbefund B3: CFD_SGS_DIAG_AB fehlte und ist der einzige, der in allen vier Faellen aus der
+// Env gelesen wird; CFD_SAMPLE_EVERY fehlte und zaehlt in fahrzeug_dd GROBE Schritte.
+struct UlatSchritt { const char* name; bool grob; };
+
+static void u_lat_zeitwaechter(const float u_lat, const float dt_f, const float dt_c,
+                               const UlatSchritt* liste, const uint n_liste, const char* wo) {
+	if(u_lat==U_LAT_VORGABE||!(dt_f>0.0f)||!(dt_c>0.0f)) return;
+	const double skal = (double)U_LAT_VORGABE/(double)u_lat; // dt(Vorgabe) / dt(hier), sprossenunabhaengig
+	uint n_gesetzt = 0u;
+	for(uint i=0u; i<n_liste; i++) {
+		const char* nm = liste[i].name;
+		const char* v = getenv(nm); if(v==nullptr) continue;
+		const double schritte = atof(v); if(!(schritte>0.0)) continue;
+		const double dt = liste[i].grob ? (double)dt_c : (double)dt_f;
+		n_gesetzt++;
+		// ★ BERICHTIGT am Tag des Baus: die erste Fassung schlug eine Schrittzahl VOR ("gleiche
+		// physikalische Zeit gaebe X") und unterstellte damit, der gesetzte Wert sei fuer die
+		// Vorgabe gedacht. Ist er -- wie im Arm uv8_u100 -- schon umgerechnet, empfahl die Meldung
+		// eine ZWEITE Umrechnung (5625 -> 4219). Der Waechter kann beides nicht unterscheiden,
+		// also nennt er die ZEIT (das ist die Tatsache) und die Bedingung ausdruecklich.
+		// ★ Pruefbefund B11: der Ersatzwert wird auf >= 1 geklemmt. Ungeklemmt konnte er 0 werden,
+		// und CFD_SGS_SISM_T=0 bricht im naechsten Waechter ab (lbm.cpp: alpha = 1/T).
+		const long long ersatz_roh = llround(schritte*skal);
+		const ulong ersatz = (ulong)(ersatz_roh<1ll ? 1ll : ersatz_roh);
+		print_warning("SCHRITT-SCHALTER IN ZEIT ("+string(nm)+" = "+string(v)+", "+string(wo)+"): "+string(v)+(liste[i].grob?" GROBE":" feine")+" Schritte sind bei diesem u_lat "
+			+to_string((float)(schritte*dt*1e3),2u)+" ms. Mit der Vorgabe u_lat = "+to_string(U_LAT_VORGABE,5u)+" waeren dieselben Schritte "
+			+to_string((float)(schritte*dt/skal*1e3),2u)+" ms. WAR der Wert fuer die Vorgabe gedacht, traegt "
+			+string(nm)+"="+to_string(ersatz)+" dieselbe Zeit; ist er schon umgerechnet, steht er richtig. "
+			"Welches von beidem zutrifft, kann dieser Waechter nicht sehen -- es gehoert in den Serienkopf.");
+	}
+	// ★ Pruefbefund B4: der Waechter sieht nur GESETZTE Schalter. Ein ungesetzter faellt auf seinen
+	// Code-Default zurueck (CFD_SLICE_NEAR_STEPS auf 5000), und der traegt dieselbe 50-ms-Annahme.
+	print_warning("  Schrittbasierte Schalter folgen u_lat NICHT von selbst. Das gilt auch fuer die "
+		"UNGESETZTEN: sie fallen auf ihren Code-Default zurueck, und der ist fuer u_lat = "+to_string(U_LAT_VORGABE,5u)+" gewaehlt "
+		"(in diesem Lauf "+to_string((ulong)n_gesetzt)+" der geprueften Namen gesetzt). Ebenfalls an der Schrittlaenge haengen "
+		"CFD_FAC_CD_EVERY (Vielfaches der Abtastkadenz, also von CFD_SAMPLE_EVERY) und CFD_ZAEHL_TAKT (reine Diagnostik). "
+		"Unkompensiert traegt der Arm MEHR als die zwei Aenderungen der Gittergeschwindigkeit, und der Vergleich ist dann "
+		"keine Ein-Variablen-Messung mehr (12.09.2026).");
+}
+
+// Die Listen je Fall -- was dort WIRKLICH aus der Env gelesen wird und wirkt (Pruefbefund B1/B3).
+static const UlatSchritt ULAT_SCHRITT_KUGEL[] = {{"CFD_SGS_SISM_AB",false},{"CFD_SGS_SISM_T",false},{"CFD_SGS_VD_AB",false},{"CFD_SGS_DIAG_AB",false},{"CFD_SAMPLE_EVERY",false}};
+static const UlatSchritt ULAT_SCHRITT_FZG[]   = {{"CFD_SGS_DIAG_AB",false},{"CFD_SAMPLE_EVERY",false}}; // s_sgs_sism_*/vd_ab sind hier 0, SLICE_NEAR_STEPS "NICHT angewandt"
+static const UlatSchritt ULAT_SCHRITT_DD[]    = {{"CFD_SGS_SISM_AB",false},{"CFD_SGS_SISM_T",false},{"CFD_SGS_VD_AB",false},{"CFD_SGS_DIAG_AB",false},{"CFD_SLICE_NEAR_STEPS",false},{"CFD_SAMPLE_EVERY",true}};
+static const UlatSchritt ULAT_SCHRITT_FERN[]  = {{"CFD_SGS_DIAG_AB",false},{"CFD_SAMPLE_EVERY",false}};
+
 // =============================================================================================
 // KUGEL IM KANAL MIT MITBEWEGTEM BODEN
 //
@@ -1357,6 +1453,20 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			vk+=(ulong)L.lbm_domain[d]->rho_clamp_hits[28]; sp+=(ulong)L.lbm_domain[d]->rho_clamp_hits[29]; }
 		if(vk>0ull) print_warning(string("  GESCHWINDIGKEITSKLEMME ")+wo+": "+to_string(vk)+" Treffer (saettigend). Wo sie greift, ist der Impuls NICHT erhalten -- f_eq traegt rho*u_geklemmt statt j+F/2.");
 		else print_info(string("  Geschwindigkeitsklemme ")+wo+": 0 Treffer (Impuls ungestoert).");
+		{ // ★ TODO 2 (12.09.2026): Wirkpfad der Feld-Sparschalter. 204/205 = rho uebersprungen/geschrieben,
+		  // 206/207 = dito fuer u. Gegattert mit def_zaehl_takt, also Stichproben. SOLL: ist ein Schalter an,
+		  // muss der Ueberspringzaehler > 0 sein -- sonst ist er ein lautloser No-Op (Iron Rule).
+		  ulong rs=0ull, rg=0ull, us=0ull, ug=0ull;
+		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
+			rs+=(ulong)dm->rho_clamp_hits[204]; rg+=(ulong)dm->rho_clamp_hits[205];
+			us+=(ulong)dm->rho_clamp_hits[206]; ug+=(ulong)dm->rho_clamp_hits[207]; }
+		  const bool rho_an = L.lbm_domain[0]->rho_takt>0u, u_an = L.lbm_domain[0]->u_takt>0u;
+		  if(rs+rg>0ull) print_info(string("  rho-SPARSAM ")+wo+": "+to_string(rs)+" Schreibvorgaenge uebersprungen, "+to_string(rg)+" ausgefuehrt ("+to_string((float)(100.0*(double)rs/(double)(rs+rg)),1u)+" % gespart; EIN Zeitschritt, Summe = aktive Zellen).");
+		  if(us+ug>0ull) print_info(string("  u-SPARSAM ")+wo+": "+to_string(us)+" Schreibvorgaenge uebersprungen, "+to_string(ug)+" ausgefuehrt ("+to_string((float)(100.0*(double)us/(double)(us+ug)),1u)+" % gespart; EIN Zeitschritt, Summe = aktive Zellen).");
+		  if(rho_an&&rs==0ull) print_error(string("rho-SPARSAM ist an, aber Slot 204 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
+		  if(rs+rg>0ull&&us+ug>0ull&&rs+rg!=us+ug) print_error("FELD-SPARSAM Ist=Soll verletzt: rho zaehlt "+to_string(rs+rg)+" Zellen, u aber "+to_string(us+ug)+". Beide Zaehlerpaare sitzen im SELBEN Block und muessen dieselbe Zellmenge sehen -- eine Differenz heisst Saettigung oder ein Zaehler an der falschen Stelle.");
+		  if(u_an&&us==0ull) print_error(string("u-SPARSAM ist an, aber Slot 206 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
+		}
 		{ // ★ Pruefbefund A4: Slot 59 wurde NIRGENDS gelesen -- ein reiner Schreibzaehler.
 			ulong bw=0ull; for(uint d=0u; d<L.get_D(); d++) bw+=(ulong)L.lbm_domain[d]->rho_clamp_hits[59];
 			if(bw>0ull) print_info(string("  Bewegtwand-Term ")+wo+": "+to_string(bw)+" Randzellen-Auswertungen mit u_w != 0 (saettigend).");
@@ -3728,6 +3838,7 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
 	  LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_schale_paritaet = false; if(getenv("CFD_BODEN_EQ")||getenv("CFD_BODEN_EQ_DOWN")||getenv("CFD_BODEN_EQ_ABSTAND")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird im kanal NICHT angewandt (parallele Waende, periodisches x)."); // B3/R3
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")||getenv("CFD_KOPPLUNG_GLATT")) print_warning("CFD_KOPPLUNG_ZEITINTERP/GLATT werden im kanal NICHT angewandt (nur fahrzeug_dd; M3).");
+	if(getenv("CFD_U_LAT")) print_warning("CFD_U_LAT wird im kanal NICHT angewandt -- dieser Fall setzt seine Skala ueber CFD_KANAL_UTAU (u_tau_lat) und CFD_KANAL_RETAU, nicht ueber eine Anstroemgeschwindigkeit (Ansage-Doktrin, 12.09.2026).");
 	if(getenv("CFD_SLICE_NEAR_STEPS")||getenv("CFD_VTK_JEDE")||getenv("CFD_VTK_BEHALTE")) print_warning("CFD_SLICE_NEAR_STEPS/CFD_VTK_JEDE/CFD_VTK_BEHALTE werden in diesem Fall NICHT angewandt (nur fahrzeug_dd; Kadenz-Umbau 27.08.).");
 	  { const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	  if(env_u("CFD_FERN_FACETTEN", 0u)>0u) print_warning("CFD_FERN_FACETTEN wird im kanal NICHT angewandt (nur fahrzeug_dd -- P8; Ansage-Doktrin).");
@@ -4511,10 +4622,11 @@ void main_setup_kugel() {
 	const float D      = 0.450f;                         // Kugeldurchmesser [m]
 	const float dx     = 0.001f*env_f("CFD_KUGEL_DX", 12.0f);
 	const float si_zc  = env_f("CFD_KUGEL_ZC", 0.300f);  // Kugelmittelpunkt ueber Boden [m]
-	const float u_lat  = 0.075f;
+	const float u_lat  = u_lat_schalter("kugel");
 	const float dt     = u_lat*dx/si_u;
 	const float nu_lat = si_nu*dt/(dx*dx);
 	const float tau    = 3.0f*nu_lat + 0.5f;
+	u_lat_zeitwaechter(u_lat, dt, dt, ULAT_SCHRITT_KUGEL, 5u, "kugel"); // Einzelgitter: dt_grob = dt_fein
 	const float Re_D   = si_u*D/si_nu;
 
 	// ---------------------------------------------------------------- Domaene (Abstaende ab Kugelmittelpunkt)
@@ -5069,10 +5181,11 @@ static void main_setup_fahrzeug() {
 	const float si_length = 4.4364f;   // Fahrzeuglaenge laut STL-Konvention des Projekts
 	const float A_ref     = 1.85f;     // Projekt-Konvention; die STL misst 1.8597 (0.5 % groesser)
 	const float dx        = 0.001f*env_f("CFD_DX", 4.0f);
-	const float u_lat     = 0.075f;
+	const float u_lat     = u_lat_schalter("fahrzeug");
 	const float dt        = u_lat*dx/si_u;
 	const float nu_lat    = si_nu*dt/(dx*dx);
 	const float tau       = 3.0f*nu_lat + 0.5f;
+	u_lat_zeitwaechter(u_lat, dt, dt, ULAT_SCHRITT_FZG, 2u, "fahrzeug");
 
 	// Domaene physikalisch statt in Zellen, damit dx frei waehlbar bleibt. Die Masse stammen aus der
 	// 4mm-Baseline des alten Baums (1665 x 621 x 485 Zellen) und sind hier in Meter umgerechnet.
@@ -5388,7 +5501,14 @@ static void main_setup_fahrzeug() {
 
 extern char** environ; // ★ H3: fuer die Gegenrichtung (im Lauf gesetzt, in der Referenz unbekannt)
 struct BasisZeile { string name, wert, einheit; };
-static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
+static void pruefe_basis(const string& basisdatei, const float dx_lauf, const float u_lat_lauf) {
+	// ★ Pruefbefund B5 (12.09.2026): die Einheit 'zellen_fein' rechnet NUR mit dx_ref/dx_lauf um.
+	// Fuer echte Zellzahlen ist das richtig. CFD_SLICE_NEAR_STEPS ist aber KEINE Zellzahl, sondern
+	// eine SCHRITTZAHL, und die haengt an dt = u_lat*dx/si_u, also an BEIDEN Groessen. Solange u_lat
+	// eine Konstante war, fiel das nicht auf. Seit CFD_U_LAT existiert, forderte der Waechter im
+	// richtig kompensierten Arm den physikalisch FALSCHEN Wert und brach mit print_error ab -- und im
+	// unkompensierten Arm entwarnte er. Neue Einheit 'schritte_fein': dx UND u_lat. Bei der Vorgabe
+	// ist der Faktor exakt 1,0, alle bestehenden Serienzeilen bleiben also unberuehrt.
 	if(getenv("CFD_BASIS")!=nullptr&&string(getenv("CFD_BASIS"))=="aus") {
 		print_warning("BASIS-WAECHTER ABGESCHALTET (CFD_BASIS=aus) -- dieser Lauf ist NICHT gegen die Baseline geprueft. Der Notausgang ist absichtlich laut.");
 		return;
@@ -5407,6 +5527,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 		std::istringstream is(zeile); BasisZeile b; if(!(is>>b.name>>b.wert>>b.einheit)) continue; B.push_back(b);
 	}
 	if(dx_ref<=0.0f) { print_error("BASIS-WAECHTER: kein 'dx_ref:' im Kopf von "+basisdatei+" -- Umrechnung unmoeglich."); return; }
+	if(!(u_lat_lauf>0.0f)) { print_error("BASIS-WAECHTER: CFD_U_LAT = "+to_string(u_lat_lauf,7u)+" ist nicht positiv -- die Umrechnung der Einheit 'schritte_fein' waere undefiniert (B5)."); return; }
 	if(!(dx_lauf>0.0f)) { print_error("BASIS-WAECHTER: CFD_DX = "+to_string(dx_lauf,4u)+" ist nicht positiv -- die Umrechnung waere undefiniert (M5)."); return; }
 	const double skal = (double)dx_ref/(double)dx_lauf; // Feingitter-Zellen: kleineres dx -> mehr Zellen
 	// Deklarierte Abweichungen, Format CFD_A=1,CFD_B=2 -- OHNE Leerzeichen: der Serienlaeufer
@@ -5439,7 +5560,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 		if(b.name=="CFD_DX"||b.name=="CFD_CASE") continue;  // die Sprosse selbst bzw. der Fall
 		n_geprueft++;
 		if(b.einheit!="phys"&&b.einheit!="modus"&&b.einheit!="zellen_grob"&&b.einheit!="zellen_fein"
-		   &&b.einheit!="zellen_grob_laenge"&&b.einheit!="index_grob")
+		   &&b.einheit!="zellen_grob_laenge"&&b.einheit!="index_grob"&&b.einheit!="schritte_fein")
 			print_error("BASIS-WAECHTER: unbekannte Einheit '"+b.einheit+"' bei "+b.name+" -- sie fiele still auf 'Wert bleibt' zurueck (M6).");
 		string soll=b.wert, hinweis;
 		// ★ Audit I 29.08.: 'phys', 'modus' und 'zellen_grob' fielen still auf "Wert bleibt"
@@ -5449,8 +5570,11 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 		//   modus       Schalterstellung/Zaehlwert ohne Laengenbezug
 		//   zellen_grob ANZAHL grober Zellen -- die Anzahl bleibt, ihre Laenge waechst mit dx_c
 		//               (dx_c = dx_f*ratio); wer eine feste LAENGE will, nimmt zellen_grob_laenge.
-		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob") {
-			const double roh = atof(b.wert.c_str())*skal;
+		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob"||b.einheit=="schritte_fein") {
+			//   schritte_fein  FEINE ZEITSCHRITTE -- skaliert mit dx UND mit 1/u_lat, weil
+			//                  dt = u_lat*dx/si_u. Der u_lat-Faktor ist bei der Vorgabe exakt 1,0.
+			const double u_fak = (b.einheit=="schritte_fein") ? ((double)U_LAT_VORGABE/(double)u_lat_lauf) : 1.0;
+			const double roh = atof(b.wert.c_str())*skal*u_fak;
 			const long unten=(long)floor(roh), oben=(long)ceil(roh);
 			soll = to_string((ulong)llround(roh));
 			if(unten!=oben) hinweis = " (nicht eindeutig: "+to_string((ulong)unten)+" oder "+to_string((ulong)oben)+" -- Wahl deklarieren)";
@@ -5487,6 +5611,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 			const string nm=ev.substr(0,g);
 			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME") continue;
 			print_warning("BASIS ZUSAETZLICH: "+nm+"="+ev.substr(g+1)+" -- steht nicht in der Referenz, wird also NICHT geprueft.");
+			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. Die Einheit 'schritte_fein' rechnet die Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
 			if(nm=="CFD_RATIO") print_error("CFD_RATIO ist gesetzt, steht aber nicht in der Referenz -- die Umrechnung zellen_grob/index_grob haengt an unveraendertem ratio (dx_c = dx_f*ratio). Referenz erneuern oder Schalter entfernen.");
 			extra++;
 		}
@@ -5518,7 +5643,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) {
 }
 
 static void main_setup_fahrzeug_dd() {
-	pruefe_basis(get_exe_path()+"../basis/fahrzeug_dd.basis", env_f("CFD_DX", 4.0f)); // ★ VOR jedem teuren Schritt
+	pruefe_basis(get_exe_path()+"../basis/fahrzeug_dd.basis", env_f("CFD_DX", 4.0f), env_f("CFD_U_LAT", U_LAT_VORGABE)); // ★ VOR jedem teuren Schritt; u_lat wird hier NUR gelesen (die Ansage macht u_lat_schalter weiter unten, sonst stuende sie doppelt)
 	// ★ Audit J 29.08.: der Slice-Riegel stand erst NACH baue_facetten und dem ELIBB-Remesh --
 	// bei 4 mm also nach ueber zehn Minuten Aufbau. Die Entscheidung haengt aber nur an zwei
 	// getenv, also faellt sie hier. Entscheidungstabelle wortgleich zur Stelle weiter unten.
@@ -5542,7 +5667,7 @@ static void main_setup_fahrzeug_dd() {
 	                                                  // ein Widerspruch, der nie aufgeloest wurde. Hier gilt die Referenz.
 	const float si_length = 4.4364f;
 	const float A_ref     = 1.85f;
-	const float u_lat     = 0.075f;
+	const float u_lat     = u_lat_schalter("fahrzeug_dd");
 
 	// ratio ist der einzige Regler, der ueber die Kosten entscheidet: die groben Zellen skalieren
 	// mit 1/ratio^3 und die groben Schritte mit 1/ratio, das Fernfeld kostet also 1/ratio^4.
@@ -5562,6 +5687,7 @@ static void main_setup_fahrzeug_dd() {
 	const float dt_c  = (float)ratio*dt_f;
 	const float nu_lat_f = si_nu*dt_f/(dx_f*dx_f);
 	const float nu_lat_c = si_nu*dt_c/(dx_c*dx_c);
+	u_lat_zeitwaechter(u_lat, dt_f, dt_c, ULAT_SCHRITT_DD, 6u, "fahrzeug_dd"); // SISM_AB/_T und SLICE_NEAR_STEPS zaehlen FEINE, CFD_SAMPLE_EVERY GROBE Schritte (setup.cpp: "in groben Schritten")
 
 	// ---------------------------------------------------------------- Fernfeld = OpenFOAM-Box
 	// Die Maße stammen aus dem V1-Fahrzeugfall (phase7g), wo sie durchgerechnet waren. Sie stehen hier
@@ -5793,6 +5919,19 @@ static void main_setup_fahrzeug_dd() {
 	  LBM_Domain::s_fac_budget_sn = fmax(0.25f, fmin(4.0f, env_f("CFD_FAC_BUDGET_SN", 1.0f))); // 1a-Bsn: sn-Budget-Skalar
 	  if(LBM_Domain::s_fac_budget!=1.0f) print_info("FACETTEN BUDGET (1a-B4t): Tangentialbudget x "+to_string(LBM_Domain::s_fac_budget,2u)+" (|s1| <= 2ut*k, |s2| <= ut*k). Die +-2ut-Budgets sind Design, nie geeicht (Planungsagent 2026-08-22). Erfolgskriterium: Slot-10-Anteil faellt UND cd_druck/cz_rest Richtung OF13 UND y+-Median nicht > +15 %.");
 	  if(LBM_Domain::s_fac_budget_sn!=1.0f) print_info("FACETTEN BUDGET_SN (1a-Bsn): sn-Budget x "+to_string(LBM_Domain::s_fac_budget_sn,2u)+". Verschlechtert sich cd_druck > 2 %, ist der Arm verworfen (sn beruehrt den Druckpfad).");
+	  { // ★ TODO 2 Schritt 1 (12.09.2026), CFD_RHO_SPARSAM: rho nur noch an der Auslassschicht und an
+	    // den Schritten schreiben, nach denen der Host das ganze Feld liest. NUR NAHFELD -- das Fernfeld
+	    // liest rho jeden GROBEN Schritt auf fuenf Entnahmeebenen (extract_plane_macros), das deckt die
+	    // Maske nicht ab. Der Takt ist die Sample-Kadenz in FEINEN Schritten.
+	    const uint rs_ = env_u("CFD_RHO_SPARSAM", 0u);
+	    LBM_Domain::s_rho_takt = (rs_>0u) ? max(1u, env_u("CFD_SAMPLE_EVERY", 25u))*ratio : 0u;
+	    if(rs_>0u&&env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_SPARSAM und CFD_FAC_APG schliessen sich aus: der APG-Zweig liest rho an bis zu 18 FACETTENNACHBARN (kernel.cpp, rho[j[ia]]), und die liegen ausserhalb der Auslassschicht. Die Maske waere keine Obermenge mehr und der Wandmodell-Eingang bekaeme lautlos veraltete Werte.");
+	    const uint us_ = env_u("CFD_U_SPARSAM", 0u);
+	    LBM_Domain::s_u_takt = (us_>0u) ? ratio : 0u;
+	    if(us_>0u&&env_u("CFD_SGS_BAND", 0u)>0u) print_error("CFD_U_SPARSAM und CFD_SGS_BAND schliessen sich aus: das Band liest u an den Lagen 2..8 von der Wand, also bis zu 8 Zellen ausserhalb der Facettenzelle. Die Maske dilatiert die F-BBox nur um 2 und waere keine Obermenge mehr.");
+	    if(us_>0u) print_info("u-SPARSAM (CFD_U_SPARSAM, TODO 2 Schritt 3): stream_collide schreibt u nur noch in der Randschale der Dicke 2 (deckt deriv_reg an den 6 Nachbarn jeder TYPE_E-Zelle und po_interior) und in der um 2 dilatierten F-BBox (deckt sgs_fdwand und fac_nachbar_ab); am letzten Substep jedes Grobschritts (jeder "+to_string(ratio)+"-te feine Schritt) wird u wieder UEBERALL geschrieben, weil die N2F-Entnahme dort 4^3-Bloecke ueber rund ein Viertel der Domaene liest. Der Gewinn ist dadurch konstruktiv auf (ratio-1)/ratio gedeckelt. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_U_SPARSAM=0.");
+	    if(rs_>0u) print_info("rho-SPARSAM (CFD_RHO_SPARSAM, TODO 2 Schritt 1): stream_collide schreibt rho nur noch fuer x >= Nx-2 (konstruktive Obermenge von po_interior -- der Druckauslass ist die x_max-Flaeche, die Innenzelle stammt aus einer 26er-Nachbarsuche) sowie an jedem "+to_string(LBM_Domain::s_rho_takt)+"-ten feinen Schritt, also an der Sample-Kadenz, nach der der Host das Feld liest. u bleibt UNANGETASTET. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_RHO_SPARSAM=0.");
+	  }
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz; einlass_eq EXPLIZIT 0 fuers Feingitter (Pruefagent M1: Statik-Doktrin, nicht nur Initialisierer); Schalen-alpha EXPLIZIT 0 -- lbm_f traegt spaeter eine Extract-Liste, darf aber NIE blenden (P9c-Wirkpfad-Soll nah==0)
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&(LBM_Domain::s_boden_eq_n>0u||env_u("CFD_FERN_BODEN_EQ",0u)>0u)) print_warning("CFD_BODEN_EQ_ABSTAND > 3: der Scan kostet (2A+1)^2*(A+1) Flag-Reads je Bandzelle je Schritt -- stiller Perf-Fresser (XL-R2).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2) -- Kraefteverfaelschung waechst mit N.");
@@ -5826,6 +5965,22 @@ static void main_setup_fahrzeug_dd() {
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f); LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_u("CFD_SGS_DIAG_AB", 0u);
 	LBM_Domain::s_wandfunktion = false; LBM_Domain::s_wf_tau = 1.0f; LBM_Domain::s_fac_budget = 1.0f; LBM_Domain::s_fac_budget_sn = 1.0f; LBM_Domain::s_fac_isogate = 0.0f; LBM_Domain::s_fac_deteps = 0.0f; LBM_Domain::s_schale_paritaet = false; LBM_Domain::s_facetten = false; LBM_Domain::s_fac_imem = false; LBM_Domain::s_fac_rdiag=0u; LBM_Domain::s_fac_ema = 0.0f; LBM_Domain::s_fac_pema = 0.0f; LBM_Domain::s_fac_lsq = env_u("CFD_FAC_LSQ", 0u)>0u; LBM_Domain::s_fac_quergate = env_u("CFD_FAC_QUERGATE", 0u)>0u; LBM_Domain::s_fac_elibb = env_u("CFD_FAC_ELIBB", 0u)>0u; LBM_Domain::s_fac_elibb_pur = env_u("CFD_FAC_ELIBB", 0u)==2u; LBM_Domain::s_fac_qmin = env_f("CFD_FAC_QMIN", 0.1f); LBM_Domain::s_fac_kappa = env_f("CFD_FAC_KAPPA", 0.4f); LBM_Domain::s_fac_utkorr = env_f("CFD_FAC_UTKORR", 1.0f); LBM_Domain::s_fac_qkappe = env_f("CFD_FAC_QKAPPE", 1.0f); LBM_Domain::s_fac_qdiag = env_u("CFD_FAC_QDIAG", 0u); LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_fac_satgate = false; LBM_Domain::s_fac_kraft = 0u; LBM_Domain::s_fac_kdiag = 0u; LBM_Domain::s_fac_nachbar = 0u; LBM_Domain::s_fac_messnur = 0u; LBM_Domain::s_sgs_fdwand = 0u; LBM_Domain::s_sgs_gdiag = 0u; LBM_Domain::s_sgs_sism = 0u; LBM_Domain::s_sgs_sism_T = 0u; LBM_Domain::s_sgs_sism_ab = 0ull; LBM_Domain::s_sgs_vandriest = 0u; LBM_Domain::s_sgs_band = 0u; LBM_Domain::s_sgs_nut_skal = 1.0f; LBM_Domain::s_sgs_vd_ab = 0ull; LBM_Domain::s_fac_alpha = 0u; LBM_Domain::s_fac_apg = 0.0f; LBM_Domain::s_boden_eq_n = 0u; LBM_Domain::s_boden_eq_down = 0u; LBM_Domain::s_boden_eq_split = 0xFFFFFFFFu; LBM_Domain::s_boden_eq_abstand = 0u; LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; LBM_Domain::s_fac_diagz = -1l; LBM_Domain::s_fac_tau = 1.0f; // Statik-Symmetrie VOLL (IR3-Abschluss-Loop)
 	if(LBM_Domain::s_sponge_n>0u&&LBM_Domain::s_sponge_n+32u>NF_OX) print_error("CFD_SPONGE_N ueber "+to_string(NF_OX>=32u?NF_OX-32u:0u)+" kaeme im Fernfeld der Kopplungs-Entnahmeebene x- ("+to_string(NF_OX)+" Zellen) zu nahe (32er-Reserve; Grenze folgt NEAR_VOR).");
+	{ // ★ TODO 2 Schritt 2 (12.09.2026): das FERNFELD auf denselben Stand wie das Nahfeld
+	  // (Heiko: "macht so oder so keinen Sinn, dass die unterschiedlich waeren"). Gleiche STRUKTUR,
+	  // andere Box: im Nahfeld ist die Schreibmasken-Box die Facetten-BBox, im Fernfeld der
+	  // FUSSABDRUCK des Nahfelds -- dort liest extract_plane_macros jeden Grobschritt rho UND u
+	  // auf fuenf Ebenen. Die ganze Box statt nur ihrer Oberflaeche zu nehmen ist die konservative
+	  // Wahl und kostet wenig: 417x156x122 von 768x480x552 sind 3,9 % der Fernfeldzellen.
+	  // KEIN Substep-Takt: das Fernfeld rechnet EINEN Schritt je Grobschritt, und nach jedem wird
+	  // entnommen. Gespart wird deshalb rein raeumlich; der Takt deckt nur die Hostlesungen ab.
+	  const uint rs_ = env_u("CFD_RHO_SPARSAM", 0u), us_ = env_u("CFD_U_SPARSAM", 0u);
+	  const uint se_ = max(1u, env_u("CFD_SAMPLE_EVERY", 25u));
+	  LBM_Domain::s_smbox[0]=NF_OX; LBM_Domain::s_smbox[1]=NF_OY; LBM_Domain::s_smbox[2]=NF_OZ;
+	  LBM_Domain::s_smbox[3]=cex;   LBM_Domain::s_smbox[4]=cey;   LBM_Domain::s_smbox[5]=cez;
+	  LBM_Domain::s_rho_takt = (rs_>0u) ? se_ : 0u; // Fernfeld: Takt in GROBEN Schritten
+	  LBM_Domain::s_u_takt   = (us_>0u) ? se_ : 0u;
+	  if(rs_>0u||us_>0u) print_info("FELD-SPARSAM Fernfeld: Schreibmasken-Box = Nahfeld-Fussabdruck ("+to_string(NF_OX)+","+to_string(NF_OY)+","+to_string(NF_OZ)+") + ("+to_string(cex)+","+to_string(cey)+","+to_string(cez)+"), plus Randschale 2; Takt "+to_string(se_)+" GROBE Schritte fuer die Hostlesungen. Gleiche Bauform wie im Nahfeld, andere Box.");
+	}
 	LBM_Domain::s_boden_eq_n = env_u("CFD_FERN_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); // u_road Setup-treu (XL-B5); Abstand gilt fuer beide Felder
 	LBM_Domain::s_boden_eq_down = env_u("CFD_FERN_BODEN_EQ_DOWN", 0u);
 	if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_FERN_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2) -- am Grobgitter wiegt jede Zelle 4x (XL-R3).");
@@ -6973,6 +7128,15 @@ static void main_setup_fahrzeug_dd() {
 	// aus n_outer gerechnet wird (VTK-Rotation kp, verify_at2), bleibt auf der urspruenglichen Planung --
 	// das ist gewollt und wird beim Verlaengern angesagt.
 	const uint  sample_every = max(1u, env_u("CFD_SAMPLE_EVERY", 25u)); // in groben Schritten
+	{ // ★ TODO 2 Schritt 1: Ist=Soll. s_rho_takt wurde beim Bau des NAHFELDS gesetzt und danach fuers
+	  // Fernfeld genullt -- geprueft wird deshalb die Domaenenkopie, nicht die Statik.
+	  const uint rt_ = lbm_f.lbm_domain[0]->rho_takt;
+	  if(rt_>0u&&rt_!=sample_every*ratio) print_error("rho-SPARSAM: Takt "+to_string(rt_)+" passt nicht zur Sample-Kadenz "+to_string(sample_every*ratio)+" (sample_every*ratio). Der Host laese das Feld an Schritten, an denen rho nicht geschrieben wurde -- lautlos veraltete Dichte in Slices, cp und VTK.");
+	  if(rt_>0u) print_info("rho-SPARSAM Ist=Soll: Takt "+to_string(rt_)+" feine Schritte = Sample-Kadenz ("+to_string(sample_every)+" grobe x ratio "+to_string(ratio)+").");
+	  const uint ut_ = lbm_f.lbm_domain[0]->u_takt;
+	  if(ut_>0u&&ut_!=ratio) print_error("u-SPARSAM: Takt "+to_string(ut_)+" ist nicht ratio ("+to_string(ratio)+"). u muss am LETZTEN Substep jedes Grobschritts voll geschrieben werden, sonst liest die N2F-Entnahme veraltete Bloecke.");
+	  if(ut_>0u) print_info("u-SPARSAM Ist=Soll: Takt "+to_string(ut_)+" = ratio, also Vollschreiben am letzten Substep jedes Grobschritts. Sample-Kadenz "+to_string(sample_every*ratio)+" ist ein Vielfaches davon ("+to_string(sample_every)+"x) -- Hostlesungen sind gedeckt.");
+	}
 	// ★ KADENZ-UMBAU (Heiko 27.08.): Ausgabe-Kadenz in NEAR-STEPS statt Sekunden-Uhr. Default 5000
 	// Near-Steps (= 1250 Outer = 50 ms bei 4 mm). Der Zaehler ist GITTERSCHRITT-fest: derselbe Zahlenwert
 	// bedeutet bei 8 mm 100 ms. Die Basisdatei fuehrt ihn deshalb mit der Einheit "zellen_fein" und skaliert
@@ -7423,6 +7587,19 @@ static void main_setup_fahrzeug_dd() {
 	double t_phys_begin = 0.0;
 
 	for(ulong outer=0ull; outer<n_outer; outer++) {
+		// ★ TODO 2 Schritt 1: der Abschlusspfad liest das ganze Feld, aber der LETZTE Zeitschritt ist
+		// kein Vielfaches der Sample-Kadenz (25050 mod 100 = 50 bei 8 mm). Ab der vorletzten
+		// Sample-Periode wird rho deshalb wieder ueberall geschrieben. Der Stoppdatei-Pfad braucht das
+		// nicht -- er verlaesst die Schleife AN einem Sample-Punkt, dort ist rho ohnehin frisch.
+		// ★ TODO 2, BERICHTIGT 12.09.2026 nach einer GESCHEITERTEN Abnahme: der Host sagt BEIDEN
+		// Domaenen ausdruecklich an, wann er das ganze Feld lesen wird -- an der Sample-Kadenz und in
+		// der letzten Sample-Periode vor dem Abschlusspfad. Vorher leitete die Domaene das aus ihrem
+		// eigenen Schrittzaehler ab ((t+1)%takt==0); im FERNFELD traf das nicht, und 23.425.595 Zellen
+		// standen im Feld-Dump veraltet -- exakt die Zahl, die der Wirkpfad-Zaehler als uebersprungen
+		// meldete. Der Stoppdatei-Pfad ist mitgedeckt: er verlaesst die Schleife an einem Sample-Punkt.
+		{	const bool lese_ = ((outer+1ull)%(ulong)sample_every==0ull) || (outer+(ulong)sample_every>=n_outer);
+			lbm_f.lbm_domain[0]->rho_voll_zwang = lese_;
+			lbm_c.lbm_domain[0]->rho_voll_zwang = lese_; }
 		outer_clock.start();
 		const auto _t0 = t_now();
 		lbm_c.run_async(1u);
@@ -8555,7 +8732,7 @@ static void main_setup_fahrzeug_dd() {
 //           CFD_FERN_VEH=1 (Fahrzeug doch voxelisieren -- trennt "leer" von "mit Koerper")
 // =============================================================================================
 static void main_setup_fernfeld() {
-	const float si_u = 30.0f, si_rho = 1.225f, si_length = 4.4364f, u_lat = 0.075f;
+	const float si_u = 30.0f, si_rho = 1.225f, si_length = 4.4364f, u_lat = u_lat_schalter("fernfeld");
 	const float si_nu = env_f("CFD_NU", 1.51e-5f);
 	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
 	const float dx_f  = 0.001f*fmax(0.1f, env_f("CFD_DX", 4.0f));
@@ -8564,6 +8741,7 @@ static void main_setup_fernfeld() {
 	const float nu_faktor = env_f("CFD_FERN_NU", 1.0f);    // Weg 2 aus EINLASS-AUSLASS.md
 	const float nu_lat = si_nu*dt/(dx*dx)*nu_faktor;
 	const float tau    = 3.0f*nu_lat + 0.5f;
+	u_lat_zeitwaechter(u_lat, dt, dt, ULAT_SCHRITT_FERN, 2u, "fernfeld");
 
 	auto n_cells = [](const float len, const float d) { return (uint)floor(len/d + 0.5f) + 1u; };
 	const float far_Lx = env_f("CFD_FAR_LX", 12.2720f), far_Ly = env_f("CFD_FAR_LY", 7.6640f), far_Lz = env_f("CFD_FAR_LZ", 8.8160f);
@@ -8745,6 +8923,7 @@ void main_setup_facetten_test() {
 	if(getenv("CFD_BODEN_EQ")||getenv("CFD_FERN_BODEN_EQ")||getenv("CFD_FERN_EINLASS_EQ")) print_warning("Die BODEN_EQ/EINLASS_EQ-Familie wird in facetten_test NICHT angewandt (XL-R3).");
 	if(getenv("CFD_KOPPLUNG_ZEITINTERP")) print_warning("CFD_KOPPLUNG_ZEITINTERP wird in diesem Fall NICHT angewandt (nur fahrzeug_dd; Pruefagent M3).");
 	if(getenv("CFD_FERN_FACETTEN")) print_warning("CFD_FERN_FACETTEN wird in facetten_test NICHT angewandt (nur fahrzeug_dd; P8-M1).");
+	if(getenv("CFD_U_LAT")) print_warning("CFD_U_LAT wird in facetten_test NICHT angewandt -- der Fall hat eine EIGENE, hart verdrahtete Anstroemung von 0,05 Gittereinheiten (L.u.x[n]=0.05f, damit u_t != 0). Ansage-Doktrin, 12.09.2026; Begruendung berichtigt nach Pruefbefund B9.");
 	{ const char* n2f_[] = {"CFD_N2F_SCHALE","CFD_N2F_VOLUMEN","CFD_N2F_BAND","CFD_N2F_BAND_N","CFD_N2F_BAND_PROFIL","CFD_N2F_BAND_UNTERBODEN","CFD_N2F_BAND_WAKE","CFD_N2F_BAND_NURWAKE","CFD_N2F_BAND_WAKE_START","CFD_N2F_BAND_WAKE_START_X","CFD_N2F_BAND_WAKE_ABSTAND","CFD_N2F_PARITAET"}; for(const char* b : n2f_) if(getenv(b)) print_warning(string(b)+" ist gesetzt, wird aber NUR im fahrzeug_dd-Fall angewandt (P9c; die neun BAND-/WAKE-/PARITAET-Schalter fehlten bis 2026-08-22 in dieser Ansage -- Pruefagent-S1)."); } // Ansage-Doktrin
 	print_info("facetten_test: ALLE CFD_FACETTEN*/CFD_FAC_*-Env-Werte werden IGNORIERT (Arme hart verdrahtet); kein sichere_lauf, fester Ordner export/facetten_test (Gross-Audit-Ansage).");
 	if(env_u("CFD_SGS_WANDFREI",0u)>0u||env_u("CFD_SPONGE_N",0u)>0u) print_warning("CFD_SGS_WANDFREI/CFD_SPONGE_N/CFD_SPARSE_TILES/CFD_WANDFUNKTION sind im facetten_test WIRKUNGSLOS (B10).");
