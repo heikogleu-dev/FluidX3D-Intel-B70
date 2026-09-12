@@ -576,6 +576,35 @@ small and the gradient is large: the opposite pairing. If that arm is ever switc
 to keep `u` in float32 in the boundary shell — 7 684 695 cells, 43.97 MiB, **1.48 % of the 2971 MiB
 the change buys**. Derived, not built.
 
+### The 4 mm production run with everything on (2026-09-12, `p4_register`)
+
+One run, four levers, all of them validated separately first: `rho` and `u` on two bytes, both
+sparse-write switches, and **8 steps per cell** instead of 13.3 (`u_lat` 0.125). It is a production
+run, not an A/B — no single-lever attribution is possible from it.
+
+| | baseline `p4_neu` | `p4_register` | |
+|---|---:|---:|---|
+| wall clock | 90.4 min | **48.9 min** | −45.9 % |
+| performance index | 10 958 | **5520** s_wall/s_phys | from the 100 ms mark: 5491 |
+| throughput from the mark | — | 6230 MLUPs | both domains, all fine steps |
+| near-field VRAM peak | 27 734 MB | **23 773 MB** | |
+| really free VRAM | not readable | **7450 MB** | reconstruction claimed 8882 |
+| **Cd** total | 0.5718 | **0.5822** | 97.2 % of OF13 (was 95.5 %) |
+| **Cz** total | −0.9433 | **−0.9704** | 74.6 % of OF13 (was 72.5 %) |
+
+**Both force coefficients moved toward the reference.** `cz_druck_rest` gains 0.0212 at 4.37 σ over
+six 50 ms window means — established. `cd_druck_rest` does not move (0.57 σ); what lifts Cd is the
+friction path, +0.0148. Which lever did it cannot be read off this run; from the separate
+measurements of the same day the Cz shift matches the lattice-velocity lever (0.0270 at 5.1 σ) and
+not the two-byte fields (1.43 σ).
+
+**A caveat that cancelled itself:** the FP16 free-stream offset warned about above is **exactly
+zero** at this operating point — `u_lat = 1/8` is a power of two and therefore exactly
+representable as a half. The run prints it itself.
+
+All guards clean: both fields confirmed at 16 bit in the binary, 3 290 677 boundary reads checked,
+zero outside the hull, zero at the magnitude gate.
+
 ### Measuring what was previously reconstructed (2026-09-12)
 
 Three instruments, all built because a number that mattered was an estimate:
