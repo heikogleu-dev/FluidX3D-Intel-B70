@@ -36,6 +36,9 @@ make -j"$(nproc)" Linux > "$LOG" 2>&1
 RC=$?
 set -e
 if [ "$RC" -ne 0 ]; then echo "BAU FEHLGESCHLAGEN (make RC=$RC):"; tail -20 "$LOG"; rm -f "$LOG"; exit 1; fi
-grep -iE ' error|Error ' "$LOG" && { echo "BAU FEHLGESCHLAGEN (Fehlertext trotz RC=0)"; rm -f "$LOG"; exit 1; }
+# ★ 12.09. (Audit, Pruefer B): auf das g++-Diagnoseformat verankert statt auf " error". 39 Zeilen in
+# src/ enthalten das Wort im Klartext (setup.cpp allein 26, z. B. "ein print_error waere dort exit(1)");
+# druckt eine WARNUNG eine davon mit, meldete der alte Waechter "BAU FEHLGESCHLAGEN", obwohl gebaut war.
+grep -E '^[^ ]+:[0-9]+:[0-9]+: (fatal )?error:' "$LOG" && { echo "BAU FEHLGESCHLAGEN (Fehlerdiagnose trotz RC=0)"; rm -f "$LOG"; exit 1; }
 rm -f "$LOG"
 echo "gebaut: rho = $1   ($(md5sum bin/FluidX3D | cut -d' ' -f1))"

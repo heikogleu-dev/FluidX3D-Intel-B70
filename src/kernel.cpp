@@ -1595,7 +1595,7 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 			phin = 1.0f;
 		}
 		phi[n] = phin;
-		mass[n] = phin*rho[n];
+		mass[n] = phin*load_rho(rho, n); // ★ 12.09.: der Typ-Zensus zaehlt SIGNATUREN, keine Ruempfe -- diese Zeile saehe er nicht
 		massex[n] = 0.0f; // reset excess mass
 		flags[n] = flagsn;
 	}
@@ -3006,23 +3006,36 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
 		rhon = load_rho(rho,        n); // apply preset velocity/density
-		// ★ TODO 2 Schritt 4 (12.09.2026) -- BEREICHSWAECHTER an der einzigen rho-Lesestelle, ueber die
-		// der Speicherinhalt in die RECHNUNG zurueckfliesst. Er faengt die eine Fehlerklasse, die
-		// dieser Umbau neu aufmacht und die sonst voellig still bliebe: ein Kernel, dessen
-		// rho-Parameter noch "global float*" heisst, liest zwei halbe Dichten als einen float und
-		// bekommt Groessenordnung 1e38 oder 1e-38. setArg ist typgeloescht (opencl.hpp), der
-		// OpenCL-Uebersetzer sieht nur den Kernel, den er gerade baut, und unter
-		// -cl-finite-math-only gibt es dafuer keine Diagnose.
-		//   Slot 210 UNGEGATET und saettigend: ein Nullbeweis, der den Anlauf mitsieht. Er kostet im
-		//   sauberen Fall nichts -- der Vergleich ist ein Register-Test, die Atomik feuert nur im
-		//   Fehlerfall. Soll ueber den ganzen Lauf: 0.
-		//   Slot 211 ist der Gegenbeweis, dass 210 ueberhaupt auf dem ausgefuehrten Pfad liegt (ein
-		//   Waechter ohne feuernden Besuchszaehler ist in diesem Projekt ein harter Fehler): EIN
-		//   Schritt, damit 211 == Zahl der TYPE_E-Zellen ein Ist=Soll ist und kein Schaetzwert.
-		// Die Schranke 0,25/4,0 liegt weit ausserhalb jeder Physik (RHO_CLAMP garantiert 0,5..1,5,
-		// das Tor im Kopplungs-Lift 0,5..2,0) und weit innerhalb dessen, was eine Fehldeutung liefert.
-		if(!(rhon>0.25f&&rhon<4.0f)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0
-		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[211]<0xF0000000u) atomic_inc(&rho_clamp_hits[211]); // Besuche, Ist=Soll
+		// ★ TODO 2 Schritt 4 -- BEREICHSWAECHTER an der einzigen rho-Lesestelle, ueber die der
+		// Speicherinhalt in die RECHNUNG zurueckfliesst.
+		//
+		// WAS ER LEISTET, ehrlich und zweimal berichtigt (Audit-Schleife 12.09. abends, Pruefer A
+		// und C). Er stand zuerst als Fang fuer die Typverwechslung da -- ein Kernel, dessen
+		// rho-Parameter noch "global float* rho" heisst und zwei halbe Dichten als einen float
+		// liest. DAS KANN ER NICHT: ein so gelesener Wert wird beim Zurueckschreiben wieder durch
+		// den Halbwort-Dekoder gezogen und landet IN-RANGE. Nachgerechnet: rho = 1.0f als float
+		// abgelegt und als zwei half gelesen ergibt 1,000000 und 1,0000572; selbst ein
+		// fehlgelesenes 1e10 ergibt 1,0000000 und 1,000997. Die Typklasse faengt der Typ-Zensus in
+		// lbm.cpp, und nur der. Dazu kommt: alle 18 verbliebenen float-Signaturen sind const,
+		// schreiben also ohnehin nichts zurueck.
+		// Was BLEIBT und was er wirklich ist: ein PHYSIK-Huellenwaechter. Die Schreiber von rho an
+		// TYPE_E-Zellen garantieren eine Huelle -- RHO_CLAMP [0,5; 1,5] fuer stream_collide und
+		// update_fields, das Tor im Kopplungs-Lift (0,5; 2,0). Verlaesst der gelesene Wert
+		// [0,4; 2,1], hat einer dieser Schreiber seine Zusage gebrochen. Das ist eine Aussage,
+		// die feuern KANN, und unter RHO_FP16 ist auch die obere Haelfte erreichbar (das Format
+		// traegt bis 2,99902).
+		// Der Bit-Test auf Exponent 0xFF steht hier, weil unter -cl-finite-math-only (opencl.hpp)
+		// ein Vergleich Inf und NaN nicht faengt -- derselbe Kernel verwirft die Vergleichsform
+		// weiter unten ausdruecklich ("Gross-Audit M") und nimmt dort denselben Bit-Test.
+		//   Slot 210 UNGEGATET und saettigend: ein Nullbeweis, der den Anlauf mitsieht. Er kostet
+		//   im sauberen Fall nichts -- der Vergleich ist ein Registertest, die Atomik feuert nur
+		//   im Fehlerfall. Soll ueber den ganzen Lauf: 0.
+		//   Slot 211 ist der Gegenbeweis, dass 210 auf dem ausgefuehrten Pfad liegt (ein Waechter
+		//   ohne feuernden Besuchszaehler ist in diesem Projekt ein harter Fehler): EIN Schritt,
+		//   damit die Zahl die TYPE_E-Zellen dieses Schritts ist und kein Mittel ueber viele.
+		//   Es ist ein BESUCHSZAEHLER, kein Ist=Soll -- verglichen wird er auf dem Host mit nichts.
+		if(((as_uint(rhon)&0x7F800000u)==0x7F800000u||rhon<=0.4f||rhon>=2.1f)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0
+		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[211]<0xF0000000u) atomic_inc(&rho_clamp_hits[211]); // Besuche
 		uxn  = u[                 n];
 		uyn  = u[    def_N+(ulong)n];
 		uzn  = u[2ul*def_N+(ulong)n];

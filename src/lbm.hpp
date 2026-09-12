@@ -12,10 +12,15 @@
 // Die beiden Funktionen MUESSEN zu den Geraetemakros load_rho/store_rho (lbm.cpp) passen; dort steht
 // dieselbe Rechnung mit vload_half/vstore_half_rte. Ohne RHO_FP16 sind beide die Identitaet.
 //
-// WARUM DAS TRAEGT: die Kette float->Wort->float ist ein FIXPUNKT,
+// WARUM DAS TRAEGT: die Kette float->Wort->float ist ein WERT-FIXPUNKT,
 // rho_unpack(rho_pack(rho_unpack(h))) == rho_unpack(h), bitgleich als float32 und auch nach acht
 // Umlaeufen. Nachgerechnet 12.09. mit genau diesen Wandlern: 0 Verletzungen ueber die 59.394
-// Bitmuster, die in [0,5; 1,5] landen, ueber die 60.416 in (0,5; 2,0) -- und ueber ALLE 65.536.
+// Bitmuster, die in [0,5; 1,5] landen, und ueber die 60.416 in (0,5; 2,0).
+// ES IST KEIN WORT-FIXPUNKT -- BERICHTIGT 12.09. (Pruefer A): rho_pack(rho_unpack(w)) == w gilt nur
+// fuer 33.791 der 65.536 Woerter. Bei w = 1 etwa ist rho-1 = 1,8e-12, das verschwindet in der
+// float32-Aufloesung bei 1,0, und zurueck kommt das Wort 0. Wer hier eine Bitgleichheit von
+// SPEICHERWOERTERN annimmt, baut sich beim naechsten Bytevergleich eine Falle. Was traegt, ist
+// allein die WERT-Aussage -- und die genuegt fuer beides unten.
 // Daran haengen zwei Dinge, die sonst still brechen wuerden:
 //   - pruefe_slice_ebene (setup.cpp) behaelt sein "Soll: exakt 0",
 //   - apply_velocity_inlet (kernel.cpp), das nichts als rho[n]=rho[m] tut, driftet nicht.
@@ -26,6 +31,12 @@
 // haengt allein daran, dass BEIDE Skalen exakte Zweierpotenzen bleiben -- 3.0517578E-5f ist
 // bitgenau 2^-15 und 32768.0f ist 2^15. Wer RHO_CLAMP_MIN senkt, verliert nichts.
 //
+// UND DESHALB ist load_rho auch gegen -cl-mad-enable unempfindlich -- BERICHTIGT 12.09.
+// (Pruefer A): nicht, weil dort "nichts zu runden" waere. Die Addition von 1.0f RUNDET sehr wohl,
+// und zwar genau im interessanten Bereich ((1+d) ist erst ab |d| >= 1,22e-4 exakt). Der Grund ist,
+// dass h*2^-15 EXAKT ist (Zweierpotenz, kein Unterlauf -- das kleinste Ergebnis ist 1,8e-12).
+// Auf einem exakten Produkt liefern fma und mul+add dieselbe einzige Rundung, also dasselbe Bit.
+//
 // WAS NICHT GILT (Pruefagent 12.09., MITTEL): Host- und Geraetepacker sind NICHT dieselbe Rechnung.
 // float_to_half (utilities.hpp) addiert 0x1000 und schneidet ab, rundet also bei Gleichstand VOM
 // NULLPUNKT WEG; vstore_half_rte rundet zur geraden Zahl. An 400.000 zufaelligen rho in 1+-5e-4
@@ -35,6 +46,16 @@
 // Wer eine Hostschreibstelle ergaenzt, die ein rho-Feld SAET, laeuft still gegen diese Bedingung.
 inline float rho_unpack(const rhoxx w) { // Speicherwort -> rho
 #ifdef RHO_FP16
+	// ★★ 12.09.2026 (Audit-Schleife, Pruefer A, HOCH): half_to_float ist ausdruecklich "without
+	// infinity" -- es bildet ALLE 2048 Woerter mit Exponent 0x1F auf ENDLICHE Floats ab. Ohne die
+	// Zeile unten saehe der Host nach einer Dichteexplosion auf dem Geraet eine glatte 3,0
+	// (0x7C00 = Geraete-inf -> 3.0, 0xFC00 -> -1.0), und der NaN-Zaehler der Slice-Pruefung
+	// (setup.cpp, std::isnan(...)!=std::isnan(...)) waere KONSTRUKTIV NULL. Genau die Bauform,
+	// die dieses Projekt jagt: ein Waechter, der nicht feuern kann.
+	// vstore_half_rte saettigt ab rho >= 3,0 nach 0x7C00 -- der Fall ist also erreichbar, nicht
+	// theoretisch. Deshalb wird das Bitmuster hier ehrlich weitergereicht: Mantisse 0 -> +-inf,
+	// sonst NaN, Vorzeichen erhalten. Das kostet den Geraetepfad nichts (reine Hostfunktion).
+	if((w&0x7C00u)==0x7C00u) return as_float((uint)(w&0x8000u)<<16 | 0x7F800000u | (uint)(w&0x03FFu)<<13);
 	return half_to_float(w)*3.0517578E-5f+1.0f; // NICHT fma: der Fixpunktbeweis und das Geraetemakro rechnen getrennt
 #else // RHO_FP16
 	return w;

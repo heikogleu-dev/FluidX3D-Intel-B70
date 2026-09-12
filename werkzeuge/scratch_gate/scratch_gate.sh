@@ -42,19 +42,26 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 # ★ 12.09.2026 RHO-ARM (TODO 2 Schritt 4). Ohne ihn prueft das Gate den 2-Byte-rho-Stand nicht:
 # store_rho/load_rho sind dann die Identitaet und der Rueckleser in store_rho_diag fehlt ganz.
 # Acht statt vier Arme; das Gate bleibt damit unter zehn Sekunden.
-"$T/gen" on  on  off "$T/e1p1.cl" >/dev/null
-"$T/gen" on  off off "$T/e1p0.cl" >/dev/null
-"$T/gen" off on  off "$T/e0p1.cl" >/dev/null
-"$T/gen" off off off "$T/e0p0.cl" >/dev/null
-"$T/gen" on  on  on  "$T/e1p1r.cl" >/dev/null
-"$T/gen" on  off on  "$T/e1p0r.cl" >/dev/null
-"$T/gen" off on  on  "$T/e0p1r.cl" >/dev/null
-"$T/gen" off off on  "$T/e0p0r.cl" >/dev/null
+"$T/gen" on  on  off off "$T/e1p1.cl" >/dev/null
+"$T/gen" on  off off off "$T/e1p0.cl" >/dev/null
+"$T/gen" off on  off off "$T/e0p1.cl" >/dev/null
+"$T/gen" off off off off "$T/e0p0.cl" >/dev/null
+"$T/gen" on  on  on  off "$T/e1p1r.cl" >/dev/null
+"$T/gen" on  off on  off "$T/e1p0r.cl" >/dev/null
+"$T/gen" off on  on  off "$T/e0p1r.cl" >/dev/null
+"$T/gen" off off on  off "$T/e0p0r.cl" >/dev/null
+# ★ 12.09.2026 (Audit-Schleife, Pruefer B): die beiden PRODUKTIONSARME. Nach TODO 2 laeuft die
+# Produktion mit CFD_RHO_SPARSAM und CFD_U_SPARSAM, und deren Zweige haengen an stream_collide --
+# dem Kernel, an dem sich Scratch entscheidet. Ohne diese zwei Arme prueft das Gate acht Varianten,
+# aber nicht die, die gerechnet wird. Kein volles Kreuz (16 Arme): geprueft wird der Produktionspunkt
+# ELIBB an, PTRT an, SPARSAM an, beide rho-Formate.
+"$T/gen" on  on  off on  "$T/e1p1s.cl" >/dev/null
+"$T/gen" on  on  on  on  "$T/e1p1rs.cl" >/dev/null
 
 rc=0
 neu_bekannt=""
 for dev in 0x7d67 0xe223; do
-  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r; do
+  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs; do
     ausgabe=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" ALLE || true)
     # ★ 11.09.2026: BAUFEHLER IST NICHT SCRATCH. Vorher fiel ein gescheiterter Bau in beide
     # Gates, weil die Zeile dann schlicht kein "private_size=0" enthielt -- das Gate meldete

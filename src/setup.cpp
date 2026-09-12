@@ -1461,27 +1461,46 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe) {
 			rs+=(ulong)dm->rho_clamp_hits[204]; rg+=(ulong)dm->rho_clamp_hits[205];
 			us+=(ulong)dm->rho_clamp_hits[206]; ug+=(ulong)dm->rho_clamp_hits[207]; }
 		  const bool rho_an = L.lbm_domain[0]->rho_takt>0u, u_an = L.lbm_domain[0]->u_takt>0u;
+		  // ★ 12.09.2026 abends (Audit-Schleife, Pruefer C): die drei Waechter unten sind print_error,
+		  // also exit(1), und diese Funktion laeuft VOR Facetten-Wirkpfad, F-Markerliste, ELIBB-Pur und
+		  // der Fernfeld-Abnahme. Sie koennen falsch-positiv werden, und zwar berechenbar: die Slots
+		  // 204..207 werden an GENAU EINEM Schritt geschrieben, t == def_zaehl_takt+2. Das Fernfeld
+		  // macht nur n_fein/ratio Schritte. Mit dem Baseline-Wert CFD_ZAEHL_TAKT=1000 und ratio=4
+		  // liegt dieser Schritt erst bei 4008 feinen Schritten -- JEDER kuerzere A/B haette den
+		  // Fernfeld-Arm getoetet, samt aller Abnahmen dahinter. Die 8-mm-Rauchtests kamen nur durch,
+		  // weil sie mit Takt 100 liefen. Deshalb: erst pruefen, ob der Zaehlschritt ueberhaupt im
+		  // Lauf lag (Muster des SISM-Stichprobenfensters weiter unten in dieser Datei).
+		  const ulong zschritt = zaehl_takt()+2ull;
+		  const bool zaehlschritt_im_lauf = L.get_t()>zschritt;
+		  if(!zaehlschritt_im_lauf&&(rho_an||u_an)) print_warning(string("FELD-SPARSAM ")+wo+": der Zaehlschritt t = "+to_string(zschritt)+" liegt hinter dem Laufende t = "+to_string(L.get_t())+" -- die Slots 204..207 sind deshalb null und beweisen NICHTS. Fuer einen Wirkpfadnachweis CFD_ZAEHL_TAKT kleiner waehlen.");
 		  if(rs+rg>0ull) print_info(string("  rho-SPARSAM ")+wo+": "+to_string(rs)+" Schreibvorgaenge uebersprungen, "+to_string(rg)+" ausgefuehrt ("+to_string((float)(100.0*(double)rs/(double)(rs+rg)),1u)+" % gespart; EIN Zeitschritt, Summe = aktive Zellen).");
 		  if(us+ug>0ull) print_info(string("  u-SPARSAM ")+wo+": "+to_string(us)+" Schreibvorgaenge uebersprungen, "+to_string(ug)+" ausgefuehrt ("+to_string((float)(100.0*(double)us/(double)(us+ug)),1u)+" % gespart; EIN Zeitschritt, Summe = aktive Zellen).");
-		  if(rho_an&&rs==0ull) print_error(string("rho-SPARSAM ist an, aber Slot 204 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
-		  if(rs+rg>0ull&&us+ug>0ull&&rs+rg!=us+ug) print_error("FELD-SPARSAM Ist=Soll verletzt: rho zaehlt "+to_string(rs+rg)+" Zellen, u aber "+to_string(us+ug)+". Beide Zaehlerpaare sitzen im SELBEN Block und muessen dieselbe Zellmenge sehen -- eine Differenz heisst Saettigung oder ein Zaehler an der falschen Stelle.");
-		  if(u_an&&us==0ull) print_error(string("u-SPARSAM ist an, aber Slot 206 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
+		  if(rho_an&&rs==0ull&&zaehlschritt_im_lauf) print_error(string("rho-SPARSAM ist an, aber Slot 204 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
+		  // ★ 12.09.2026 abends (Pruefer C, B5): ehrlich benannt, was dieser Vergleich leistet. Die
+		  // Paare 204/205 und 206/207 stehen im SELBEN Block unter DEMSELBEN Gatter -- die Gleichheit
+		  // gilt per Konstruktion und kann nur bei SAETTIGUNG brechen. Es ist also eine
+		  // Saettigungspruefung, kein Wirkpfadnachweis, und als exit(1) vor allen uebrigen Abnahmen
+		  // war sie falsch eingeordnet. Bei 4 mm liegt die Summe bei 12,9 % der Schwelle.
+		  if(rs+rg>0ull&&us+ug>0ull&&rs+rg!=us+ug) print_warning("FELD-SPARSAM: rho zaehlt "+to_string(rs+rg)+" Zellen, u aber "+to_string(us+ug)+". Beide Paare sitzen im selben Block unter demselben Gatter; eine Differenz kann nur aus SAETTIGUNG kommen (Schwelle 0xF0000000) -- die Prozentzahlen oben sind dann Artefakte.");
+		  if(u_an&&us==0ull&&zaehlschritt_im_lauf) print_error(string("u-SPARSAM ist an, aber Slot 206 = 0 -- der Schalter hat NIE etwas uebersprungen. Lautloser No-Op (")+wo+").");
 		}
-		{ // ★ TODO 2 Schritt 4 (12.09.2026): rho als 2-Byte-Wort. Drei Aussagen, alle Ist=Soll.
-		  //   Slot 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle. SOLL 0, UNGEGATET.
-		  //             Feuert er, liest irgendein Kernel den Puffer als falschen Typ -- die eine
-		  //             Fehlerklasse, die dieser Umbau aufmacht und die sonst voellig still bliebe.
+		{ // ★ TODO 2 Schritt 4 (12.09.2026): rho als 2-Byte-Wort. ZWEI Aussagen.
+		  //   Slot 210 = rho nicht-endlich oder ausserhalb der HUELLE [0,4; 2,1] an der
+		  //             TYPE_E-Lesestelle. SOLL 0, UNGEGATET. Er prueft, ob die Schreiber von rho
+		  //             ihre Zusage halten (RHO_CLAMP [0,5;1,5], Kopplungs-Lift (0,5;2,0)) -- er
+		  //             faengt NICHT die Typverwechslung, ein falsch gelesener Wert landet nach dem
+		  //             Halbwort-Dekoder wieder in der Huelle. Die Typklasse faengt der Typ-Zensus
+		  //             in lbm.cpp, und nur der.
 		  //   Slot 211 = Besuche derselben Stelle an EINEM Schritt. SOLL > 0. Ohne ihn waere 210 ein
-		  //             Waechter, dessen Null nichts beweist, weil er vielleicht nie ausgefuehrt wird.
-		  //   Slots 212..217 = Dekaden des Rueckrechenfehlers |load_rho(store_rho(x))-x|.
-		  //             SOLL: 217 (>=1e-3) exakt 0. Nur unter RHO_FP16 belegt; ohne ihn ist
-		  //             store_rho die Identitaet und es gaebe nichts zu messen.
+		  //             Waechter, dessen Null nichts beweist, weil er vielleicht nie laeuft.
+		  //   Die frueheren Slots 212..217 (Quantisierungs-Dekaden) sind entfallen -- Begruendung
+		  //   zwoelf Zeilen tiefer und an store_rho in kernel.cpp.
 		  ulong ausser=0ull, besuche=0ull;
 		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
 			ausser+=(ulong)dm->rho_clamp_hits[210]; besuche+=(ulong)dm->rho_clamp_hits[211]; }
 		  print_info(string("  rho-Speicherwort ")+wo+": "+to_string((uint)(8u*sizeof(rhoxx)))+" bit, "
-			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb 0,25..4,0 (Soll 0).");
-		  if(ausser>0ull) print_error(string("rho-Bereichswaechter ")+wo+": "+to_string(ausser)+" Lesungen ausserhalb 0,25..4,0. Ein Kernel liest den rho-Puffer als falschen Typ (Signatur noch 'global float* rho'?) -- die Werte sind Muell, der Lauf ist kein Ergebnis.");
+			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb der Huelle [0,4; 2,1] (Soll 0).");
+		  if(ausser>0ull) print_error(string("rho-Huellenwaechter ")+wo+": "+to_string(ausser)+" Lesungen an TYPE_E-Zellen ausserhalb [0,4; 2,1] oder nicht-endlich. Einer der rho-Schreiber haelt seine Zusage nicht (RHO_CLAMP garantiert [0,5;1,5], der Kopplungs-Lift (0,5;2,0)) -- der Lauf ist kein Ergebnis.");
 		  // ★ BERICHTIGT 12.09. (Pruefagent, HOCH): hier stand print_error -- und print_error ist exit(1).
 		  // Der KANALFALL hat konstruktiv KEINE TYPE_E-Zelle, Slot 211 ist dort strukturell 0. Der
 		  // Waechter haette den Kanal in BEIDEN Armen getoetet, VOR Wandfunktions-Wirkpfad, P-TRT-
@@ -5953,12 +5972,6 @@ static void main_setup_fahrzeug_dd() {
 	    // Maske nicht ab. Der Takt ist die Sample-Kadenz in FEINEN Schritten.
 	    const uint rs_ = env_u("CFD_RHO_SPARSAM", 0u);
 	    LBM_Domain::s_rho_takt = (rs_>0u) ? max(1u, env_u("CFD_SAMPLE_EVERY", 25u))*ratio : 0u;
-	    // ★ 12.09.2026 (Pruefagent, MITTEL): APG misst rho-DIFFERENZEN zwischen Nachbarzellen,
-	    // Groessenordnung 1e-6 bis 1e-5. Der Quantisierungsfehler je Summand ist |rho-1|*2^-11,
-	    // bei |rho-1| = 1e-3 also 4,9e-7 -- DERSELBEN Groessenordnung wie das gemessene Gefaelle.
-	    // Ueberall sonst wird rho als Absolutwert benutzt, dort ist das Verhaeltnis 1:4000.
-	    // APG ist damit der einzige Verbraucher, den das 2-Byte-Format qualitativ trifft.
-	    if(sizeof(rhoxx)<4u&&env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("RHO_FP16 und CFD_FAC_APG schliessen sich aus: der APG-Zweig bildet rho-DIFFERENZEN zwischen Nachbarzellen (Groessenordnung 1e-6..1e-5). Bei rho als FP16S(rho-1) ist der Quantisierungsfehler je Summand |rho-1|*2^-11, bei |rho-1|=1e-3 also 4,9e-7 -- also so gross wie das Signal. Entweder werkzeuge/rho_format.sh FP32 oder CFD_FAC_APG=0.");
 	    if(rs_>0u&&env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_SPARSAM und CFD_FAC_APG schliessen sich aus: der APG-Zweig liest rho an bis zu 18 FACETTENNACHBARN (kernel.cpp, rho[j[ia]]), und die liegen ausserhalb der Auslassschicht. Die Maske waere keine Obermenge mehr und der Wandmodell-Eingang bekaeme lautlos veraltete Werte.");
 	    const uint us_ = env_u("CFD_U_SPARSAM", 0u);
 	    LBM_Domain::s_u_takt = (us_>0u) ? ratio : 0u;
@@ -7790,26 +7803,39 @@ static void main_setup_fahrzeug_dd() {
 					{
 						n_coin++;
 						const ulong cb = ((ulong)(b/ratio)*(ulong)cp[p].extent_a + (ulong)(a/ratio))*4ull;
-						const float d = fmax(fmax(fabs(lbm_f.rho.get(n)-face[p][cb]), fabs(lbm_f.u.x[n]-face[p][cb+1ull])),
-						                     fmax(fabs(lbm_f.u.y[n]-face[p][cb+2ull]), fabs(lbm_f.u.z[n]-face[p][cb+3ull])));
+						// ★ 12.09.2026, TODO 2 Schritt 4 -- rho und u werden GETRENNT geprueft, und das ist
+						// der dritte Anlauf an dieser Stelle. Die Geschichte gehoert dazu, damit sie nicht
+						// ein viertes Mal genommen wird:
+						//   Anlauf 1 war eine mit dem Speicherformat mitwandernde Schranke auf dem
+						//     GEMEINSAMEN fmax. Sie lockerte u mit -- genau das, was ihr eigener
+						//     Kommentar ausschloss.
+						//   Anlauf 2 nahm sie ganz zurueck, mit der Begruendung, am Deckungspunkt sei die
+						//     kubische Interpolation die Identitaet und die Wandlung ein Fixpunkt, der
+						//     Wert komme also bitgenau zurueck. DAS WAR AN EINEM PRUEFPUNKT ABGELESEN.
+						//     Die Kopplungspruefung laeuft ZWEIMAL je Lauf. Am ersten Punkt sind beide
+						//     Arme auf allen vier Flaechen exakt 0 -- am zweiten nicht, und zwar in
+						//     BEIDEN Armen (y-/y+/z+ bei 3e-4, schon unter FP32). Ursache dort ist
+						//     KOPPLUNG-GLATT: der geglaettete Grobwert ist am Deckungspunkt nicht mehr
+						//     der Wert, der eingespeist wurde, und die Identitaet gilt nicht mehr.
+						//   Was die Quantisierung WIRKLICH beitraegt, ist am zweiten Punkt auf x-
+						//     ablesbar, wo die Glaettung nichts tut: FP32 exakt 0, FP16 max 3,58e-6 an
+						//     207 von 4872 Punkten. 3,58e-6 ist |rho-1|*2^-11 bei |rho-1| = 7e-3, also
+						//     genau ein Quant -- ein Kopplungsdefekt ist es nicht.
+						// Deshalb: rho bekommt eine Schranke, die dem Speicherformat folgt (im FP32-Arm
+						// ist sie exakt die alte 1e-6), u behaelt seine scharfe 1e-6. Getrennt geprueft,
+						// gemeinsam berichtet.
+						const float d_rho = fabs(lbm_f.rho.get(n)-face[p][cb]);
+						const float d_u   = fmax(fabs(lbm_f.u.x[n]-face[p][cb+1ull]),
+						                    fmax(fabs(lbm_f.u.y[n]-face[p][cb+2ull]), fabs(lbm_f.u.z[n]-face[p][cb+3ull])));
+						const float d = fmax(d_rho, d_u);
 						maxdev = fmax(maxdev, d);
-						// ★ 12.09.2026, TODO 2 Schritt 4: hier stand kurzzeitig eine mit dem Speicherformat
-						// mitwandernde Schranke, weil die rho-Quantisierung (bis 5,6e-5) 56-fach ueber der
-						// festen 1e-6 liegt. SIE IST UNNOETIG UND WAR FALSCH GEBAUT -- zweimal:
-						//   (1) d ist das gemeinsame fmax ueber rho UND alle drei u-Komponenten. Eine
-						//       rho-abhaengige Schranke lockert damit die u-Pruefung mit, also genau das,
-						//       was der eigene Kommentar daneben ausschloss.
-						//   (2) Sie wird gar nicht gebraucht. Am Deckungspunkt ist die kubische
-						//       Interpolation die IDENTITAET (w[0]=1, Rest 0), und die Wandlung
-						//       float->Wort->float ist ein Fixpunkt. Der Wert kommt also BITGENAU zurueck.
-						// GEMESSEN am 8-mm-Paar r8_fp32/r8_fp16: beide melden auf allen vier Flaechen
-						// "groesste Abweichung dort 0.00000000 (identisch)". Die scharfe Schranke bleibt.
-						if(d>1.0e-6f) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
+						const float tol_rho = fmax(1.0e-6f, (sizeof(rhoxx)<4u ? fabs(face[p][cb]-1.0f)*4.89e-4f : 0.0f)); // 2^-11 = worst-case-ULP von half
+						if(d_rho>tol_rho||d_u>1.0e-6f) { if(n_bad==0ull) { bx=x; by=y; bz=z; } n_bad++; }
 					}
 				}
 				print_info(string("[KOPPLUNG ")+face_name[p]+"] "+to_string(n_e)+" TYPE_E-Zellen, davon "+to_string(n_coin)
 					+" Deckungspunkte (plus "+to_string(n_outlet_edge)+" auf der Auslasskante, dort gilt der Auslass); groesste Abweichung dort "+to_string(maxdev,9u)
-					+(n_bad? (" -- "+to_string(n_bad)+" ueber 1e-6, erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : " (identisch)")
+					+(n_bad? (" -- "+to_string(n_bad)+" ueber der Schranke (u: 1e-6; rho: 1e-6 bzw. |rho-1|*2^-11 unter RHO_FP16), erste bei ("+to_string(bx)+","+to_string(by)+","+to_string(bz)+") von ("+to_string(fNx-1u)+","+to_string(fNy-1u)+","+to_string(fNz-1u)+")") : " (identisch)")
 					+"; groesste Abweichung vom Freistrom "+to_string(100.0f*maxrel,2u)+" % von u_inf");
 				if(n_e==0ull) print_warning(string("Flaeche ")+face_name[p]+" hat KEINE TYPE_E-Zelle -- diese Kopplungsflaeche ist wirkungslos.");
 				if(maxrel<1.0e-6f) print_warning(string("Flaeche ")+face_name[p]+" steht exakt auf Freistrom -- das Fernfeld gibt dort (noch) nichts Eigenes vor.");

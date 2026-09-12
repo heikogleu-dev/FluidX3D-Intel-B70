@@ -219,6 +219,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fac_apg!=0.0f&&fabs(s_fac_apg)<5e-7f) print_error("CFD_FAC_APG zu klein fuer die 6-Stellen-Emission -- wuerde still zu 0.000000 (No-Op-Arm)."); // Gross-Audit N
 	if(s_fac_apg!=0.0f) print_warning("CFD_FAC_APG liest rho der Nachbarzellen im SELBEN stream_collide-Launch -- Laeufe sind NICHT bitreproduzierbar (dieselbe Fehlerklasse wie der NACHBAR-Befund B72, 03.09.; vor einem APG-A/B nach dem fac_nb-Muster auslagern).");
 	if(s_fac_pema>0.0f&&s_fac_nachbar>0u) print_error("PEMA + NACHBAR: die gefilterte Kette (kernel.cpp, utb_wm = utb*def_fac_utkorr) rechnet twe aus dem eigenen gefilterten u mit yw -- die Nachbarabtastung waere dort WIRKUNGSLOS, Slot 72 zaehlte trotzdem (Pruefagent 03.09.). Kombination gesperrt.");
+	// ★ 12.09.2026 (Audit-Schleife, Pruefer B): APG bildet rho-DIFFERENZEN zwischen Nachbarzellen,
+	// Groessenordnung 1e-6..1e-5. Mit rho als FP16S(rho-1) ist der Quantisierungsfehler je Summand
+	// |rho-1|*2^-11, bei |rho-1| = 1e-3 also 4,9e-7 -- so gross wie das Signal. Ueberall sonst steht
+	// rho als Absolutwert, dort ist das Verhaeltnis 1:4000. APG ist der einzige Verbraucher, den das
+	// Format QUALITATIV trifft.
+	// Die Sperre steht HIER und nicht im Setup: s_fac_apg wird in drei Setups gesetzt (fahrzeug_dd,
+	// kanal, kugel), eine setup-lokale Sperre haette zwei davon offen gelassen. Genau dafuer wurde
+	// die APG+PEMA-Sperre darunter schon einmal hierher verlegt (Tiefen-Audit A1-B3).
+	if(sizeof(rhoxx)<4u&&s_fac_apg!=0.0f) print_error("RHO_FP16 und CFD_FAC_APG schliessen sich aus: der APG-Zweig bildet rho-DIFFERENZEN zwischen Nachbarzellen (1e-6..1e-5), und der Quantisierungsfehler je Summand ist |rho-1|*2^-11 -- bei |rho-1| = 1e-3 also 4,9e-7 und damit so gross wie das Signal. Entweder werkzeuge/rho_format.sh FP32 oder CFD_FAC_APG=0.");
 	if(s_fac_apg!=0.0f&&s_fac_pema>0.0f) print_error("APG + PEMA: die gefilterte Kette verwirft die APG-Korrektur still -- Kombination gesperrt (Tiefen-Audit A1-B3: Sperre jetzt IM Konstruktor, setup-unabhaengig)."); 
 	if(getenv("CFD_SPALDING_IT")&&env_u("CFD_SPALDING_IT",3u)==0u) print_warning("CFD_SPALDING_IT=0 wird auf 1 GEKLEMMT (min 1; Default ohne Env ist 3) -- Gross-Audit N16.");
 	if(env_u("CFD_SPALDING_IT", 0u)>0u&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
@@ -1846,7 +1855,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 // 2^15, beide Multiplikationen runden also nicht. Zusammen mit der Sterbenz-Exaktheit von (x)-1.0f
 // auf [0,5; 2,0] macht das die Kette Laden->Speichern zu einem Fixpunkt (Beweis siehe lbm.hpp bei
 // rho_pack). Es macht die Makros ausserdem unempfindlich gegen -cl-mad-enable (opencl.hpp): eine
-// Kontraktion zu mad() kann nichts aendern, wo nichts zu runden ist.
+// Kontraktion zu mad() kann nichts aendern, weil h*2^-15 EXAKT ist und auf einem exakten Produkt
+// fma und mul+add dieselbe einzige Rundung liefern. (Die Addition von 1.0f rundet sehr wohl --
+// berichtigt 12.09., Pruefer A; die frueher hier stehende Begruendung "nichts zu runden" war falsch.)
 //
 // ZWEI LADEMAKROS, und das ist kein Luxus: load_rho liefert rho, load_drho liefert rho-1 OHNE den
 // Umweg ueber die Addition von 1. Wer rho-1 braucht und trotzdem load_rho nimmt, rechnet
@@ -1854,7 +1865,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 // absoluten Boden von 5,96e-8 eingebaut. Genau davor warnt der Kommentar an po_reduce_mean, der fuer
 // seine Abweichungsablage 1e-9 beansprucht -- mit load_rho waere das lautlos 60-fach verfehlt.
 #ifdef RHO_FP16
-	"\n	#define RHO_FP16" // damit kernel.cpp den Arm kennt (Host-Define allein wirkt nicht auf dem Geraet)
+	"\n	#define RHO_FP16" // ★ 12.09. (Pruefer A, N5): geraeteseitig heute UNBENUTZT -- kernel.cpp traegt kein einziges #ifdef RHO_FP16 mehr, seit die Quantisierungsmessung entfallen ist. Bewusst emittiert: CFD_DUMP_DEFINES und CFD_DUMP_CL machen den Arm damit am Quelltext erkennbar, und der naechste rho-Zweig braucht es wieder.
 	"\n	#define rhoxx half" // rho als range-verschobenes IEEE-754-FP16, 2 statt 4 Byte je Zelle
 	"\n	#define load_rho(p,o) (vload_half(o,p)*3.0517578E-5f+1.0f)"
 	"\n	#define load_drho(p,o) (vload_half(o,p)*3.0517578E-5f)" // rho-1, ohne Ausloeschung
