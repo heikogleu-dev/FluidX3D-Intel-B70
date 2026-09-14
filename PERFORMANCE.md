@@ -384,6 +384,8 @@ Zellzahl ×1,214 gegenüber 4 mm, Kapazität 32 655 MB:
 | T=8 | 32 100 MB | passt, 554 MB Restluft — **unter der Mindestluft von 1 024 MB** |
 | **16×8×4** (Bau nötig) | **31 902 MB** | passt, 752 MB Restluft, bei ~78 % Durchsatz |
 
+*(Stand 11.09., vor rho/u auf zwei Byte — seit dem 12.09. passt 3,75 mm auch dicht, siehe §1g.)*
+
 **T=16 löst den 3,75-mm-Fall nicht.** Nur T=8 kommt heute in Frage, und dessen Reserve liegt
 unter der Projektvorgabe. Die anisotrope Kachel ist der einzige Weg, der 3,75 mm mit
 vertretbarer Reserve **und** dem besseren Durchsatz erreicht.
@@ -456,6 +458,25 @@ Kopplung 1,0 %). **Die 8,13 % Schlupf aus Abschnitt 1 sind damit überholt** —
 
 **Erster Schritt: ein Aufbaulauf mit kleiner Endzeit** — zeigt Ausrichtung und echten Spitzenwert
 in zehn Minuten statt in 63.
+
+#### Nachtrag 13./14.09.2026 — Berichtigungen zu diesem Abschnitt (Details: `UEBERGABE-2026-09-14.md` §3 und §5)
+
+* **Die Gitterausrichtung ist KEIN Risiko.** Box und Versatz rasten seit 09.08. auf ganze Grobzellen ein
+  (`auf_grobe_zelle`, setup.cpp). Das ist konstruktiv gesichert, Vorbehalt 1 oben ist erledigt.
+* **Das Nahfeld hat 634,62 Mio Zellen, nicht 630.** Exakt aus den Setup-Formeln: 1801×709×497. Die
+  y-Paritätsregel hängt eine Grobzelle an (+15 mm). Rechnerisch ~29 030 MB Spitze, **~2195 MB frei**.
+* **Schritt-Schalter rechnen u_lat um, aber NICHT dx** (`env_schritte`). SISM_T/SISM_AB/SLICE_NEAR_STEPS/SAMPLE_EVERY
+  müssen bei 3,75 mm von Hand ×16/15 gesetzt werden. `basis/fahrzeug_dd.basis` stammt vom 03.09. und führt
+  SISM, P-TRT, DETEPS u. a. nicht.
+* **`CFD_KRAFT_ZBAND` = 16 mm ist bei 3,75 mm nicht darstellbar** (15 oder 18,75 mm) → cd_rest/cz_rest
+  ändern ihre Definition.
+* **Neu: rho nur in der Randschale** (Todo 3, Plan 14.09.): −1249 MB VRAM bei 3,75 mm → ~3444 MB frei.
+  Laufzeitgewinn ~0 (rho ist dank RHO_SPARSAM nur noch ~0,03 % des Verkehrs).
+* **Grenze einer B70 bei dieser Box (Rechnung):** ~3,70 mm, mit Randschale ~3,64 mm. **3,5 mm fehlen
+  ~3,8 GB.**
+* **Folgeidee u nur wo gelesen** (Übergabe §6.1, Rechnung): Die U_SPARSAM-Maske ist die Lesermenge.
+  Ersparnis 4 mm ~1,4 GB (bitgleich) bzw. ~2,1 GB (N2F aus den DDFs, eine Physikvariable). 3,5 mm mit
+  rho- und u-Randspeicher: ~330 MB frei, unter der Untergrenze.
 
 ### Zwei B70 — die VRAM-Rechnung geht, die Zeitrechnung vermutlich nicht
 
@@ -721,6 +742,18 @@ Feld entschieden: `FP16S(rho−1)`, **nicht** int16 für u — das kippt Gates a
 | 150-ms-VTK-Dump, der wieder gelöscht wird | 9 s + 11,7 GB Schreiblast | eine Zeile |
 | `fac_geo[6]/[7]` (nie gelesen) | 25 MB VRAM | Stride-Umbau |
 
+## Speicher: rho und u nur dort halten, wo sie gelesen werden (14.09.2026)
+
+Vollständige Pläne in `UEBERGABE-2026-09-14.md`. Die Zahlen sind **Rechnung** aus p4_register, nicht
+gemessen.
+
+| # | Hebel | VRAM | Laufzeit | Stand |
+|---|---|---:|---|---|
+| **Todo 3** | **rho nur in der Randschale** (Dicke 2), sonst aus den DDFs | −973 MiB (4 mm), −1249 MB (3,75 mm) | ~0 (rho ~0,03 % des Verkehrs) | Plan, **vor 3,75 mm** |
+| **später** | **u nur wo gelesen** (Schale + F-BBox + N2F), Heiko: „riskant, aber lohnenswert" | Var a bitgleich ~−1,4 GB, Var b ~−2,1 GB (4 mm) | offen; Var b verschiebt die N2F-Kopplung um einen Feinschritt | Idee, **erst nach Todo 3** |
+
+Beide zusammen: 3,75 mm ~5,2–6,0 GB frei; 3,5 mm nur ~330 MB (Var b), also unter der Untergrenze.
+
 ## Neu auf der Liste, aber unter PHYSIK, nicht unter Performance
 
 **Abstandsgesteuerte Verfeinerung (12.09., Heiko-Frage).** Gerechnet an der echten STL
@@ -770,6 +803,12 @@ Fall nicht vor. Was dort steht, sind **Schema-Begrenzer**: `grad(U) cellLimited 
 f; das Gleichgewicht trägt beide vollständig, der Nichtgleichgewichtsanteil hat beide **exakt
 null**. Jede Begrenzung, die nur f_neq anfasst, ist damit **exakt** erhaltend, nicht
 näherungsweise.
+
+> **BERICHTIGT 13.09.2026:** Positivität ist parameterfrei, wandert aber sehr wohl mit `u_lat`. Das
+> D3Q19-Gleichgewicht ist nur für |u|² ≤ 2/3 in Gittereinheiten positiv. Die heutige Komponentenklemme
+> lässt schräg zu den Achsen |u|² bis 1,0 zu. Außerdem greift die **Dichteklemme** in p4_register
+> 14,4 Mio mal, zehnfach öfter als die u-Klemme, und erhält die Masse nicht. Stufenplan in
+> `UEBERGABE-2026-09-14.md` §1.
 
 **Und es gibt die parameterfreie Fassung:** Positivität. f_eq + f_neq ≥ 0 je Richtung ist eine
 physikalische Forderung, keine gewählte Zahl — sie wandert nicht mit `u_lat`, anders als die

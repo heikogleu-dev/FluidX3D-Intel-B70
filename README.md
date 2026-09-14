@@ -56,6 +56,9 @@ Six numbers, all measured on this rig, all reproducible from the run line in
 5. **3.75 mm became reachable.** Projected peak 28 822 MB with 2401 MB really free. Without the
    two-byte fields the same grid would need 33 862 MB — 2.6 GB more than the card has. The grid
    alignment at dx_c = 15 mm is **not yet checked**, and that could still kill it.
+   *Update 2026-09-13: the alignment is guaranteed by construction (box and offset snap to whole
+   coarse cells since 2026-08-09). The exact near-field grid is 1801×709×497 = 634.6 M cells, not
+   630 M, so about 2195 MB free rather than 2401 (arithmetic, not measured).*
 6. **`u_lat` has a name you can think in.** `CFD_SCHRITTE_PRO_ZELLE=8` sets 8 time steps per cell
    instead of 13.3, and **every step-counting switch now converts automatically** — set and unset
    ones alike, because their defaults were chosen for the old value too. That silent second variable
@@ -712,6 +715,20 @@ writes and the two-byte fields and is superseded.
 **Not yet checked, and it could kill the arithmetic:** whether the near-field box and the far field
 still land on whole coarse cells at dx_c = 15 mm. At `ratio` 8 that failed by more than half a
 grid point. The first step is a ten-minute setup-only run, not a 63-minute production run.
+
+**Update 2026-09-13/14 (code reading and arithmetic, nothing built or run):**
+* The alignment worry is resolved: box lengths and offsets are snapped to whole coarse cells in
+  `main_setup_fahrzeug_dd`. The price is a y parity rule that adds one coarse cell. The exact grid
+  is **1801×709×497 = 634.6 M** cells and roughly **2195 MB** free.
+* Step-counting switches follow `u_lat` but **not dx**. At 3.75 mm, `CFD_SGS_SISM_T`, `CFD_SGS_SISM_AB`,
+  `CFD_SLICE_NEAR_STEPS` and `CFD_SAMPLE_EVERY` must be scaled by hand by 16/15. The basis reference
+  file dates from 2026-09-03.
+* The 16 mm force band (`CFD_KRAFT_ZBAND=4`) cannot be represented at 3.75 mm, so `cd_rest`/`cz_rest`
+  change their definition.
+* **Planned: store `rho` only in a two-cell boundary shell** and reconstruct it from the distributions
+  elsewhere. That saves ~1249 MB at 3.75 mm (→ ~3444 MB free) at practically no runtime change.
+* Single-card limit for this box (arithmetic): ~3.70 mm, ~3.64 mm with the rho shell. **3.5 mm is
+  about 3.8 GB short.**
 
 ### Two B70s — the memory arithmetic works, the timing probably does not
 
