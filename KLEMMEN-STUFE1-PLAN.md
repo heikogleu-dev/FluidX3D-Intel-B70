@@ -225,9 +225,36 @@ bewegten Boden — derselbe Ort wie die Dichteklemme (Stufe 0: 100 % am Boden). 
 Folge für Modus 2: der Begrenzer wirkt fast nur im Bodenband; ob boden_eq diese Zellen danach überschreibt (Plan E9), ist mit dem offenen
 Stufe-0-Befund „boden_eq 0 Treffer vs. stream_collide 1,13 Mio am selben Band“ verknüpft und ungeklärt.
 
+> **BERICHTIGT nach M2:** boden_eq überschreibt die EINGEHENDEN Populationen der Bandzellen, nicht die ausgehenden f** einer K1-Zelle;
+> Populationen, die in Zellen außerhalb des Bands strömen (z > nz_eff; ab x_split nz_down = 1), tragen die Begrenzerwirkung weiter.
+> Gemessen (M2): negativ geladene Populationen Nah 3 540 → 71, Fern 285 → 0. Der Absatz unten ist damit überholt.
+
 **Folge für Modus 2 am Boden (Herleitung aus kernel.cpp boden_eq, nicht gemessen):** boden_eq ersetzt NACH stream_collide alle 19 Populationen
 der Zellen z = 1..nz_eff (TYPE_MS eingeschlossen, ausgenommen Zellen mit Solid im Abstand ≤ CFD_BODEN_EQ_ABSTAND in Ebene/oberhalb) durch
 f_eq(ρ_lokal, u_road). Weil der Begrenzer Masse erhält, bleibt ρ_lokal gleich — die Begrenzerwirkung an diesen K1-Zellen ist danach GELÖSCHT.
 Wirksam bleibt Modus 2 nur an K1-Zellen außerhalb des boden_eq-Bands (Reifennähe) und in K0/K2 (Nah 41 von 4 442 Stichproben). Das 8-mm-M2
 misst daher vor allem, ob Reifennähe und Facetten etwas tragen; eine Kraftänderung ist nicht zu erwarten. Messbar über [292] (Wirkung) gegen
 Kräfte.
+
+## Messung P1c 8 mm B70 (b47076f, Standardzeile 300 ms): M2 CFD_POSITIV=2 gegen M1 CFD_POSITIV=1 (= A, forces bitgleich zu kl_z2c_dd8_b70)
+
+Stichprobe Nah 11, Fern 13 (Primzahl). Ist=Soll in beiden Armen und Domänen erfüllt; Klemm-Budget in beiden eingehalten.
+
+| | M1 (Messarm) | M2 (anwenden) |
+|---|---|---|
+| Nah Kandidaten / K0,K1,K2 | 4 448 / 24, 4 401, 17 | 2 293 / 38, 2 235, 14 |
+| Nah s-Eimer | 5/6/3349/673/409 | 4/2/13/1385/883 |
+| Nah negativ geladen (Zählschritte) | 3 540 | **71** |
+| Nah Σ(1−s) (Stichprobe) | – | 140,96 (s̄ ≈ 0,94) |
+| Fern Kandidaten (alle K1) / neg. geladen | 282 / 285 | 163 / **0** |
+| cd_rest Fenster 250–300 ms (sd) | 0,4596 (0,0546) | 0,3984 (0,0578) |
+| cz_rest Fenster 250–300 ms (sd) | −0,1728 (0,2972) | −0,4012 (0,2954) |
+| σ_cd / σ_cz (Block-SEM 4, Budget) | 0,02574 / 0,02367 | 0,02454 / 0,02610 |
+| Klemm-Budget Nah+Fern netto | 0,2227 σ | 0,0266 σ (dCd_m 6,5·10⁻⁴) |
+| Wanduhr ab 100 ms (je 1 Lauf) | 132,4 s (A: 131,9 s) | 135,5 s |
+
+**Einordnung:** M2 wirkt (negativ geladene Populationen −98 % Nah, −100 % Fern; Kandidaten halbiert, s wandert von 0,5–0,75 nach 0,75–1).
+Δcd_rest = −0,061 ≈ 1,7 σ_diff (√(σ₁²+σ₂²) = 0,036); Δcz_rest = −0,23 — nach Block-SEM groß, aber Einzelrealisierung eines chaotischen
+Laufs mit Fenster-sd 0,30 und k(4)-unsicherem σ; nach Plan §5 kann 8 mm Kraftänderungen dieser Größe nicht belastbar zuordnen. Wanduhr
+M2 +2,3 % gegen M1, M1 +0,4 % gegen A (je eine Messung). Die Dichteklemmen-Nettomasse Nah sinkt nicht (Q_netto 0,176 → 0,596), Fernfeld
+fällt stark (0,377 → 0,0069). Nicht verifiziert: Streuung zweier Realisierungen, Wanduhr-Rauschen.

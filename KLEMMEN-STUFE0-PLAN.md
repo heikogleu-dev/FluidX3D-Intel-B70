@@ -275,6 +275,12 @@ Läufe kl_s0b_dd8_an_b70 / _aus_b70 (dbec4ce) und kl_s0c_dd8_b70 (b470bab), Zeil
 
 ## Nachtrag 15.09.2026 abends: Erklärung „boden_eq 0 Treffer, stream_collide 1,13 Mio am selben Band“ (Herleitung, NICHT gemessen)
 
+> **BERICHTIGT (gleicher Abend, nach M2):** Die folgende Herleitung verwechselt Σf* der Zelle mit rho_local von boden_eq. boden_eq lädt die
+> EINGESTRÖMTEN Populationen (Nachbarn) und setzt sie auf f_eq(ρ_lokal, u_road); stream_collide lädt im nächsten Schritt genau diese
+> (ρ = ρ_lokal im Band, daher 0 Treffer in boden_eq), wendet an TYPE_MS danach apply_moving_boundaries an und klemmt erst dann.
+> Neue Hypothese (unbelegt): die 1,13 Mio K1-Treffer entstehen durch die Bodenlink-Behandlung zwischen boden_eq und der Klemme.
+> Die Spiegelungsrechnung unten trifft nur Σf* derselben Zelle und erklärt die 0 Treffer NICHT.
+
 SRT nach der Dichteklemme: Σf* = ρ_c + (1−w)(ρ_roh − ρ_c) (Stufe-1-Plan §1.2, m0). Bei 8 mm ist w nahe 2 (def_w in defs_prod8_nah.txt),
 also Σf* ≈ 2ρ_c − ρ_roh: die Masse wird an der Klemmgrenze GESPIEGELT. Unten (ρ_c = 0,5, ρ_roh < 0,5): Σf* ≈ 1 − ρ_roh ∈ (0,5; 1];
 oben (ρ_c = 1,5, ρ_roh > 1,5): Σf* ≈ 3 − ρ_roh < 1,5. boden_eq liest danach genau diese Summe als rho_local und kann die Klemme nur für
