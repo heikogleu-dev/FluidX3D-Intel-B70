@@ -767,6 +767,15 @@ B70 **SIMD16** (iGPU SIMD8). Die zuschaltbaren Fork-Features erklären die Breit
 selbst (git-Historie enthält Upstream ab 7680735, 2022-08-04; Fork-Basis bestimmen, dessen kernel.cpp mit Upstream-Defines offline
 übersetzen). Erst wenn Upstream auf der B70 SIMD32 bekommt, ist die Breite ein Fork-Kernbefund.
 
+**A1b erledigt (15.09. abends, offline, gleicher ocloc):** Upstream-`stream_collide` von der Fork-Basis **8986874** (Upstream
+2026-07-14), mit Upstream-Defines übersetzt — Benchmark-Arm (FP16S, D3Q19, SRT, keine Erweiterung) UND Erweiterungs-Arm (UPDATE_FIELDS,
+VOLUME_FORCE, FORCE_FIELD, MOVING_BOUNDARIES, EQUILIBRIUM_BOUNDARIES, SUBGRID) — ist auf der B70 ebenfalls **SIMD16** (iGPU SIMD8).
+**Verdikt A: Die SIMD-Breite erklärt die Lücke zu Upstream NICHT** — Upstream fährt dieselbe Breite. Hypothese „fällt der Kernel auf SIMD16“
+falsifiziert. Nebenbefund: die Upstream-Vergleichszahl stammt vermutlich aus dem Upstream-**Benchmark** (README_UPSTREAM.md:738–739:
+B70 6750 MLUPs) — also ohne jede Erweiterung, gegen unseren vollen Produktionskernel; vor jedem Prozentvergleich klären, welche
+Upstream-Konfiguration die 520 GB/s trägt. A2 (auto-large-GRF) bleibt als Occupancy-A/B offen; A3 (sub_group 32 erzwingen) verliert an
+Gewicht, weil auch Upstream bei 16 liegt.
+
 ## Die billigen
 
 | Hebel | Gewinn | Aufwand |
