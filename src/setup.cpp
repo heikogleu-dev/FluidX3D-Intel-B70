@@ -1382,7 +1382,7 @@ void klemm_bilanz_abschluss(const char* fall) { if(klemm_bilanz_verletzt) print_
 // Die Trefferzaehler (saettigend) werden ebenso differenziert; Phase "nach Warmlauf" = Fenster, deren Leseschritt t_si >= t_warmup.
 struct KlemmBilanz {
 	bool init = false; uint alt[288]; double ges[288], nach[288];
-	ulong fenster = 0ull, mehrdeutig = 0ull, t_start = 0ull, t_warm = 0ull, t_ende = 0ull; bool warm = false;
+	ulong fenster = 0ull, fenster_nach = 0ull, mehrdeutig = 0ull, t_start = 0ull, t_warm = 0ull, t_ende = 0ull; bool warm = false; // Pruefpass S0c M1: t_ende = get_t() des VORIGEN Lesens bis zum Update
 	std::ofstream csv;
 };
 static bool klemm_summenslot(const uint k) { return (k>=226u&&k<=235u)||(k>=247u&&k<=256u)||k==263u||k==264u||k==267u||k==268u; }
@@ -1398,6 +1398,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 		K.csv << "t_si,t_lat,nach_warmup,rho_K0,rho_K1,rho_K2,rho_K3,rho_K4,u_K0,u_K1,u_K2,u_K3,u_K4,m_zu,m_ab,jx_plus,jx_minus,jz_plus,jz_minus,kappung,mehrdeutig\n";
 		return;
 	}
+	if(L.get_t()==K.t_ende) return; // Pruefpass S0c N3: kein Schritt seit dem letzten Lesen (Restfenster nach dem letzten Sample, Stopp) -> kein leeres Fenster
 	uint dlt[288];
 	for(uint k=0u; k<288u; k++) dlt[k] = d->rho_clamp_hits[k]-K.alt[k]; // uint-Arithmetik: mod 2^32
 	const double S = 16384.0, ob[6] = {1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0, 16.0};
@@ -1405,11 +1406,12 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*2.1*ob[b]*S+1.0); }
 	B_r = fmax(B_r, (double)dlt[266]*(2.0*S+1.0)); // ★ S0d: BODEN/EINLASS_EQ-Summen 267/268, Faktor 1, Kappe 2
 	const double grenze = klemm_haken_env()==4u ? 65536.0 : 4294967296.0; // Haken 4: Schranke kuenstlich 2^16 -> die Warnung MUSS feuern
-	const bool mehrd = B_r>=grenze||B_u>=grenze;
+	bool satt_dek = false; for(uint b=0u; b<6u; b++) if(d->rho_clamp_hits[236u+b]>=0xF0000000u||d->rho_clamp_hits[257u+b]>=0xF0000000u) satt_dek = true; // Pruefpass S0c N2: gesaettigte Dekade -> Differenz 0 -> Schranke unterschaetzt
+	const bool mehrd = B_r>=grenze||B_u>=grenze||satt_dek||dlt[210]>0u; // N1: rho_max 2,1 gilt nur, solange Slot 210 (rho ausserhalb 0,25..4,0 an TYPE_E) im Fenster 0 bleibt -- sonst ist die u-Schranke keine
 	if(mehrd) { if(K.mehrdeutig==0ull) print_warning(string("KLEMM-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG (Schranke rho "+to_string(B_r,0u)+", u "+to_string(B_u,0u)+" >= "+to_string(grenze,0u)+") -- die Festkomma-Summen koennen gewickelt sein; weitere Fenster nur im Bericht gezaehlt."); K.mehrdeutig++; }
 	for(uint k=0u; k<288u; k++) { K.ges[k] += (double)dlt[k]; if(nach_warmup) K.nach[k] += (double)dlt[k]; K.alt[k] = d->rho_clamp_hits[k]; }
-	K.fenster++; K.t_ende = L.get_t();
-	if(nach_warmup&&!K.warm) { K.warm = true; K.t_warm = L.get_t(); }
+	if(nach_warmup&&!K.warm) { K.warm = true; K.t_warm = K.t_ende; } // Pruefpass S0c M1: Phase beginnt am Anfang DIESES Fensters (voriges Lesen), nicht an seinem Ende
+	K.fenster++; if(nach_warmup) K.fenster_nach++; K.t_ende = L.get_t();
 	auto su = [&](const uint a, const uint n) { double s = 0.0; for(uint k=a; k<a+n; k++) s += (double)dlt[k]; return s; };
 	if(K.csv.is_open()) {
 		K.csv << t_si << "," << L.get_t() << "," << (nach_warmup?1:0);
@@ -1421,7 +1423,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 // ★ 15.09.2026 Klemmen S0c: Bericht in physikalischen Groessen. NUR EIN GROESSENVERGLEICH (Plan §1 Punkt 6): entfernter FLUIDimpuls
 // ist keine Koerperkraft; ΔCd_aeq = (Fluid-x-Impulsverlust je Schritt, in N) / (q_inf*A_ref), Vorzeichen positiv = Fluid verliert +x-Impuls.
 // Die Masse wird auf den Einlass-Massenstrom u_lat*Ny*Nz (rho = 1) je Schritt bezogen. n_Schritte = Schritte DIESER Domaene.
-static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const double qA, const float u_lat, const uint Ny, const uint Nz, const double sigma_cdrest) {
+static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const double qA, const float u_lat, const uint Ny, const uint Nz, const double sigma_cdrest, const char* sigma_name = "sigma(cd_rest, Block-SEM 4)") {
 	if(!K.init) return;
 	const double S = 16384.0;
 	auto su = [&](const double* a, const uint b, const uint n) { double s = 0.0; for(uint k=b; k<b+n; k++) s += a[k]; return s; };
@@ -1437,8 +1439,8 @@ static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const 
 		const double eq_zu = a[267]/S, eq_ab = a[268]/S; // ★ S0d: BODEN_EQ/EINLASS_EQ (Faktor 1)
 		const double Fx_N = (double)u.si_F((float)(jx/(double)n)), Fz_N = (double)u.si_F((float)(jz/(double)n));
 		const double dcd = -Fx_N/qA, dcz = -Fz_N/qA;
-		print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+", "+to_string(n)+" Schritte, "+to_string(K.fenster)+" Fenster): rho-Treffer "+to_string(hr,0u)+", u-Treffer "+to_string(hu,0u));
-		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Einlass-Massenstroms; Rundungsschranke "+to_string(hr/(2.0*S),4u));
+		print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+", "+to_string(n)+" Schritte, "+to_string(ph==0u ? K.fenster : K.fenster_nach)+" Fenster): rho-Treffer "+to_string(hr,0u)+", u-Treffer "+to_string(hu,0u));
+		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Durchflusses u_lat*Ny*Nz (Groessenbezug; das Nahfeld hat keinen Einlass); Rundungsschranke "+to_string(hr/(2.0*S),4u));
 		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+" (massenerhaltend, nur gezaehlt); Lift-rho-Tor "+to_string(a[270],0u));
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
 		if(ph==1u) {
@@ -1448,12 +1450,16 @@ static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const 
 			kl += ", u-Treffer "; for(uint k=0u; k<5u; k++) kl += (k?"/":"")+to_string(a[242u+k],0u);
 			kl += ", dCd_aeq "; for(uint k=0u; k<5u; k++) kl += (k?"/":"")+to_string(-(double)u.si_F((float)((a[247u+k]-a[252u+k])/S/(double)n))/qA,6u);
 			print_info(kl);
-			if(sigma_cdrest>0.0) print_info(string("    Vergleich: |dCd_aeq| / sigma(cd_rest, Block-SEM 4) = ")+to_string(fabs(dcd)/sigma_cdrest,4u)+" (sigma "+to_string(sigma_cdrest,5u)+"); Entscheidungsregel Uebergabe §1.2: << 1 Hygiene, >~ 1 Stufe 1 Rang 1.");
+			if(sigma_cdrest>0.0) print_info(string("    Vergleich: |dCd_aeq| / ")+sigma_name+" = "+to_string(fabs(dcd)/sigma_cdrest,4u)+" (sigma "+to_string(sigma_cdrest,5u)+"); Entscheidungsregel Uebergabe §1.2: << 1 Hygiene, >~ 1 Stufe 1 Rang 1.");
 			else print_info("    Vergleich gegen sigma(cd_rest): keine Reihe verfuegbar (zu wenige Samples oder Facettenpfad aus).");
 		}
 	}
-	if(K.mehrdeutig>0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": "+to_string(K.mehrdeutig)+" von "+to_string(K.fenster)+" Fenstern MEHRDEUTIG -- Summen unsicher (Haken 4 erwartet das).");
+	if(K.mehrdeutig>0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": "+to_string(K.mehrdeutig)+" von "+to_string(K.fenster)+" Fenstern MEHRDEUTIG -- Summen unsicher"+string(klemm_haken_env()==4u ? " (Haken 4 erwartet das)." : "."));
 	else print_info(string("  KLEMM-BILANZ ")+wo+": Wickelwaechter still in allen "+to_string(K.fenster)+" Fenstern.");
+	if(klemm_haken_env()==4u&&K.mehrdeutig==0ull&&K.ges[0]+K.ges[1]+K.ges[28]>0.0) { // Pruefpass S0c M2: ein Negativtest, der ohne Beanstandung besteht, ist keiner
+		print_warning(string("  KLEMM-BILANZ ")+wo+": HAKEN 4 gesetzt, aber kein Fenster MEHRDEUTIG trotz Treffern -- der Wickelwaechter feuert nicht. Abbruch am Fallende.");
+		klemm_bilanz_verletzt = true;
+	}
 }
 static // ---------------------------------------------------------------------------- Dichte-Klemme berichten
 // ★★ Heikos Einwand 2026-08-09: "rho clamp ist doch auch nur ne Kruecke die man benoetigt wenn der
@@ -1485,7 +1491,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 			print_warning(string("  KLEMM-BILANZ ")+wo+": ABNAHME VERLETZT -- Klassen "+to_string(rk)+" / Dekaden "+to_string(rd)+" gegen [0]+[1] = "+to_string(r01)+", u-Klassen "+to_string(uk)+" / u-Dekaden "+to_string(ud)+" gegen [28] = "+to_string(v[28])+". Der Abbruch folgt am Fallende.");
 			klemm_bilanz_verletzt = true;
 		}
-		if(v[265]!=0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": Kappung [265] = "+to_string(v[265])+" -- mindestens ein |w*drho| oder |dj| > 16; die Festkomma-Summen sind damit UNTERGRENZEN (kein Abbruch, Pruefpass S0b MITTEL 1).");
+		if(v[265]!=0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": Kappung [265] = "+to_string(v[265])+" -- mindestens ein |w*drho| oder |dj| > 16 (stream_collide) oder |drho| > 2 (boden_eq/einlass_eq, S0d); die Festkomma-Summen sind damit UNTERGRENZEN (kein Abbruch, Pruefpass S0b MITTEL 1).");
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
 	}
 #endif // RHO_CLAMP
@@ -1596,7 +1602,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				// ★ 15.09.2026 Klemmen Stufe 0 (KLEMMEN-STUFE0-PLAN.md §6): die Festkomma-Summenslots wickeln ABSICHTLICH mod 2^32 --
 				// der Host bildet Fensterdifferenzen und summiert in double. Ohne diese Ausnahme stuende rund ein Viertel
 				// des uint-Bereichs im exit(1)-Band, also bei ~24 Slots etwa jeder dritte Lauf (Planungsagent, Rechnung).
-				if((sl>=226u&&sl<=235u)||(sl>=247u&&sl<=256u)||sl==263u||sl==264u||sl==267u||sl==268u) continue;
+				if(klemm_summenslot(sl)) continue; // Pruefpass S0c N7: eine Liste statt zwei
 				if(v>mx) { mx=v; mxs=sl; } } }
 		// ★ g12-Befund (2026-08-25 nacht): SAETTIGUNG ist der GEWOLLTE Endzustand der saettigenden
 		// Zaehler (Parken ab 0xF0000000) -- der Waechter hat sie als "Wickelgefahr" gemeldet und
@@ -5601,7 +5607,7 @@ void main_setup_kugel() {
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h); }
-	berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u)); // ★ 15.09.2026 Klemmen S0c
+	berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u), "sigma(Cd der Kugel aus object_force, Block-SEM 4)"); // ★ 15.09.2026 Klemmen S0c (Pruefpass S0c N4: Kugel hat kein cd_rest)
 	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd_w.size(); i++) { mcd+=cd_w[i]; mcz+=cz_w[i]; }
