@@ -498,3 +498,7 @@ Ein Lauf je Arm; Rauschen der Wanduhr nicht gemessen. 4 mm bewusst nicht gerechn
 - Die Pass-3-Änderungen sind wörtlich die Vorschläge des Prüfagenten; kein weiterer Prüfpass, Deckung durch diese Nachprüfung.
 
 **Stand RHO_RAND Nahfeld: C0–C2d abgeschlossen.** Offen: Fernfeld (Region R3 für die Entnahmeebenen, Heiko „später“), Haken 3 (sobald ein Fall asymmetrische MS-Zellen hat).
+
+**ABGESCHLOSSEN 15.09.2026 nachmittags (Heiko).** Fernfeld NICHT gebaut: RHO_SPARSAM spart dort schon 94,0 % der rho-Schreibvorgänge
+(rr_c2d_dd8_b_b70: 23 425 596 übersprungen, 1 495 885 ausgeführt je Schritt); gerechnet ≤ 0,2 % des Speicherverkehrs der iGPU,
+der Nutzen wäre nur System-RAM (≈ 400 MB bei 4 mm, Rechnung). Nächster Punkt: Erhaltende Klemmen Stufe 0.
