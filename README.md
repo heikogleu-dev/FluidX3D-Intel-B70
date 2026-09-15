@@ -552,7 +552,7 @@ strictly more physics on board.
 count and both came back with nothing — one of them with the opposite sign. What does move the
 clock on this rig is **atomics on shared buffers** and **memory traffic**, and every open
 proposal that rests on an instruction count alone is now marked unproven in
-[`PERFORMANCE.md`](PERFORMANCE.md).
+[`TODO.md`](TODO.md) (appendix; formerly PERFORMANCE.md).
 
 **A second measurement lesson, paid the same day:** `VmHWM` is a high-water mark. Freeing a
 buffer *after* the peak lowers the steady state and not the mark — so the host-mirror release
@@ -709,7 +709,7 @@ Wall clock grows by 29.5 %, not 21.4 %: cells by 21.4 %, steps per physical seco
 
 **The iGPU is not the limit.** Both grids grow by the same factor, `ratio` stays 4, and in the
 phase profile of `p4_register` the far field sits at **2.1 %** of visible time against 95.4 % for
-the near field. The 8.13 % far-field slack quoted elsewhere in `PERFORMANCE.md` predates the sparse
+the near field. The 8.13 % far-field slack quoted elsewhere in `TODO.md` (appendix) predates the sparse
 writes and the two-byte fields and is superseded.
 
 **Not yet checked, and it could kill the arithmetic:** whether the near-field box and the far field
@@ -762,7 +762,7 @@ layout remain parked behind physics work — documented with their expected mech
 project markdowns. Four further levers with a non-instruction justification (merging the two
 facet kernels, replacing a flood scan with a flag bit, bundling the host round-trips,
 precomputing facet geometry into the already-allocated free slots) are listed with their open
-measurements in [`PERFORMANCE.md`](PERFORMANCE.md).
+measurements in [`TODO.md`](TODO.md) (appendix; formerly PERFORMANCE.md).
 
 ## The validated production configuration
 

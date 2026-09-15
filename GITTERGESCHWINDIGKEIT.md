@@ -1,6 +1,6 @@
 # Gittergeschwindigkeit u_lat — Schalter und erste Messung
 
-**Stand 12.09.2026 vormittags.** TODO 1 aus `PERFORMANCE.md`. Fassung: FluidX3D-v2, Zweig
+**Stand 12.09.2026 vormittags.** TODO 1 aus `TODO.md` (Anhang, bis 15.09. PERFORMANCE.md). Fassung: FluidX3D-v2, Zweig
 master, Commit 68568dc plus die hier beschriebene Änderung an `src/setup.cpp`.
 
 ---
@@ -114,7 +114,7 @@ trennt sie nicht:
 
 1. **Einschwingunterschied.** Die beiden Arme laufen mit verschiedenem Ma durch die Anwärmphase
    und kommen verschieden schnell an. Dann ist 0,100 brauchbar und das Messfenster zu früh —
-   was `PERFORMANCE.md` ohnehin schon beziffert (+1,34 % Bias auf cd_druck).
+   was `TODO.md` (Anhang, bis 15.09. PERFORMANCE.md) ohnehin schon beziffert (+1,34 % Bias auf cd_druck).
 2. **Echter, kleiner Versatz**, den 300 ms nicht auflösen.
 
 Cz_rest ist durchweg negativer (mehr Abtrieb), aber die Streuung trägt es nicht: 1,1 bis 1,6 σ

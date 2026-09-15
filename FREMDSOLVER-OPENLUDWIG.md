@@ -6,7 +6,7 @@ CUDA/KernelAbstractions.jl, 19 Validierungsfälle im Repo.
 
 **Was hier Messung ist und was nicht:** alle Aussagen über *ihren* Code sind am Quelltext der
 genannten Fassung geprüft. Ihre Leistungs- und Speicherzahlen sind **ihre Dokumentation**, nicht
-auf dieser Maschine gemessen; unsere Gegenzahlen stammen aus `PERFORMANCE.md` (11.09.2026,
+auf dieser Maschine gemessen; unsere Gegenzahlen stammen aus `TODO.md` (Anhang, bis 15.09. PERFORMANCE.md) (11.09.2026,
 Lauf `p4_neu`). Hardware wird **nicht** gegeneinander verrechnet — wo verglichen wird, dann als
 Anteil an der jeweils eigenen Dachlinie.
 
@@ -91,7 +91,7 @@ die Grundlage. Beides ist zu haben — aber nicht unbesehen.
 |---|---|---|
 | **Speicher je Zelle** | **476 B** in der Vorgabekonfiguration: vier volle 27er-Float32-Felder (`f`, `f_temp`, `f_post_collision`, `f_old`, `blocks.jl:145-157`) plus `rho`/`rho_old`/`vel`/`vel_temp`/`vel_old` | **39,6 B** (27 310,9 MiB für 722,6 M Zellen beider Domänen) |
 | **DDF allein** | D3Q27 × FP32 × 2 Puffer = 216 B | D3Q19 × FP16S × ein Puffer = **38 B** |
-| **Bandbreitenausnutzung** | 350 MLUPs × 216 B = 75,6 GB/s; gegen die Nennbandbreite der RTX 4090 (1008 GB/s, Herstellerangabe, hier nicht gemessen) = **7,5 %** — Grundlage ist ihre Doku-Tabelle „Large/Very Large" | 420 GB/s von 608 GB/s Spitze = **69 %** (gemessen, `PERFORMANCE.md`) |
+| **Bandbreitenausnutzung** | 350 MLUPs × 216 B = 75,6 GB/s; gegen die Nennbandbreite der RTX 4090 (1008 GB/s, Herstellerangabe, hier nicht gemessen) = **7,5 %** — Grundlage ist ihre Doku-Tabelle „Large/Very Large" | 420 GB/s von 608 GB/s Spitze = **69 %** (gemessen, `TODO.md` (Anhang, bis 15.09. PERFORMANCE.md)) |
 | **q-Werte der Randbedingung** | float16, als Speicheroptimierung ausgewiesen | **uchar**, 18 B je aktive Facette (`lbm.hpp:268`) |
 | **Wandmodell** | Volumenkraft entgegen dem **vollen** Geschwindigkeitsvektor, keine Tangentialprojektion, einseitig (`if tau_wall > tau_res`), eine Korrekturstufe | Tangentialzerlegung, Normalkompensation, Nachbarabtastung, ELIBB, Rang-1-Pseudoinverse |
 | **Prüfpunkt/Neustart** | **nicht vorhanden** | ebenfalls nicht — hier ist nichts zu holen |

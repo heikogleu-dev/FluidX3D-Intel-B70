@@ -13,10 +13,10 @@ static bool f_nur_solid_an_setup() { const char* e = getenv("CFD_F_NUR_SOLID"); 
 extern char** environ;
 
 // ---------------------------------------------------------------------------- Gittergeschwindigkeit
-// ★ 12.09.2026, TODO 1 aus PERFORMANCE.md: u_lat stand an VIER Stellen hart verdrahtet (kugel,
+// ★ 12.09.2026, TODO 1 aus PERFORMANCE.md (seit 15.09. TODO.md): u_lat stand an VIER Stellen hart verdrahtet (kugel,
 // fahrzeug, fahrzeug_dd, fernfeld), ohne Schalter und ohne dokumentierte Herleitung. Es gilt
 // dt = u_lat*dx/si_u, die Laufzeit ist also streng proportional zu 1/u_lat -- der groesste
-// Einzelhebel des Projekts (PERFORMANCE.md, "Die drei grossen", Punkt 1).
+// Einzelhebel des Projekts (PERFORMANCE.md, seit 15.09. TODO.md, "Die drei grossen", Punkt 1).
 //
 // DIE HERLEITUNG IST NACHGERECHNET, NICHT GERATEN (12.09.2026): bei dx = 4 mm und si_u = 30 m/s
 // ist dt = 0,075*0,004/30 = 1,00000e-5 s GENAU. 0,075 ist der Wert, der den Zeitschritt der

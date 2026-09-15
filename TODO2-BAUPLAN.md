@@ -59,7 +59,7 @@ dazu der Host. Latente Erweiterungen: `CFD_SGS_BAND=1` (8 Wandlagen) und `CFD_FA
 
 ## 3 · Der Deckel, und er begrenzt die Erwartung
 
-Die Maßnahme wirkt im **Nahfeld**. Der Schlupf des Fernfelds beträgt 8,13 % (`PERFORMANCE.md`).
+Die Maßnahme wirkt im **Nahfeld**. Der Schlupf des Fernfelds beträgt 8,13 % (`TODO.md` (Anhang, bis 15.09. PERFORMANCE.md)).
 Sobald das Feinfenster um mehr als 8,13 % schrumpft, ist die iGPU der kritische Pfad. Die in der
 Übergabe genannte Spanne „−6,5 bis −9,5 %" ist in ihrer oberen Hälfte **konstruktiv
 unerreichbar**, solange nur das Nahfeld angefasst wird.

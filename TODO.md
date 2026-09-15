@@ -1,4 +1,292 @@
-# Performance und VRAM — Befundlage und Massnahmenliste
+# TODO — FluidX3D-v2 (führende Arbeitsliste)
+
+**Umbenannt am 15.09.2026 spät aus `PERFORMANCE.md` (Heiko: „wir nutzen dieses Markdown ja doch anders“).** Oben steht die geordnete
+Liste mit Stand und nächstem Schritt je Punkt, darunter die offenen Themen nach Art, dann „Erledigt — nicht noch einmal vorschlagen“.
+Die bisherige Performance-Befundlage (Messwerte 11.–15.09.) steht **unverändert als Anhang** am Ende. `ARBEITSLISTE.md` ist der ältere
+Stand (09.09.) und nur noch historisch; die Planungsunterlagen der einzelnen Punkte bleiben in ihren eigenen Dateien.
+
+**Regeln für diese Liste:** Zahlen nur mit Quelle (Lauf oder Datei). Ein Punkt wandert nach „Erledigt“, wenn er gemessen und geprüft ist —
+mit Commit. Eine Variable je Lauf; 4-mm- und Produktionsläufe nur nach Heikos Go.
+
+---
+
+## 0 · Morgen zuerst (Heiko, 15.09.2026 spät)
+
+| # | Punkt | Stand | nächster Schritt |
+|---|---|---|---|
+| **1** | **Volle Audit-Korrektur-Schleife über den Klemmen-Block Stufe 0–2** (Iron Rule 3) | Gebaut und je Commit geprüft: S0a–S0d, Z2a–Z2f, P1a–P1d (Commits 1760eaa … 2569c07). Letzter Prüfbericht Z2e/Z2f eingearbeitet; dessen Nachprüfung steht noch aus. Pläne: `KLEMMEN-STUFE0-PLAN.md`, `KLEMMEN-STUFE1-PLAN.md`, `KLEMMEN-STUFE2-PLAN.md` | Drei unabhängige Prüfer (jede Funktion / Host- und Pipeline-Zusammenspiel / Zusammenspiel und toter Code), Befunde beheben, erneut prüfen bis sauber; danach Gate + Kugel-Leiter CPU → iGPU → B70 |
+| **2** | **B70-Gegenprobe nach CAT-Error, dann Arm M-CB1B2** | 15.09. 22:49:19 `xe 0000:04:00.0 Engine memory CAT error, class=bcs` am Übergang `kl_z2ef_ku16_t_b70` → `r_b70`; `r_b70` brauchte 62 s statt 3 s, Ergebnis und Hash in Ordnung. Ursache offen (Queue kennt das Muster, „2x belegt“). Arm M-CB1B2 (`logs/kl_z2m_b2.txt`) wurde vor dem Start gestoppt | Harmloser 16-mm-Kugellauf auf der B70 + `journalctl -k`; sauber → M-CB1B2 fahren (POSITIV=2 + U_KLEMME=1 + RHO_HUELLE=1 gegen M-CB1); wieder CAT → B70 für Hakenläufe sperren, Treiberstand prüfen |
+
+## 1 · Reihenfolge danach
+
+| # | Punkt | Stand | nächster Schritt | Quelle |
+|---|---|---|---|---|
+| 3 | **Klemmen: was geht in den Standard?** | 8 mm: Begrenzer wirkt (negativ geladene Populationen −98 %/−100 %), Budget überall eingehalten, Kraftdifferenzen Einzelrealisierungen (Δcd_rest −0,061 ≈ 1,7 σ_diff); Betragsklemme greift nach Warmlauf an Facetten (0,11 σ Impuls) | Nach Audit und M-CB1B2 Entscheidungsvorlage für Heiko; eine zweite Realisierung je Arm nur mit Rückfrage | `KLEMMEN-STUFE1-PLAN.md`, `KLEMMEN-STUFE2-PLAN.md` (Messabschnitte) |
+| 4 | **APG/Mozaffari-Linie reaktivieren** (Todo 2) | geparkt; ELIBB × APG, deterministisches Nachbar-ρ; Serienzeilen brauchen `CFD_RHO_RAND=0` | 8-mm-A/B κ 0,5 gegen 0 mit `CFD_VTK_DT=0.025` | Wissensspeicher-Todo, `UEBERGABE-2026-09-14.md` |
+| 5 | **iGPU-Leistungsleiter** — PFLICHT vor 3,75 mm | offen; absolute Grobschrittzeit ungemessen | zuerst Timer um den Fernfeldschritt (`CFD_QUEUE_DEV=2`) | Anhang „Der Deckel“ |
+| 6 | **3,75 mm / 15 m** | rechnerisch machbar seit 12.09. (Anhang 1g); 3,5 mm fehlen ~3,8 GB | nach 5 | Anhang 1g |
+
+## 2 · Performance — offen
+
+Herleitung jedes Punktes: `PERFORMANCE-ROHBEFUNDE-2026-09-11.md` Teil 4, u_lat-Messung: `GITTERGESCHWINDIGKEIT.md` (Ordnung vom 12.09.,
+nach der u_lat-Messung). Alle Zahlen sind Wanduhr, Verkehr oder eingesparte Schritte — keine Instruktionszahl.
+
+### Was sich am 12.09. geändert hat
+
+**`u_lat` ist gemessen und GEPARKT, nicht erledigt.** Der Schalter `CFD_U_LAT` ist gebaut
+(Vorgabe 0,075, Inertheit zweimal mit 28 von 28 bitgleichen Dateien abgenommen). Die Laufzeit
+folgt streng 1/u_lat: zwei Messungen bei 0,100 ergaben 76,0 % und 77,4 % der Wanduhr. **Aber die
+Kräfte bewegen sich**: Cd_rest +0,0346 ± 0,0157 (2,2 σ) über 200–500 ms. Der Versatz sitzt in den
+ersten vier Fenstern und ist im letzten verschwunden (−0,004 ± 0,017); das Feld bei 500 ms ist
+zwischen den Armen **nicht unterscheidbar** (RMS 2,84 m/s gegen 2,93 m/s, die ein Arm gegen sich
+selbst 50 ms später hat). Damit ist das Einschwingen der einzige verbleibende Verdächtige — und
+genau deshalb rückt `CFD_T_WARMUP` auf Platz 1.
+
+### Die Reihenfolge
+
+| # | Hebel | Gewinn | Physik | Aufwand |
+|---|---|---|---|---|
+| **1** | **`CFD_T_WARMUP` 0,201 → 0,29** | **15,6 min UND +1,3 % Genauigkeit** | beseitigt den +1,34-%-Bias auf cd_druck | **eine Variable** |
+| **2** | **Die sieben Zugriffe: rho/u nur schreiben, wo gelesen wird** | **−6,5 bis −9,5 % Wanduhr** | **bitgleich beweisbar** | hoch |
+| **3** | **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** (Anwärmphase ist 39 %) | — | 200–300 Zeilen |
+| 4 | `u_lat` erneut, HINTER Punkt 1 | −24 % Wanduhr | dann erst deutbar | Schalter liegt fertig |
+
+**Zu 1, und es ist heute mehr als ein billiger Posten:** das Messfenster beginnt mitten im
+Einschwingen. SISM wird bei 150 ms scharf, die Mittelung startet bei 201 ms, der Vorgang braucht
+92–114 ms. Solange das so ist, trägt **jeder** Arm, der die Zeitschrittweite anfasst, einen
+Einschwingunterschied mit — am 12.09. belegt. Der Punkt zahlt also doppelt: Zeit und Deutbarkeit.
+
+**Zu 2 — die sieben Zugriffe, und das ist derselbe Punkt wie „rho/u nur schreiben":** im ganzen
+`stream_collide` gibt es **sieben** Zugriffe auf `u[]`/`rho[]`. Die vier lesenden stehen im
+TYPE_E-Zweig (`kernel.cpp`, „apply preset velocity/density") — **0,63 % der Zellen**. Geschrieben
+wird für 87,8 %, jeden Schritt: 16,8 % des Verkehrs für eine Leserschaft unter zwei Prozent.
+**Das neue Argument vom 12.09.:** dies ist der einzige grosse Posten der Liste, dessen Abnahme ein
+BYTEVERGLEICH ist und kein Fehlerbalken. Die u_lat-Runde hat gezeigt, was ein Hebel kostet, der
+Zahlen ändert — eine ganze Messkampagne, die im Rauschen endet.
+Alternative gleicher Ursache: beide auf 2 Byte → **−3 961 MiB VRAM**, −7,2 %. Format am echten
+Feld entschieden: `FP16S(rho−1)`, **nicht** int16 für u — das kippt Gates am Wandmodell.
+
+> **Stand 15.09.:** Punkt 2 der Tabelle („sieben Zugriffe“) ist weitgehend umgesetzt — RHO_SPARSAM, U_SPARSAM, RHO_FP16, U_FP16 und
+> RHO_RAND (Nahfeld, seit 15.09. Standard) stehen in der Produktionszeile. `CFD_T_WARMUP` steht dort weiter auf 0,2 (Punkt 1 offen),
+> Prüfpunkt/Neustart ungebaut, `u_lat` geparkt.
+
+### Durchsatz-Audit Nahfeldkernel: warum 69 % statt 85 % Spitze (Auftrag Heiko 15.09.2026, geprüft, NICHT gemessen)
+
+**Auftrag:** die Lücke 420 GB/s (69 % von 608) gegen Upstream 520 GB/s (85 %) auf derselben B70 mechanismenweise verorten —
+messen, nicht bauen; keine Kerneländerung ohne Freigabe; eine Variable je Lauf; Screening 8 mm. Heiko: Doppelprüfungen gegen
+frühere Audits sind ausdrücklich erwünscht.
+
+**Prüfung der Ausgangslage (Hauptsitzung 15.09. abends):**
+- 420 / 608 / 520 GB/s und 5028 MLUPs: belegt in diesem Dokument (Kopf), **Stand 11.09.** — also VOR den Zwei-Byte-Feldern (12.09.),
+  RHO_SPARSAM (12.09.) und RHO_RAND (15.09., jetzt Standard). Vor jeder Deutung am heutigen Stand neu messen.
+- „46,1 B/Zelle gemessen (8 mm)“ ist verwechselt: **gemessen 8 mm = 46,6 B/Zelle** (Nahfeld-Spitze 2916 MiB, RHO_RAND);
+  46,1 B/Zelle ist die **4-mm-Rechnung** mit RHO_RAND (p4_register 48,0 gemessen minus 973 MiB gerechnet).
+- „113 B/Zelle/Schritt Verkehr nach der rho-Einsparung“: **keine Quelle im Repo** (113 kommt nur als 113,0 M Zellen vor,
+  LEISTUNG.md:105). Belegt ist §3: 83,5 B je Gitterzelle, Freistrom-Fluid 93 B, Facettenzelle 339,5 B (Stand 11.09.). Neu erheben.
+- „Gate prüft 37 Kernel“: heute **39 Kernel × 17 Arme × 2 Geräte** (scratch_gate.sh, inkl. Produktionsarme prod8nah/prod8fern aus
+  echten Defines seit 1760eaa).
+
+| Punkt | Stand nach Prüfung | nächster Messschritt |
+|---|---|---|
+| **A · SIMD/GRF** | **Offline belegt (HEAD 31061af, igc_offline, beide Geräte):** `stream_collide` läuft auf der B70 mit **SIMD16** — in ALLEN 17 Gate-Armen, auch im minimalen Kanalarm e0p0; praktisch alle übrigen Kernel dort mit SIMD32 (u. a. update_fields, boden_eq, sgs_fdwand). iGPU: `stream_collide` **SIMD8**. `grf_count` = 128 in **jedem** Kernel → kein Druckmaß. Früherer Befund AUDIT-BEFUNDE.md ~970 (26.08.): „simd8/16 einzig spillfrei bei 128 GRF“; offen seit dort (Rang 4): `-cl-intel-enable-auto-large-GRF-mode`. clinfo B70: Sub-Group-Größen 16/32, lokale Arbeitsgruppe im Code 64 (opencl.hpp:3). | **A1** (offline, Minuten): Gate-Arm „upstream“ ohne Fork-Defines (kein FACETTEN/SUBGRID/Klemmen/PTRT) → SIMD-Breite von `stream_collide` auf der B70. Ist sie 32, ist der Abfall auf 16 fork-verursacht und Kandidat für die Lücke. **A2** (ein GPU-A/B, 8 mm, Wanduhr, bitgleich prüfen): Compileroption auto-large-GRF. **A3** (Kerneländerung → Freigabe): `intel_reqd_sub_group_size(32)` an `stream_collide`, erst Gate (private/spill), dann A/B. |
+| **B · Divergenz Facettenkette** | **Widerspruch im Bestand:** AUDIT-BEFUNDE ~970 (26.08.) „Verzweigungen im Innersten entwarnt (Divergenz auf 0,67 % der Zellen)“ gegen §6 hier „Divergenzkosten ungemessen“. ELIBB-an/aus ist als Divergenz-A/B **nicht sauber** (ändert Physik; der Arm ohne ELIBB war 2,46 % LANGSAMER, Speicher elibb-am-fahrzeug-unverzichtbar). | **B1** (Host, ohne Lauf): Facettenzellen je SIMD-Block zählen — lineare Indexreihenfolge n, Blöcke zu 16 (B70) bzw. 64 (Arbeitsgruppe); Verteilung 0/1/…/16. **B2** nur spezifizieren: Zellklassen-Sortierung (Dispatch-Indirektion). |
+| **C · „L2“** | clinfo B70: *Global Memory cache size* **24 MiB**, Zeilenlänge 256 B (Bedeutung auf einer dGPU unklar — kein CPU-L2; CPU 285K meldet 3 MiB). Rechnung Arbeitssatz eine xy-Ebene DDFs (19 × 2 B): 8 mm 845×333 → 10,7 MB (passt), 4 mm 1689×661 → 42,4 MB (passt nicht). | **C1**: GB/s bei 8 mm und 4 mm an WORTGLEICHER Zeile vergleichen (sonst vermischt); nur ein Unterschied im Durchsatz je Zelle würde die Cache-These tragen. |
+| **D · boden_eq-Dispatch** | Offen seit Runde 1 (§6: 519,1 M Work-Items für 1,15 M Treffer; M6 ABSTAND-Scan per Flagbit). Früherer Vorschlag AUDIT-BEFUNDE ~963 (Rang 3): „boden_eq-3D-Range, ~250× weniger Threads, Kernel unverändert“. Neu 15.09.: boden_eq klemmt nie (Klemmen S0d, 0 Treffer bei 8,6 Mio Band-Resets). | **D1**: Zeitnahme um den boden_eq-Enqueue (finish davor/danach) je Grobschritt, 8 mm; dann **D2** 3D-Range als eigene Variable. |
+| **E · Koaleszenz** | Befund §3 („19 load.ugm.d16u32 + 19 store“) stammt vom 11.09., **vor** U_FP16 und RHO_RAND. Gegenprüfung sinnvoll. | **E1** (offline): asm-Statistik von `stream_collide` im Arm prod8nah auf Nachrichtenbreite/-zahl auszählen. |
+| **F · Umgruppierung** | Zweimal folgenlos bzw. mit umgekehrtem Vorzeichen (2073 Instr. weniger → 2,46 % langsamer; Spalding −4,57 % → ±0). | nur verfolgen, wenn A Registerdruck als Occupancy-Bremse zeigt; sonst abhaken. |
+
+**Vorab festgehaltene Deutung (aus dem Auftrag):** SIMD16 statt 32 oder hoher GRF-Druck → Registerarbeit lohnt · Facetten-Blöcke
+stark gestreut → Sortierung spezifizieren · Cache klein gegen Arbeitssatz → bandbreitenlimitiert, nicht kernel-limitiert ·
+alles unauffällig → 69 % sind der Preis der Wandmodellkette.
+**Reihenfolge (billig zuerst):** A1 → E1 → B1 (alle ohne GPU) → A2 → D1 → C1. Report als Markdown in den Chat, nicht committen.
+
+**A1, erster Teil erledigt (15.09. abends, offline):** `stream_collide` mit den echten 8-mm-Produktions-Defines, aber OHNE alle
+Fork-Features (kein FACETTEN*/SGS_*/SUBGRID/PTRT/RHO_RAND/U_SPARSAM/F_LISTE/KLEMM, rho und u als float wie Upstream) bleibt auf der
+B70 **SIMD16** (iGPU SIMD8). Die zuschaltbaren Fork-Features erklären die Breite also nicht. Offen bleibt **A1b**: der Upstream-Kernel
+selbst (git-Historie enthält Upstream ab 7680735, 2022-08-04; Fork-Basis bestimmen, dessen kernel.cpp mit Upstream-Defines offline
+übersetzen). Erst wenn Upstream auf der B70 SIMD32 bekommt, ist die Breite ein Fork-Kernbefund.
+
+**A1b erledigt (15.09. abends, offline, gleicher ocloc):** Upstream-`stream_collide` von der Fork-Basis **8986874** (Upstream
+2026-07-14), mit Upstream-Defines übersetzt — Benchmark-Arm (FP16S, D3Q19, SRT, keine Erweiterung) UND Erweiterungs-Arm (UPDATE_FIELDS,
+VOLUME_FORCE, FORCE_FIELD, MOVING_BOUNDARIES, EQUILIBRIUM_BOUNDARIES, SUBGRID) — ist auf der B70 ebenfalls **SIMD16** (iGPU SIMD8).
+**Verdikt A: Die SIMD-Breite erklärt die Lücke zu Upstream NICHT** — Upstream fährt dieselbe Breite. Hypothese „fällt der Kernel auf SIMD16“
+falsifiziert. Nebenbefund: die Upstream-Vergleichszahl stammt vermutlich aus dem Upstream-**Benchmark** (README_UPSTREAM.md:738–739:
+B70 6750 MLUPs) — also ohne jede Erweiterung, gegen unseren vollen Produktionskernel; vor jedem Prozentvergleich klären, welche
+Upstream-Konfiguration die 520 GB/s trägt. A2 (auto-large-GRF) bleibt als Occupancy-A/B offen; A3 (sub_group 32 erzwingen) verliert an
+Gewicht, weil auch Upstream bei 16 liegt.
+
+### Die billigen
+
+| Hebel | Gewinn | Aufwand |
+|---|---|---|
+| Remesh-Diagnostik gattern | 1,35 % (73,3 s für zwei rein berichtende Rechnungen) | zwei `if` |
+| Kopplungsernte alle 2 Grobschritte | 1,65 % | zwei Zeilen |
+| `extract_plane_macros` vor `lbm_c.finish()` ziehen | 0,5–1,0 % + vier Syncs weniger | klein |
+| Kräftekadenz 1 → 4 ms | 0,56 % (gemessen **41-fach** überabgetastet) | eine Variable |
+| 150-ms-VTK-Dump, der wieder gelöscht wird | 9 s + 11,7 GB Schreiblast | eine Zeile |
+| `fac_geo[6]/[7]` (nie gelesen) | 25 MB VRAM | Stride-Umbau |
+
+> **Stand 15.09.:** nicht erneut geprüft; die Produktionszeile trägt weiter `CFD_FAC_CD_EVERY=1` (Kräftekadenz).
+
+### Speicher: rho und u nur dort halten, wo sie gelesen werden (14.09.2026)
+
+Vollständige Pläne in `UEBERGABE-2026-09-14.md`. Die Zahlen sind **Rechnung** aus p4_register, nicht
+gemessen.
+
+| # | Hebel | VRAM | Laufzeit | Stand |
+|---|---|---:|---|---|
+| **Todo 3** | **rho nur in der Randschale** (Dicke 2), sonst aus den DDFs | −973 MiB (4 mm), −1249 MB (3,75 mm) | ~0 (rho ~0,03 % des Verkehrs) | Plan, **vor 3,75 mm** |
+| **später** | **u nur wo gelesen** (Schale + F-BBox + N2F), Heiko: „riskant, aber lohnenswert" | Var a bitgleich ~−1,4 GB, Var b ~−2,1 GB (4 mm) | offen; Var b verschiebt die N2F-Kopplung um einen Feinschritt | Idee, **erst nach Todo 3** |
+
+Beide zusammen: 3,75 mm ~5,2–6,0 GB frei; 3,5 mm nur ~330 MB (Var b), also unter der Untergrenze.
+
+> **Stand 15.09.:** „rho nur in der Randschale“ ist erledigt (RHO_RAND, `RHO_RAND-PLAN.md`); „u nur wo gelesen“ bleibt Idee.
+
+## 3 · Physik und Messverfahren — offen (keine Performance-Punkte)
+
+### Neu auf der Liste, aber unter PHYSIK, nicht unter Performance
+
+**Abstandsgesteuerte Verfeinerung (12.09., Heiko-Frage).** Gerechnet an der echten STL
+(46,1058 m² benetzte Fläche, 133 766 Dreiecke) und mit der Steiner-Formel für die Schalenvolumen:
+von unserem 4-mm-Nahkasten liegen **2,33 %** innerhalb von 16 mm der Wand (0,744 von 31,96 m³).
+
+| Variante | Zellen | Arbeit je phys. Sekunde | mit gemessener Block-Indirektion (T=8: 71 %) |
+|---|---:|---:|---:|
+| heute (4 mm Nahkasten + 16 mm Fernfeld) | 722,6 M | 1,00 | — |
+| 1 mm bis 16 mm, dann 4/16/64 | 782,5 M | **5,28 ×** | 7,44 × |
+| 1 mm nur bis 4 mm, dann 2/4/8/16 | 338,1 M | 1,63 × | 2,30 × |
+| **2 mm bis 16 mm, dann 4/8/16/32** | **176,4 M** | **0,42 ×** | 0,59 × |
+
+Die innerste Stufe skaliert mit dx⁻⁴ (acht Zellen, zwei Schritte je Halbierung). **1 mm an der
+Wand ist ausgeschlossen** — 743,7 M Zellen allein in der ersten Schale, plus 264 M, wenn die
+Fahrbahn als zweite Wand zählt. **2 mm an der Wand wäre ein Viertel der Zellen und 1,7-fach
+schneller als heute.** Das ist kein Performance-Punkt: die Abtriebslücke (74,1 % von OF13) lebt
+dort, wo der Ablöseort von der Grenzschicht bestimmt wird.
+**Vier Dinge stehen dagegen, drei davon gemessen:** Block-Indirektion 29 % Durchsatz bei T=8,
+2-Zell-Halo 259,2 MiB vor der Kornwahl, die heutige Zwei-Stufen-Kopplung kostet schon 3,4 % des
+Grobschritts fürs Synchronisieren (bei fünf Stufen vier Grenzflächen statt einer). Das Vierte ist
+das eigentliche: **unsere Kopplung ist für genau zwei Domänen auf zwei Geräten gebaut.** Und jede
+Änderung der Wandzellgröße zieht y⁺ und damit die Eichung von Wandmodell, ELIBB und SISM mit.
+**Nicht zu verwechseln mit dem am 11.09. Verworfenen:** dort ging es um eine dritte Stufe IM
+iGPU-Schlupf, und dafür gibt es keinen Ort. Eine Abstandskaskade ist etwas anderes.
+
+**Cauchy-Schwarz-Realisierbarkeitsschranke (12.09., aus OPEN_Ludwig).** Klemmt die
+Nebendiagonalen des zweiten Moments auf |c_αβ| ≤ √(c_αα·c_ββ). Greift eine Stufe VOR unserer
+Geschwindigkeitsklemme, die nachweislich feuert (p4_neu: 56 539 Treffer im Nahfeld). Einzelheiten
+in `FREMDSOLVER-OPENLUDWIG.md` Abschnitt 2.2.
+
+### Eigener Punkt: die Geschwindigkeitsklemme erhaltend bauen (12.09.2026, Heiko)
+
+**Heute ist die Klemme ein Eingriff am Zustand, kein Filter.** `clamp(u, -def_c, def_c)` je
+Komponente schneidet die Geschwindigkeit ab — und die Geschwindigkeit IST das erste Moment.
+Damit nimmt die Klemme dem System Impuls weg, und das Log sagt es selbst, wenn es beim Fernfeld
+„0 Treffer (Impuls ungestoert)" meldet.
+
+**Der Vergleich mit OpenFOAM 13, am eigenen Referenzfall geprüft** (`CFD-Cases/mr2v40H`):
+`fvOptions` ist **leer**, `limitVelocity`/`limitTemperature`/`rhoMin`/`rhoMax` kommen im ganzen
+Fall nicht vor. Was dort steht, sind **Schema-Begrenzer**: `grad(U) cellLimited Gauss linear 1`,
+`div(phi,U) bounded Gauss LUST grad(U)`, `div(phi,k) bounded Gauss limitedLinear 1.0`,
+`default limited corrected 0.33`. Alle vier greifen am **Fluss oder Gradienten** und sind
+**erhaltend** — sie ändern, wie eine Größe transportiert wird, nie die Größe selbst.
+
+**In LBM geht das sauberer als in FVM.** Masse und Impuls sind das nullte und erste Moment von
+f; das Gleichgewicht trägt beide vollständig, der Nichtgleichgewichtsanteil hat beide **exakt
+null**. Jede Begrenzung, die nur f_neq anfasst, ist damit **exakt** erhaltend, nicht
+näherungsweise.
+
+> **BERICHTIGT 13.09.2026:** Positivität ist parameterfrei, wandert aber sehr wohl mit `u_lat`. Das
+> D3Q19-Gleichgewicht ist nur für |u|² ≤ 1/3 in Gittereinheiten positiv [BERICHTIGT 15.09.: hier stand 2/3 — das gilt nur für f₀; für i≠0 ist g(x)=1+3x+4,5x²−1,5u² bei x=c_i·u=−1/3 minimal, 0,5−1,5u², KLEMMEN-STUFE0-PLAN.md §1 Punkt 5]. Die heutige Komponentenklemme
+> lässt schräg zu den Achsen |u|² bis 1,0 zu. Außerdem greift die **Dichteklemme** in p4_register
+> 14,4 Mio mal, zehnfach öfter als die u-Klemme, und erhält die Masse nicht. Stufenplan in
+> `UEBERGABE-2026-09-14.md` §1.
+
+**Und es gibt die parameterfreie Fassung:** Positivität. f_eq + f_neq ≥ 0 je Richtung ist eine
+physikalische Forderung, keine gewählte Zahl — sie wandert nicht mit `u_lat`, anders als die
+heutige Schwelle (0,57735 Gittereinheiten = 230,9 m/s bei u_lat 0,075, aber 138,6 m/s bei 0,125).
+OpenLUDWIG führt genau das als `limiter: "positivity"`; die Cauchy-Schwarz-Variante auf dem
+zweiten Moment ist die schärfere Schwester (`FREMDSOLVER-OPENLUDWIG.md` 2.2).
+
+**Zwischenschritt, der heute schon zählbar wäre:** den **entfernten Impuls** mitzählen statt nur
+die Treffer. Drei Zeilen und ein Slot; danach steht im Bericht nicht „1 421 219 Treffer", sondern
+wieviel Promille des Gesamtimpulses die Klemme genommen hat. Erst damit ist entscheidbar, ob sie
+Filter oder Eingriff ist. Bei 1,13 Treffern je Schritt (Standard) ist das akademisch, bei 47
+(u_lat 0,125) nicht mehr.
+
+**Nicht in TODO 2 mischen.** TODO 2 lässt Schreibvorgänge weg und ändert keinen Wert; seine
+Abnahme ist der Bytevergleich. Eine Klemme ändert Werte und zerstört genau dieses Kriterium.
+> **Stand 15.09.:** In Umsetzung als Klemmen-Block (Stufe 0 Messinstrument, Stufe 1 Positivitätsbegrenzer `CFD_POSITIV`, Stufe 2
+> Budget und Hüllen `CFD_KLEMM_BUDGET`/`CFD_U_KLEMME`/`CFD_TOR_HUELLE`/`CFD_RHO_HUELLE`) — siehe Punkt 1 und 3 oben.
+
+### Klemmen-Folgepunkte (15.09.2026)
+- Ursache der 1,13 Mio ρ-Treffer an TYPE_MS-Bodenzellen bei 0 Treffern in boden_eq: Hypothese Bodenlink-Behandlung (apply_moving_boundaries)
+  zwischen boden_eq und Klemme — unbelegt (`KLEMMEN-STUFE0-PLAN.md`, Nachtrag BERICHTIGT).
+- Unter `CFD_RHO_HUELLE`: Druckauslass schreibt ρ an TYPE_E ungeklemmt; N2F-Band-Diagnose zählt weiter gegen 0,5/1,5 (`KLEMMEN-STUFE2-PLAN.md`).
+- Budget-Interim „Masse netto bei u∞“ (Lagally); Ablösung über lokale Summen (Slots 301/302) erst, wenn brutto reißt und netto nicht.
+- σ aus korrelierten Blöcken unterschätzt (k(4)-Budget ist dadurch strenger, sichere Seite).
+
+### Zwei offene Punkte vom 12.09., beide KEINE Performance-Punkte
+
+**1 · Die 4-mm-Sprosse ist nicht als reproduzierbar belegt — und einmal war sie es nachweislich
+nicht.** `p4_u125` und `p4_u125b` (u_lat 0,125, wortgleiche Zeile) unterscheiden sich: identischer
+Commit, alle Quelldateien der gesicherten Code-Kopien byteweise gleich, Binary unverändert
+(md5 `800542b6…`), Umgebung bis auf `CFD_RUN_NAME` gleich, Aufbau-Log identisch — und trotzdem
+weichen bei 50 ms 928 von 930 Sondenpunkten ab, maximal 0,68 m/s. Ein Lauf trug den
+Einlassdefekt, der andere nicht.
+
+**Auf der 8-mm-Sprosse gilt Determinismus dagegen, dreimal belegt:** uv8_vor/uv8_nach2 (über zwei
+verschiedene Binaries), uv8_u100/uv8_u100b, uv8_u125_a/_b — je **28 von 28 Dateien bitgleich**.
+u_lat ist damit als Ursache entlastet.
+
+Die beiden bekannten Fließkomma-Reduktionen sind bereits behoben und im Code vermerkt: `po_mean`
+am 24.08. (`kernel.cpp:3994`) und `object_force` am 25.08. (`:4482`). Die verbliebenen
+`atomic_add_f` sitzen in `object_torque`, `object_center_of_mass` (nicht im dd-Pfad) und
+`spread_force` (PARTICLES nicht gebaut). **Es ist also eine dritte, unbekannte Quelle.**
+
+**Was es entscheidet:** ein Wiederhollauf der 4-mm-Standardzeile gegen `p4_neu`, 90 min. Fällt er
+bitgleich aus, betrifft es nur den 0,125er-Betriebspunkt. Fällt er es nicht, trägt **jeder**
+4-mm-A/B dieses Projekts eine unbezifferte Streuung — auch die Fehlerbalken der Baseline.
+
+**2 · Der reflektierende Fernfeld-Einlass.** `CFD_FERN_VI=0` ist der gemessene Default, und
+`setup.cpp:6362` sagt es selbst: „rho bleibt am Einlass festgenagelt, der Rand reflektiert —
+bekannt und angesagt." Bei u_lat 0,075 bleibt das unter der Sichtbarkeitsschwelle (Sonde
+`einlass_saeule.csv`: **0 von 552** Zellen über 2 %), bei 0,125 riss es in einem von zwei Läufen
+auf (**71 von 552**, kleinstes u_x 21,53 statt 30 m/s, z = 5,74 m). Der dokumentierte Altfall lag
+bei z = 4,62 bis 5,58 m — dieselbe Stelle. Nächster Schritt ist ein Arm mit `CFD_FERN_VI=1`;
+er trennt „der Rand reflektiert" von „die Physik trägt die Mach-Zahl nicht".
+
+### Der Befund, der kein Performance-Befund ist
+
+**Das Messfenster beginnt mitten im Einschwingen** — siehe Punkt 1 oben, er ist deswegen dort
+hingerückt. Bias **+1,34 % auf `cd_druck`**. Für gepaarte A/B harmlos, für **jede Absolutaussage
+gegen OF13 nicht** — und das ist die offene Hauptfrage des Projekts. Die Nahfeldbox wird vor
+Messbeginn nicht einmal **einmal** durchspült (0,225 s gegen T_WARMUP 0,201 s).
+
+## 4 · Erledigt — nicht noch einmal vorschlagen
+
+| | warum |
+|---|---|
+| ratio 4 → 8 | Das **Nahfeld wächst** um 0,60 %, weil `CFD_NEAR_LY` durch 32 mm nicht aufgeht |
+| Dritte Auflösungsstufe | Kein Ort dafür: in den Schlupf passen 9,4 M Zellen = Würfel von 1,7 m |
+| CPU als Rechengerät | 1/54 der B70; sie steht aber zu **95,4 %** in Barrieren — der Hebel ist **asynchrone Ausgabe**, nicht Rechnen |
+| Nahkasten beschneiden | `AUDIT-BEFUNDE.md` B71 fordert die **doppelten** Abstände; die geforderte Box bräuchte 52,3 GiB |
+| Fernfeld-Fußabdruck überspringen | 14,9 ms, liegt **komplett im Schlupf** = null Wanduhr |
+| Block-Tiling | Durchsatz sättigt bei 80 %; Reserve für den Fall, dass ein Gitter sonst nicht passt |
+| M2, M7, M8 | nur instruktionsbegründet — zweimal folgenlos geblieben |
+| SIMD-Breite als Ursache der Durchsatzlücke | 15.09. A1b: Upstream-`stream_collide` (8986874) läuft auf der B70 ebenfalls SIMD16 — Hypothese falsifiziert |
+| ρ nur in der Randschale (Todo 3) | 15.09. RHO_RAND, Nahfeld, Standard seit b9329a5 (`RHO_RAND-PLAN.md`) |
+
+---
+
+# Anhang · Performance-Befundlage (bis 15.09.2026, unverändert aus `PERFORMANCE.md`)
+
+## Der Deckel, und er ist beweglich
+
+Der Schlupf des Fernfelds beträgt **8,13 %** (34,1 ms von 419,1 ms) und **schrumpft mit jeder
+Nahfeld-Maßnahme** — die Runde vom 11.09. hat ein Drittel davon verbraucht. `T_fern = 1,82 ns
+× N_fern`, flach über Faktor 15,5 (12-Punkte-Leiter). Die iGPU kann nie mehr als **9,59 %**
+der Gesamtleistung tragen und trägt 8,93 %: **der Schnitt liegt bei 93,1 % des Optimums**.
+Wer gegen den Deckel optimiert, muss ihn nach jeder Maßnahme neu bestimmen.
+
 
 **Stand 12.09.2026 (Abschnitte 1e–1g), Rest 11.09.2026.** Konsolidiert aus drei Agentenrunden und eigener Nachprüfung. Die
 vollständigen Rohbefunde mit allen Zwischenrechnungen stehen in
@@ -690,239 +978,3 @@ falsche Physik), und `active_tile_id` muss hinter `TS_P` gebunden werden, sonst 
 
 ---
 
-# Was als Nächstes zu tun ist
-
-**NEU GEORDNET am 12.09.2026, nach der u_lat-Messung.** Die Herleitung jedes Punktes steht in
-`PERFORMANCE-ROHBEFUNDE-2026-09-11.md` Teil 4, die u_lat-Messung in `GITTERGESCHWINDIGKEIT.md`.
-**Alle Zahlen sind Wanduhr, Verkehr oder eingesparte Schritte — keine Instruktionszahl.**
-
-## Was sich am 12.09. geändert hat
-
-**`u_lat` ist gemessen und GEPARKT, nicht erledigt.** Der Schalter `CFD_U_LAT` ist gebaut
-(Vorgabe 0,075, Inertheit zweimal mit 28 von 28 bitgleichen Dateien abgenommen). Die Laufzeit
-folgt streng 1/u_lat: zwei Messungen bei 0,100 ergaben 76,0 % und 77,4 % der Wanduhr. **Aber die
-Kräfte bewegen sich**: Cd_rest +0,0346 ± 0,0157 (2,2 σ) über 200–500 ms. Der Versatz sitzt in den
-ersten vier Fenstern und ist im letzten verschwunden (−0,004 ± 0,017); das Feld bei 500 ms ist
-zwischen den Armen **nicht unterscheidbar** (RMS 2,84 m/s gegen 2,93 m/s, die ein Arm gegen sich
-selbst 50 ms später hat). Damit ist das Einschwingen der einzige verbleibende Verdächtige — und
-genau deshalb rückt `CFD_T_WARMUP` auf Platz 1.
-
-## Die Reihenfolge
-
-| # | Hebel | Gewinn | Physik | Aufwand |
-|---|---|---|---|---|
-| **1** | **`CFD_T_WARMUP` 0,201 → 0,29** | **15,6 min UND +1,3 % Genauigkeit** | beseitigt den +1,34-%-Bias auf cd_druck | **eine Variable** |
-| **2** | **Die sieben Zugriffe: rho/u nur schreiben, wo gelesen wird** | **−6,5 bis −9,5 % Wanduhr** | **bitgleich beweisbar** | hoch |
-| **3** | **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** (Anwärmphase ist 39 %) | — | 200–300 Zeilen |
-| 4 | `u_lat` erneut, HINTER Punkt 1 | −24 % Wanduhr | dann erst deutbar | Schalter liegt fertig |
-
-**Zu 1, und es ist heute mehr als ein billiger Posten:** das Messfenster beginnt mitten im
-Einschwingen. SISM wird bei 150 ms scharf, die Mittelung startet bei 201 ms, der Vorgang braucht
-92–114 ms. Solange das so ist, trägt **jeder** Arm, der die Zeitschrittweite anfasst, einen
-Einschwingunterschied mit — am 12.09. belegt. Der Punkt zahlt also doppelt: Zeit und Deutbarkeit.
-
-**Zu 2 — die sieben Zugriffe, und das ist derselbe Punkt wie „rho/u nur schreiben":** im ganzen
-`stream_collide` gibt es **sieben** Zugriffe auf `u[]`/`rho[]`. Die vier lesenden stehen im
-TYPE_E-Zweig (`kernel.cpp`, „apply preset velocity/density") — **0,63 % der Zellen**. Geschrieben
-wird für 87,8 %, jeden Schritt: 16,8 % des Verkehrs für eine Leserschaft unter zwei Prozent.
-**Das neue Argument vom 12.09.:** dies ist der einzige grosse Posten der Liste, dessen Abnahme ein
-BYTEVERGLEICH ist und kein Fehlerbalken. Die u_lat-Runde hat gezeigt, was ein Hebel kostet, der
-Zahlen ändert — eine ganze Messkampagne, die im Rauschen endet.
-Alternative gleicher Ursache: beide auf 2 Byte → **−3 961 MiB VRAM**, −7,2 %. Format am echten
-Feld entschieden: `FP16S(rho−1)`, **nicht** int16 für u — das kippt Gates am Wandmodell.
-
-## Durchsatz-Audit Nahfeldkernel: warum 69 % statt 85 % Spitze (Auftrag Heiko 15.09.2026, geprüft, NICHT gemessen)
-
-**Auftrag:** die Lücke 420 GB/s (69 % von 608) gegen Upstream 520 GB/s (85 %) auf derselben B70 mechanismenweise verorten —
-messen, nicht bauen; keine Kerneländerung ohne Freigabe; eine Variable je Lauf; Screening 8 mm. Heiko: Doppelprüfungen gegen
-frühere Audits sind ausdrücklich erwünscht.
-
-**Prüfung der Ausgangslage (Hauptsitzung 15.09. abends):**
-- 420 / 608 / 520 GB/s und 5028 MLUPs: belegt in diesem Dokument (Kopf), **Stand 11.09.** — also VOR den Zwei-Byte-Feldern (12.09.),
-  RHO_SPARSAM (12.09.) und RHO_RAND (15.09., jetzt Standard). Vor jeder Deutung am heutigen Stand neu messen.
-- „46,1 B/Zelle gemessen (8 mm)“ ist verwechselt: **gemessen 8 mm = 46,6 B/Zelle** (Nahfeld-Spitze 2916 MiB, RHO_RAND);
-  46,1 B/Zelle ist die **4-mm-Rechnung** mit RHO_RAND (p4_register 48,0 gemessen minus 973 MiB gerechnet).
-- „113 B/Zelle/Schritt Verkehr nach der rho-Einsparung“: **keine Quelle im Repo** (113 kommt nur als 113,0 M Zellen vor,
-  LEISTUNG.md:105). Belegt ist §3: 83,5 B je Gitterzelle, Freistrom-Fluid 93 B, Facettenzelle 339,5 B (Stand 11.09.). Neu erheben.
-- „Gate prüft 37 Kernel“: heute **39 Kernel × 17 Arme × 2 Geräte** (scratch_gate.sh, inkl. Produktionsarme prod8nah/prod8fern aus
-  echten Defines seit 1760eaa).
-
-| Punkt | Stand nach Prüfung | nächster Messschritt |
-|---|---|---|
-| **A · SIMD/GRF** | **Offline belegt (HEAD 31061af, igc_offline, beide Geräte):** `stream_collide` läuft auf der B70 mit **SIMD16** — in ALLEN 17 Gate-Armen, auch im minimalen Kanalarm e0p0; praktisch alle übrigen Kernel dort mit SIMD32 (u. a. update_fields, boden_eq, sgs_fdwand). iGPU: `stream_collide` **SIMD8**. `grf_count` = 128 in **jedem** Kernel → kein Druckmaß. Früherer Befund AUDIT-BEFUNDE.md ~970 (26.08.): „simd8/16 einzig spillfrei bei 128 GRF“; offen seit dort (Rang 4): `-cl-intel-enable-auto-large-GRF-mode`. clinfo B70: Sub-Group-Größen 16/32, lokale Arbeitsgruppe im Code 64 (opencl.hpp:3). | **A1** (offline, Minuten): Gate-Arm „upstream“ ohne Fork-Defines (kein FACETTEN/SUBGRID/Klemmen/PTRT) → SIMD-Breite von `stream_collide` auf der B70. Ist sie 32, ist der Abfall auf 16 fork-verursacht und Kandidat für die Lücke. **A2** (ein GPU-A/B, 8 mm, Wanduhr, bitgleich prüfen): Compileroption auto-large-GRF. **A3** (Kerneländerung → Freigabe): `intel_reqd_sub_group_size(32)` an `stream_collide`, erst Gate (private/spill), dann A/B. |
-| **B · Divergenz Facettenkette** | **Widerspruch im Bestand:** AUDIT-BEFUNDE ~970 (26.08.) „Verzweigungen im Innersten entwarnt (Divergenz auf 0,67 % der Zellen)“ gegen §6 hier „Divergenzkosten ungemessen“. ELIBB-an/aus ist als Divergenz-A/B **nicht sauber** (ändert Physik; der Arm ohne ELIBB war 2,46 % LANGSAMER, Speicher elibb-am-fahrzeug-unverzichtbar). | **B1** (Host, ohne Lauf): Facettenzellen je SIMD-Block zählen — lineare Indexreihenfolge n, Blöcke zu 16 (B70) bzw. 64 (Arbeitsgruppe); Verteilung 0/1/…/16. **B2** nur spezifizieren: Zellklassen-Sortierung (Dispatch-Indirektion). |
-| **C · „L2“** | clinfo B70: *Global Memory cache size* **24 MiB**, Zeilenlänge 256 B (Bedeutung auf einer dGPU unklar — kein CPU-L2; CPU 285K meldet 3 MiB). Rechnung Arbeitssatz eine xy-Ebene DDFs (19 × 2 B): 8 mm 845×333 → 10,7 MB (passt), 4 mm 1689×661 → 42,4 MB (passt nicht). | **C1**: GB/s bei 8 mm und 4 mm an WORTGLEICHER Zeile vergleichen (sonst vermischt); nur ein Unterschied im Durchsatz je Zelle würde die Cache-These tragen. |
-| **D · boden_eq-Dispatch** | Offen seit Runde 1 (§6: 519,1 M Work-Items für 1,15 M Treffer; M6 ABSTAND-Scan per Flagbit). Früherer Vorschlag AUDIT-BEFUNDE ~963 (Rang 3): „boden_eq-3D-Range, ~250× weniger Threads, Kernel unverändert“. Neu 15.09.: boden_eq klemmt nie (Klemmen S0d, 0 Treffer bei 8,6 Mio Band-Resets). | **D1**: Zeitnahme um den boden_eq-Enqueue (finish davor/danach) je Grobschritt, 8 mm; dann **D2** 3D-Range als eigene Variable. |
-| **E · Koaleszenz** | Befund §3 („19 load.ugm.d16u32 + 19 store“) stammt vom 11.09., **vor** U_FP16 und RHO_RAND. Gegenprüfung sinnvoll. | **E1** (offline): asm-Statistik von `stream_collide` im Arm prod8nah auf Nachrichtenbreite/-zahl auszählen. |
-| **F · Umgruppierung** | Zweimal folgenlos bzw. mit umgekehrtem Vorzeichen (2073 Instr. weniger → 2,46 % langsamer; Spalding −4,57 % → ±0). | nur verfolgen, wenn A Registerdruck als Occupancy-Bremse zeigt; sonst abhaken. |
-
-**Vorab festgehaltene Deutung (aus dem Auftrag):** SIMD16 statt 32 oder hoher GRF-Druck → Registerarbeit lohnt · Facetten-Blöcke
-stark gestreut → Sortierung spezifizieren · Cache klein gegen Arbeitssatz → bandbreitenlimitiert, nicht kernel-limitiert ·
-alles unauffällig → 69 % sind der Preis der Wandmodellkette.
-**Reihenfolge (billig zuerst):** A1 → E1 → B1 (alle ohne GPU) → A2 → D1 → C1. Report als Markdown in den Chat, nicht committen.
-
-**A1, erster Teil erledigt (15.09. abends, offline):** `stream_collide` mit den echten 8-mm-Produktions-Defines, aber OHNE alle
-Fork-Features (kein FACETTEN*/SGS_*/SUBGRID/PTRT/RHO_RAND/U_SPARSAM/F_LISTE/KLEMM, rho und u als float wie Upstream) bleibt auf der
-B70 **SIMD16** (iGPU SIMD8). Die zuschaltbaren Fork-Features erklären die Breite also nicht. Offen bleibt **A1b**: der Upstream-Kernel
-selbst (git-Historie enthält Upstream ab 7680735, 2022-08-04; Fork-Basis bestimmen, dessen kernel.cpp mit Upstream-Defines offline
-übersetzen). Erst wenn Upstream auf der B70 SIMD32 bekommt, ist die Breite ein Fork-Kernbefund.
-
-**A1b erledigt (15.09. abends, offline, gleicher ocloc):** Upstream-`stream_collide` von der Fork-Basis **8986874** (Upstream
-2026-07-14), mit Upstream-Defines übersetzt — Benchmark-Arm (FP16S, D3Q19, SRT, keine Erweiterung) UND Erweiterungs-Arm (UPDATE_FIELDS,
-VOLUME_FORCE, FORCE_FIELD, MOVING_BOUNDARIES, EQUILIBRIUM_BOUNDARIES, SUBGRID) — ist auf der B70 ebenfalls **SIMD16** (iGPU SIMD8).
-**Verdikt A: Die SIMD-Breite erklärt die Lücke zu Upstream NICHT** — Upstream fährt dieselbe Breite. Hypothese „fällt der Kernel auf SIMD16“
-falsifiziert. Nebenbefund: die Upstream-Vergleichszahl stammt vermutlich aus dem Upstream-**Benchmark** (README_UPSTREAM.md:738–739:
-B70 6750 MLUPs) — also ohne jede Erweiterung, gegen unseren vollen Produktionskernel; vor jedem Prozentvergleich klären, welche
-Upstream-Konfiguration die 520 GB/s trägt. A2 (auto-large-GRF) bleibt als Occupancy-A/B offen; A3 (sub_group 32 erzwingen) verliert an
-Gewicht, weil auch Upstream bei 16 liegt.
-
-## Die billigen
-
-| Hebel | Gewinn | Aufwand |
-|---|---|---|
-| Remesh-Diagnostik gattern | 1,35 % (73,3 s für zwei rein berichtende Rechnungen) | zwei `if` |
-| Kopplungsernte alle 2 Grobschritte | 1,65 % | zwei Zeilen |
-| `extract_plane_macros` vor `lbm_c.finish()` ziehen | 0,5–1,0 % + vier Syncs weniger | klein |
-| Kräftekadenz 1 → 4 ms | 0,56 % (gemessen **41-fach** überabgetastet) | eine Variable |
-| 150-ms-VTK-Dump, der wieder gelöscht wird | 9 s + 11,7 GB Schreiblast | eine Zeile |
-| `fac_geo[6]/[7]` (nie gelesen) | 25 MB VRAM | Stride-Umbau |
-
-## Speicher: rho und u nur dort halten, wo sie gelesen werden (14.09.2026)
-
-Vollständige Pläne in `UEBERGABE-2026-09-14.md`. Die Zahlen sind **Rechnung** aus p4_register, nicht
-gemessen.
-
-| # | Hebel | VRAM | Laufzeit | Stand |
-|---|---|---:|---|---|
-| **Todo 3** | **rho nur in der Randschale** (Dicke 2), sonst aus den DDFs | −973 MiB (4 mm), −1249 MB (3,75 mm) | ~0 (rho ~0,03 % des Verkehrs) | Plan, **vor 3,75 mm** |
-| **später** | **u nur wo gelesen** (Schale + F-BBox + N2F), Heiko: „riskant, aber lohnenswert" | Var a bitgleich ~−1,4 GB, Var b ~−2,1 GB (4 mm) | offen; Var b verschiebt die N2F-Kopplung um einen Feinschritt | Idee, **erst nach Todo 3** |
-
-Beide zusammen: 3,75 mm ~5,2–6,0 GB frei; 3,5 mm nur ~330 MB (Var b), also unter der Untergrenze.
-
-## Neu auf der Liste, aber unter PHYSIK, nicht unter Performance
-
-**Abstandsgesteuerte Verfeinerung (12.09., Heiko-Frage).** Gerechnet an der echten STL
-(46,1058 m² benetzte Fläche, 133 766 Dreiecke) und mit der Steiner-Formel für die Schalenvolumen:
-von unserem 4-mm-Nahkasten liegen **2,33 %** innerhalb von 16 mm der Wand (0,744 von 31,96 m³).
-
-| Variante | Zellen | Arbeit je phys. Sekunde | mit gemessener Block-Indirektion (T=8: 71 %) |
-|---|---:|---:|---:|
-| heute (4 mm Nahkasten + 16 mm Fernfeld) | 722,6 M | 1,00 | — |
-| 1 mm bis 16 mm, dann 4/16/64 | 782,5 M | **5,28 ×** | 7,44 × |
-| 1 mm nur bis 4 mm, dann 2/4/8/16 | 338,1 M | 1,63 × | 2,30 × |
-| **2 mm bis 16 mm, dann 4/8/16/32** | **176,4 M** | **0,42 ×** | 0,59 × |
-
-Die innerste Stufe skaliert mit dx⁻⁴ (acht Zellen, zwei Schritte je Halbierung). **1 mm an der
-Wand ist ausgeschlossen** — 743,7 M Zellen allein in der ersten Schale, plus 264 M, wenn die
-Fahrbahn als zweite Wand zählt. **2 mm an der Wand wäre ein Viertel der Zellen und 1,7-fach
-schneller als heute.** Das ist kein Performance-Punkt: die Abtriebslücke (74,1 % von OF13) lebt
-dort, wo der Ablöseort von der Grenzschicht bestimmt wird.
-**Vier Dinge stehen dagegen, drei davon gemessen:** Block-Indirektion 29 % Durchsatz bei T=8,
-2-Zell-Halo 259,2 MiB vor der Kornwahl, die heutige Zwei-Stufen-Kopplung kostet schon 3,4 % des
-Grobschritts fürs Synchronisieren (bei fünf Stufen vier Grenzflächen statt einer). Das Vierte ist
-das eigentliche: **unsere Kopplung ist für genau zwei Domänen auf zwei Geräten gebaut.** Und jede
-Änderung der Wandzellgröße zieht y⁺ und damit die Eichung von Wandmodell, ELIBB und SISM mit.
-**Nicht zu verwechseln mit dem am 11.09. Verworfenen:** dort ging es um eine dritte Stufe IM
-iGPU-Schlupf, und dafür gibt es keinen Ort. Eine Abstandskaskade ist etwas anderes.
-
-**Cauchy-Schwarz-Realisierbarkeitsschranke (12.09., aus OPEN_Ludwig).** Klemmt die
-Nebendiagonalen des zweiten Moments auf |c_αβ| ≤ √(c_αα·c_ββ). Greift eine Stufe VOR unserer
-Geschwindigkeitsklemme, die nachweislich feuert (p4_neu: 56 539 Treffer im Nahfeld). Einzelheiten
-in `FREMDSOLVER-OPENLUDWIG.md` Abschnitt 2.2.
-
-## Eigener Punkt: die Geschwindigkeitsklemme erhaltend bauen (12.09.2026, Heiko)
-
-**Heute ist die Klemme ein Eingriff am Zustand, kein Filter.** `clamp(u, -def_c, def_c)` je
-Komponente schneidet die Geschwindigkeit ab — und die Geschwindigkeit IST das erste Moment.
-Damit nimmt die Klemme dem System Impuls weg, und das Log sagt es selbst, wenn es beim Fernfeld
-„0 Treffer (Impuls ungestoert)" meldet.
-
-**Der Vergleich mit OpenFOAM 13, am eigenen Referenzfall geprüft** (`CFD-Cases/mr2v40H`):
-`fvOptions` ist **leer**, `limitVelocity`/`limitTemperature`/`rhoMin`/`rhoMax` kommen im ganzen
-Fall nicht vor. Was dort steht, sind **Schema-Begrenzer**: `grad(U) cellLimited Gauss linear 1`,
-`div(phi,U) bounded Gauss LUST grad(U)`, `div(phi,k) bounded Gauss limitedLinear 1.0`,
-`default limited corrected 0.33`. Alle vier greifen am **Fluss oder Gradienten** und sind
-**erhaltend** — sie ändern, wie eine Größe transportiert wird, nie die Größe selbst.
-
-**In LBM geht das sauberer als in FVM.** Masse und Impuls sind das nullte und erste Moment von
-f; das Gleichgewicht trägt beide vollständig, der Nichtgleichgewichtsanteil hat beide **exakt
-null**. Jede Begrenzung, die nur f_neq anfasst, ist damit **exakt** erhaltend, nicht
-näherungsweise.
-
-> **BERICHTIGT 13.09.2026:** Positivität ist parameterfrei, wandert aber sehr wohl mit `u_lat`. Das
-> D3Q19-Gleichgewicht ist nur für |u|² ≤ 1/3 in Gittereinheiten positiv [BERICHTIGT 15.09.: hier stand 2/3 — das gilt nur für f₀; für i≠0 ist g(x)=1+3x+4,5x²−1,5u² bei x=c_i·u=−1/3 minimal, 0,5−1,5u², KLEMMEN-STUFE0-PLAN.md §1 Punkt 5]. Die heutige Komponentenklemme
-> lässt schräg zu den Achsen |u|² bis 1,0 zu. Außerdem greift die **Dichteklemme** in p4_register
-> 14,4 Mio mal, zehnfach öfter als die u-Klemme, und erhält die Masse nicht. Stufenplan in
-> `UEBERGABE-2026-09-14.md` §1.
-
-**Und es gibt die parameterfreie Fassung:** Positivität. f_eq + f_neq ≥ 0 je Richtung ist eine
-physikalische Forderung, keine gewählte Zahl — sie wandert nicht mit `u_lat`, anders als die
-heutige Schwelle (0,57735 Gittereinheiten = 230,9 m/s bei u_lat 0,075, aber 138,6 m/s bei 0,125).
-OpenLUDWIG führt genau das als `limiter: "positivity"`; die Cauchy-Schwarz-Variante auf dem
-zweiten Moment ist die schärfere Schwester (`FREMDSOLVER-OPENLUDWIG.md` 2.2).
-
-**Zwischenschritt, der heute schon zählbar wäre:** den **entfernten Impuls** mitzählen statt nur
-die Treffer. Drei Zeilen und ein Slot; danach steht im Bericht nicht „1 421 219 Treffer", sondern
-wieviel Promille des Gesamtimpulses die Klemme genommen hat. Erst damit ist entscheidbar, ob sie
-Filter oder Eingriff ist. Bei 1,13 Treffern je Schritt (Standard) ist das akademisch, bei 47
-(u_lat 0,125) nicht mehr.
-
-**Nicht in TODO 2 mischen.** TODO 2 lässt Schreibvorgänge weg und ändert keinen Wert; seine
-Abnahme ist der Bytevergleich. Eine Klemme ändert Werte und zerstört genau dieses Kriterium.
-
-## Zwei offene Punkte vom 12.09., beide KEINE Performance-Punkte
-
-**1 · Die 4-mm-Sprosse ist nicht als reproduzierbar belegt — und einmal war sie es nachweislich
-nicht.** `p4_u125` und `p4_u125b` (u_lat 0,125, wortgleiche Zeile) unterscheiden sich: identischer
-Commit, alle Quelldateien der gesicherten Code-Kopien byteweise gleich, Binary unverändert
-(md5 `800542b6…`), Umgebung bis auf `CFD_RUN_NAME` gleich, Aufbau-Log identisch — und trotzdem
-weichen bei 50 ms 928 von 930 Sondenpunkten ab, maximal 0,68 m/s. Ein Lauf trug den
-Einlassdefekt, der andere nicht.
-
-**Auf der 8-mm-Sprosse gilt Determinismus dagegen, dreimal belegt:** uv8_vor/uv8_nach2 (über zwei
-verschiedene Binaries), uv8_u100/uv8_u100b, uv8_u125_a/_b — je **28 von 28 Dateien bitgleich**.
-u_lat ist damit als Ursache entlastet.
-
-Die beiden bekannten Fließkomma-Reduktionen sind bereits behoben und im Code vermerkt: `po_mean`
-am 24.08. (`kernel.cpp:3994`) und `object_force` am 25.08. (`:4482`). Die verbliebenen
-`atomic_add_f` sitzen in `object_torque`, `object_center_of_mass` (nicht im dd-Pfad) und
-`spread_force` (PARTICLES nicht gebaut). **Es ist also eine dritte, unbekannte Quelle.**
-
-**Was es entscheidet:** ein Wiederhollauf der 4-mm-Standardzeile gegen `p4_neu`, 90 min. Fällt er
-bitgleich aus, betrifft es nur den 0,125er-Betriebspunkt. Fällt er es nicht, trägt **jeder**
-4-mm-A/B dieses Projekts eine unbezifferte Streuung — auch die Fehlerbalken der Baseline.
-
-**2 · Der reflektierende Fernfeld-Einlass.** `CFD_FERN_VI=0` ist der gemessene Default, und
-`setup.cpp:6362` sagt es selbst: „rho bleibt am Einlass festgenagelt, der Rand reflektiert —
-bekannt und angesagt." Bei u_lat 0,075 bleibt das unter der Sichtbarkeitsschwelle (Sonde
-`einlass_saeule.csv`: **0 von 552** Zellen über 2 %), bei 0,125 riss es in einem von zwei Läufen
-auf (**71 von 552**, kleinstes u_x 21,53 statt 30 m/s, z = 5,74 m). Der dokumentierte Altfall lag
-bei z = 4,62 bis 5,58 m — dieselbe Stelle. Nächster Schritt ist ein Arm mit `CFD_FERN_VI=1`;
-er trennt „der Rand reflektiert" von „die Physik trägt die Mach-Zahl nicht".
-
-## Der Befund, der kein Performance-Befund ist
-
-**Das Messfenster beginnt mitten im Einschwingen** — siehe Punkt 1 oben, er ist deswegen dort
-hingerückt. Bias **+1,34 % auf `cd_druck`**. Für gepaarte A/B harmlos, für **jede Absolutaussage
-gegen OF13 nicht** — und das ist die offene Hauptfrage des Projekts. Die Nahfeldbox wird vor
-Messbeginn nicht einmal **einmal** durchspült (0,225 s gegen T_WARMUP 0,201 s).
-
-## Erledigt — nicht noch einmal vorschlagen
-
-| | warum |
-|---|---|
-| ratio 4 → 8 | Das **Nahfeld wächst** um 0,60 %, weil `CFD_NEAR_LY` durch 32 mm nicht aufgeht |
-| Dritte Auflösungsstufe | Kein Ort dafür: in den Schlupf passen 9,4 M Zellen = Würfel von 1,7 m |
-| CPU als Rechengerät | 1/54 der B70; sie steht aber zu **95,4 %** in Barrieren — der Hebel ist **asynchrone Ausgabe**, nicht Rechnen |
-| Nahkasten beschneiden | `AUDIT-BEFUNDE.md` B71 fordert die **doppelten** Abstände; die geforderte Box bräuchte 52,3 GiB |
-| Fernfeld-Fußabdruck überspringen | 14,9 ms, liegt **komplett im Schlupf** = null Wanduhr |
-| Block-Tiling | Durchsatz sättigt bei 80 %; Reserve für den Fall, dass ein Gitter sonst nicht passt |
-| M2, M7, M8 | nur instruktionsbegründet — zweimal folgenlos geblieben |
-
-## Der Deckel, und er ist beweglich
-
-Der Schlupf des Fernfelds beträgt **8,13 %** (34,1 ms von 419,1 ms) und **schrumpft mit jeder
-Nahfeld-Maßnahme** — die Runde vom 11.09. hat ein Drittel davon verbraucht. `T_fern = 1,82 ns
-× N_fern`, flach über Faktor 15,5 (12-Punkte-Leiter). Die iGPU kann nie mehr als **9,59 %**
-der Gesamtleistung tragen und trägt 8,93 %: **der Schnitt liegt bei 93,1 % des Optimums**.
-Wer gegen den Deckel optimiert, muss ihn nach jeder Maßnahme neu bestimmen.
