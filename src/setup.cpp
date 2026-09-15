@@ -4747,20 +4747,23 @@ void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz,
 // ★ 15.09.2026 RHO_RAND C1 -- PRUEFINSTRUMENT UND PROBEZELLEN (RHO_RAND-PLAN.md §5/§7/§11; Probezellen: Heiko 15.09.).
 // Beantwortet vor dem Umbau am echten Feld: liefert die Rekonstruktion aus den DDFs dasselbe Speicherwort, das
 // stream_collide im naechsten Schritt in den rho-Puffer schreibt? Ablauf auf DEMSELBEN fi-Zustand:
-//   (1) Pufferwoerter w_vor lesen (stammen aus stream_collide(t0-1)),
-//   (2) Ebene bei t0 rekonstruieren (Soll) und bei t0-1 (NEGATIVTEST: falsche Paritaet muss abweichen),
-//   (3) GENAU einen Schritt rechnen, Pufferwoerter w_nach lesen (aus stream_collide(t0)).
-// Verglichen wird Geraetewort gegen Geraetewort (der Hostpacker rundet anders, lbm.hpp). Soll je Klasse:
-// Fluid, TYPE_E, TYPE_S, TYPE_MS bitgleich; Facettenzellen duerfen abweichen (Plan K4: das Wandmodell schreibt fhn
-// VOR calculate_rho_u um) und werden getrennt ausgewiesen. Rekonstruktion und Speichern laufen in verschiedenen
-// Kernels in verschiedene Puffer -- kein Rueckleser auf derselben Adresse.
+//   (1) Pufferwoerter w_vor lesen (Stand nach dem letzten Schritt),
+//   (2) Ebene bei t0 rekonstruieren (Soll) und bei t0-1 (NEGATIVTEST: falsche Paritaet),
+//   (3) GENAU einen Schritt rechnen, Pufferwoerter w_nach lesen.
+// Verglichen wird Geraetewort gegen Geraetewort (der Hostpacker rundet anders, lbm.hpp). Soll: Fluid, TYPE_E,
+// TYPE_S, TYPE_MS bitgleich gegen w_nach. Getrennt und NICHT Teil des Solls:
+//   Facette        -- weicht nur ab, wenn das Wandmodell die Masse nicht erhaelt (FAC_ALPHA=0, ELIBB-Blende),
+//   TYPE_E Auslass -- do_time_step ruft apply_pressure_outlet VOR stream_collide; der rekonstruierte (= gelesene)
+//                     Wert hinkt dort einen Schritt nach (Pruefpass C1, M1). Deklarierte Abweichung der rho-Ausgabe.
+// Rekonstruktion und Speichern laufen in verschiedenen Kernels in verschiedene Puffer -- kein Rueckleser.
 // Kostet EINEN zusaetzlichen Zeitschritt am Laufende; deshalb nur mit CFD_RHO_REK_PRUEF=1 und hinter allen Abnahmen.
+// Die dd-Klassen aus §11 (Bandlage 2, APG-Kantennachbar, boden_eq-Band) gibt es an der Kugel nicht; sie gehoeren in C3.
 static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, const uint Nz, const string& out_dir, const string& fall) {
 	LBM_Domain* d = lbm.lbm_domain[0];
 	const uint y = Ny/2u;
 	PlaneSpec pl; pl.origin = uint3(0u, y, 0u); pl.extent_a = Nx; pl.extent_b = Nz; pl.axis = 1u;
 	const ulong NP = (ulong)Nx*(ulong)Nz, NxNy = (ulong)Nx*(ulong)Ny;
-	auto zelle = [&](const ulong g) { return g%(ulong)Nx+(ulong)y*(ulong)Nx+(g/(ulong)Nx)*NxNy; }; // Ebenenindex -> Zellindex (plane_cell_index, Achse y)
+	auto zelle = [&](const ulong g) { return g%(ulong)Nx+(ulong)y*(ulong)Nx+(g/(ulong)Nx)*NxNy; }; // Ebenenindex -> Zellindex (plane_cell_index, Achse y: a=x, b=z)
 	const ulong FN = (ulong)d->fbnx*(ulong)d->fbny*(ulong)d->fbnz;
 	auto ist_facette = [&](const ulong n) {
 		if(d->fac_N==0ull||FN==0ull) return false;
@@ -4769,11 +4772,14 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 		const ulong fbi = (ulong)(x-d->fbx0)+((ulong)(yy-d->fby0)+(ulong)(z-d->fbz0)*(ulong)d->fbny)*(ulong)d->fbnx;
 		return d->fac_idx_voll_on ? d->fac_idx[fbi]!=0xFFFFFFFFu : ((d->fac_idx[2ull*(fbi>>5)]>>(uint)(fbi&31ull))&1u)!=0u;
 	};
+	std::vector<uchar> auslass((size_t)NP, 0u);
+	for(const ulong n : d->po_zellen_liste()) if((n/(ulong)Nx)%(ulong)Ny==(ulong)y) auslass[(size_t)(n%(ulong)Nx+(n/NxNy)*(ulong)Nx)] = 1u;
+	const ulong t0 = lbm.get_t(); // = Domaenen-t (D=1), naechster stream_collide-Schritt
+	if(t0==0ull) { print_warning("RHO-REKONSTRUKTION ("+fall+"): t0 = 0, der Negativtest t0-1 ist nicht definiert -- Pruefung uebersprungen."); return; }
 	d->alloc_rho_rek(NP);
 	d->finish_queue();
 	d->rho_clamp_hits.read_from_device();
 	const uint h217_0 = d->rho_clamp_hits[217], h218_0 = d->rho_clamp_hits[218];
-	const ulong t0 = lbm.get_t(); // = Domaenen-t (D=1), naechster stream_collide-Schritt
 	d->rho.read_from_device();
 	std::vector<rhoxx> w_vor((size_t)NP), w_nach((size_t)NP);
 	for(ulong g=0ull; g<NP; g++) w_vor[(size_t)g] = d->rho[zelle(g)];
@@ -4786,59 +4792,82 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 	for(ulong g=0ull; g<NP; g++) w_nach[(size_t)g] = d->rho[zelle(g)];
 	d->rho_clamp_hits.read_from_device();
 	const ulong d217 = (ulong)(d->rho_clamp_hits[217]-h217_0), d218 = (ulong)(d->rho_clamp_hits[218]-h218_0);
-	// Klassen: 0 Fluid, 1 TYPE_E, 2 TYPE_S, 3 TYPE_MS, 4 tote Kachel, 5 ausserhalb; Facette als eigene Klasse 6 (ueberschreibt 0)
-	const uint NK = 7u; const char* kname[7] = {"Fluid", "TYPE_E", "TYPE_S", "TYPE_MS", "tote Kachel", "ausserhalb", "Facette"};
-	ulong anz[7]={0}, gleich[7]={0}, neg_gleich[7]={0}, vor_gleich[7]={0}, geklemmt=0ull, n_e_ebene=0ull;
-	std::vector<std::vector<ulong>> beispiele(NK);
-	std::vector<ulong> klemm_bsp;
-	for(ulong g=0ull; g<NP; g++) {
+	// Klassen: 0 Fluid, 1 TYPE_E, 2 TYPE_S, 3 TYPE_MS, 4 tote Kachel, 5 ausserhalb (aus dem Kernel); 6 Facette, 7 TYPE_E Auslass (Host)
+	const uint NK = 8u; const char* kname[8] = {"Fluid", "TYPE_E", "TYPE_S", "TYPE_MS", "tote Kachel", "ausserhalb", "Facette", "TYPE_E Auslass"};
+	auto klasse_von = [&](const ulong g) {
 		uint k = (uint)(rek[(size_t)(4ull*g+2ull)]+0.5f); if(k>5u) k = 5u;
-		if(k==1u) n_e_ebene++;
 		if(k==0u&&ist_facette(zelle(g))) k = 6u;
+		if(k==1u&&auslass[(size_t)g]!=0u) k = 7u;
+		return k;
+	};
+	ulong anz[8]={0}, gleich[8]={0}, neg_gleich[8]={0}, neg_gleich_vor[8]={0}, vor_gleich[8]={0}, rek_gleich_vor[8]={0}, n_e_ebene=0ull;
+	std::vector<std::pair<uint,ulong>> klemm; std::vector<std::vector<ulong>> abweicher(NK);
+	for(ulong g=0ull; g<NP; g++) {
+		const uint k = klasse_von(g);
+		if(k==1u||k==7u) n_e_ebene++;
 		anz[k]++;
-		if(rek_w[(size_t)g]==w_nach[(size_t)g]) gleich[k]++; else if(beispiele[k].size()<3u) beispiele[k].push_back(g);
+		if(rek_w[(size_t)g]==w_nach[(size_t)g]) gleich[k]++; else if(abweicher[k].size()<2u) abweicher[k].push_back(g);
 		if(neg_w[(size_t)g]==w_nach[(size_t)g]) neg_gleich[k]++;
+		if(neg_w[(size_t)g]==w_vor[(size_t)g]) neg_gleich_vor[k]++;
 		if(w_vor[(size_t)g]==w_nach[(size_t)g]) vor_gleich[k]++;
+		if(rek_w[(size_t)g]==w_vor[(size_t)g]) rek_gleich_vor[k]++;
 		const float roh = rek[(size_t)(4ull*g+1ull)];
-		if((k==0u||k==3u||k==6u)&&(roh<=0.5f||roh>=1.5f)) { geklemmt++; if(klemm_bsp.size()<3u) klemm_bsp.push_back(g); }
-		if(beispiele[k].empty()&&g+1ull==NP) {} // (keine Abweichung: Beispiele unten aus den gleichen Zellen)
-	}
-	// Probezellen: je Klasse die ersten Abweichler; hat eine Klasse keine, die erste Zelle der Klasse
-	for(ulong g=0ull; g<NP; g++) {
-		uint k = (uint)(rek[(size_t)(4ull*g+2ull)]+0.5f); if(k>5u) k = 5u;
-		if(k==0u&&ist_facette(zelle(g))) k = 6u;
-		if(beispiele[k].empty()) beispiele[k].push_back(g);
+		if((k==0u||k==3u||k==6u)&&(roh<=RHO_CLAMP_MIN||roh>=RHO_CLAMP_MAX)&&klemm.size()<3u) klemm.push_back({k, g});
 	}
 	print_info("---------------- RHO-REKONSTRUKTION ("+fall+", RHO_RAND C1) ----------------");
-	print_info("Ebene y="+to_string(y)+", "+to_string(NP)+" Zellen, t0="+to_string(t0)+"; Soll: Rekonstruktion(t0) = Pufferwort nach stream_collide(t0)");
+	print_info("Ebene y="+to_string(y)+", "+to_string(NP)+" Zellen, t0="+to_string(t0)+"; Soll: Wort der Rekonstruktion(t0) = Pufferwort nach dem Schritt");
 	bool ok = true;
 	for(uint k=0u; k<NK; k++) {
 		if(anz[k]==0ull) continue;
-		print_info("  "+string(kname[k])+": "+to_string(anz[k])+" Zellen, bitgleich "+to_string(gleich[k])+", Negativtest t0-1 gleich "+to_string(neg_gleich[k])+", Puffer unveraendert "+to_string(vor_gleich[k]));
-		if((k<=3u)&&gleich[k]!=anz[k]) ok = false;
+		print_info("  "+string(kname[k])+": "+to_string(anz[k])+" Zellen, bitgleich "+to_string(gleich[k])+(k<=3u ? " (Soll alle)" : " (kein Soll)")+", Puffer im Schritt unveraendert "+to_string(vor_gleich[k]));
+		if(k<=3u&&gleich[k]!=anz[k]) ok = false;
 	}
-	ulong neg_abw = 0ull; for(uint k=0u; k<NK; k++) if(k==0u||k==3u||k==6u) neg_abw += anz[k]-neg_gleich[k];
-	print_info("  Negativtest: "+to_string(neg_abw)+" Abweichungen an rekonstruierten Zellen (Soll > 0)");
+	if(anz[7]>0ull) print_info("  TYPE_E Auslass: Rekonstruktion = Wort VOR dem Schritt an "+to_string(rek_gleich_vor[7])+" von "+to_string(anz[7])+" (deklariert: hinkt einen Schritt nach)");
+	if(anz[6]>0ull) print_info("  Facette: "+to_string(anz[6]-gleich[6])+" Wortabweichungen (erwartet 0 bei massenerhaltendem Wandmodell)");
+	// Negativtest (Pruefpass C1, N1): bei t0-1 liefert load_f im Wesentlichen den Stand VOR dem Schritt. Er muss sich
+	// dort vom Soll unterscheiden, wo sich der Puffer im Schritt geaendert hat -- geprueft an der Fluidklasse selbst.
+	const ulong neg_abw0 = anz[0]-neg_gleich[0], geaendert0 = anz[0]-vor_gleich[0];
+	print_info("  Negativtest t0-1 (Fluid): "+to_string(neg_abw0)+" Abweichungen vom Soll, im Schritt geaenderte Zellen "+to_string(geaendert0)+", davon gleich Puffer vor: "+to_string(neg_gleich_vor[0]));
+	if(geaendert0>0ull&&neg_abw0==0ull) ok = false;
 	print_info("  Zaehler 217 (Besuche): +"+to_string(d217)+" (Soll "+to_string((ulong)(2ull*NP))+"), 218 (TYPE_E): +"+to_string(d218)+" (Soll "+to_string((ulong)(2ull*n_e_ebene))+")");
-	print_info("  Zellen mit rho_roh ausserhalb (0,5; 1,5), also geklemmt: "+to_string(geklemmt));
-	if(neg_abw==0ull) ok = false;
 	if(d217!=2ull*NP||d218!=2ull*n_e_ebene) ok = false;
-	// Probezellen-CSV und Log
+	print_info("  Zellen mit rho_roh ausserhalb ("+to_string(RHO_CLAMP_MIN,2u)+"; "+to_string(RHO_CLAMP_MAX,2u)+"), also geklemmt: "+to_string((ulong)klemm.size())+(klemm.size()>=3u?" (erste 3)":""));
+	// ---- Probezellen (Heiko 15.09.): gezielte Orte plus die ersten Abweichler je Klasse und die ersten Klemmzellen
+	auto wort_str = [&](const rhoxx w) {
+#ifdef RHO_FP16
+		return to_string((ulong)w);
+#else
+		return to_string(w, 9u);
+#endif
+	};
 	std::ofstream pz(out_dir+"rho_rek_probezellen.csv");
-	pz << "klasse,x,z,wort_nach,rho_puffer_nach,wort_rek,rho_rek,rho_roh,bitgleich,wort_vor,rho_puffer_vor,rho_rek_minus_puffer,wort_neg,rho_neg\n";
-	auto zeile = [&](const uint k, const ulong g) {
+	pz << "probe,klasse,x,z,wort_nach,rho_puffer_nach,wort_vor,rho_puffer_vor,wort_rek,rho_rek,rho_roh,rek_gleich_nach,rek_gleich_vor,rho_rek_minus_puffer_nach,wort_neg,rho_neg\n";
+	auto zeile = [&](const string& probe, const ulong g) {
+		const uint k = klasse_von(g);
 		const float rp = rho_unpack(w_nach[(size_t)g]), rv = rho_unpack(w_vor[(size_t)g]), rn = rho_unpack(neg_w[(size_t)g]);
 		const float rr = rek[(size_t)(4ull*g)], ro = rek[(size_t)(4ull*g+1ull)];
-		pz << kname[k] << "," << g%(ulong)Nx << "," << g/(ulong)Nx << "," << (ulong)w_nach[(size_t)g] << "," << std::setprecision(10) << rp << "," << (ulong)rek_w[(size_t)g] << "," << rr << "," << ro << ","
-		   << (rek_w[(size_t)g]==w_nach[(size_t)g]?1:0) << "," << (ulong)w_vor[(size_t)g] << "," << rv << "," << (rr-rp) << "," << (ulong)neg_w[(size_t)g] << "," << rn << "\n";
-		print_info("  PROBE "+string(kname[k])+" (x="+to_string(g%(ulong)Nx)+",z="+to_string(g/(ulong)Nx)+"): Puffer "+to_string(rp,7u)+" rek "+to_string(rr,7u)+" roh "+to_string(ro,7u)+(rek_w[(size_t)g]==w_nach[(size_t)g]?" [bitgleich]":" [ABWEICHUNG]"));
+		const bool gn = rek_w[(size_t)g]==w_nach[(size_t)g], gv = rek_w[(size_t)g]==w_vor[(size_t)g];
+		pz << probe << "," << kname[k] << "," << g%(ulong)Nx << "," << g/(ulong)Nx << "," << wort_str(w_nach[(size_t)g]) << "," << to_string(rp, 9u) << "," << wort_str(w_vor[(size_t)g]) << "," << to_string(rv, 9u) << ","
+		   << wort_str(rek_w[(size_t)g]) << "," << to_string(rr, 9u) << "," << to_string(ro, 9u) << "," << (gn?1:0) << "," << (gv?1:0) << "," << to_string(rr-rp, 9u) << "," << wort_str(neg_w[(size_t)g]) << "," << to_string(rn, 9u) << "\n";
+		print_info("  PROBE "+probe+" ["+string(kname[k])+"] (x="+to_string(g%(ulong)Nx)+",z="+to_string(g/(ulong)Nx)+"): Puffer nach "+to_string(rp,7u)+" vor "+to_string(rv,7u)+" rek "+to_string(rr,7u)+" roh "+to_string(ro,7u)+(gn?" [= nach]":(gv?" [= vor]":" [ABWEICHUNG]")));
 	};
-	for(uint k=0u; k<NK; k++) for(const ulong g : beispiele[k]) zeile(k, g);
-	for(const ulong g : klemm_bsp) zeile(0u, g);
+	auto g_von = [&](const uint x, const uint z) { return (ulong)x+(ulong)z*(ulong)Nx; };
+	auto erste_der_klasse = [&](const uint k) { for(ulong g=0ull; g<NP; g++) if(klasse_von(g)==k) return g; return NP; };
+	{	// freie Nachlaufzelle: ab 3/4 Nx auf halber Hoehe die erste Fluidzelle
+		ulong g = NP; for(uint x=(3u*Nx)/4u; x+2u<Nx; x++) if(klasse_von(g_von(x, Nz/2u))==0u) { g = g_von(x, Nz/2u); break; }
+		if(g<NP) zeile("frei_nachlauf", g);
+	}
+	zeile("einlass_x0", g_von(0u, Nz/2u));
+	zeile("deckel_zmax", g_von(Nx/2u, Nz-1u));
+	zeile("auslass_xmax", g_von(Nx-1u, Nz/2u));
+	zeile("po_interior_xmax-1", g_von(Nx-2u, Nz/2u));
+	for(const uint k : {2u, 3u, 6u}) { const ulong g = erste_der_klasse(k); if(g<NP) zeile(string("erste_")+kname[k], g); }
+	for(uint k=0u; k<NK; k++) for(const ulong g : abweicher[k]) zeile(string("abweichung_")+kname[k], g);
+	for(const auto& kg : klemm) zeile("klemme", kg.second);
 	pz.close();
 	print_info("  Probezellen-CSV: "+out_dir+"rho_rek_probezellen.csv");
 	if(!ok) print_error("RHO-REKONSTRUKTION ("+fall+"): Soll verletzt -- Fluid/TYPE_E/TYPE_S/TYPE_MS nicht bitgleich, Negativtest ohne Abweichung oder Zaehler 217/218 ungleich Soll. Siehe Zeilen darueber.");
-	print_info("RHO-REKONSTRUKTION ("+fall+"): Soll erfuellt (Facettenzellen getrennt ausgewiesen).");
+	print_info("RHO-REKONSTRUKTION ("+fall+"): Soll erfuellt (Facette und TYPE_E Auslass getrennt ausgewiesen).");
 }
 
 void main_setup_kugel() {

@@ -391,3 +391,20 @@ Je Klasse 1–3 Zellen, Index im Log.
 6. U_SPARSAM × SGS_BAND (K7): nicht beantwortet, bleibt offen.
 7. APG-Weg (a/b): offen. Grundlage ist der C0-Zensus bei 8 mm: Die APG-Lesemenge umfasst 1 502 474 Zellen,
    davon liegen 150 578 nicht in L1+L2.
+
+## 13 Nachträge aus der C1-Prüfung (15.09.2026)
+
+* **Deklarierte Abweichung, ergänzt zu §5:** Die TYPE_E-Auslasszellen (po_cells) hinken einen Schritt nach.
+  do_time_step ruft Einlass, Auslass und dann stream_collide auf (lbm.cpp:3022–3024). Der gelesene Pufferwert
+  stammt deshalb aus dem vorigen Schritt, während die Fluidzellen einen Schritt voraus sind (t+1). Im Fernfeld
+  mit CFD_FERN_VI gilt dasselbe für die vi-Zellen.
+* **K4 präzisiert:** Wandmodelle, die fhn vor calculate_rho_u umschreiben, weichen nur ab, wenn sie die Masse
+  NICHT erhalten. iMEM mit FAC_ALPHA≥1 erhält sie analytisch. Echte Abweichungen entstehen bei FAC_ALPHA=0 und
+  bei der ELIBB-Blende mit q≠0,5 (ELIBB ist am Fahrzeug Pflicht).
+* **Falle für C2 (N7):** alloc_rho_rek bindet fi zum Aufrufzeitpunkt; die Rebind-Liste in finalize_sparse_tiles
+  enthält den Kernel nicht. Vor dem Tiling-Umbau aufrufen oder in die Liste aufnehmen. Eine
+  initialized-Prüfung wie bei alloc_coupling_planes fehlt.
+* **Für C3/dd (N8):** Keine vollen rho-Reads, das wären bei 4 mm 4 GiB je Read. Stattdessen Ebenen-Gather.
+* **Probezellen an der Kugel:** Einlass, Deckel, Auslass, po_interior, freie Nachlaufzelle, erste TYPE_S, TYPE_MS
+  und Facette, dazu Abweichler und Klemmzellen. **Bandlage 2, APG-Kantennachbar und boden_eq-Band** gibt es an
+  der Kugel nicht, sie folgen in C3 im dd-Fall.

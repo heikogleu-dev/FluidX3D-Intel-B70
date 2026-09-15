@@ -2888,7 +2888,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 //              (aus |rho-1| ueber 56.081.419 Fluidzellen des Dumps, mal 2^-12)
 // Auf der CPU lieferte DERSELBE Quelltext 28,24 / 56,87 / 14,85 % -- dort uebersetzt ein anderer
 // Compiler und der Umlauf bleibt stehen. Genau deshalb ist die CPU-Sprosse allein kein Beweis.
-// Der vermeintliche Nullbeweis in Slot 217 war ebenso wertlos: er zaehlte eine Null, die per
+// Der vermeintliche Nullbeweis in Slot 217 (historisch, 12.09.; seit 15.09. traegt 217 die Besuche von rho_rek_ebene) war ebenso wertlos: er zaehlte eine Null, die per
 // Konstruktion null war. Ein Waechter, der nicht feuern KANN, ist kein Waechter.
 //
 // WAS STATTDESSEN GILT. Die Quantisierung wird dort gemessen, wo sie sichtbar ist, ohne dass ein
@@ -4359,8 +4359,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// den rho-Puffer zu lesen -- ausser dort, wo stream_collide selbst ihn liest (TYPE_E) oder nie schreibt (TYPE_S).
 	// Aufgerufen mit dem AKTUELLEN Domaenen-t (nach increment_time_step): load_f liest dann genau die Slots, die
 	// stream_collide(t) gleich lesen wird, das Ergebnis ist also das rho, das stream_collide(t) speichern wird --
-	// bitgleich ueberall dort, wo zwischen load_f und calculate_rho_u nichts an fhn aendert (Plan K4: Facetten-
-	// und Wandfunktionszellen weichen ab, weil ihr Wandmodell fhn VOR calculate_rho_u umschreibt).
+	// bitgleich ueberall dort, wo zwischen load_f und calculate_rho_u nichts an fhn aendert. Wandmodelle, die fhn VOR
+	// calculate_rho_u umschreiben, weichen nur ab, wenn sie die MASSE nicht erhalten (Pruefpass C1 zu Plan K4):
+	// iMEM mit FAC_ALPHA>=1 erhaelt sie analytisch, FAC_ALPHA=0 und die ELIBB-Blende bei q != 0,5 nicht.
+	// TYPE_E: hier wird der Puffer GELESEN. Am Druckauslass schreibt apply_pressure_outlet ihn zu BEGINN des naechsten
+	// Schritts neu (do_time_step: Einlass, Auslass, dann stream_collide) -- dort hinkt dieser Wert einen Schritt nach.
 	// Ausgabe je Ebenenzelle (4 floats): [0] rho rekonstruiert (MIT RHO_CLAMP, wie gespeichert), [1] rho roh
 	// (Summe ohne Klemme), [2] Klasse (0 Fluid, 1 TYPE_E, 2 TYPE_S, 3 TYPE_MS, 4 tote Kachel, 5 ausserhalb),
 	// [3] heutiger Pufferwert load_rho. out_wort traegt [0] als GERAETE-gepacktes Speicherwort (vstore_half_rte),
@@ -4380,10 +4383,12 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(is_dead_tile(n, tile_slot)) { klasse = 4.0f; rekonstruieren = false; }
 )+"#endif"+R( // SPARSE_TILES
 	if(rekonstruieren&&flagsn_bo==TYPE_S) { klasse = 2.0f; rekonstruieren = false; }
+	)+"#ifdef EQUILIBRIUM_BOUNDARIES"+R(
 	if(rekonstruieren&&flagsn_bo==TYPE_E) {
 		rhon = load_rho(rho, n); rho_roh = rhon; klasse = 1.0f; rekonstruieren = false;
 		if(rho_clamp_hits[218]<0xF0000000u) atomic_inc(&rho_clamp_hits[218]);
 	}
+	)+"#endif"+R( // EQUILIBRIUM_BOUNDARIES -- ohne sie rekonstruiert stream_collide TYPE_E-Zellen wie Fluid (Pruefpass C1, N5)
 	if(rekonstruieren) {
 		uxx j[def_velocity_set];
 		neighbors(n, j);

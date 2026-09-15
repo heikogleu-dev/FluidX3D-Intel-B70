@@ -338,6 +338,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		// ★ 14 -> 13 am 12.09. abends: store_rho_diag ist entfallen (der Rueckleser war ein No-Op,
 		// siehe die Begruendung an store_rho in kernel.cpp). Der Waechter hat den Wegfall SELBST
 		// gemeldet und den Lauf angehalten -- so soll es sein.
+		// ★ 13 -> 14 am 15.09.: rho_rek_ebene (RHO_RAND C1) liest rho an TYPE_E und als heutigen Pufferwert.
 		const string muster = "global\nfloat*\nrho", muster_t = "global\nrhoxx*\nrho";
 		uint n_float=0u, n_t=0u;
 		for(size_t i=opencl_c_code.find(muster); i!=string::npos; i=opencl_c_code.find(muster, i+1ull)) n_float++;
@@ -352,14 +353,14 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		// geschlagen -- gefunden, bevor die Zahl eingetragen war, weil sie am emittierten Quelltext
 		// abgelesen und nicht geschaetzt wurde.
 		// Deshalb: gezaehlt wird nur, wenn hinter dem "u" KEIN Bezeichnerzeichen mehr steht. Die drei
-		// vorkommenden Fortsetzungen sind "," (19x), ")" (1x -- calculate_Q, dort ist u der letzte
+		// vorkommenden Fortsetzungen sind "," (20x seit 15.09., rho_rek_ebene), ")" (1x -- calculate_Q, dort ist u der letzte
 		// Parameter) und der Zeilenumbruch (1x -- graphics_q, dessen Parameterliste per Splice
 		// weitergeht). [Zuordnung berichtigt 12.09. abends, Pruefer C; die Zahlen stimmten.]
 		// SOLL 21 x float: SURFACE 4 (average_neighbors_non_gas/_fluid, surface_0, surface_2),
 		// PARTICLES 1 (integrate_particles), GRAPHICS 13, und DREI ungegatete Hilfsfunktionen --
 		// closest_u (wird NIRGENDS aufgerufen, toter Code), interpolate_u (nur von integrate_particles)
 		// und calculate_Q (nur von graphics_q_field). Alle drei werden immer mituebersetzt.
-		// SOLL 19 x velxx: die aktiven Traeger. Aendert jemand eine der Zahlen, ist das eine bewusste
+		// SOLL 20 x velxx (19 -> 20 am 15.09.: rho_rek_ebene, RHO_RAND C1): die aktiven Traeger. Aendert jemand eine der Zahlen, ist das eine bewusste
 		// Entscheidung und diese Zeile gehoert mitgeaendert.
 		auto zaehle_wortgenau = [&](const string& m) {
 			uint n=0u;
@@ -616,7 +617,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 216 (204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift (Invariantenzusicherung, konstruktiv unerreichbar: Klemme 0,57735 x Lift-Gewichte 1,5625 = 0,9021 < 1,0), Soll 0; 215 = Besuche des Lift-Schreibpfads, ohne die die Null in 214 nichts beweist. 216..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden und sind FREI: der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	// letzten Slot L. NAECHSTER FREIER SLOT: 219 (216 reserviert fuer RHO_RAND C2, 217/218 = rho_rek_ebene Besuche/TYPE_E, 15.09.; 204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift (Invariantenzusicherung, konstruktiv unerreichbar: Klemme 0,57735 x Lift-Gewichte 1,5625 = 0,9021 < 1,0), Soll 0; 215 = Besuche des Lift-Schreibpfads, ohne die die Null in 214 nichts beweist. 216..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden und sind FREI: der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
