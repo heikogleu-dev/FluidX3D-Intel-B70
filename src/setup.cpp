@@ -1564,12 +1564,12 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		if(v[265]!=0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": Kappung [265] = "+to_string(v[265])+" -- mindestens ein |w*drho| oder |dj| > 16 (stream_collide) oder |drho| > 2 (boden_eq/einlass_eq, S0d); die Festkomma-Summen sind damit UNTERGRENZEN (kein Abbruch, Pruefpass S0b MITTEL 1).");
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
 		if(L.lbm_domain[0]->positiv_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1b (KLEMMEN-STUFE1-PLAN.md §4, Nachtrag P1b): Ist=Soll des Positiv-Messarms
-			const ulong tk = zaehl_takt(), tl = L.get_t(); const uint hk = positiv_haken_env();
+			const ulong tk = zaehl_takt(), tl = L.get_t(); const uint hk = L.lbm_domain[0]->positiv_haken; // Konstruktionszeit-Kopie (Pruefbefund P1b NIEDRIG 6)
 			const ulong zs = tl>=3ull ? (tl-3ull)/tk+1ull : 0ull; // Zaehlschritte t%tk == 2 mit t < get_t()
-			const uint sub = positiv_stichprobe((unsigned long long)L.lbm_domain[0]->get_N()); // Stichprobenperiode der Zellzaehler (kernel.cpp)
+			const uint sub = positiv_stichprobe((unsigned long long)L.lbm_domain[0]->get_N(), L.lbm_domain[0]->get_Nx(), L.lbm_domain[0]->get_Ny()); // Stichprobenperiode der Zellzaehler (kernel.cpp)
 			ulong kl5 = 0ull, ei5 = 0ull; for(uint k=0u; k<5u; k++) { kl5 += v[273u+k]; ei5 += v[280u+k]; }
 			bool satt = false; for(uint k=272u; k<=291u; k++) if(k!=285u&&k!=289u&&v[k]>=4026531840ull) satt = true;
-			print_info(string("  POSITIV ")+wo+": Modus "+to_string(L.lbm_domain[0]->positiv_modus)+" (Messarm), "+to_string(zs)+" Zaehlschritte (t%"+to_string(tk)+" == 2) an jeder "+to_string(sub)+". Zelle (n%"+to_string(sub)+" == 0): Kandidaten (Nicht-E) "+to_string(v[272])+", davon machtlos "+to_string(v[278])+" (f_eq selbst negativ "+to_string(v[279])+"), begrenzbar K0..K4 = "+fuenf(273u)+" (Summe "+to_string(kl5)+")");
+			print_info(string("  POSITIV ")+wo+": Modus "+to_string(L.lbm_domain[0]->positiv_modus)+" (Messarm), "+to_string(zs)+" Zaehlschritte (t%"+to_string(tk)+" == 2) an jeder "+to_string(sub)+". Zelle (n%"+to_string(sub)+" == 0): Kandidaten (Nicht-E) "+to_string(v[272])+", davon machtlos (konservativ) "+to_string(v[278])+" (f_eq selbst negativ "+to_string(v[279])+"), begrenzbar K0..K4 = "+fuenf(273u)+" (Summe "+to_string(kl5)+")");
 			print_info(string("  POSITIV ")+wo+": s-Eimer [0;0,25) [0,25;0,5) [0,5;0,75) [0,75;0,95) [0,95;1] = "+fuenf(280u)+"; Koinzidenz Dichteklemme "+to_string(v[286])+", u-Klemme "+to_string(v[287])+"; TYPE_E-Kandidaten "+to_string(v[291])+"; Zellen mit negativer GELADENER Population "+to_string(v[285])+" (Zaehlschritte), Nachladeprobe t = takt+3: "+to_string(v[289]));
 			string verl;
 			if(satt) print_info(string("  POSITIV ")+wo+": Zaehler GESAETTIGT -- Summen-Soll nicht pruefbar (keine Beanstandung).");

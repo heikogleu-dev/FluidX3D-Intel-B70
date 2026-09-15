@@ -9,7 +9,7 @@
 using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
-string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s, const unsigned long long N); // ★ 15.09.2026 Klemmen Stufe 1 P1a: kernel.o, dieselbe Quelle wie lbm.cpp
+string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s, const unsigned long long N, const unsigned Nx, const unsigned Ny); // ★ 15.09.2026 Klemmen Stufe 1 P1a: kernel.o, dieselbe Quelle wie lbm.cpp
 
 static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam, const bool u16, const bool rand) {
 	string s =
@@ -208,8 +208,11 @@ int main(int argc, char** argv) {
 			if(ok&&q<a.size()&&a[q]=='h') { if(q+1<a.size()&&a[q+1]>='1'&&a[q+1]<='3') { haken = (unsigned)(a[q+1]-'0'); q += 2; } else ok = false; }
 			if(ok&&q!=a.size()) ok = false;
 			if(!ok) { std::cerr << "gen: 4. Argument exakt pos<1|2>[f][h<1..3>]: " << a << "\n"; return 2; }
-			unsigned long long N_defs = 1ull; { const size_t pn = defs.find("#define def_N "); if(pn!=string::npos) N_defs = std::stoull(defs.substr(pn+14)); }
-			pos = positiv_defines((unsigned)(a[3]-'0'), haken, fac ? 1u : 0u, defs.find("#define fpxx half")!=string::npos, N_defs); // N aus def_N der defs (Stichprobenperiode wie im Lauf)
+			unsigned long long N_defs = 1ull; unsigned Nx_defs = 1u, Ny_defs = 1u;
+			{ size_t pn = defs.find("#define def_N "); if(pn!=string::npos) N_defs = std::stoull(defs.substr(pn+14));
+			  pn = defs.find("#define def_Nx "); if(pn!=string::npos) Nx_defs = (unsigned)std::stoul(defs.substr(pn+15));
+			  pn = defs.find("#define def_Ny "); if(pn!=string::npos) Ny_defs = (unsigned)std::stoul(defs.substr(pn+15)); }
+			pos = positiv_defines((unsigned)(a[3]-'0'), haken, fac ? 1u : 0u, defs.find("#define fpxx half")!=string::npos, N_defs, Nx_defs, Ny_defs); // N, Nx, Ny aus den defs der defs (Stichprobenperiode wie im Lauf)
 		}
 		const string code = geraet + defs + klemm + pos + get_opencl_c_code();
 		std::ofstream f(argv[3]); f << code; f.close();

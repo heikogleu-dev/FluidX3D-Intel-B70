@@ -6668,13 +6668,23 @@ unsigned positiv_haken_periode() { return 1009u; } // ★ P1b: Haken-1-Zellen n 
 // ★ P1b Nachtrag: sicheres_gitter = groesstes Gitter, an dem Atomics in (fast) jeder Zelle je Schritt nachweislich liefen (Kugel 16 mm,
 // 6 104 700 Zellen, Absturzsperre lbm.cpp). Die Zellzaehler des Messarms laufen nur fuer n mod def_pos_sub == 0 mit
 // def_pos_sub = ceil(N / sicheres_gitter): je Zaehlschritt hoechstens so viele zaehlende Zellen wie am belegt sicheren Gitter -- automatisch, kein Handwert.
-unsigned positiv_stichprobe(const unsigned long long N) { const unsigned long long g = 6104700ull; return (unsigned)((N+g-1ull)/g); }
-string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s, const unsigned long long N) { // unsigned statt uint: kernel.hpp definiert uint fuer die Syntaxfaerbung leer
+unsigned long long positiv_sicheres_gitter() { return 6104700ull; } // EINE Quelle: Absturzsperre (lbm.cpp) und Stichprobe (Pruefbefund P1b NIEDRIG 4)
+// Pruefbefund P1b NIEDRIG 3: die Periode ist die kleinste PRIMZAHL >= ceil(N/g), die weder Nx noch Ny teilt -- sonst zaehlt n%p nur jede p-te
+// x-Ebene (Fernfeld 8 mm: 5 teilt Nx = 385). N/p <= g bleibt erhalten.
+unsigned positiv_stichprobe(const unsigned long long N, const unsigned Nx, const unsigned Ny) {
+	const unsigned long long g = positiv_sicheres_gitter(), c = (N+g-1ull)/g;
+	if(c<=1ull) return 1u;
+	for(unsigned long long p=c; ; p++) {
+		bool prim = p>=2ull; for(unsigned long long d=2ull; d*d<=p&&prim; d++) if(p%d==0ull) prim = false;
+		if(prim&&Nx%p!=0ull&&Ny%p!=0ull) return (unsigned)p;
+	}
+}
+string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s, const unsigned long long N, const unsigned Nx, const unsigned Ny) { // unsigned statt uint: kernel.hpp definiert uint fuer die Syntaxfaerbung leer
 	if(modus==0u) return "";
 	string s = "\n	#define POSITIV";
 	if(modus>=2u) s += "\n	#define POSITIV_ANWENDEN";
 	if(facette>0u) s += "\n	#define POSITIV_FACETTE";
-	s += "\n	#define def_pos_sub "+std::to_string(positiv_stichprobe(N))+"u"; // Stichprobenperiode der Zellzaehler
+	s += "\n	#define def_pos_sub "+std::to_string(positiv_stichprobe(N, Nx, Ny))+"u"; // Stichprobenperiode der Zellzaehler
 	if(haken==2u) s += "\n	#define def_pos_t0 (1.2f*def_w0)\n	#define def_pos_ts (1.2f*def_ws)\n	#define def_pos_te (1.2f*def_we)";
 	else if(fp16s) s += "\n	#define def_pos_t0 (4.0f/32768.0f)\n	#define def_pos_ts (0.5f/32768.0f)\n	#define def_pos_te (0.25f/32768.0f)";
 	else s += "\n	#define def_pos_t0 0.0f\n	#define def_pos_ts 0.0f\n	#define def_pos_te 0.0f";

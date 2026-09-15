@@ -177,8 +177,9 @@ uint klemm_haken_env();
 uint positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a (lbm.cpp): CFD_POSITIV 0/1/2, CFD_POSITIV_HAKEN 0..3, CFD_POSITIV_FACETTE 0/1
 uint positiv_haken_env();
 uint positiv_facette_env();
-string positiv_defines(const uint modus, const uint haken, const uint facette, const bool fp16s, const unsigned long long N); // kernel.cpp, einzige Quelle (auch Scratch-Gate)
-uint positiv_stichprobe(const unsigned long long N); // kernel.cpp: Stichprobenperiode der Messarm-Zellzaehler = ceil(N / 6 104 700)
+string positiv_defines(const uint modus, const uint haken, const uint facette, const bool fp16s, const unsigned long long N, const uint Nx, const uint Ny); // kernel.cpp, einzige Quelle (auch Scratch-Gate)
+uint positiv_stichprobe(const unsigned long long N, const uint Nx, const uint Ny); // kernel.cpp: kleinste Primzahl >= ceil(N / sicheres Gitter), teilt weder Nx noch Ny
+unsigned long long positiv_sicheres_gitter(); // kernel.cpp: groesstes Gitter mit belegt sicheren Atomics in fast jeder Zelle je Schritt (Kugel 16 mm)
 uint positiv_haken_periode(); // kernel.cpp: Periode P der Haken-1-Zellen (Kernel-Define def_pos_hP und Host-Soll)
 
 // ★ 12.09.2026 (Heiko): SCHRITTBASIERTE SCHALTER FOLGEN u_lat JETZT VON SELBST.
@@ -424,6 +425,7 @@ public:
 	uint rho_takt = 0u;        // Konstruktionszeit-Kopie von s_rho_takt (read-once-Doktrin)
 	bool klemm_bilanz_on = false; // ★ 15.09.2026 Klemmen S0b: Konstruktionszeit-Kopie von CFD_KLEMM_BILANZ (Vorgabe 1)
 	uint positiv_modus = 0u; // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie von CFD_POSITIV (0 aus, 1 Messarm, 2 anwenden)
+	uint positiv_haken = 0u, positiv_facette = 0u; // ★ Pruefbefund P1b NIEDRIG 6: Konstruktionszeit-Kopien fuer den Bericht
 	bool rho_rand_on = false;  // ★ 15.09. Konstruktionszeit-Kopie von s_rho_rand (read-once-Doktrin); das Setup liest DIESEN Wert, nicht die Umgebungsvariable
 	ulong rr_N = 0ull;         // ★ 15.09. RHO_RAND C2c: Zellen der Randschale R1 (rho-Puffer = rr_N+1, letzter Slot Papierkorb); 0 ohne RHO_RAND
 	uint u_takt = 0u;          // Konstruktionszeit-Kopie von s_u_takt

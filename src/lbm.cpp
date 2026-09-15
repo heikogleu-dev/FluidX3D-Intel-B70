@@ -390,6 +390,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #if !defined(SRT)||!defined(D3Q19)||defined(FP16C)||!defined(RHO_CLAMP)
 		print_error("CFD_POSITIV ist nur fuer SRT + D3Q19 + FP16S/FP32 + RHO_CLAMP gebaut (TRT nicht gebaut, Momente ausgeschrieben fuer D3Q19, FP16C ohne tau-Herleitung, Klassen und Leser haengen am Klemm-Instrument) -- hier waere der Schalter ein stiller No-Op.");
 #endif
+		if(zaehl_takt()<3ull) print_error("CFD_POSITIV braucht einen Zaehltakt >= 3 (Zaehlschritte t%takt == 2, Pruefpunkt takt+2/+3) -- hier "+to_string(zaehl_takt())+" (Pruefbefund P1b NIEDRIG 5).");
 		if(!klemm_bilanz_env()) print_error("CFD_POSITIV braucht das Klemm-Messinstrument (CFD_KLEMM_BILANZ=1, Vorgabe): Klassen K0..K4, Fensterleser und Bericht haengen daran.");
 		if(pm_==2u) print_error("CFD_POSITIV=2 (anwenden) folgt mit Stufe 1 P1c -- gebaut ist erst der Messarm, der Schalter waere ein stiller No-Op.");
 		if(positiv_facette_env()>0u) print_warning("CFD_POSITIV_FACETTE wirkt nur in Modus 2 -- im Messarm zaehlt K0 ohnehin als \"wuerde begrenzen\" (Ansage-Doktrin).");
@@ -399,7 +400,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	}
 	{ const uint kh_ = klemm_haken_env(); const uint ph_ = positiv_haken_env();
 	  const bool cpu_ = device_info.is_cpu;
-	  if((kh_>0u||ph_>0u)&&get_N()>6104700ull&&!cpu_) print_error("ABSTURZSPERRE: CFD_KLEMM_HAKEN="+to_string(kh_)+" / CFD_POSITIV_HAKEN="+to_string(ph_)+" auf einem GPU-Gitter mit "+to_string(get_N())+" Zellen (> 6 104 700, groesstes belegt sicheres Hakengitter). Atomics in fast jeder Zelle je Schritt haben am 15.09. die B70 lahmgelegt (device wedged). Haken nur an der Kugel <= 16 mm oder auf Geraet 0 (CPU)."); }
+	  if((kh_>0u||ph_>0u)&&get_N()>positiv_sicheres_gitter()&&!cpu_) print_error("ABSTURZSPERRE: CFD_KLEMM_HAKEN="+to_string(kh_)+" / CFD_POSITIV_HAKEN="+to_string(ph_)+" auf einem GPU-Gitter mit "+to_string(get_N())+" Zellen (> 6 104 700, groesstes belegt sicheres Hakengitter). Atomics in fast jeder Zelle je Schritt haben am 15.09. die B70 lahmgelegt (device wedged). Haken nur an der Kugel <= 16 mm oder auf Geraet 0 (CPU)."); }
 	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
 		const string pfad = "/tmp/fx3d_kernel_dump_"+to_string(dump_nr++)+".cl";
@@ -669,8 +670,8 @@ void LBM_Domain::allocate(Device& device) {
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
 	// letzten Slot L. [HISTORISCH bis 15.09. abends] NAECHSTER FREIER SLOT: 271 (Puffer 288 seit 15.09.; 221..270 = Klemmen Stufe 0, Layout KLEMMEN-STUFE0-PLAN.md §6: 221..225 rho-Treffer K0..K4, 226..235 Sum-q rho unten/oben, 236..241 Dekaden |drho|, 242..246 u-Treffer, 247..256 Sum-q jx +/-, 257..262 Dekaden |du|, 263/264 Sum-q jz +/-, 265 Kappung, 266..268 BODEN/EINLASS_EQ, 269/270 schale_blend/Lift-rho-Tor; Sum-q-Slots wickeln ABSICHTLICH mod 2^32). Bis 15.09.: 221 (216 = RHO_RAND R1-Zugriff ausserhalb der Schale, ungegatet, Soll 0, 217/218 = rho_rek_ebene Besuche/TYPE_E, 219/220 = rho_ausgabe_ebene Besuche/TYPE_E nur im gezaehlten Aufruf, 15.09.; 204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift (Invariantenzusicherung, konstruktiv unerreichbar: Klemme 0,57735 x Lift-Gewichte 1,5625 = 0,9021 < 1,0), Soll 0; 215 = Besuche des Lift-Schreibpfads, ohne die die Null in 214 nichts beweist. 216..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden (HISTORISCH -- seit 15.09. traegt 217 die Besuche von rho_rek_ebene, 216 traegt seit C2b den R1-Zugriff ausserhalb der Schale): der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	// Klemmen Stufe 1 (KLEMMEN-STUFE1-PLAN.md §4, Puffer 320 seit 15.09. abends; Nachtrag P1b: 272..288, 291 nur an Zaehlschritten t%zaehl_takt == 2, 285 dito, 271/289 je genau ein Schritt): [271] Besuche am Pruefpunkt t == zaehl_takt+2 | [272] Kandidaten (ein f*_i + w_i < tau_i, Nicht-E)
-	// | [273..277] s < 1 je Klasse K0..K4 (Modus 1: wuerde begrenzen) | [278] machtlos (ein B_i < tau_i) | [279] davon f_eq_i + w_i < 0 | [280..284] s-Eimer [0;0,25) [0,25;0,5)
-	// [0,5;0,75) [0,75;0,95) [0,95;1) | [285] nach load_f negativ (Nicht-E) | [286] Kandidat und rho-Klemme | [287] Kandidat und u-Klemme | [288] H1-Zellen im Eimer [0,25;0,5)
+	// | [273..277] s < 1 je Klasse K0..K4 (Modus 1: wuerde begrenzen) | [278] machtlos, KONSERVATIV (irgendein B_i < tau_i; Obermenge von unloesbar, Pruefbefund P1b NIEDRIG 1, Plan E3) | [279] davon f_eq_i + w_i < 0 | [280..284] s-Eimer [0;0,25) [0,25;0,5)
+	// [0,5;0,75) [0,75;0,95) [0,95;1] (s = 1 durch Rundung moeglich, Modus 2 wendet dann nichts an) | [285] nach load_f negativ (Nicht-E) | [286] Kandidat und rho-Klemme | [287] Kandidat und u-Klemme | [288] H1-Zellen im Eimer [0,25;0,5)
 	// | [289] Nachladeprobe t == zaehl_takt+3 | [290] Haken: Selbstpruefung Sum(f**-f*), Sum c(f**-f*) ueber Toleranz | [291] TYPE_E-Kandidaten (f_eq_i + w_i < tau_i) | [292]/[293] Sum-q (1-s), Sum-q Sum|df_i|
 	// (Festkomma, wickeln ABSICHTLICH mod 2^32) | [294] Kappung zu 293. NAECHSTER FREIER SLOT: 295.
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
@@ -690,6 +691,7 @@ void LBM_Domain::allocate(Device& device) {
 	if((klemm_haken_env()==3u||klemm_haken_env()==4u)&&!klemm_bilanz_on) print_error("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+" ist ein Negativtest des Messinstruments, das hier AUS ist (CFD_KLEMM_BILANZ=0 oder nicht SRT) -- er liefe still ins Leere (Pruefpass S0c-2 N-d).");
 	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3/4 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
 	positiv_modus = positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie, dieselbe Quelle wie die Emission (Sperren seit P1b VOR dem Kernelbau, Pruefbefund P1a NIEDRIG 2)
+	positiv_haken = positiv_env()>0u ? positiv_haken_env() : 0u; positiv_facette = positiv_env()>0u ? positiv_facette_env() : 0u;
 	if(positiv_modus>0u) print_info("CFD_POSITIV="+to_string(positiv_modus)+": Positivitaetsbegrenzer (Projektionsform) als MESSARM -- s wird an den Zaehlschritten t%"+to_string(zaehl_takt())+" == 2 gerechnet und gezaehlt, die Felder bleiben bitgleich.");
 	// rho_rand_on steht seit C2c VOR der rho-Allokation (allocate), nicht mehr hier.
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
@@ -2214,9 +2216,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)
 	+(klemm_bilanz_env()&&klemm_haken_env()==3u ? string("\n	#define KLEMM_HAKEN3") : string(""))
 #if defined(D3Q19)&&defined(FP16S) // ★ 15.09.2026 Klemmen Stufe 1 P1a: bei CFD_POSITIV=0 leer (Kernelquelle zeichengleich); Sperren im Konstruktor
-	+(klemm_bilanz_env() ? positiv_defines(positiv_env(), positiv_haken_env(), positiv_facette_env(), true, (unsigned long long)get_N()) : string(""))
+	+(klemm_bilanz_env() ? positiv_defines(positiv_env(), positiv_haken_env(), positiv_facette_env(), true, (unsigned long long)get_N(), get_Nx(), get_Ny()) : string(""))
 #elif defined(D3Q19)&&!defined(FP16C)
-	+(klemm_bilanz_env() ? positiv_defines(positiv_env(), positiv_haken_env(), positiv_facette_env(), false, (unsigned long long)get_N()) : string(""))
+	+(klemm_bilanz_env() ? positiv_defines(positiv_env(), positiv_haken_env(), positiv_facette_env(), false, (unsigned long long)get_N(), get_Nx(), get_Ny()) : string(""))
 #endif
 #endif // SRT
 #endif // RHO_CLAMP
