@@ -1384,18 +1384,18 @@ void klemm_bilanz_abschluss(const char* fall) {
 // w_max = 2 (SRT, w < 2), rho_max = 2,1 (Huelle des TYPE_E-Bereichswaechters), Oberkante der Kappungseimer = 16 (Kappung).
 // Die Trefferzaehler (saettigend) werden ebenso differenziert; Phase "nach Warmlauf" = Fenster, deren Leseschritt t_si >= t_warmup.
 struct KlemmBilanz {
-	bool init = false; uint alt[288]; double ges[288], nach[288];
+	bool init = false; uint alt[LBM_Domain::hits_n]; double ges[LBM_Domain::hits_n], nach[LBM_Domain::hits_n]; // ★ P1a: 288 -> hits_n (320)
 	ulong fenster = 0ull, fenster_nach = 0ull, mehrdeutig = 0ull, t_start = 0ull, t_warm = 0ull, t_ende = 0ull; bool warm = false; // Pruefpass S0c M1: t_ende = get_t() des VORIGEN Lesens bis zum Update
 	std::ofstream csv;
 };
 static uint klemm_budget_modus() { const uint m = env_u("CFD_KLEMM_BUDGET", 2u); if(m>2u) print_error("CFD_KLEMM_BUDGET kennt nur 0 (nicht bewerten), 1 (nur Warnung), 2 (Fehler am Fallende, Vorgabe)."); return m; } // ★ Z2c Pruefpass NIEDRIG 3: beim Startstand geprueft
-static bool klemm_summenslot(const uint k) { return (k>=226u&&k<=235u)||(k>=247u&&k<=256u)||k==263u||k==264u||k==267u||k==268u; }
+static bool klemm_summenslot(const uint k) { return (k>=226u&&k<=235u)||(k>=247u&&k<=256u)||k==263u||k==264u||k==267u||k==268u||k==292u||k==293u; } // ★ P1a: 292/293 Stufe-1-Summen
 static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool nach_warmup, const string& csv_pfad, const char* wo) {
 	LBM_Domain* d = L.lbm_domain[0];
 	if(!d->klemm_bilanz_on||L.get_D()!=1u) return;
 	d->finish_queue(); d->rho_clamp_hits.read_from_device();
 	if(!K.init) {
-		for(uint k=0u; k<288u; k++) { K.alt[k] = d->rho_clamp_hits[k]; K.ges[k] = 0.0; K.nach[k] = 0.0; }
+		for(uint k=0u; k<LBM_Domain::hits_n; k++) { K.alt[k] = d->rho_clamp_hits[k]; K.ges[k] = 0.0; K.nach[k] = 0.0; }
 		K.init = true; K.t_start = L.get_t(); K.t_ende = L.get_t(); (void)klemm_budget_modus(); // Z2c Pruefpass NIEDRIG 3: falscher Wert bricht am START ab, nicht nach dem Lauf
 		K.csv.open(csv_pfad); K.csv.precision(10);
 		K.csv << "# Klemmen Stufe 0 (KLEMMEN-STUFE0-PLAN.md), "<<wo<<": je Fenster (Sample-Takt) die Differenzen. Masse in Gittereinheiten (rho*Zelle), Impuls in Gittereinheiten; Festkomma S = 16384 bereits herausgerechnet.\n";
@@ -1403,8 +1403,8 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 		return;
 	}
 	if(L.get_t()==K.t_ende) return; // Pruefpass S0c N3: kein Schritt seit dem letzten Lesen (Restfenster nach dem letzten Sample, Stopp) -> kein leeres Fenster
-	uint dlt[288];
-	for(uint k=0u; k<288u; k++) dlt[k] = d->rho_clamp_hits[k]-K.alt[k]; // uint-Arithmetik: mod 2^32
+	uint dlt[LBM_Domain::hits_n];
+	for(uint k=0u; k<LBM_Domain::hits_n; k++) dlt[k] = d->rho_clamp_hits[k]-K.alt[k]; // uint-Arithmetik: mod 2^32
 	const double S = 16384.0, ob[6] = {1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0, 16.0};
 	double B_r = 0.0, B_u = 0.0;
 	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*2.1*ob[b]*S+1.0); }
@@ -1413,7 +1413,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	bool satt_dek = d->rho_clamp_hits[266]>=0xF0000000u; for(uint b=0u; b<6u; b++) if(d->rho_clamp_hits[236u+b]>=0xF0000000u||d->rho_clamp_hits[257u+b]>=0xF0000000u) satt_dek = true; // Pruefpass S0c-2 N-c: auch 266 (Schranke der S0d-Summen) // Pruefpass S0c N2: gesaettigte Dekade -> Differenz 0 -> Schranke unterschaetzt
 	const bool mehrd = B_r>=grenze||B_u>=grenze||satt_dek||dlt[210]>0u; // N1: rho_max 2,1 gilt nur, solange Slot 210 (rho ausserhalb [0,4; 2,1] an TYPE_E, kernel.cpp Bereichswaechter) im Fenster 0 bleibt -- sonst ist die u-Schranke keine
 	if(mehrd) { if(K.mehrdeutig==0ull) print_warning(string("KLEMM-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG -- Ursache: "+string(B_r>=grenze||B_u>=grenze ? "Schranke rho "+to_string(B_r,0u)+" / u "+to_string(B_u,0u)+" >= "+to_string(grenze,0u) : "")+string(satt_dek ? " gesaettigte Dekade/Slot 266" : "")+string(dlt[210]>0u ? " Slot 210 > 0 (rho-Huelle 2,1 an TYPE_E verletzt)" : "")+"; die Festkomma-Summen koennen gewickelt sein, weitere Fenster nur im Bericht gezaehlt."); K.mehrdeutig++; } // Pruefpass S0c-2 N-b
-	for(uint k=0u; k<288u; k++) { K.ges[k] += (double)dlt[k]; if(nach_warmup) K.nach[k] += (double)dlt[k]; K.alt[k] = d->rho_clamp_hits[k]; }
+	for(uint k=0u; k<LBM_Domain::hits_n; k++) { K.ges[k] += (double)dlt[k]; if(nach_warmup) K.nach[k] += (double)dlt[k]; K.alt[k] = d->rho_clamp_hits[k]; }
 	if(nach_warmup&&!K.warm) { K.warm = true; K.t_warm = K.t_ende; } // Pruefpass S0c M1: Phase beginnt am Anfang DIESES Fensters (voriges Lesen), nicht an seinem Ende
 	K.fenster++; if(nach_warmup) K.fenster_nach++; K.t_ende = L.get_t();
 	auto su = [&](const uint a, const uint n) { double s = 0.0; for(uint k=a; k<a+n; k++) s += (double)dlt[k]; return s; };
@@ -1526,8 +1526,8 @@ static // ----------------------------------------------------------------------
 void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_lat=0.0f) { // u_lat nur fuer die Freistrom-Ansage unter U_FP16; 0 = nicht bekannt, dann entfaellt sie
 #ifdef RHO_CLAMP
 	if(L.lbm_domain[0]->klemm_bilanz_on) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §6): Ist=Soll des Messinstruments am Laufende
-		ulong v[288]; for(uint k=0u; k<288u; k++) v[k] = 0ull;
-		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); for(uint k=0u; k<288u; k++) v[k] += (ulong)L.lbm_domain[d]->rho_clamp_hits[k]; }
+		ulong v[LBM_Domain::hits_n]; for(uint k=0u; k<LBM_Domain::hits_n; k++) v[k] = 0ull;
+		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); for(uint k=0u; k<LBM_Domain::hits_n; k++) v[k] += (ulong)L.lbm_domain[d]->rho_clamp_hits[k]; }
 		ulong rk=0ull, rd=0ull, uk=0ull, ud=0ull; bool satt_r=false, satt_u=false; // Pruefpass S0b NIEDRIG: getrennt, sonst schaltet eine gesaettigte rho-Seite (H1) auch die u-Abnahme ab
 		for(uint k=0u; k<5u; k++) { rk += v[221u+k]; uk += v[242u+k]; }
 		for(uint k=0u; k<6u; k++) { rd += v[236u+k]; ud += v[257u+k]; }

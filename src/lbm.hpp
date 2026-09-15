@@ -174,6 +174,10 @@ struct Facette {
 ulong zaehl_takt(); // ★ 11.09.2026 gemeinsamer Zaehltakt fuer Kernel-Gatter UND Host-Sollformeln
 bool klemm_bilanz_env(); // ★ 15.09.2026 Klemmen S0b (lbm.cpp)
 uint klemm_haken_env();
+uint positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a (lbm.cpp): CFD_POSITIV 0/1/2, CFD_POSITIV_HAKEN 0..3, CFD_POSITIV_FACETTE 0/1
+uint positiv_haken_env();
+uint positiv_facette_env();
+string positiv_defines(const uint modus, const uint haken, const uint facette, const bool fp16s); // kernel.cpp, einzige Quelle (auch Scratch-Gate)
 
 // ★ 12.09.2026 (Heiko): SCHRITTBASIERTE SCHALTER FOLGEN u_lat JETZT VON SELBST.
 // Bis heute taten sie es ausdruecklich NICHT -- die Begruendung stand an u_lat_schalter in
@@ -360,7 +364,8 @@ public:
 	// greift. Ein Lauf, in dem sie dauernd zuschlaegt, rechnet auf einem verfaelschten Feld und ist
 	// KEIN Ergebnis. Ich hatte diesen Waechter in defines.hpp beschrieben und nicht gebaut -- genau
 	// der lautlose No-op, den dieses Projekt jagt, in meiner eigenen Klemme.
-	Memory<uint> rho_clamp_hits; // 288 Slots seit 15.09.2026 (Klemmen Stufe 0; vorher 224 seit 08.09., davor 128) (Legende: lbm.cpp bei der Allokation) (70 Kraftpfad, 71 reserviert; 30.08.). Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
+	static constexpr uint hits_n = 320u; // ★ 15.09.2026 Klemmen Stufe 1 P1a: Slotzahl an EINER Stelle (Allokation lbm.cpp, Leser setup.cpp)
+	Memory<uint> rho_clamp_hits; // hits_n = 320 Slots seit 15.09.2026 abends (Klemmen Stufe 1: 271..294; 288 mit Stufe 0, vorher 224 seit 08.09., davor 128) (Legende: lbm.cpp bei der Allokation) (70 Kraftpfad, 71 reserviert; 30.08.). Legende steht an EINER Stelle: lbm.cpp bei der Allokation (Pruefbefund 3-E: hier stand eine widerspruechliche Zweitfassung, aus der der naechste Slot vergeben worden waere).
 	// ★ uint je Domaene: ein pathologischer Lauf (Test B mass 415 Mio = ~10 % von 2^32) kann
 	// ueberlaufen. Fuer einen Waechter, der bei >0 ohnehin den Lauf disqualifiziert, vertretbar --
 	// aber die ZAHL ist oberhalb einiger Milliarden nicht mehr woertlich zu nehmen.
@@ -375,7 +380,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 271 (221..270 Klemmen Stufe 0, Legende lbm.cpp; bis 15.09.: 221 -- 216 RHO_RAND R1-Zugriff ausserhalb (Soll 0), 217/218 rho_rek_ebene, 219/220 rho_ausgabe_ebene, 15.09.; 212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift, 215 = dessen Besuchszaehler; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 295 (271..294 Klemmen Stufe 1, Puffer 320; 221..270 Klemmen Stufe 0, Legende lbm.cpp; bis 15.09. abends: 271; bis 15.09.: 221 -- 216 RHO_RAND R1-Zugriff ausserhalb (Soll 0), 217/218 rho_rek_ebene, 219/220 rho_ausgabe_ebene, 15.09.; 212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift, 215 = dessen Besuchszaehler; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
@@ -416,6 +421,7 @@ public:
 	uint einlass_eq_n = 0u; float einlass_eq_u = 0.0f; // Konstruktionszeit-Kopien (EINLASS_EQ)
 	uint rho_takt = 0u;        // Konstruktionszeit-Kopie von s_rho_takt (read-once-Doktrin)
 	bool klemm_bilanz_on = false; // ★ 15.09.2026 Klemmen S0b: Konstruktionszeit-Kopie von CFD_KLEMM_BILANZ (Vorgabe 1)
+	uint positiv_modus = 0u; // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie von CFD_POSITIV (0 aus, 1 Messarm, 2 anwenden)
 	bool rho_rand_on = false;  // ★ 15.09. Konstruktionszeit-Kopie von s_rho_rand (read-once-Doktrin); das Setup liest DIESEN Wert, nicht die Umgebungsvariable
 	ulong rr_N = 0ull;         // ★ 15.09. RHO_RAND C2c: Zellen der Randschale R1 (rho-Puffer = rr_N+1, letzter Slot Papierkorb); 0 ohne RHO_RAND
 	uint u_takt = 0u;          // Konstruktionszeit-Kopie von s_u_takt

@@ -6560,3 +6560,24 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 
 
 );} // ############################################################### end of OpenCL C code #####################################################################
+
+// ★ 15.09.2026 Klemmen Stufe 1 P1a (KLEMMEN-STUFE1-PLAN.md §2a, §4): EINZIGE Quelle der Positivitaets-Defines. lbm.cpp (Emission) und
+// das Scratch-Gate (gen_main datei ... pos*) rufen dieselbe Funktion -- Gate und Lauf koennen nicht auseinanderlaufen.
+// modus 0 = leer (Kernelquelle zeichengleich), 1 = POSITIV (Messarm: s gerechnet und gezaehlt, Felder bitgleich), 2 = zusaetzlich
+// POSITIV_ANWENDEN; facette 1 = K0 (Facettenzellen) in Modus 2 eingeschlossen (Vorgabe 0 = ausgenommen, Entscheidung E2).
+// tau_i = halbe ULP des FP16S-Halbworts bei f = 0: Rechenform f - w_i = -w_i, gespeichert -w_i*2^15 (i = 0: 10 922,7 -> ULP 8;
+// Achsen 1 820,4 -> ULP 1; Diagonalen 910,2 -> ULP 1/2), vstore_half_rte rundet zur naechsten Stufe -> nach dem Speichern f >= 0.
+// FP32: tau = 0. Haken 2 (Negativtest): tau_i = 1,2*w_i, jede Zelle ist Kandidat. Als AUSDRUECKE emittiert (Plan §2a, nicht to_string).
+string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s) { // unsigned statt uint: kernel.hpp definiert uint fuer die Syntaxfaerbung leer
+	if(modus==0u) return "";
+	string s = "\n	#define POSITIV";
+	if(modus>=2u) s += "\n	#define POSITIV_ANWENDEN";
+	if(facette>0u) s += "\n	#define POSITIV_FACETTE";
+	if(haken==2u) s += "\n	#define def_pos_t0 (1.2f*def_w0)\n	#define def_pos_ts (1.2f*def_ws)\n	#define def_pos_te (1.2f*def_we)";
+	else if(fp16s) s += "\n	#define def_pos_t0 (4.0f/32768.0f)\n	#define def_pos_ts (0.5f/32768.0f)\n	#define def_pos_te (0.25f/32768.0f)";
+	else s += "\n	#define def_pos_t0 0.0f\n	#define def_pos_ts 0.0f\n	#define def_pos_te 0.0f";
+	s += "\n	#define def_pos_g0 (def_pos_t0-def_w0)\n	#define def_pos_gs (def_pos_ts-def_ws)\n	#define def_pos_ge (def_pos_te-def_we)"; // Kandidat: fhn[i] < tau_i - w_i
+	if(haken==1u) s += "\n	#define POSITIV_HAKEN1";
+	if(haken==3u) s += "\n	#define POSITIV_HAKEN3";
+	return s;
+}

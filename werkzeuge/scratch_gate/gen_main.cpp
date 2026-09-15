@@ -9,6 +9,7 @@
 using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
+string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s); // ★ 15.09.2026 Klemmen Stufe 1 P1a: kernel.o, dieselbe Quelle wie lbm.cpp
 
 static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam, const bool u16, const bool rand) {
 	string s =
@@ -184,6 +185,7 @@ int main(int argc, char** argv) {
 	// weder SGS_FDWAND/SISM noch SPONGE -- der Buchungsort der Klemmen-Stufe-0 laege im Produktionsbau ungeprueft.
 	//   gen nurcode <ausgabe>            -> nur get_opencl_c_code() (zum Abschneiden des Vorspanns aus einem Dump)
 	//   gen datei <defs.txt> <ausgabe.cl> -> defs + aktueller Kernel
+	//   gen datei <defs.txt> <ausgabe.cl> pos<modus>[f][h<haken>] -> zusaetzlich positiv_defines() (Klemmen Stufe 1, z. B. pos2fh1)
 	if(argc>=3&&string(argv[1])=="nurcode") { std::ofstream f(argv[2]); f << get_opencl_c_code(); return 0; }
 	if(argc>=4&&(string(argv[1])=="datei"||string(argv[1])=="dateih3")) { // dateih3: zusaetzlich KLEMM_HAKEN3 (Gate-Arm fuer den Negativhaken)
 		std::ifstream d(argv[2]); if(!d) { std::cerr << "gen: defs-Datei fehlt: " << argv[2] << "\n"; return 2; }
@@ -196,7 +198,16 @@ int main(int argc, char** argv) {
 		// Die Dumps vom 15.09. (b9329a5) sind VOR Klemmen-S0b entstanden -- KLEMM_BILANZ (Produktionsvorgabe) wird angehaengt.
 		const string klemm = (defs.find("#define KLEMM_BILANZ")==string::npos ? string("\n #define KLEMM_BILANZ\n #define def_klemm_s 16384.0f") : string(""))
 			+(string(argv[1])=="dateih3" ? string("\n #define KLEMM_HAKEN3") : string(""));
-		const string code = geraet + defs + klemm + get_opencl_c_code();
+		string pos = "";
+		if(argc>=5) { // ★ 15.09.2026 Klemmen Stufe 1 P1a: Positiv-Arme ueber die EMISSIONSFUNKTION selbst, keine Zwillingsliste
+			const string a = argv[4];
+			if(a.size()<4||a.substr(0, 3)!="pos"||a[3]<'1'||a[3]>'2') { std::cerr << "gen: 4. Argument pos<1|2>[f][h<1..3>]: " << a << "\n"; return 2; }
+			const size_t h = a.find('h');
+			const unsigned haken = (h==string::npos||h+1>=a.size()) ? 0u : (unsigned)(a[h+1]-'0');
+			if(haken>3u) { std::cerr << "gen: Haken 1..3: " << a << "\n"; return 2; }
+			pos = positiv_defines((unsigned)(a[3]-'0'), haken, a.find('f')!=string::npos ? 1u : 0u, defs.find("#define fpxx half")!=string::npos);
+		}
+		const string code = geraet + defs + klemm + pos + get_opencl_c_code();
 		std::ofstream f(argv[3]); f << code; f.close();
 		std::cout << "geschrieben: " << argv[3] << " (" << code.size() << " Bytes, Defines aus " << argv[2] << ")\n";
 		return 0;
