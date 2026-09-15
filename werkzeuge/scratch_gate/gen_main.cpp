@@ -67,6 +67,9 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 	"\n#define RHO_CLAMP_MAX 1.5000f"
 	"\n#define KLEMM_BILANZ" // ★ 15.09.2026 Klemmen S0b: Produktionsvorgabe CFD_KLEMM_BILANZ=1
 	"\n#define def_klemm_s 16384.0f"
+	"\n#define def_u2max (def_c*def_c)" // ★ Z2b (lbm.cpp-Emission unter KLEMM_BILANZ)
+	"\n#define def_tor_lo (1.0f-1.5625f*0.500000f)"
+	"\n#define def_tor_hi (1.0f+1.5625f*0.500000f)"
 	"\n#define FACETTEN"
 	"\n#define def_fac_Y 86206.89844f"
 	"\n#define def_fac_utkorr 1.000000f"
@@ -197,6 +200,7 @@ int main(int argc, char** argv) {
 			"\n #ifdef cl_khr_int64_base_atomics\n #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable\n #endif";
 		// Die Dumps vom 15.09. (b9329a5) sind VOR Klemmen-S0b entstanden -- KLEMM_BILANZ (Produktionsvorgabe) wird angehaengt.
 		const string klemm = (defs.find("#define KLEMM_BILANZ")==string::npos ? string("\n #define KLEMM_BILANZ\n #define def_klemm_s 16384.0f") : string(""))
+			+(defs.find("#define def_u2max")==string::npos ? string("\n #define def_u2max (def_c*def_c)\n #define def_tor_lo (1.0f-1.5625f*0.500000f)\n #define def_tor_hi (1.0f+1.5625f*0.500000f)") : string("")) // ★ Z2b: Schnappschuesse vor Z2b tragen die Huellen-Defines nicht
 			+(string(argv[1])=="dateih3" ? string("\n #define KLEMM_HAKEN3") : string(""));
 		string pos = "";
 		if(argc>=5) { // ★ 15.09.2026 Klemmen Stufe 1 P1a: Positiv-Arme ueber die EMISSIONSFUNKTION selbst, keine Zwillingsliste

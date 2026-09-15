@@ -673,7 +673,8 @@ void LBM_Domain::allocate(Device& device) {
 	// | [273..277] s < 1 je Klasse K0..K4 (Modus 1: wuerde begrenzen) | [278] machtlos, KONSERVATIV (irgendein B_i < tau_i; Obermenge von unloesbar, Pruefbefund P1b NIEDRIG 1, Plan E3) | [279] davon f_eq_i + w_i < 0 | [280..284] s-Eimer [0;0,25) [0,25;0,5)
 	// [0,5;0,75) [0,75;0,95) [0,95;1] (s = 1 durch Rundung moeglich, Modus 2 wendet dann nichts an) | [285] nach load_f negativ (Nicht-E) | [286] Kandidat und rho-Klemme | [287] Kandidat und u-Klemme | [288] H1-Zellen im Eimer [0,25;0,5)
 	// | [289] Nachladeprobe t == zaehl_takt+3 | [290] Haken: Selbstpruefung Sum(f**-f*), Sum c(f**-f*) ueber Toleranz | [291] TYPE_E-Kandidaten (f_eq_i + w_i < tau_i) | [292]/[293] Sum-q (1-s), Sum-q Sum|df_i|
-	// (Festkomma, wickeln ABSICHTLICH mod 2^32) | [294] Kappung zu 293. NAECHSTER FREIER SLOT: 295.
+	// (Festkomma, wickeln ABSICHTLICH mod 2^32) | [294] Kappung zu 293. Klemmen Z2b: [295] u-Komponentenhuelle |u_a| >= c_s vor der Klemme (Soll = [28] unter der Komponentenklemme)
+	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [300] Lift-rho ausserhalb der Bildhuelle (0,21875; 1,78125), Soll 0. [298]/[299] reserviert Z2f. NAECHSTER FREIER SLOT: 301.
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -2215,6 +2216,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define RHO_CLAMP_MAX "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? 1.002f : RHO_CLAMP_MAX,4u)+"f"
 #ifdef SRT // Pruefpass S0b NIEDRIG: die Buchung dj = w*rho*du gilt nur fuer SRT (unter TRT relaxiert der Impuls mit wm)
 	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)
+	+(klemm_bilanz_env() ? string("\n	#define def_u2max (def_c*def_c)") // ★ Z2b: Betragshuelle folgt def_c (Haken 2 schrumpft sie mit, gewollt)
+		+"\n	#define def_tor_lo (1.0f-1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)"+"\n	#define def_tor_hi (1.0f+1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)" : string("")) // ★ Z2b: Bildhuelle aus dem PHYSIKALISCHEN RHO_CLAMP_MAX (Host-Makro), Lambda^2 = 1,5625
 	+(klemm_bilanz_env()&&klemm_haken_env()==3u ? string("\n	#define KLEMM_HAKEN3") : string(""))
 #if defined(D3Q19)&&defined(FP16S) // ★ 15.09.2026 Klemmen Stufe 1 P1a: bei CFD_POSITIV=0 leer (Kernelquelle zeichengleich); Sperren im Konstruktor
 	+(klemm_bilanz_env() ? positiv_defines(positiv_env(), positiv_haken_env(), positiv_facette_env(), true, (unsigned long long)get_N(), get_Nx(), get_Ny()) : string(""))

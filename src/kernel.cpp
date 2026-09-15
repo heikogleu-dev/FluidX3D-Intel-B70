@@ -3233,6 +3233,17 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	{ // separate block to avoid variable name conflicts
 )+"#ifdef VOLUME_FORCE"+R( // apply force and collision operator, write to fi in video memory
 		const float rho2 = 0.5f/rhon; // apply external volume force (Guo forcing, Krueger p.233f)
+)+"#ifdef KLEMM_BILANZ"+R(
+		{ const float uxg_ = fma(fxn, rho2, uxn), uyg_ = fma(fyn, rho2, uyn), uzg_ = fma(fzn, rho2, uzn); // Guo-verschobenes u VOR der Klemme (identischer Ausdruck, IGC fasst zusammen)
+		{ // ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §2.1): Huellen VOR der Klemme zaehlen. 295 Komponentenhuelle |u_a| >= c_s (Soll = [28]
+		  // solange die Komponentenklemme gilt), 296 Betragshuelle |u|^2 >= c_s^2 (groesste isotrope Kugel mit f_eq >= 0), 297 = 296 ohne 295 (Diagonalluecke).
+		  const bool k295_ = fabs(uxg_)>=def_c||fabs(uyg_)>=def_c||fabs(uzg_)>=def_c;
+		  const bool k296_ = uxg_*uxg_+uyg_*uyg_+uzg_*uzg_>=def_u2max;
+		  if(k295_&&rho_clamp_hits[295]<0xF0000000u) atomic_inc(&rho_clamp_hits[295]);
+		  if(k296_) { if(rho_clamp_hits[296]<0xF0000000u) atomic_inc(&rho_clamp_hits[296]); if(!k295_&&rho_clamp_hits[297]<0xF0000000u) atomic_inc(&rho_clamp_hits[297]); }
+		}
+		}
+)+"#endif"+R( // KLEMM_BILANZ
 		uxn = clamp(fma(fxn, rho2, uxn), -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(fma(fyn, rho2, uyn), -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(fma(fzn, rho2, uzn), -def_c, def_c);
@@ -3245,6 +3256,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // KLEMM_BILANZ
 		calculate_forcing_terms(uxn, uyn, uzn, fxn, fyn, fzn, Fin); // calculate volume force terms Fin from velocity field (Guo forcing, Krueger p.233f)
 )+"#else"+R( // VOLUME_FORCE
+)+"#ifdef KLEMM_BILANZ"+R(
+		{ // ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §2.1): Huellen VOR der Klemme zaehlen. 295 Komponentenhuelle |u_a| >= c_s (Soll = [28]
+		  // solange die Komponentenklemme gilt), 296 Betragshuelle |u|^2 >= c_s^2 (groesste isotrope Kugel mit f_eq >= 0), 297 = 296 ohne 295 (Diagonalluecke).
+		  const bool k295_ = fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c;
+		  const bool k296_ = uxn*uxn+uyn*uyn+uzn*uzn>=def_u2max;
+		  if(k295_&&rho_clamp_hits[295]<0xF0000000u) atomic_inc(&rho_clamp_hits[295]);
+		  if(k296_) { if(rho_clamp_hits[296]<0xF0000000u) atomic_inc(&rho_clamp_hits[296]); if(!k295_&&rho_clamp_hits[297]<0xF0000000u) atomic_inc(&rho_clamp_hits[297]); }
+		}
+)+"#endif"+R( // KLEMM_BILANZ
 		uxn = clamp(uxn, -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(uyn, -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(uzn, -def_c, def_c);
@@ -4810,6 +4830,12 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		v[2] += wij*coarse_plane[cb+2ul];
 		v[3] += wij*coarse_plane[cb+3ul];
 	}
+)+"#ifdef KLEMM_BILANZ"+R(
+	// ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §2.3): Slot 300 = Lift-rho ausserhalb der BILDHUELLE 1 +- Lambda^2*(RHO_CLAMP_MAX-1) =
+	// (0,21875; 1,78125). Lambda = 1,25 je Achse (Catmull-Rom, siehe u-Tor unten), Eingang geklemmt -> Soll 0; das Tor darunter verwirft heute
+	// auch legale Werte in (0,219; 0,5].
+	if(!(v[0]>def_tor_lo&&v[0]<def_tor_hi)&&hits[300]<0xF0000000u) atomic_inc(&hits[300]);
+)+"#endif"+R( // KLEMM_BILANZ
 	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
 	if(!(v[0]>0.5f&&v[0]<2.0f)) {
 )+"#ifdef KLEMM_BILANZ"+R(

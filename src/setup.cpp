@@ -1601,6 +1601,16 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		}
 		if(v[265]!=0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": Kappung [265] = "+to_string(v[265])+" -- mindestens ein |w*drho| oder |dj| > 16 (stream_collide) oder |drho| > 2 (boden_eq/einlass_eq, S0d); die Festkomma-Summen sind damit UNTERGRENZEN (kein Abbruch, Pruefpass S0b MITTEL 1).");
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
+		{ // ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §4): Huellenzaehler
+			const bool satt_h = v[28]>=4026531840ull||v[295]>=4026531840ull||v[296]>=4026531840ull||v[297]>=4026531840ull;
+			print_info(string("  KLEMM-HUELLEN ")+wo+": u-Komponentenhuelle [295] "+to_string(v[295])+" (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+", davon Diagonalluecke [297] "+to_string(v[297])+" (nicht von der Komponentenklemme gefasst), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+" (Soll 0; Tor [270] "+to_string(v[270])+")");
+			string hv_;
+			if(!satt_h) {
+				if(v[295]!=v[28]) hv_ += " [295] "+to_string(v[295])+" != [28] "+to_string(v[28])+" (Komponentenhuelle muss genau die Klemmtreffer zaehlen);";
+				if(v[297]>v[296]||v[296]-v[297]!=v[295]) hv_ += " [296] - [297] = "+to_string((ulong)(v[296]>=v[297] ? v[296]-v[297] : 0ull))+" != [295] "+to_string(v[295])+" (Komponentenhuelle muss in der Betragshuelle liegen; Rundung/Kontraktion?);";
+			}
+			if(!hv_.empty()) { print_warning(string("  KLEMM-HUELLEN ")+wo+": ABNAHME VERLETZT --"+hv_+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }
+		}
 		if(L.lbm_domain[0]->positiv_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1b (KLEMMEN-STUFE1-PLAN.md §4, Nachtrag P1b): Ist=Soll des Positiv-Messarms
 			const ulong tk = zaehl_takt(), tl = L.get_t(); const uint hk = L.lbm_domain[0]->positiv_haken; // Konstruktionszeit-Kopie (Pruefbefund P1b NIEDRIG 6)
 			const ulong zs = tl>=3ull ? (tl-3ull)/tk+1ull : 0ull; // Zaehlschritte t%tk == 2 mit t < get_t()
