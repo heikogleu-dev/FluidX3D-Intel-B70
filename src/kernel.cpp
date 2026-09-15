@@ -6728,7 +6728,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 unsigned positiv_haken_periode() { return 1009u; } // ★ P1b: Haken-1-Zellen n mod P == 0 (Primzahl, keine Gitterresonanz); EINE Quelle fuer Kernel-Define und Host-Soll
 // ★ P1b Nachtrag: sicheres_gitter = groesstes Gitter, an dem Atomics in (fast) jeder Zelle je Schritt nachweislich liefen (Kugel 16 mm,
 // 6 104 700 Zellen, Absturzsperre lbm.cpp). Die Zellzaehler des Messarms laufen nur fuer n mod def_pos_sub == 0 mit
-// def_pos_sub = ceil(N / sicheres_gitter): je Zaehlschritt hoechstens so viele zaehlende Zellen wie am belegt sicheren Gitter -- automatisch, kein Handwert.
+// def_pos_sub = kleinste Primzahl >= ceil(N / sicheres_gitter), die Nx und Ny nicht teilt (positiv_stichprobe): je Zaehlschritt hoechstens so viele zaehlende Zellen wie am belegt sicheren Gitter -- automatisch, kein Handwert.
 unsigned long long positiv_sicheres_gitter() { return 6104700ull; } // EINE Quelle: Absturzsperre (lbm.cpp) und Stichprobe (Pruefbefund P1b NIEDRIG 4)
 // Pruefbefund P1b NIEDRIG 3: die Periode ist die kleinste PRIMZAHL >= ceil(N/g), die weder Nx noch Ny teilt -- sonst zaehlt n%p nur jede p-te
 // x-Ebene (Fernfeld 8 mm: 5 teilt Nx = 385). N/p <= g bleibt erhalten.

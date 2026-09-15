@@ -1644,10 +1644,16 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				if((hk==1u||hk==3u)&&v[290]!=0ull) verl += " Selbstpruefung: "+to_string(v[290])+" angewandte Zellen verletzen Masse/Impuls ueber der Toleranz;";
 				const bool facette_ = L.lbm_domain[0]->positiv_facette>0u; // Konstruktionszeit-Kopie
 				const ulong erlaubt_ = facette_ ? kl5 : kl5-v[273];
-				// No-Op-Waechter: gibt es an Stichprobenzellen erlaubte Klassen mit s < 0,95 (Eimer 0..3), muss Summe (1-s) > 0 sein. Ohne K0 exakt: Summe >= 0,05 S je Zelle.
+				// No-Op-Waechter (Pruefbefund P1c N1/N2): Zellen in Eimer 0..3 haben s < 0,95; hoechstens v[273] davon sind K0. Ohne FACETTE traegt
+				// jede uebrige Zelle >= 0,05 S - 0,5 zur Summe (1-s) bei -- exakte Untergrenze, auch mit K0. Nur pruefbar, solange die Summe nicht wickeln kann.
 				ulong e03_ = 0ull; for(uint k=0u; k<4u; k++) e03_ += v[280u+k];
-				if(!satt&&erlaubt_>0ull&&(facette_||v[273]==0ull)&&(double)v[292]<0.05*S*(double)e03_-0.5*(double)e03_) verl += " NO-OP Modus 2: "+to_string(e03_)+" Stichprobenzellen mit s < 0,95, aber Summe (1-s) nur "+to_string((double)v[292]/S, 4u)+";";
-				if(!satt&&erlaubt_>0ull&&v[292]==0ull&&e03_>0ull) verl += " NO-OP Modus 2: erlaubte Begrenzungen, aber keine angewandt;";
+				const ulong k0_ = facette_ ? 0ull : v[273], min_zellen_ = e03_>k0_ ? e03_-k0_ : 0ull;
+				const bool wickelfrei_ = (double)ei5*(S+1.0)<4294967296.0;
+				if(!satt&&wickelfrei_&&min_zellen_>0ull&&(double)v[292]<(0.05*S-0.5)*(double)min_zellen_) verl += " NO-OP Modus 2: mindestens "+to_string(min_zellen_)+" erlaubte Stichprobenzellen mit s < 0,95, aber Summe (1-s) nur "+to_string((double)v[292]/S, 4u)+";";
+				if(!wickelfrei_) print_info(string("  POSITIV ")+wo+": Summe (1-s) kann gewickelt sein ("+to_string(ei5)+" begrenzte Stichprobenzellen) -- No-Op-Untergrenze nicht pruefbar.");
+				if(v[294]!=0ull) print_warning(string("  POSITIV ")+wo+": Kappung [294] = "+to_string(v[294])+" -- mindestens eine Zelle mit (1-s) oder Summe |df| > 16; die Summen sind UNTERGRENZEN (Soll 0, Pruefbefund P1c N3).");
+				if(facette_&&v[273]==0ull) print_warning(string("  POSITIV ")+wo+": CFD_POSITIV_FACETTE=1, aber keine K0-Zelle in der Stichprobe -- der Schalter war hier wirkungslos (Ansage-Doktrin, Pruefbefund P1c N4).");
+				(void)erlaubt_;
 			}
 			if(hk==3u&&verl.find("Klassen")==string::npos) verl += " Haken 3 gesetzt, aber die Klassen-Abnahme beanstandet nichts -- der Negativtest feuert nicht;";
 			if(!verl.empty()) { print_warning(string("  POSITIV ")+wo+": ABNAHME VERLETZT --"+verl+(hk==3u ? " (Haken 3 erwartet genau die Klassen-Beanstandung.)" : "")+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }

@@ -193,7 +193,7 @@ Reaktion von update_force_field auf umverteilte Populationen.
 
 * **Zähler gegatet statt ungegatet (Abweichung von §4, Absturzsperre):** Alle Zellzähler des Messarms (272–288, 291, 285) zählen nur an
   Zählschritten `t % zaehl_takt == 2` UND an Stichprobenzellen `n % def_pos_sub == 0`, `def_pos_sub = ⌈N / 6 104 700⌉` (größtes Gitter,
-  an dem Atomics in fast jeder Zelle je Schritt belegt liefen, Kugel 16 mm). 8 mm Nahfeld: 11, Fernfeld: 5; Kugel ≤ 16 mm: 1. Grund: die
+  an dem Atomics in fast jeder Zelle je Schritt belegt liefen, Kugel 16 mm). 8 mm Nahfeld: 11, Fernfeld: 5 (seit 2cb4ada Primzahl, die Nx/Ny nicht teilt: Fernfeld 13 — P1b-Fernfeldraten sind mit n%5 gemessen); Kugel ≤ 16 mm: 1. Grund: die
   natürliche Rate negativer Populationen ist ungemessen; ungegatete Atomics in vielen Zellen haben die B70 am 15.09. lahmgelegt. 271 und
   289 zählen je genau einen Schritt in allen Zellen (Last wie 204/205, belegt). Die Ist=Soll-Identitäten bleiben exakt, weil alle
   Klassenzähler dasselbe Gatter tragen. Modus 1 prüft die Kandidaten nur an Zählschritten (Hot Path ≈ 1 Vergleich); Modus 2 prüft jeden Schritt.
