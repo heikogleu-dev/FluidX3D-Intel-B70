@@ -489,4 +489,12 @@ Ein Lauf je Arm; Rauschen der Wanduhr nicht gemessen. 4 mm bewusst nicht gerechn
 - Kugel Haken 5: genau ein Error, und zwar aus der Abnahme (216 = 504); der C0-Wächter meldet nur noch Warnung (N3).
   rr-Vergleich 207/1 — die eine Abweichung ist die TYPE_E-Innenzelle, deren rr_idx_host der Papierkorb ist (erwartet).
 - dd 8 mm B 60 ms: forces.csv bitgleich zu rr_c2c3_dd8_b_b70; rr-Vergleich 1307/0 mit der neuen Ursprungsformel (N1); Abnahme erfüllt.
-- N2 (TEILABNAHME bei Lauf kürzer als der Zählschritt) ist zur Laufzeit nicht ausgelöst worden — nur durch Prüfagent gedeckt.
+- N2 (TEILABNAHME) war in 5dc69ae zur Laufzeit nicht ausgelöst.
+
+**Prüfpass C2c-3 (freigegeben, 4 × NIEDRIG) → d2d81ae**, Nachprüfung logs/rr_c2c5_b70.txt (B70, 13:34–13:35):
+- Kugel B: Hash 13385224609926903411, rr 206/0, Abnahme erfüllt. Haken 5: ein Error aus der Abnahme, kein C0-Error (Soll genau 1 Beanstandung).
+- Kugel CFD_ZAEHL_TAKT=1000 (500 Schritte < Zählschritt 1002): „TEILABNAHME erfüllt (211 und 204/205 ungeprüft)“, Hash unverändert, kein Instrumentenfehler.
+- dd 8 mm B 60 ms: forces.csv bitgleich zu rr_c2c3_dd8_b_b70, rr 1307/0, Abnahme erfüllt.
+- Die Pass-3-Änderungen sind wörtlich die Vorschläge des Prüfagenten; kein weiterer Prüfpass, Deckung durch diese Nachprüfung.
+
+**Stand RHO_RAND Nahfeld: C0–C2d abgeschlossen.** Offen: Fernfeld (Region R3 für die Entnahmeebenen, Heiko „später“), Haken 3 (sobald ein Fall asymmetrische MS-Zellen hat).
