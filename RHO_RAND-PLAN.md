@@ -408,3 +408,25 @@ Je Klasse 1–3 Zellen, Index im Log.
 * **Probezellen an der Kugel:** Einlass, Deckel, Auslass, po_interior, freie Nachlaufzelle, erste TYPE_S, TYPE_MS
   und Facette, dazu Abweichler und Klemmzellen. **Bandlage 2, APG-Kantennachbar und boden_eq-Band** gibt es an
   der Kugel nicht, sie folgen in C3 im dd-Fall.
+
+## 14 Messbefund 15.09. vormittags: Die t+1-Rekonstruktion taugt NICHT als Ausgabe, die Nachkollisionssumme schon
+
+Gemessen an der Kugel, 16 mm, B70, t0 = 500 Schritte (früher Anlauf, t ≈ 0,02 s); rr_c1g_ku_b70 und
+rr_c1g_fac_elibb_b70. Heute liest ein Slice den Puffer nach dem letzten Schritt (w_vor). Die Ausgabeabweichung
+ist deshalb |x − w_vor| und nicht |x − w_nach|.
+
+| Ausgabe-Kandidat | Fluid | TYPE_MS | Facette (ELIBB) |
+|---|---|---|---|
+| **Rekonstruktion t0** (Plan §5 bisher: rho der nächsten Kollision) | Median cp 0,21, max 8,9 | Median cp **4,1**, max 10,2 | Median cp 0,35, max 2,3 |
+| **Nachkollisionssumme** (Parität t0−1: eigene Populationen nach der Kollision) | max cp **0,004** | max cp 0,004 | max cp **0,001** |
+
+(cp = (2/3)·Δrho/u_lat², u_lat 0,075)
+
+* **Die Annahme „ein Schritt ist physikalisch belanglos“ (§3.4, Falle 1) ist WIDERLEGT.** An Wandzellen gibt es
+  eine Periode-2-Mode, die Rekonstruktion trifft die andere Phase.
+* **Die Nachkollisionssumme** reproduziert den heutigen Slice-Wert bis auf FP16S-Rundung, auch an
+  ELIBB-Facetten, weil das Wandmodell in den Nachkollisions-Populationen schon enthalten ist. Sie ist nicht
+  bitgleich. §3.4 hatte sie als „keine bitgleiche Alternative" verworfen; numerisch ist sie die bessere
+  Ausgabe.
+* **Physikleser sind nicht betroffen:** TYPE_E, po_interior und der Lift lesen R1.
+* **Vorbehalt:** früher Anlauf an der Kugel. Die Bestätigung im dd-Fall bei entwickelter Strömung gehört in C3.
