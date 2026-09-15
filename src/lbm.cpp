@@ -401,6 +401,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif
 	  }
 	  if(klemm_haken_env()==5u) print_warning("CFD_KLEMM_HAKEN=5: TESTARM -- Bildhuelle fuer Slot 300 kuenstlich auf 1 +- 1/32768 verengt (Soll [300] > 0, [270] = 0, Physik unveraendert).");
+	  if(tor_huelle_env()>0u&&!klemm_bilanz_env()) print_warning("CFD_TOR_HUELLE=1 ohne Klemm-Instrument (CFD_KLEMM_BILANZ=0): das Soll [270] = 0 ist hier nicht pruefbar (Pruefbefund Z2f NIEDRIG 1).");
 	  if(tor_huelle_env()>0u) print_info("CFD_TOR_HUELLE=1: Lift-rho-Tor und Waechter [210] aus der Bildhuelle 1 +- Lambda^2 (RHO_CLAMP_MAX-1) -- Soll [270] = 0.");
 	}
 	{ // ★ 15.09.2026 Klemmen Stufe 1: Sperren des Positivitaetsbegrenzers VOR Kernelbau und Grossallokation (Pruefbefund P1a NIEDRIG 2)
@@ -700,7 +701,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [0,5;0,75) [0,75;0,95) [0,95;1] (s = 1 durch Rundung moeglich, Modus 2 wendet dann nichts an) | [285] nach load_f negativ (Nicht-E) | [286] Kandidat und rho-Klemme | [287] Kandidat und u-Klemme | [288] H1-Zellen im Eimer [0,25;0,5)
 	// | [289] Nachladeprobe t == zaehl_takt+3 | [290] Haken: Selbstpruefung Sum(f**-f*), Sum c(f**-f*) ueber Toleranz | [291] TYPE_E-Kandidaten (f_eq_i + w_i < tau_i) | [292]/[293] Sum-q (1-s), Sum-q Sum|df_i|
 	// (Festkomma, wickeln ABSICHTLICH mod 2^32) | [294] Kappung zu 293. Klemmen Z2b: [295] u-Komponentenhuelle |u_a| >= c_s vor der Klemme (Soll = [28] unter der Komponentenklemme)
-	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [300] Lift-rho ausserhalb der Bildhuelle (0,21875; 1,78125), Soll 0. [298]/[299] reserviert Z2f. NAECHSTER FREIER SLOT: 301.
+	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [298]/[299] (nur CFD_RHO_HUELLE) rho unter/ueber der Konsistenzhuelle 0,5/1,5 | [300] Lift-rho ausserhalb der GESCHLOSSENEN Bildhuelle [0,21875; 1,78125], Soll 0 (Haken 5: > 0). NAECHSTER FREIER SLOT: 301.
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -714,8 +715,8 @@ void LBM_Domain::allocate(Device& device) {
 	klemm_bilanz_on = false;
 	if(klemm_bilanz_env()) print_warning("CFD_KLEMM_BILANZ ist an, das Messinstrument ist aber nur fuer SRT gebaut -- hier AUS (Ansage-Doktrin, Pruefpass S0b-2).");
 #endif
-	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : klemm_haken_env()==5u ? "Bildhuelle fuer Slot 300 verengt (Physik unveraendert)" : (klemm_haken_env()==4u ? "RHO_CLAMP 1,001/1,002 und Host-Wickelschranke 2^16 (Soll: MEHRDEUTIG)" : "RHO_CLAMP 1,001/1,002"))+string(klemm_haken_env()==3u&&klemm_bilanz_on ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt; im dd-Fall je Domaene eine Warnung)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis.");
-	if((klemm_haken_env()==3u||klemm_haken_env()==4u)&&!klemm_bilanz_on) print_error("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+" ist ein Negativtest des Messinstruments, das hier AUS ist (CFD_KLEMM_BILANZ=0 oder nicht SRT) -- er liefe still ins Leere (Pruefpass S0c-2 N-d).");
+	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : klemm_haken_env()==5u ? "Bildhuelle fuer Slot 300 verengt (Physik unveraendert)" : (klemm_haken_env()==4u ? "RHO_CLAMP 1,001/1,002 und Host-Wickelschranke 2^16 (Soll: MEHRDEUTIG)" : "RHO_CLAMP 1,001/1,002"))+string(klemm_haken_env()==3u&&klemm_bilanz_on ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt; im dd-Fall je Domaene eine Warnung)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis"+string(klemm_haken_env()==5u ? " -- AUSNAHME Haken 5: nur Zaehlerhuellen verengt, Physik unveraendert." : "."));
+	if((klemm_haken_env()==3u||klemm_haken_env()==4u||klemm_haken_env()==5u)&&!klemm_bilanz_on) print_error("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+" ist ein Negativtest des Messinstruments, das hier AUS ist (CFD_KLEMM_BILANZ=0 oder nicht SRT) -- er liefe still ins Leere (Pruefpass S0c-2 N-d).");
 	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3/4 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
 	u_klemme = u_klemme_env(); if(u_klemme>0u) print_info("CFD_U_KLEMME=1: u-Klemme als BETRAG |u|^2 <= c_s^2 (Z2d) statt je Komponente -- Slot 28 zaehlt die Betragshuelle.");
 	positiv_modus = positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie, dieselbe Quelle wie die Emission (Sperren seit P1b VOR dem Kernelbau, Pruefbefund P1a NIEDRIG 2)
@@ -2241,12 +2242,13 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define RHO_CLAMP"
 	+((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? string("\n	#define RHO_CLAMP_MIN 1.0010f\n	#define RHO_CLAMP_MAX 1.0020f") // ★ Klemmen-Haken 1/3/4: nur Testarme
 	  : (rho_huelle_env()>0u ? string("\n	#define RHO_CLAMP_MIN (20.0f/32768.0f)\n	#define RHO_CLAMP_MAX (1.0f+65504.0f/32768.0f)\n	#define RHO_HUELLE") // ★ Z2f: numerische Huelle als BRUECHE (to_string schnitte 20/32768 auf 0,0006)
-	    +"\n	#define def_rho_kons_lo "+to_string(RHO_CLAMP_MIN, 6u)+"f\n	#define def_rho_kons_hi "+to_string(RHO_CLAMP_MAX, 6u)+"f"
+	    +(klemm_haken_env()==5u ? string("\n	#define def_rho_kons_lo (1.0f-1.0f/32768.0f)\n	#define def_rho_kons_hi (1.0f+1.0f/32768.0f)") // ★ Pruefbefund Z2f M2: Haken 5 verengt auch die Konsistenzhuelle -> [298]+[299] MUSS feuern (nur Zaehler)
+	      : "\n	#define def_rho_kons_lo "+to_string(RHO_CLAMP_MIN, 6u)+"f\n	#define def_rho_kons_hi "+to_string(RHO_CLAMP_MAX, 6u)+"f")
 	  : "\n	#define RHO_CLAMP_MIN "+to_string(RHO_CLAMP_MIN,4u)+"f\n	#define RHO_CLAMP_MAX "+to_string(RHO_CLAMP_MAX,4u)+"f")) // Vorgabe: Zeichenfolge wie bisher (\"0.5000f\")
 	+((klemm_bilanz_env()||tor_huelle_env()>0u) ? (klemm_haken_env()==5u ? string("\n	#define def_tor_lo (1.0f-1.0f/32768.0f)\n	#define def_tor_hi (1.0f+1.0f/32768.0f)") // ★ Pruefbefund Z2b M1: Haken 5 verengt die Bildhuelle kuenstlich -> [300] MUSS feuern, das Tor (0,5; 2,0) bleibt, Physik unveraendert
 	  : "\n	#define def_tor_lo (1.0f-1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)"+"\n	#define def_tor_hi (1.0f+1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)") : string("")) // ★ Z2b/Z2e: Bildhuelle aus dem PHYSIKALISCHEN RHO_CLAMP_MAX (Host-Makro), Lambda^2 = 1,5625; ausserhalb von SRT, weil Lift-Kernel und Waechter immer gebaut werden
 	+(tor_huelle_env()>0u ? string("\n	#define def_tor_gate_lo (def_tor_lo-16.0f/32768.0f)\n	#define def_tor_gate_hi (def_tor_hi+16.0f/32768.0f)\n	#define def_w210_lo (def_tor_lo-32.0f/32768.0f)\n	#define def_w210_hi (def_tor_hi+32.0f/32768.0f)") // ★ Z2e: groesste RHO_FP16-ULP unter 2^15 ist 16
-	  : (rho_huelle_env()>0u ? string("\n	#define def_tor_gate_lo RHO_CLAMP_MIN\n	#define def_tor_gate_hi RHO_CLAMP_MAX\n	#define def_w210_lo 0.0f\n	#define def_w210_hi 3.0f") // ★ Z2f: numerische Huelle
+	  : ((rho_huelle_env()>0u&&!(klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)) ? string("\n	#define def_tor_gate_lo RHO_CLAMP_MIN\n	#define def_tor_gate_hi RHO_CLAMP_MAX\n	#define def_w210_lo 0.0f\n	#define def_w210_hi 3.0f") // ★ Z2f: numerische Huelle
 	  : string("\n	#define def_tor_gate_lo 0.5f\n	#define def_tor_gate_hi 2.0f\n	#define def_w210_lo 0.4f\n	#define def_w210_hi 2.1f"))) // Vorgabe: Werte wie vor Z2e
 #ifdef SRT // Pruefpass S0b NIEDRIG: die Buchung dj = w*rho*du gilt nur fuer SRT (unter TRT relaxiert der Impuls mit wm)
 	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)

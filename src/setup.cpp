@@ -1611,6 +1611,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				if(betrag_&&v[296]!=v[28]) hv_ += " [296] "+to_string(v[296])+" != [28] "+to_string(v[28])+" (Betragshuelle muss unter CFD_U_KLEMME=1 genau die Klemmtreffer zaehlen);";
 				if(v[297]>v[296]||v[296]-v[297]!=v[295]) hv_ += " [296] - [297] = "+to_string((ulong)(v[296]>=v[297] ? v[296]-v[297] : 0ull))+" != [295] "+to_string(v[295])+" (Komponentenhuelle muss in der Betragshuelle liegen; Rundung/Kontraktion oder NaN?);";
 			}
+			if(klemm_haken_env()==5u&&rho_huelle_env()>0u&&v[298]+v[299]==0ull) hv_ += " Haken 5 unter RHO_HUELLE: Soll [298]+[299] > 0, Ist 0 (Positivtest der Konsistenzhuellen-Zaehler);";
 			if(klemm_haken_env()==5u&&v[215]>0ull&&(v[300]==0ull||v[270]!=0ull)) hv_ += " Haken 5: Soll [300] > 0 und [270] = 0, Ist "+to_string(v[300])+"/"+to_string(v[270])+" (Positivtest des Lift-Zaehlers);";
 			if(tor_huelle_env()>0u&&v[270]!=0ull) hv_ += " TOR_HUELLE: das Lift-Tor griff "+to_string(v[270])+" mal -- die Bildhuelle ist dann keine Invariante (Soll 0);";
 			if(klemm_haken_env()!=5u&&tor_huelle_env()==0u&&rho_huelle_env()==0u&&v[300]!=0ull) print_warning(string("  KLEMM-HUELLEN ")+wo+": Lift-rho ausserhalb der Bildhuelle [300] = "+to_string(v[300])+" -- der Eingang des Lifts verlaesst die Klemmhuelle (Plan §2.3: dann Arm M-T fahren).");
@@ -1854,8 +1855,8 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
 			ausser+=(ulong)dm->rho_clamp_hits[210]; besuche+=(ulong)dm->rho_clamp_hits[211]; }
 		  print_info(string("  rho-Speicherwort ")+wo+": "+to_string((uint)(8u*sizeof(rhoxx)))+" bit, "
-			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb der Huelle [0,4; 2,1] (Soll 0).");
-		  if(ausser>0ull) print_error(string("rho-Huellenwaechter ")+wo+": "+to_string(ausser)+" Lesungen an TYPE_E-Zellen ausserhalb [0,4; 2,1] oder nicht-endlich. Einer der rho-Schreiber haelt seine Zusage nicht (RHO_CLAMP garantiert [0,5;1,5], der Kopplungs-Lift (0,5;2,0)) -- der Lauf ist kein Ergebnis.");
+			+to_string(besuche)+" TYPE_E-Lesungen an einem Schritt geprueft, "+to_string(ausser)+" ausserhalb der Waechterhuelle "+string(tor_huelle_env()>0u ? "(Bildhuelle +- 32/32768)" : (rho_huelle_env()>0u&&!(klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? "(0; 3)" : "[0,4; 2,1]"))+" (Soll 0).");
+		  if(ausser>0ull) print_error(string("rho-Huellenwaechter ")+wo+": "+to_string(ausser)+" Lesungen an TYPE_E-Zellen ausserhalb der Waechterhuelle (Vorgabe [0,4; 2,1], TOR_HUELLE Bildhuelle, RHO_HUELLE (0; 3)) oder nicht-endlich. Einer der rho-Schreiber haelt seine Zusage nicht (RHO_CLAMP garantiert [0,5;1,5], der Kopplungs-Lift (0,5;2,0)) -- der Lauf ist kein Ergebnis.");
 		  // ★ BERICHTIGT 12.09. (Pruefagent, HOCH): hier stand print_error -- und print_error ist exit(1).
 		  // Der KANALFALL hat konstruktiv KEINE TYPE_E-Zelle, Slot 211 ist dort strukturell 0. Der
 		  // Waechter haette den Kanal in BEIDEN Armen getoetet, VOR Wandfunktions-Wirkpfad, P-TRT-

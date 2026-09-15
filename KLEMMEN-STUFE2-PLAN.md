@@ -171,3 +171,12 @@ die Betragshülle wird dagegen auch im entwickelten Feld an Facettenzellen verle
 9 918-mal und entfernt Impuls im Umfang 0,11 σ (Cd) / 0,13 σ (Cz): innerhalb des Budgets, aber nicht kostenlos. (3) [300] = [270] = 0 →
 Arm M-T entfällt planmäßig. (4) M-CB1 ≈ M-C (Positivität dominiert die Kraftänderung). Kraftdifferenzen bleiben Einzelrealisierungen
 (σ_diff ≈ 0,036–0,045). Wanduhr je eine Messung.
+
+## Nachtrag Prüfbericht Z2e/Z2f (15.09.2026 spät) — bekannte Grenzen (nicht behoben, deklariert)
+- Druckauslass schreibt ρ an TYPE_E UNGEKLEMMT (kernel.cpp apply_pressure_outlet): unter CFD_RHO_HUELLE ρ ≤ 0 oder ≥ 3 möglich → Wächter 210
+  bricht ab. Unter TOR_HUELLE praktisch unkritisch (erst ab |⟨ρ−1⟩| > 0,28). Vor dem ersten B2-Arm beobachten.
+- N2F-Band-Diagnose (setup.cpp ~8752) zählt „an der Solver-Dichteklemme“ mit den HOST-Makros 0,5/1,5: unter B2 numerisch gleich (kein Fehlalarm),
+  aber sachlich nicht mehr die Solver-Klemme (Plan §7 „unter B2 umstellen“ offen).
+- Ohne RHO_CLAMP baut der Kernel nicht (Tor-/Wächter-Defines unter #ifdef RHO_CLAMP; RHO_CLAMP ist fest an).
+- gen_main hält für t/r eine Zwillingsliste der Emission; 20/32768 ist im Halbwort nicht exakt speicherbar (rte → 16/32768, nur TYPE_E-Lesung);
+  Stufe-0-Kappe 16 und boden_eq-Kappe 2 sind unter der numerischen Hülle nicht garantiert (Überschreitung → [265], Summen Untergrenzen).
