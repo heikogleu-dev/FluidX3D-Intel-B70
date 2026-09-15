@@ -242,3 +242,19 @@ Offline-Bisektion am generierten .cl (igc_offline, prod8nah):
 F-BBox ohne Facette („fahrzeugnah“)** > **K3 Randschale Dicke 2 (reiner Koordinatentest; Nahfeld = Koppelrand + Auslass, Fernfeld =
 Domänenrand)** > K4 Rest. „Wandnah ohne Facette“ außerhalb der F-BBox ist damit nicht mehr trennbar (landet in K4); im Fernfeld gibt es
 keine Facetten, dort ist K2 die F-BBox. Volles Gate danach grün (17 Arme × 2 Geräte, rc 0).
+
+## Messung S0b/S0c, 8 mm, 300 ms, B70 (15.09.2026, VORLÄUFIG bis Prüfpass S0c)
+
+Läufe kl_s0b_dd8_an_b70 / _aus_b70 (dbec4ce) und kl_s0c_dd8_b70 (b470bab), Zeile = rr_c2d_dd8_b_b70 (RHO_RAND Standard).
+- forces.csv und cd_facetten.csv aller drei Läufe bitgleich zu rr_c2d_dd8_b_b70 (Instrument an wie aus).
+- Wanduhr (je ein Lauf, Rauschen ungemessen): an 198,6 s / 5480 MLUPs, aus 196,8 s / 5512 MLUPs; C2d B ohne Instrument 5500.
+- Ist=Soll exakt: Nahfeld rho 3 176 331, u 1872; Fernfeld rho 62 515, u 0.
+- **Ort:** Nahfeld rho-Treffer K0..K4 = 599 / **3 175 714** / 18 / 0 / 0 → 99,98 % bewegter Boden (TYPE_MS); Fernfeld 100 % MS.
+  u-Treffer 1872 / 0 / 0 / 0 / 0 → alle an Facettenzellen.
+- **Größe:** |Δρ|-Dekaden Nahfeld 6684 / 56 027 / 784 769 / 2 328 800 / 51 / 0 → echte Verletzungen um 0,01–0,1, kaum „Echos“.
+  |Δu|-Dekaden 0 / 2 / 10 / 167 / 1693 / 0.
+- **Phase (S0c):** Nahfeld nach Warmlauf (5048 Schritte) rho 1 126 800 Treffer, u **0**. Masse netto −907 (Gitter) = **−30,9 ppm des
+  Einlass-Massenstroms je Schritt** (ganzer Lauf −30,0 ppm); ΔCd_äq 0 nach Warmlauf (RHO_CLAMP erhält den Impuls), ganzer Lauf 0,00037
+  aus den 1872 Anlauf-u-Treffern. σ(cd_rest, Block-SEM 4) = 0,02574. Fernfeld nach Warmlauf −77,2 ppm je Schritt. Wickelwächter still.
+- **Einordnung nach Übergabe §1.2:** |ΔCd_entfernt| ≪ σ → Stufe 1 ist bei 8 mm Hygiene, nicht Rang 1. Die Dichteklemme ist ein
+  **Boden-Befund** (bewegter Boden / BODEN_EQ-Band), kein Wandmodell-Befund. u-Klemme nach Warmlauf wirkungslos (bei 4 mm offen).

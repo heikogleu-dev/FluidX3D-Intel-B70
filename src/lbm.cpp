@@ -377,6 +377,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		if(n_uf!=21u||n_uv!=20u) print_error("u-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_uf)+" x \"global float* u\" (Soll 21, alle in SURFACE/PARTICLES/GRAPHICS oder totem Code) und "
 			+to_string(n_uv)+" x \"global velxx* u\" (Soll 20; 19 -> 20 am 15.09.: rho_rek_ebene, RHO_RAND C1). Ein u-Kernel ist nicht auf velxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-u waere das ein stiller Fehler, kein Absturz: der Kernel laese zwei halbe Geschwindigkeiten als eine.");
 	}
+	// ★★ 15.09.2026 ABSTURZSPERRE TESTHAKEN (Heiko: "sicherstellen, dass so ein CL_OUT_OF_RESOURCES nicht versehentlich nochmal passiert").
+	// Anlass: CFD_KLEMM_HAKEN=1 im 8-mm-Fahrzeug (65,6 Mio Nahfeldzellen) auf der B70 -- nahezu JEDE Zelle nimmt je Schritt den
+	// Trefferzweig mit mehreren Atomics, stream_collide lief ueber das Treiber-Zeitlimit, "xe ... device wedged", sgs_fdwand
+	// CL_OUT_OF_RESOURCES, der Desktop auf derselben Karte hing bis zum Neustart (logs/kl_s0d_dd8_h1_b70.log, journalctl 15:49:34).
+	// Grenze = das GROESSTE Gitter, an dem ein solcher Haken nachweislich lief: Kugel 16 mm, 340x171x105 = 6 104 700 Zellen
+	// (kl_s0b/kl_s0d_ku_h1_b70, rc 0) -- ein Messwert, kein geschaetztes Zeitlimit. Groesser nur auf Geraet 0 (CPU, kein Watchdog).
+	{ const uint kh_ = klemm_haken_env(); const uint ph_ = env_u("CFD_POSITIV_HAKEN", 0u);
+	  const bool cpu_ = device_info.is_cpu;
+	  if((kh_>0u||ph_>0u)&&get_N()>6104700ull&&!cpu_) print_error("ABSTURZSPERRE: CFD_KLEMM_HAKEN="+to_string(kh_)+" / CFD_POSITIV_HAKEN="+to_string(ph_)+" auf einem GPU-Gitter mit "+to_string(get_N())+" Zellen (> 6 104 700, groesstes belegt sicheres Hakengitter). Atomics in fast jeder Zelle je Schritt haben am 15.09. die B70 lahmgelegt (device wedged). Haken nur an der Kugel <= 16 mm oder auf Geraet 0 (CPU)."); }
 	if(env_on("CFD_DUMP_CL")) {
 		static std::atomic<uint> dump_nr(0u); // je Domaene eine Datei, sonst ueberschreibt die zweite die erste
 		const string pfad = "/tmp/fx3d_kernel_dump_"+to_string(dump_nr++)+".cl";

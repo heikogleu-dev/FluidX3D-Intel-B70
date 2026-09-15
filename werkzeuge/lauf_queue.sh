@@ -41,6 +41,13 @@ while IFS= read -r zeile; do
 	# nie ein Zeitschritt, kein Log-Fortschritt. Ein blosser "Engine reset bcs" ist dagegen harmlos
 	# (am 06.09. dreimal gefolgt von einem sauberen Lauf). Der Waechter wartet einmal ab und sagt
 	# BESCHEID; er bricht nicht ab, weil der Zusammenhang zwar zweifach belegt, aber nicht bewiesen ist.
+	# ★★ 15.09.2026 ABSTURZSPERRE: Atomik-Testhaken (CFD_KLEMM_HAKEN, CFD_POSITIV_HAKEN) ausserhalb der Kugel NIE auf einer GPU.
+	# Am 15.09. 15:49 hat CFD_KLEMM_HAKEN=1 im 8-mm-Fahrzeug die B70 lahmgelegt (device wedged, CL_OUT_OF_RESOURCES, Desktop hing).
+	# Zweite Sperre neben der im Code (lbm.cpp, Gittergrenze): die Queue startet solche Zeilen gar nicht erst.
+	if [ "${CFD_QUEUE_DEV:-2}" != "0" ] && echo " $env_teil " | grep -Eq ' CFD_(KLEMM|POSITIV)_HAKEN=[1-9]' && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel '; then
+		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel auf GPU-Geraet ${CFD_QUEUE_DEV:-2} (Absturzsperre 15.09.)" | tee -a "$Q"
+		continue
+	fi
 	if [ "${CFD_QUEUE_DEV:-2}" = "1" ] && command -v journalctl >/dev/null 2>&1; then
 		cat_n=$(journalctl -k --since '-3min' --no-pager 2>/dev/null | grep -ac 'Engine memory CAT error')
 		if [ "${cat_n:-0}" -gt 0 ]; then
