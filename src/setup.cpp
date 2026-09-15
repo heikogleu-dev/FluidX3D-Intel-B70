@@ -4754,13 +4754,18 @@ void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz,
 //   haken2 = rho_ausgabe_ebene     bei t0   -> NEGATIVTEST: falscher Zeitschritt muss die Schranke reissen
 // danach genau EIN Schritt und w_nach. Soll:
 //   (i)   Identitaet bitgleich an Fluid/TYPE_E/TYPE_S/TYPE_MS/Band/APG-Kante/z-Band; Auslass = Wort VOR dem Schritt
-//   (ii)  aus == alt bitgleich (float) an allen Zellen; an TYPE_E/TYPE_S/Auslass zusaetzlich aus == rho_unpack(w_vor)
+//   (ii)  aus == alt bitgleich (float) an allen Zellen; an TYPE_E/TYPE_S/Auslass zusaetzlich aus == rho_unpack(w_vor) -- dort
+//         ist es konstruktiv derselbe Pufferinhalt, geprueft wird die Host-Dekodierung gegen load_rho auf dem Geraet (N5)
 //   (iii) |alt - rho_unpack(w_vor)| <= S je Zelle (ausser Klemmzellen). S aus der FP16S-Rundung HERGELEITET, kein Handwert:
 //         S = 2^-11 * ((1+2^-11)*k*Summe|f~| + |rho-1|) + 64*FLT_EPSILON*(1+Summe|f~|). 2^-11 = halbe relative ULP eines
-//         half-Worts (je DDF-Slot und fuer das rho-Wort), k = 2 wo boden_eq die feq neu rundet (z <= boden_eq_n), sonst 1;
-//         64 >= Zahl der gerundeten Float-Operationen der Kollisionskette je Zelle (19 Populationen x <= 3 Rundungen).
+//         half-Worts (je DDF-Slot und fuer das rho-Wort), k = 2 wo boden_eq die feq neu rundet (z <= boden_eq_n), sonst 1 --
+//         k ist PLAUSIBEL, nicht hergeleitet (Pruefpass C2a, N2: Summe|f_post| vor boden_eq gegen Summe|feq~| danach; zu eng
+//         hiesse Fehlalarm, nie falsches ok). 64*FLT_EPSILON ist KONSERVATIV angesetzt, nicht abgezaehlt (N3: Vor-/Nachsumme,
+//         feq-Kette, P-TRT); der Anteil "1+" dominiert ohnehin.
 //   (iv)  Haken 2 reisst S an mindestens einer Zelle
-//   (v)   an asymmetrischen TYPE_MS-Zellen (Summe der MS-Korrekturen != 0) reisst mms S, alt nicht; gibt es keine -> "nicht trennscharf"
+//   (v)   asymmetrische TYPE_MS-Zellen (|Summe der MS-Korrekturen| > S): dort MUSS mms S reissen und alt nicht, und
+//         (mms - alt) muss die Host-Formel treffen (prueft die Formel gegen apply_moving_boundaries). Gibt es keine: im Log
+//         "nicht trennscharf" -- an der Kugel konstruktiv (Waende laufen ueber ganz x, nur u_x != 0, Kugel steht); Haken 3 folgt in C2c.
 //   Zaehler: 217 = 3*NP, 218 = 3*TYPE_E, 219 = NP, 220 = TYPE_E (nur der gezaehlte aus-Aufruf).
 // Rechnet EINEN Schritt mehr; nur mit CFD_RHO_REK_PRUEF=1 und hinter allen Abnahmen.
 static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, const uint Nz, const uint achse, const uint pos, const float u_lat, const string& out_dir, const string& fall) {
@@ -4787,8 +4792,9 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 	for(const ulong n : d->po_zellen_liste()) { const ulong g = auf_ebene(n); if(g<NP) auslass[(size_t)g] = 1u; }
 	const ulong t0 = lbm.get_t();
 	if(t0==0ull) { print_error("RHO-REKONSTRUKTION ("+fall+"): t0 = 0, t0-1 ist nicht definiert -- CFD_RHO_REK_PRUEF=1 liefe ohne Wirkung."); return; }
-	d->alloc_rho_rek(NP);
-	d->alloc_rho_ausgabe(NP);
+	const ulong NP_max = std::max((ulong)Nx*(ulong)Nz, (ulong)Nx*(ulong)Ny); // beide Ebenen (y und z) -- ein gebundener Puffer darf nicht wachsen
+	d->alloc_rho_rek(NP_max);
+	d->alloc_rho_ausgabe(NP_max);
 	d->finish_queue();
 	d->rho_clamp_hits.read_from_device();
 	const uint h0[4] = {d->rho_clamp_hits[217], d->rho_clamp_hits[218], d->rho_clamp_hits[219], d->rho_clamp_hits[220]};
@@ -4852,7 +4858,7 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 	// ---- Auswertung
 	const double eps_fp = 64.0*1.1920929e-7, halb_ulp = 1.0/2048.0;
 	ulong anz[11]={0}, gleich[11]={0}, vor_gleich[11]={0}, rek_gleich_vor[11]={0}, aus_ne_alt[11]={0}, es_ne_puffer[11]={0}, s_verletzt[11]={0}, n_klemm=0ull, n_e_ebene=0ull;
-	ulong n_ms_asym=0ull, ms_asym_mms_reisst=0ull, ms_asym_alt_reisst=0ull, haken2_reisst=0ull;
+	ulong n_ms_asym=0ull, ms_asym_mms_reisst=0ull, ms_asym_alt_reisst=0ull, ms_formel_falsch=0ull, haken2_reisst=0ull, haken2_basis=0ull, n_klemm_t0=0ull;
 	double max_quote_alt[11]={0}, max_quote_mms_ms=0.0;
 	std::vector<std::vector<double>> abs_ausg(NK), abs_alt(NK);
 	std::vector<std::pair<uint,ulong>> klemm; std::vector<std::vector<ulong>> abweicher(NK), s_bsp(NK);
@@ -4869,8 +4875,16 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 		const float r_vor = rho_unpack(w_vor[(size_t)g]);
 		if((k==1u||k==2u||k==7u)&&as_uint(aus[(size_t)g])!=as_uint(r_vor)) es_ne_puffer[k]++;
 		const float roh = rek[(size_t)(4ull*g+1ull)];
-		const bool geklemmt = (k==0u||k==3u||k>=6u)&&k!=7u&&(roh<=RHO_CLAMP_MIN||roh>=RHO_CLAMP_MAX);
-		if(geklemmt) { n_klemm++; if(klemm.size()<3u) klemm.push_back({k, g}); }
+		// Klemmzellen, nach Zeitschritt getrennt (Pruefpass C2a, M1):
+		//  klemm_vor: im Schritt t0-1 geklemmt (Pufferwort bzw. Nachkollisionssumme AUF der Klemmgrenze -- 0,5/1,5 sind als FP16S-Wort
+		//             exakt) -> dann ist Summe f_post = rho_roh + w(rho_k - rho_roh) != rho_k; nur fuer (iii) auszunehmen. dd 8 mm z=1:
+		//             7 Zellen mit Puffer 1,5 rissen S (Quote 16,8), bevor dieser Ausschluss existierte. DEKLARIERTE AUSNAHME der Ausgabe (b).
+		//  klemm_t0:  im Schritt t0 geklemmt (rho_roh ausserhalb) -> nur fuer Haken 2 auszunehmen.
+		const bool wand_klasse = (k==0u||k==3u||k>=6u)&&k!=7u;
+		const bool klemm_vor = wand_klasse&&(r_vor<=RHO_CLAMP_MIN||r_vor>=RHO_CLAMP_MAX||alt[(size_t)(4ull*g)]<=RHO_CLAMP_MIN||alt[(size_t)(4ull*g)]>=RHO_CLAMP_MAX);
+		const bool klemm_t0  = wand_klasse&&(roh<=RHO_CLAMP_MIN||roh>=RHO_CLAMP_MAX);
+		if(klemm_vor) { n_klemm++; if(klemm.size()<3u) klemm.push_back({k, g}); }
+		if(klemm_t0) n_klemm_t0++;
 		if(k==0u||k==3u||k==6u||k>=8u) {
 			const double sumabs = (double)alt[(size_t)(4ull*g+1ull)];
 			const double fak = (d->boden_eq_n>0u&&n/NxNy<=(ulong)d->boden_eq_n) ? 2.0 : 1.0;
@@ -4878,19 +4892,23 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 			const double da = fabs((double)alt[(size_t)(4ull*g)]-(double)r_vor), dm = fabs((double)mms[(size_t)(4ull*g)]-(double)r_vor), dh = fabs((double)haken2[(size_t)g]-(double)r_vor);
 			abs_ausg[k].push_back(fabs((double)rek[(size_t)(4ull*g)]-(double)r_vor));
 			abs_alt[k].push_back(da);
-			if(!geklemmt) {
+			if(!klemm_vor) {
 				if(da>S) { s_verletzt[k]++; if(s_bsp[k].size()<2u) s_bsp[k].push_back(g); }
 				if(da/S>max_quote_alt[k]) max_quote_alt[k] = da/S;
-				if(dh>S) haken2_reisst++;
 				if(k==3u) {
 					const double sc = ms_korrektur(n);
-					if(fabs(sc)>1e-9) { n_ms_asym++; if(dm>S) ms_asym_mms_reisst++; if(da>S) ms_asym_alt_reisst++; if(dm/S>max_quote_mms_ms) max_quote_mms_ms = dm/S; }
+					if(fabs(sc)>S) { // nur Zellen, an denen die Korrektur S ueberhaupt reissen KANN (M2)
+						n_ms_asym++; if(dm>S) ms_asym_mms_reisst++; if(da>S) ms_asym_alt_reisst++; if(dm/S>max_quote_mms_ms) max_quote_mms_ms = dm/S;
+						const double dmm = (double)mms[(size_t)(4ull*g)]-(double)alt[(size_t)(4ull*g)]; // = Summe der Korrekturen, bis auf Rundung
+						if(fabs(dmm-sc)>eps_fp*(1.0+sumabs+fabs(sc))) ms_formel_falsch++;
+					}
 				}
 			}
+			if(!klemm_t0&&!klemm_vor) { haken2_basis++; if(dh>S) haken2_reisst++; }
 		}
 	}
 	print_info("---------------- RHO-REKONSTRUKTION ("+fall+", "+ebene_name+", RHO_RAND C2a) ----------------");
-	print_info(to_string(NP)+" Zellen, t0="+to_string(t0)+"; Klemmzellen (rho_roh ausserhalb Klemme): "+to_string(n_klemm)+", aus der Schranke genommen");
+	print_info(to_string(NP)+" Zellen, t0="+to_string(t0)+"; Klemmzellen t0-1: "+to_string(n_klemm)+" (aus (iii) genommen, deklarierte Ausnahme der Ausgabe (b)), Klemmzellen t0: "+to_string(n_klemm_t0)+" (aus Haken 2 genommen)");
 	bool ok = true;
 	for(uint k=0u; k<NK; k++) {
 		if(anz[k]==0ull) continue;
@@ -4901,13 +4919,12 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 		if((soll_ident||k==7u)&&gleich[k]!=anz[k]) ok = false;
 		if(aus_ne_alt[k]>0ull||es_ne_puffer[k]>0ull||s_verletzt[k]>0ull) ok = false;
 	}
-	print_info("  Haken 2 (Ausgabe mit t statt t-1): "+to_string(haken2_reisst)+" Zellen reissen S (Soll > 0)");
+	print_info("  Haken 2 (Ausgabe mit t statt t-1): "+to_string(haken2_reisst)+" von "+to_string(haken2_basis)+" Zellen reissen S = "+to_string(haken2_basis>0ull?100.0f*(float)haken2_reisst/(float)haken2_basis:0.0f,1u)+" % (Soll > 0)");
 	if(haken2_reisst==0ull) ok = false;
 	if(n_ms_asym>0ull) {
-		print_info("  MS asymmetrisch: "+to_string(n_ms_asym)+" Zellen; MIT MS-Korrektur reissen S "+to_string(ms_asym_mms_reisst)+" (Soll > 0, max Quote "+to_string(max_quote_mms_ms,3u)+"), OHNE "+to_string(ms_asym_alt_reisst)+" (Soll 0)");
-		if(ms_asym_alt_reisst>0ull) ok = false;
-		if(ms_asym_mms_reisst==0ull) print_warning("  MS asymmetrisch vorhanden, aber auch MIT Korrektur keine S-Verletzung -- die Ebene trennt die Varianten nicht.");
-	} else print_info("  MS asymmetrisch: 0 Zellen auf dieser Ebene -- MS-Varianten hier nicht trennscharf");
+		print_info("  MS asymmetrisch (|Korrektur| > S): "+to_string(n_ms_asym)+" Zellen; MIT Korrektur reissen S "+to_string(ms_asym_mms_reisst)+" (Soll alle, max Quote "+to_string(max_quote_mms_ms,3u)+"), OHNE "+to_string(ms_asym_alt_reisst)+" (Soll 0), Host-Formel falsch "+to_string(ms_formel_falsch)+" (Soll 0)");
+		if(ms_asym_alt_reisst>0ull||ms_asym_mms_reisst!=n_ms_asym||ms_formel_falsch>0ull) ok = false;
+	} else print_info("  MS asymmetrisch (|Korrektur| > S): 0 Zellen -- MS-Varianten auf dieser Ebene NICHT TRENNSCHARF (Entscheidung stuetzt sich auf die Herleitung; Haken 3 folgt in C2c)");
 	const ulong soll_z[4] = {3ull*NP, 3ull*n_e_ebene, NP, n_e_ebene};
 	print_info("  Zaehler 217/218/219/220: +"+to_string(dz[0])+"/+"+to_string(dz[1])+"/+"+to_string(dz[2])+"/+"+to_string(dz[3])+" (Soll "+to_string(soll_z[0])+"/"+to_string(soll_z[1])+"/"+to_string(soll_z[2])+"/"+to_string(soll_z[3])+")");
 	for(uint i=0u; i<4u; i++) if(dz[i]!=soll_z[i]) ok = false;
