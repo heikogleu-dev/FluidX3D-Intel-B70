@@ -731,6 +731,36 @@ Zahlen ändert — eine ganze Messkampagne, die im Rauschen endet.
 Alternative gleicher Ursache: beide auf 2 Byte → **−3 961 MiB VRAM**, −7,2 %. Format am echten
 Feld entschieden: `FP16S(rho−1)`, **nicht** int16 für u — das kippt Gates am Wandmodell.
 
+## Durchsatz-Audit Nahfeldkernel: warum 69 % statt 85 % Spitze (Auftrag Heiko 15.09.2026, geprüft, NICHT gemessen)
+
+**Auftrag:** die Lücke 420 GB/s (69 % von 608) gegen Upstream 520 GB/s (85 %) auf derselben B70 mechanismenweise verorten —
+messen, nicht bauen; keine Kerneländerung ohne Freigabe; eine Variable je Lauf; Screening 8 mm. Heiko: Doppelprüfungen gegen
+frühere Audits sind ausdrücklich erwünscht.
+
+**Prüfung der Ausgangslage (Hauptsitzung 15.09. abends):**
+- 420 / 608 / 520 GB/s und 5028 MLUPs: belegt in diesem Dokument (Kopf), **Stand 11.09.** — also VOR den Zwei-Byte-Feldern (12.09.),
+  RHO_SPARSAM (12.09.) und RHO_RAND (15.09., jetzt Standard). Vor jeder Deutung am heutigen Stand neu messen.
+- „46,1 B/Zelle gemessen (8 mm)“ ist verwechselt: **gemessen 8 mm = 46,6 B/Zelle** (Nahfeld-Spitze 2916 MiB, RHO_RAND);
+  46,1 B/Zelle ist die **4-mm-Rechnung** mit RHO_RAND (p4_register 48,0 gemessen minus 973 MiB gerechnet).
+- „113 B/Zelle/Schritt Verkehr nach der rho-Einsparung“: **keine Quelle im Repo** (113 kommt nur als 113,0 M Zellen vor,
+  LEISTUNG.md:105). Belegt ist §3: 83,5 B je Gitterzelle, Freistrom-Fluid 93 B, Facettenzelle 339,5 B (Stand 11.09.). Neu erheben.
+- „Gate prüft 37 Kernel“: heute **39 Kernel × 17 Arme × 2 Geräte** (scratch_gate.sh, inkl. Produktionsarme prod8nah/prod8fern aus
+  echten Defines seit 1760eaa).
+
+| Punkt | Stand nach Prüfung | nächster Messschritt |
+|---|---|---|
+| **A · SIMD/GRF** | **Offline belegt (HEAD 31061af, igc_offline, beide Geräte):** `stream_collide` läuft auf der B70 mit **SIMD16** — in ALLEN 17 Gate-Armen, auch im minimalen Kanalarm e0p0; praktisch alle übrigen Kernel dort mit SIMD32 (u. a. update_fields, boden_eq, sgs_fdwand). iGPU: `stream_collide` **SIMD8**. `grf_count` = 128 in **jedem** Kernel → kein Druckmaß. Früherer Befund AUDIT-BEFUNDE.md ~970 (26.08.): „simd8/16 einzig spillfrei bei 128 GRF“; offen seit dort (Rang 4): `-cl-intel-enable-auto-large-GRF-mode`. clinfo B70: Sub-Group-Größen 16/32, lokale Arbeitsgruppe im Code 64 (opencl.hpp:3). | **A1** (offline, Minuten): Gate-Arm „upstream“ ohne Fork-Defines (kein FACETTEN/SUBGRID/Klemmen/PTRT) → SIMD-Breite von `stream_collide` auf der B70. Ist sie 32, ist der Abfall auf 16 fork-verursacht und Kandidat für die Lücke. **A2** (ein GPU-A/B, 8 mm, Wanduhr, bitgleich prüfen): Compileroption auto-large-GRF. **A3** (Kerneländerung → Freigabe): `intel_reqd_sub_group_size(32)` an `stream_collide`, erst Gate (private/spill), dann A/B. |
+| **B · Divergenz Facettenkette** | **Widerspruch im Bestand:** AUDIT-BEFUNDE ~970 (26.08.) „Verzweigungen im Innersten entwarnt (Divergenz auf 0,67 % der Zellen)“ gegen §6 hier „Divergenzkosten ungemessen“. ELIBB-an/aus ist als Divergenz-A/B **nicht sauber** (ändert Physik; der Arm ohne ELIBB war 2,46 % LANGSAMER, Speicher elibb-am-fahrzeug-unverzichtbar). | **B1** (Host, ohne Lauf): Facettenzellen je SIMD-Block zählen — lineare Indexreihenfolge n, Blöcke zu 16 (B70) bzw. 64 (Arbeitsgruppe); Verteilung 0/1/…/16. **B2** nur spezifizieren: Zellklassen-Sortierung (Dispatch-Indirektion). |
+| **C · „L2“** | clinfo B70: *Global Memory cache size* **24 MiB**, Zeilenlänge 256 B (Bedeutung auf einer dGPU unklar — kein CPU-L2; CPU 285K meldet 3 MiB). Rechnung Arbeitssatz eine xy-Ebene DDFs (19 × 2 B): 8 mm 845×333 → 10,7 MB (passt), 4 mm 1689×661 → 42,4 MB (passt nicht). | **C1**: GB/s bei 8 mm und 4 mm an WORTGLEICHER Zeile vergleichen (sonst vermischt); nur ein Unterschied im Durchsatz je Zelle würde die Cache-These tragen. |
+| **D · boden_eq-Dispatch** | Offen seit Runde 1 (§6: 519,1 M Work-Items für 1,15 M Treffer; M6 ABSTAND-Scan per Flagbit). Früherer Vorschlag AUDIT-BEFUNDE ~963 (Rang 3): „boden_eq-3D-Range, ~250× weniger Threads, Kernel unverändert“. Neu 15.09.: boden_eq klemmt nie (Klemmen S0d, 0 Treffer bei 8,6 Mio Band-Resets). | **D1**: Zeitnahme um den boden_eq-Enqueue (finish davor/danach) je Grobschritt, 8 mm; dann **D2** 3D-Range als eigene Variable. |
+| **E · Koaleszenz** | Befund §3 („19 load.ugm.d16u32 + 19 store“) stammt vom 11.09., **vor** U_FP16 und RHO_RAND. Gegenprüfung sinnvoll. | **E1** (offline): asm-Statistik von `stream_collide` im Arm prod8nah auf Nachrichtenbreite/-zahl auszählen. |
+| **F · Umgruppierung** | Zweimal folgenlos bzw. mit umgekehrtem Vorzeichen (2073 Instr. weniger → 2,46 % langsamer; Spalding −4,57 % → ±0). | nur verfolgen, wenn A Registerdruck als Occupancy-Bremse zeigt; sonst abhaken. |
+
+**Vorab festgehaltene Deutung (aus dem Auftrag):** SIMD16 statt 32 oder hoher GRF-Druck → Registerarbeit lohnt · Facetten-Blöcke
+stark gestreut → Sortierung spezifizieren · Cache klein gegen Arbeitssatz → bandbreitenlimitiert, nicht kernel-limitiert ·
+alles unauffällig → 69 % sind der Preis der Wandmodellkette.
+**Reihenfolge (billig zuerst):** A1 → E1 → B1 (alle ohne GPU) → A2 → D1 → C1. Report als Markdown in den Chat, nicht committen.
+
 ## Die billigen
 
 | Hebel | Gewinn | Aufwand |
