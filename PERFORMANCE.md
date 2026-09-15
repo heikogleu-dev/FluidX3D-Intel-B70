@@ -761,6 +761,12 @@ stark gestreut → Sortierung spezifizieren · Cache klein gegen Arbeitssatz →
 alles unauffällig → 69 % sind der Preis der Wandmodellkette.
 **Reihenfolge (billig zuerst):** A1 → E1 → B1 (alle ohne GPU) → A2 → D1 → C1. Report als Markdown in den Chat, nicht committen.
 
+**A1, erster Teil erledigt (15.09. abends, offline):** `stream_collide` mit den echten 8-mm-Produktions-Defines, aber OHNE alle
+Fork-Features (kein FACETTEN*/SGS_*/SUBGRID/PTRT/RHO_RAND/U_SPARSAM/F_LISTE/KLEMM, rho und u als float wie Upstream) bleibt auf der
+B70 **SIMD16** (iGPU SIMD8). Die zuschaltbaren Fork-Features erklären die Breite also nicht. Offen bleibt **A1b**: der Upstream-Kernel
+selbst (git-Historie enthält Upstream ab 7680735, 2022-08-04; Fork-Basis bestimmen, dessen kernel.cpp mit Upstream-Defines offline
+übersetzen). Erst wenn Upstream auf der B70 SIMD32 bekommt, ist die Breite ein Fork-Kernbefund.
+
 ## Die billigen
 
 | Hebel | Gewinn | Aufwand |
