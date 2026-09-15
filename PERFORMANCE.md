@@ -805,7 +805,7 @@ null**. Jede Begrenzung, die nur f_neq anfasst, ist damit **exakt** erhaltend, n
 näherungsweise.
 
 > **BERICHTIGT 13.09.2026:** Positivität ist parameterfrei, wandert aber sehr wohl mit `u_lat`. Das
-> D3Q19-Gleichgewicht ist nur für |u|² ≤ 2/3 in Gittereinheiten positiv. Die heutige Komponentenklemme
+> D3Q19-Gleichgewicht ist nur für |u|² ≤ 1/3 in Gittereinheiten positiv [BERICHTIGT 15.09.: hier stand 2/3 — das gilt nur für f₀; für i≠0 ist g(x)=1+3x+4,5x²−1,5u² bei x=c_i·u=−1/3 minimal, 0,5−1,5u², KLEMMEN-STUFE0-PLAN.md §1 Punkt 5]. Die heutige Komponentenklemme
 > lässt schräg zu den Achsen |u|² bis 1,0 zu. Außerdem greift die **Dichteklemme** in p4_register
 > 14,4 Mio mal, zehnfach öfter als die u-Klemme, und erhält die Masse nicht. Stufenplan in
 > `UEBERGABE-2026-09-14.md` §1.
