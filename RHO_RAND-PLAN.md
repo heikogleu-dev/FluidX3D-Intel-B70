@@ -378,3 +378,16 @@ Je Klasse 1–3 Zellen, Index im Log.
 - Klemmzelle: roh ≠ geklemmt, geklemmt = gespeichert.
 
 **FP16 (Nachtrag):** Mit K3 erledigt. Die Fernfeld-Kopplung liest weiter den quantisierten Puffer und wird nie rekonstruiert. Die Nahfeld-Rekonstruktion fließt nur in Ausgaben, und die Wortvergleiche laufen gerätegepackt (Abschnitt 6).
+
+## 12 Entscheidungen Heiko 15.09.2026 (zu §10)
+
+1. **Nur Nahfeld:** ja. **Später auch Fernfeld**, dann mit einer eigenen Region R3 für die Entnahmeebenen (K3).
+2. **rho-Ausgabe:** float.
+3. **Deklarierte Abweichung** der rho-Spalten ist akzeptiert: rho(t+1), an Facetten vor dem Wandmodell.
+4. **R1:** überall Dicke 2.
+5. **RHO_RAND × RHO_SPARSAM:** **Entscheidung B** (Prüfbefund M3). RHO_RAND ersetzt die rho-Schreibmaske
+   NUR im Nahfeld, das Fernfeld behält seine Maske. Umgesetzt an der Lesestelle (s_rho_takt Nahfeld = 0,
+   mit Ansage).
+6. U_SPARSAM × SGS_BAND (K7): nicht beantwortet, bleibt offen.
+7. APG-Weg (a/b): offen. Grundlage ist der C0-Zensus bei 8 mm: Die APG-Lesemenge umfasst 1 502 474 Zellen,
+   davon liegen 150 578 nicht in L1+L2.

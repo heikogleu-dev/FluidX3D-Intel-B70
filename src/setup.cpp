@@ -6069,7 +6069,7 @@ static void main_setup_fahrzeug_dd() {
 	    LBM_Domain::s_u_takt = (us_>0u) ? ratio : 0u;
 	    if(us_>0u&&env_u("CFD_SGS_BAND", 0u)>0u) print_error("CFD_U_SPARSAM und CFD_SGS_BAND schliessen sich aus: das Band liest u an den Lagen 2..8 von der Wand, also bis zu 8 Zellen ausserhalb der Facettenzelle. Die Maske dilatiert die F-BBox nur um 2 und waere keine Obermenge mehr.");
 	    if(us_>0u) print_info("u-SPARSAM (CFD_U_SPARSAM, TODO 2 Schritt 3): stream_collide schreibt u nur noch in der Randschale der Dicke 2 (deckt deriv_reg an den 6 Nachbarn jeder TYPE_E-Zelle und po_interior) und in der um 2 dilatierten F-BBox (deckt sgs_fdwand und fac_nachbar_ab); am letzten Substep jedes Grobschritts (jeder "+to_string(ratio)+"-te feine Schritt) wird u wieder UEBERALL geschrieben, weil die N2F-Entnahme dort 4^3-Bloecke ueber rund ein Viertel der Domaene liest. Der Gewinn ist dadurch konstruktiv auf (ratio-1)/ratio gedeckelt. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_U_SPARSAM=0.");
-	    if(rs_>0u) print_info("rho-SPARSAM (CFD_RHO_SPARSAM, TODO 2 Schritt 1): stream_collide schreibt rho nur noch fuer x >= Nx-2 (konstruktive Obermenge von po_interior -- der Druckauslass ist die x_max-Flaeche, die Innenzelle stammt aus einer 26er-Nachbarsuche) sowie an jedem "+to_string(LBM_Domain::s_rho_takt)+"-ten feinen Schritt, also an der Sample-Kadenz, nach der der Host das Feld liest. u bleibt UNANGETASTET. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_RHO_SPARSAM=0.");
+	    if(rs_>0u&&env_u("CFD_RHO_RAND", 0u)==0u) print_info("rho-SPARSAM (CFD_RHO_SPARSAM, TODO 2 Schritt 1): stream_collide schreibt rho nur noch fuer x >= Nx-2 (konstruktive Obermenge von po_interior -- der Druckauslass ist die x_max-Flaeche, die Innenzelle stammt aus einer 26er-Nachbarsuche) sowie an jedem "+to_string(LBM_Domain::s_rho_takt)+"-ten feinen Schritt, also an der Sample-Kadenz, nach der der Host das Feld liest. u bleibt UNANGETASTET. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_RHO_SPARSAM=0.");
 	  }
 	  { // ★ 15.09.2026 RHO_RAND, Commit C0 (RHO_RAND-PLAN.md): rho nur noch in der Domaenen-Randschale R1,
 	    // sonst aus den DDFs rekonstruiert. NUR NAHFELD (Plan K3: die Fernfeld-Entnahme liest rho(t_c), das nach
@@ -6081,7 +6081,13 @@ static void main_setup_fahrzeug_dd() {
 	    LBM_Domain::s_rho_rand = rr_;
 	    if(rr_==0u&&env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u) print_warning("CFD_RHO_RAND_TESTHAKEN ist gesetzt, CFD_RHO_RAND aber 0 -- der Testhaken ist wirkungslos (Ansage-Doktrin).");
 	    if(rr_>0u) {
-	      if(env_u("CFD_RHO_SPARSAM", 0u)>0u) print_error("CFD_RHO_RAND und CFD_RHO_SPARSAM schliessen sich aus: RHO_RAND ersetzt die Schreibmaske in dieser Domaene (RHO_RAND-PLAN.md §6). Einen von beiden setzen.");
+	      // ★ Heiko 15.09., Entscheidung B (Pruefbefund M3): RHO_RAND ersetzt RHO_SPARSAM NUR im Nahfeld. Das Fernfeld
+	      // liest CFD_RHO_SPARSAM weiter selbst (Block "TODO 2 Schritt 2") und behaelt seine Maske -- sonst traege jeder
+	      // RHO_RAND-Arm eine zweite Variable im Fernfeld. Im Nahfeld wird der SPARSAM-Takt hier genullt.
+	      if(env_u("CFD_RHO_SPARSAM", 0u)>0u) {
+	        LBM_Domain::s_rho_takt = 0u;
+	        print_info("CFD_RHO_RAND ersetzt CFD_RHO_SPARSAM im NAHFELD (rho-Takt dort 0); das FERNFELD behaelt seine rho-Schreibmaske (Entscheidung Heiko 15.09.).");
+	      }
 	      if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus: APG liest rho an den 18 Nachbarn jeder Facettenzelle im Inneren, dort gibt es unter RHO_RAND keinen Puffer. Die APG-Lesemenge zaehlt der C0-Zensus; der APG-Weg (Region oder DDFs) ist eine eigene Entscheidung.");
 	      if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0: der Voll-Read-Slicepfad liest den ganzen rho-Puffer vom Geraet, den es unter RHO_RAND nicht mehr gibt. Den Ebenen-Gather (CFD_SLICE_GPU=1) benutzen.");
 	      if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1: der Pruefarm vergleicht gegen den vollen rho-Puffer. Unter RHO_RAND gehoert dieser Vergleich in den eigenen Pruefmodus (Plan C3), der noch nicht gebaut ist.");
