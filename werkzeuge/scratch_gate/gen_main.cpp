@@ -9,7 +9,7 @@ using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
 
-static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam, const bool u16) {
+static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam, const bool u16, const bool rand) {
 	string s =
 	"\n#define cl_workgroup_size 64u"
 	"\n#ifdef cl_khr_fp64"
@@ -134,6 +134,16 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 	          "\n#define def_SMX0 8u"  "\n#define def_SMY0 4u"  "\n#define def_SMZ0 4u"
 	          "\n#define def_SMNX 46u" "\n#define def_SMNY 22u" "\n#define def_SMNZ 14u"
 	: (string)"";
+	// ★ 15.09.2026 RHO_RAND C2b (RHO_RAND-C2-PLAN.md §5/§6): der PRODUKTIONSPUNKT unter RHO_RAND -- RHO_RAND ersetzt
+	// RHO_SPARSAM/RHO_SMBOX im Nahfeld, U_SPARSAM bleibt. def_RR_N = Randschale des Gate-Kanals 62x30x22:
+	// 40920 - 58*26*18 = 13776. Nie zusammen mit sparsam (die Aufrufe im Gate halten das ein).
+	s += rand
+	? (string)"\n#define RHO_RAND"
+	          "\n#define def_RR_N 13776ul"
+	          "\n#define U_SPARSAM"
+	          "\n#define def_SMX0 8u"  "\n#define def_SMY0 4u"  "\n#define def_SMZ0 4u"
+	          "\n#define def_SMNX 46u" "\n#define def_SMNY 22u" "\n#define def_SMNZ 14u"
+	: (string)"";
 	s +=
 	"\n#define UPDATE_FIELDS"
 	"\n#define VOLUME_FORCE"
@@ -165,19 +175,21 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 }
 
 int main(int argc, char** argv) {
-	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <ausgabe.cl>
-	if(argc<7) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <u16:on|off> <ausgabe.cl>\n"; return 2; }
+	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <u16:on|off> <rand:on|off> <ausgabe.cl>
+	if(argc<8) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <u16:on|off> <rand:on|off> <ausgabe.cl>\n"; return 2; }
 	const bool elibb   = string(argv[1])=="on";
 	const bool ptrt    = string(argv[2])=="on";
 	const bool rho16   = string(argv[3])=="on";
 	const bool sparsam = string(argv[4])=="on";
 	const bool u16     = string(argv[5])=="on";
-	const string out = argv[6];
-	const string code = device_defines(elibb, ptrt, rho16, sparsam, u16) + get_opencl_c_code();
+	const bool rand    = string(argv[6])=="on";
+	if(rand&&sparsam) { std::cerr << "gen: rand und sparsam schliessen sich aus (RHO_RAND ersetzt RHO_SPARSAM)\n"; return 2; }
+	const string out = argv[7];
+	const string code = device_defines(elibb, ptrt, rho16, sparsam, u16, rand) + get_opencl_c_code();
 	std::ofstream f(out);
 	f << code;
 	f.close();
 	std::cout << "geschrieben: " << out << " (" << code.size() << " Bytes, ELIBB="
-	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ", RHO16=" << (rho16?"an":"aus") << ", SPARSAM=" << (sparsam?"an":"aus") << ", U16=" << (u16?"an":"aus") << ")\n";
+	          << (elibb?"an":"aus") << ", PTRT=" << (ptrt?"an":"aus") << ", RHO16=" << (rho16?"an":"aus") << ", SPARSAM=" << (sparsam?"an":"aus") << ", U16=" << (u16?"an":"aus") << ", RAND=" << (rand?"an":"aus") << ")\n";
 	return 0;
 }

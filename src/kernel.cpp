@@ -824,6 +824,20 @@ string opencl_c_container() { return R( // ########################## begin of O
 )+R(uxx index(const uint3 xyz) { // assemble 1D index from 3D coordinates (x,y,z -> n)
 	return (uxx)xyz.x+(uxx)(xyz.y+xyz.z*def_Ny)*(uxx)def_Nx; // n = x+(y+z*Ny)*Nx
 }
+)+"#ifdef RHO_RAND"+R(
+)+R(uxx rr_idx(const uxx n) { // ★ 15.09.2026 RHO_RAND C2b: Zelle -> Index in der Randschale R1 (Dicke 2, RHO_RAND-PLAN.md §4); def_RR_N = nicht in R1 (Papierkorb-Slot)
+	const uint3 c = coordinates(n);
+	const uxx a = (uxx)def_Nx*(uxx)def_Ny;
+	if(c.z<2u) return n;
+	if(c.z+2u>=def_Nz) return 2u*a+(n-(uxx)(def_Nz-2u)*a);
+	const uxx r0 = 4u*a+(uxx)(c.z-2u)*(uxx)(4u*def_Nx+4u*(def_Ny-4u));
+	if(c.y<2u) return r0+(uxx)c.x+(uxx)c.y*(uxx)def_Nx;
+	if(c.y+2u>=def_Ny) return r0+2u*(uxx)def_Nx+(uxx)c.x+(uxx)(c.y+2u-def_Ny)*(uxx)def_Nx;
+	if(c.x<2u) return r0+4u*(uxx)def_Nx+4u*(uxx)(c.y-2u)+(uxx)c.x;
+	if(c.x+2u>=def_Nx) return r0+4u*(uxx)def_Nx+4u*(uxx)(c.y-2u)+(uxx)(c.x+4u-def_Nx);
+	return (uxx)def_RR_N;
+}
+)+"#endif"+R( // RHO_RAND
 )+R(float3 position(const uint3 xyz) { // 3D coordinates to 3D position
 	return (float3)((float)xyz.x+0.5f-0.5f*(float)def_Nx, (float)xyz.y+0.5f-0.5f*(float)def_Ny, (float)xyz.z+0.5f-0.5f*(float)def_Nz);
 }
@@ -1579,7 +1593,11 @@ ulong cell_base(const uxx n, const global uint* tile_slot) {
 )+"#endif"+R( // MOVING_BOUNDARIES
 	}
 	float feq[def_velocity_set]; // f_equilibrium
+)+"#ifdef RHO_RAND"+R(
+	{ const uxx rr_ = rr_idx(n); calculate_f_eq(rr_<(uxx)def_RR_N ? load_rho(rho, rr_) : 1.0f, load_u(u, n), load_u(u, def_N+(ulong)n), load_u(u, 2ul*def_N+(ulong)n), feq); } // ★ C2b: innen 1,0 = Saat rho_pack(1)
+)+"#else"+R(
 	calculate_f_eq(load_rho(rho, n), load_u(u, n), load_u(u, def_N+(ulong)n), load_u(u, 2ul*def_N+(ulong)n), feq);
+)+"#endif"+R( // RHO_RAND
 )+"#ifdef SURFACE"+R( // automatically generate the interface layer between fluid and gas
 	{ // separate block to avoid variable name conflicts
 		float phin = phi[n];
@@ -3018,7 +3036,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R(
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
+)+"#ifdef RHO_RAND"+R(
+		{ const uxx rr_ = rr_idx(n); // ★ C2b: R1; Slot 216 zaehlt Zugriffe ausserhalb (ungegatet, Soll 0; Besuchsbeleg Slot 211)
+		  if(rr_>=(uxx)def_RR_N&&rho_clamp_hits[216]<0xF0000000u) atomic_inc(&rho_clamp_hits[216]);
+		  rhon = load_rho(rho, rr_); }
+)+"#else"+R(
 		rhon = load_rho(rho,        n); // apply preset velocity/density
+)+"#endif"+R( // RHO_RAND
 		// ★ TODO 2 Schritt 4 -- BEREICHSWAECHTER an der einzigen rho-Lesestelle, ueber die der
 		// Speicherinhalt in die RECHNUNG zurueckfliesst.
 		//
@@ -3180,6 +3204,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(flagsn_bo!=TYPE_E) // only update fields for non-TYPE_E cells
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	{
+		)+"#ifdef RHO_RAND"+R(
+		// ★ 15.09.2026 RHO_RAND C2b: rho nur in R1 und nur dort, wo es je Schritt gelesen wird (po_interior, x >= Nx-2 --
+		// dieselbe konstruktive Obermenge wie RHO_SPARSAM). felder_voll Bit 0 hat hier KEINE Wirkung: Ausgaben lesen
+		// rho_ausgabe_ebene. Slots 204/205 zaehlen wie unter RHO_SPARSAM genau einen Schritt.
+		{ const bool rho_schreiben = (uint)(n%(uxx)def_Nx)+2u>=(uint)def_Nx;
+		  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[rho_schreiben?205u:204u]<0xF0000000u) atomic_inc(&rho_clamp_hits[rho_schreiben?205u:204u]);
+		  if(rho_schreiben) store_rho(rho, rr_idx(n), rhon); }
+		)+"#else"+R(
 		)+"#ifdef RHO_SPARSAM"+R(
 		// ★ TODO 2 Schritt 1 (12.09.2026): rho wird nur noch dort geschrieben, wo es im NAECHSTEN
 		// Schritt gelesen wird, plus an den Schritten, nach denen der Host das ganze Feld liest.
@@ -3217,6 +3249,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		)+"#else"+R(
 		store_rho(rho, n, rhon); // update density field
 		)+"#endif"+R( // RHO_SPARSAM
+		)+"#endif"+R( // RHO_RAND
 		)+"#ifdef U_SPARSAM"+R(
 		// ★ TODO 2 Schritt 3 (12.09.2026): u wird nur noch dort geschrieben, wo es VOR dem naechsten
 		// Vollschreiben gelesen wird. Die Leser von u je feinem Schritt und ihre Reichweite:
@@ -4121,7 +4154,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(flagsn_bo!=TYPE_E) // only update fields for non-TYPE_E cells
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
 	{
+		)+"#ifdef RHO_RAND"+R(
+		{ const uxx rr_ = rr_idx(n); if(rr_<(uxx)def_RR_N) store_rho(rho, rr_, rhon); } // ★ C2b: toter Pfad, aber gebunden -- nie ausserhalb R1 schreiben
+		)+"#else"+R(
 		store_rho(rho, n, rhon); // update density field
+		)+"#endif"+R( // RHO_RAND
 		store3_u(u, n, (float3)(uxn, uyn, uzn)); // update velocity field
 	}
 } // update_fields()
@@ -4156,7 +4193,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// float32-Raster bei 1,0 runden und damit genau den absoluten Boden von 5,96e-8 einbauen, gegen
 	// den der Absatz darueber argumentiert. Ohne RHO_FP16 expandiert load_drho zu (rho[...]-1.0f) --
 	// zeichengleich zu dem, was hier vorher stand.
+)+"#ifdef RHO_RAND"+R(
+	cache[lid] = gid<N_po ? load_drho(rho, rr_idx((uxx)po_interior[gid])) : 0.0f; // ★ C2b: po_interior liegt in R1 (C0-Waechter 1b)
+)+"#else"+R(
 	cache[lid] = gid<N_po ? load_drho(rho, po_interior[gid]) : 0.0f;
+)+"#endif"+R( // RHO_RAND
 	barrier(CLK_LOCAL_MEM_FENCE);
 	for(uint s=1u; s<cl_workgroup_size; s*=2u) {
 		if(lid%(2u*s)==0u) cache[lid] += cache[lid+s];
@@ -4240,8 +4281,14 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// in die Zone KLEINER |rho-1| -- dort ist der Additionsboden fuehrend. Die Entscheidung bleibt
 	// trotzdem richtig: 6e-8 in rho sind mit dem Umrechenfaktor rho->cp von rund 117 etwa 7e-6 in
 	// cp, gegen die 0,15, um die es geht.
+)+"#ifdef RHO_RAND"+R(
+	{ const uxx rn_ = rr_idx((uxx)n), rm_ = rr_idx((uxx)m); // ★ C2b: Randzelle und Innenzelle liegen in R1 (C0-Waechter 1a/1b)
+	  store_rho(rho, rn_, po_hart!=0u ? fma(po_sigma, rho_out-load_rho(rho, rm_), load_rho(rho, rm_))
+	                                  : fma(po_sigma, (rho_out-1.0f)-po_mean[0], load_rho(rho, rm_))); }
+)+"#else"+R(
 	store_rho(rho, n, po_hart!=0u ? fma(po_sigma, rho_out-load_rho(rho, m), load_rho(rho, m))
 	                              : fma(po_sigma, (rho_out-1.0f)-po_mean[0], load_rho(rho, m)));
+)+"#endif"+R( // RHO_RAND
 	store_u(u, n, load_u(u, m));
 	store_u(u, def_N+(ulong)n, load_u(u, def_N+(ulong)m));
 	store_u(u, 2ul*def_N+(ulong)n, load_u(u, 2ul*def_N+(ulong)m));
@@ -4259,7 +4306,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const ulong n = vi_cells[gid], m = vi_interior[gid];
 	// Reines Kopieren. Dass das unter RHO_FP16 NICHT driftet, haengt am Fixpunkt der Wandlung
 	// (Beweis an rho_pack in lbm.hpp): store_rho(load_rho(w)) liefert dasselbe Wort zurueck.
+)+"#ifdef RHO_RAND"+R(
+	store_rho(rho, rr_idx((uxx)n), load_rho(rho, rr_idx((uxx)m))); // ★ C2b: nur Fernfeld nutzt VI, dort gibt es kein RHO_RAND; Nahfeld-VI sperrt C0-Waechter 1c
+)+"#else"+R(
 	store_rho(rho, n, load_rho(rho, m));
+)+"#endif"+R( // RHO_RAND
 } // apply_velocity_inlet()
 
 // =====================================================================================
@@ -4345,7 +4396,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const ulong o = (ulong)gid*4ul;
 	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
 	if(n>=(uxx)def_N) { out[o]=1.0f; out[o+1ul]=0.0f; out[o+2ul]=0.0f; out[o+3ul]=0.0f; return; }
+)+"#ifdef RHO_RAND"+R(
+	{ const uxx rr_ = rr_idx(n); out[o+0ul] = rr_<(uxx)def_RR_N ? load_rho(rho, rr_) : NAN; } // ★ C2b: innen gibt es kein rho mehr -- NaN-Marker, der Host nimmt rho aus rho_ausgabe_ebene
+)+"#else"+R(
 	out[o+0ul] = load_rho(rho, n);
+)+"#endif"+R( // RHO_RAND
 	out[o+1ul] = load_u(u, n);
 	out[o+2ul] = load_u(u, def_N+(ulong)n);
 	out[o+3ul] = load_u(u, 2ul*def_N+(ulong)n);
@@ -4389,7 +4444,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(rekonstruieren&&flagsn_bo==TYPE_S) { klasse = 2.0f; rekonstruieren = false; }
 	)+"#ifdef EQUILIBRIUM_BOUNDARIES"+R(
 	if(rekonstruieren&&flagsn_bo==TYPE_E) {
+)+"#ifdef RHO_RAND"+R(
+		rhon = load_rho(rho, rr_idx(n)); rho_roh = rhon; klasse = 1.0f; rekonstruieren = false; // ★ C2b (Pruefkernel; unter RHO_RAND sperrt der Host ihn)
+)+"#else"+R(
 		rhon = load_rho(rho, n); rho_roh = rhon; klasse = 1.0f; rekonstruieren = false;
+)+"#endif"+R( // RHO_RAND
 		if(rho_clamp_hits[218]<0xF0000000u) atomic_inc(&rho_clamp_hits[218]);
 	}
 	)+"#endif"+R( // EQUILIBRIUM_BOUNDARIES -- ohne sie rekonstruiert stream_collide TYPE_E-Zellen wie Fluid (Pruefpass C1, N5)
@@ -4415,7 +4474,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[o+0ul] = rhon;
 	out[o+1ul] = rho_roh;
 	out[o+2ul] = klasse;
+)+"#ifdef RHO_RAND"+R(
+	{ const uxx rr_ = rr_idx(n); out[o+3ul] = rr_<(uxx)def_RR_N ? load_rho(rho, rr_) : NAN; }
+)+"#else"+R(
 	out[o+3ul] = load_rho(rho, n);
+)+"#endif"+R( // RHO_RAND
 	store_rho(out_wort, gid, rhon);
 } // rho_rek_ebene()
 
@@ -4441,7 +4504,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(flagsn_bo==TYPE_S) { out[gid] = 1.0f; return; }
 	)+"#ifdef EQUILIBRIUM_BOUNDARIES"+R(
 	if(flagsn_bo==TYPE_E) {
+)+"#ifdef RHO_RAND"+R(
+		{ const uxx rr_ = rr_idx(n);
+		  if(rr_>=(uxx)def_RR_N&&rho_clamp_hits[216]<0xF0000000u) atomic_inc(&rho_clamp_hits[216]); // Soll 0
+		  out[gid] = load_rho(rho, rr_); }
+)+"#else"+R(
 		out[gid] = load_rho(rho, n);
+)+"#endif"+R( // RHO_RAND
 		if(zaehlen!=0u&&rho_clamp_hits[220]<0xF0000000u) atomic_inc(&rho_clamp_hits[220]);
 		return;
 	}
@@ -4519,7 +4588,12 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// Zeilen auseinander -- gefunden von zwei Pruefern unabhaengig).
 	if(hits[215]<0xF0000000u) atomic_inc(&hits[215]); // Besuche des Lift-Schreibpfads
 	if(fabs(v[1])>=1.0f||fabs(v[2])>=1.0f||fabs(v[3])>=1.0f) { if(hits[214]<0xF0000000u) atomic_inc(&hits[214]); return; }
+)+"#ifdef RHO_RAND"+R(
+	{ const uxx rr_ = rr_idx((uxx)n); // ★ C2b: Sentinel nur zaehlen (Slot 216, Soll 0), nie schreiben -- und KEIN return, die u-Schreibvorgaenge bleiben
+	  if(rr_<(uxx)def_RR_N) store_rho(rho, rr_, v[0]); else if(hits[216]<0xF0000000u) atomic_inc(&hits[216]); }
+)+"#else"+R(
 	store_rho(rho, n, v[0]);
+)+"#endif"+R( // RHO_RAND
 	store_u(u, n, v[1]);
 	store_u(u, def_N+(ulong)n, v[2]);
 	store_u(u, 2ul*def_N+(ulong)n, v[3]);
