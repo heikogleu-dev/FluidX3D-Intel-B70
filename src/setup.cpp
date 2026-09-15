@@ -1446,15 +1446,20 @@ static void klemm_budget_bewerten(const char* wo, const KlemmUrteil& U, const do
 	if(!U.pruefbar) urteil = "nicht pruefbar ("+U.grund+")";
 	else if(!(sig_cd>0.0)) urteil = "nicht pruefbar (sigma_cd fehlt oder 0: weniger als 2B Samples nach Warmlauf, Facettenpfad aus oder konstante Reihe)"; // Z2c Pruefpass NIEDRIG 4
 	else {
-		const bool cd_ok = lhs<=k*sig_cd, cz_ok = !(sig_cz>0.0)||fabs(U.dcz_j)<=k*sig_cz;
+		const bool cz_da = sig_cz>0.0;
+		const bool cd_ok = lhs<=k*sig_cd, cz_ok = !cz_da||fabs(U.dcz_j)<=k*sig_cz;
 		urteil = (cd_ok&&cz_ok) ? "eingehalten" : "GERISSEN";
 		if(!cd_ok||!cz_ok) {
 			if(U.kappung) urteil += " (Summen gekappt: brutto nur Untergrenze, netto unsicher)"; // Z2c Pruefpass NIEDRIG 1
+			// Pruefpass 2 NIEDRIG 4: auch der Riss wird gegen die Worst-Case-Rundung gestellt (Fehler-Flag bleibt -- konservativ)
+			const bool cd_r = !cd_ok&&fmax(0.0, lhs-U.rund_cd)<=k*sig_cd, cz_r = !cz_ok&&fmax(0.0, fabs(U.dcz_j)-U.rund_cz)<=k*sig_cz;
+			if(cd_r||cz_r) urteil += " (Riss liegt innerhalb der Worst-Case-Rundung: "+string(cd_r ? "Cd "+to_string(U.rund_cd/sig_cd,3u)+" sigma" : "")+string(cd_r&&cz_r ? ", " : "")+string(cz_r ? "Cz "+to_string(U.rund_cz/sig_cz,3u)+" sigma" : "")+" -- nicht sicher)";
 			if(modus==2u) klemm_budget_verletzt = true;
 		} else {
 			if(U.kappung) urteil += " (Summen gekappt: brutto nur Untergrenze, netto unsicher -- Urteil unsicher)";
-			const bool rund_ = lhs+U.rund_cd>k*sig_cd||((sig_cz>0.0)&&fabs(U.dcz_j)+U.rund_cz>k*sig_cz); // Z2c Pruefpass NIEDRIG 5: haelt das Urteil auch mit der Worst-Case-Rundung?
-			if(rund_) urteil += " (mit Worst-Case-Rundung "+to_string(U.rund_cd/sig_cd,3u)+" sigma nicht mehr sicher -- Urteil unsicher)";
+			const bool cd_r = lhs+U.rund_cd>k*sig_cd, cz_r = cz_da&&fabs(U.dcz_j)+U.rund_cz>k*sig_cz; // haelt das Urteil auch mit der Worst-Case-Rundung? (Pruefpass 2 NIEDRIG 1: je Groesse benannt)
+			if(cd_r||cz_r) urteil += " (mit Worst-Case-Rundung nicht mehr sicher: "+string(cd_r ? "Cd "+to_string(U.rund_cd/sig_cd,3u)+" sigma" : "")+string(cd_r&&cz_r ? ", " : "")+string(cz_r ? "Cz "+to_string(U.rund_cz/sig_cz,3u)+" sigma" : "")+" -- Urteil unsicher)";
+			if(!cz_da) urteil += " (Cz nicht pruefbar: sigma_cz fehlt -- nur Cd bewertet, Urteil unsicher)"; // Pruefpass 2 NIEDRIG 5: Plan §3 "nicht pruefbar" = Warnung
 		}
 		if(cd_ok&&lhs_b>k*sig_cd) print_warning(string("  KLEMM-BUDGET ")+wo+": netto eingehalten, BRUTTO gerissen ("+to_string(lhs_b/sig_cd,3u)+" sigma) -- Ablösebedingung des Interims \"netto bei u_inf\" ausgeloest: das Urteil haengt am Ort der Quellen (Plan §2.4, lokale Summen noetig).");
 	}
@@ -1465,10 +1470,13 @@ static void klemm_budget_bewerten(const char* wo, const KlemmUrteil& U, const do
 	else if(urteil.rfind("nicht",0)==0||urteil.find("unsicher")!=string::npos) print_warning(txt); // Z2c Pruefpass M3: "eingehalten, unsicher" ist eine Warnung (Plan §3)
 	else print_info(txt);
 	std::ofstream c(csv_pfad, neu ? std::ios::trunc : std::ios::app); c.precision(8);
-	if(neu) c << "# Klemm-Budget (KLEMMEN-STUFE2-PLAN.md §2.4): |dCd_j|+|dCd_m| <= k(B)*sigma_cd, |dCz_j| <= k(B)*sigma_cz, B = " << B << ", k = " << k << "; nur Phase nach Warmlauf; dCd_m = Massenaequivalent bei u_inf (Interim)\n"
+	if(neu) c << "# Klemm-Budget (KLEMMEN-STUFE2-PLAN.md §2.4): |dCd_j|+|dCd_m| <= k(B)*sigma_cd, |dCz_j| <= k(B)*sigma_cz, B = " << B << ", k = " << k << "; nur Phase nach Warmlauf; dCd_m = Massenaequivalent bei u_inf (Interim); Q = Gitter-Masse je Schritt der Domaene, SENKE POSITIV (wie dCd_m; Plan §2.4 schrieb Quelle +); netto = |innen| + |BODEN/EINLASS_EQ| mit Vorzeichen des Gesamtnettos; Zeile Nah+Fern: Q leer (Fein- und Grobschritte nicht addierbar), n = Nahfeldschritte\n"
 		<< "bereich,n_schritte,Q_netto,Q_brutto,dCd_j,dCz_j,dCd_m_netto,dCd_m_brutto,rund_cd,rund_cz,sigma_cd,sigma_cz,B,k,kappung,urteil\n"; // Q = Gitter-Masse je Schritt (Senke +)
 	string urteil_csv = urteil; for(char& ch : urteil_csv) if(ch==',') ch = ';'; // Z2c Pruefpass NIEDRIG 2: kein Spaltenversatz
-	c << wo << "," << U.n << "," << U.q_netto+0.0 << "," << U.q_brutto+0.0 << "," << U.dcd_j+0.0 << "," << U.dcz_j+0.0 << "," << U.dcd_m+0.0 << "," << U.dcd_m_brutto+0.0 << "," << U.rund_cd << "," << U.rund_cz << "," << sig_cd << "," << sig_cz << "," << B << "," << k << "," << (U.kappung?1:0) << "," << urteil_csv << "\n"; // +0.0: keine "-0"
+	const bool q_leer = string(wo)=="Nah+Fern";
+	c << wo << "," << U.n << ",";
+	if(q_leer) c << ",,"; else c << U.q_netto+0.0 << "," << U.q_brutto+0.0 << ",";
+	c << U.dcd_j+0.0 << "," << U.dcz_j+0.0 << "," << U.dcd_m+0.0 << "," << U.dcd_m_brutto+0.0 << "," << U.rund_cd << "," << U.rund_cz << "," << sig_cd << "," << sig_cz << "," << B << "," << k << "," << (U.kappung?1:0) << "," << urteil_csv << "\n"; // +0.0: keine "-0"
 }
 static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const double qA, const float u_lat, const uint Ny, const uint Nz, const double sigma_cdrest, const char* sigma_name = "sigma(cd_rest, Block-SEM 4)") {
 	KlemmUrteil U;
@@ -1492,12 +1500,18 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+" (massenerhaltend, nur gezaehlt); Lift-rho-Tor "+to_string(a[270],0u));
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
 		if(ph==1u) { // ★ Z2c: Budget-Kennwerte (Masse inkl. BODEN/EINLASS_EQ, S0d)
-			const double Qn = (m_netto+eq_zu-eq_ab)/(double)n, Qb = (m_zu+m_ab+eq_zu+eq_ab)/(double)n; // Z2c Pruefpass NIEDRIG 7: BODEN/EINLASS_EQ-Masse setzt f_eq(rho_c, u_road bzw. u_inf) und traegt ihren Impuls mit -- dort ist die Lagally-Kraft ~0; Mitzaehlen bei u_inf liegt auf der SICHEREN Seite (deklariert)
+			// Z2c Pruefpass 2 (MITTEL): Innen- und BODEN/EINLASS_EQ-Nettomasse NICHT mit Vorzeichen verrechnen -- gegenlaeufige Anteile
+			// wuerden sich aufheben (Fehlerklasse M2). Betrag = |Q_innen| + |Q_eq|, Vorzeichen = das des Gesamtnettos (nur Anzeige).
+			// Deklaration: die EQ-Masse setzt f_eq(rho_c, u_road bzw. u_inf) und traegt ihren Impuls mit -- dort ist die Lagally-Kraft ~0;
+			// sie bei u_inf mitzuzaehlen liegt auf der sicheren Seite, und zwar jetzt auch netto.
+			const double Qi = m_netto/(double)n, Qe = (eq_zu-eq_ab)/(double)n, Qb = (m_zu+m_ab+eq_zu+eq_ab)/(double)n;
+			const double Qn_betrag = fabs(Qi)+fabs(Qe), Qn_vz = (Qi+Qe<0.0) ? -1.0 : 1.0;
 			U.n = n; U.dcd_j = dcd; U.dcz_j = dcz;
-			U.dcd_m = -(double)u.si_F((float)((double)u_lat*Qn))/qA; U.dcd_m_brutto = fabs((double)u.si_F((float)((double)u_lat*Qb))/qA);
-			U.q_netto = -Qn; U.q_brutto = Qb; // Senke positiv wie dCd_m (m_netto > 0 = zugefuehrt = Quelle)
-			U.rund_cd = fabs((double)u.si_F((float)(hu/(2.0*S)/(double)n)))/qA+fabs((double)u.si_F((float)((double)u_lat*(hr+a[266])/(2.0*S)/(double)n)))/qA; // Worst-Case je Treffer 1/(2S)
-			U.rund_cz = fabs((double)u.si_F((float)(hu/(2.0*S)/(double)n)))/qA;
+			U.dcd_m = -Qn_vz*(double)u.si_F((float)((double)u_lat*Qn_betrag))/qA; U.dcd_m_brutto = fabs((double)u.si_F((float)((double)u_lat*Qb))/qA);
+			U.q_netto = -Qn_vz*Qn_betrag; U.q_brutto = Qb; // Senke positiv wie dCd_m (m_netto > 0 = zugefuehrt = Quelle); ACHTUNG Plan §2.4 schreibt Q_netto mit Quelle +
+			const double hr_ex = su(a,236u,6u), hu_ex = su(a,257u,6u); // Pruefpass 2 NIEDRIG 2: ungegatete Dekadensummen statt Klassenzaehler (KLEMM_HAKEN3 gatet 221+kk)
+			U.rund_cd = fabs((double)u.si_F((float)(hu_ex/(2.0*S)/(double)n)))/qA+fabs((double)u.si_F((float)((double)u_lat*(hr_ex+a[266])/(2.0*S)/(double)n)))/qA; // Worst-Case je Buchung 1/(2S)
+			U.rund_cz = fabs((double)u.si_F((float)(hu_ex/(2.0*S)/(double)n)))/qA;
 			U.kappung = a[265]>0.0; U.pruefbar = K.mehrdeutig==0ull; if(!U.pruefbar) U.grund = "Wickelwaechter MEHRDEUTIG in mindestens einem Fenster, auch im Warmlauf (konservativ, Z2c Pruefpass NIEDRIG 6)";
 			string kl = "    Klassen K0..K4 (Facette/MS/F-BBox/Randschale/Rest) nach Warmlauf -- rho-Treffer ";
 			for(uint k=0u; k<5u; k++) kl += (k?"/":"")+to_string(a[221u+k],0u);
@@ -9210,7 +9224,7 @@ static void main_setup_fahrzeug_dd() {
 	    klemm_budget_bewerten("Fernfeld", uf_, sig_, sgz_, out_dir+"klemm_budget.csv", false);
 	    KlemmUrteil ug_; ug_.pruefbar = un_.pruefbar&&uf_.pruefbar; ug_.grund = un_.pruefbar ? uf_.grund : un_.grund; ug_.kappung = un_.kappung||uf_.kappung; ug_.n = un_.n;
 	    ug_.dcd_j = fabs(un_.dcd_j)+fabs(uf_.dcd_j); ug_.dcz_j = fabs(un_.dcz_j)+fabs(uf_.dcz_j); ug_.dcd_m = fabs(un_.dcd_m)+fabs(uf_.dcd_m); ug_.dcd_m_brutto = un_.dcd_m_brutto+uf_.dcd_m_brutto; // Z2c Pruefpass M2: Summe der BETRAEGE (ungünstigster Fall, gegenlaeufige Domaenen heben sich nicht auf)
-	    ug_.q_netto = fabs(un_.q_netto)+fabs(uf_.q_netto); ug_.q_brutto = un_.q_brutto+uf_.q_brutto; ug_.rund_cd = un_.rund_cd+uf_.rund_cd; ug_.rund_cz = un_.rund_cz+uf_.rund_cz;
+	    ug_.rund_cd = un_.rund_cd+uf_.rund_cd; ug_.rund_cz = un_.rund_cz+uf_.rund_cz;
 	    klemm_budget_bewerten("Nah+Fern", ug_, sig_, sgz_, out_dir+"klemm_budget.csv", false);
 	  } }
 	if(stat_ok) {
