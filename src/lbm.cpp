@@ -339,12 +339,13 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		// siehe die Begruendung an store_rho in kernel.cpp). Der Waechter hat den Wegfall SELBST
 		// gemeldet und den Lauf angehalten -- so soll es sein.
 		// ★ 13 -> 14 am 15.09.: rho_rek_ebene (RHO_RAND C1) liest rho an TYPE_E und als heutigen Pufferwert.
+		// ★ 14 -> 15 am 15.09.: rho_ausgabe_ebene (RHO_RAND C2a) liest rho an TYPE_E.
 		const string muster = "global\nfloat*\nrho", muster_t = "global\nrhoxx*\nrho";
 		uint n_float=0u, n_t=0u;
 		for(size_t i=opencl_c_code.find(muster); i!=string::npos; i=opencl_c_code.find(muster, i+1ull)) n_float++;
 		for(size_t i=opencl_c_code.find(muster_t); i!=string::npos; i=opencl_c_code.find(muster_t, i+1ull)) n_t++;
-		if(n_float!=18u||n_t!=14u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
-			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 14; 13 -> 14 am 15.09.: rho_rek_ebene, RHO_RAND C1). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
+		if(n_float!=18u||n_t!=15u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
+			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 15; 13 -> 14 -> 15 am 15.09.: rho_rek_ebene, rho_ausgabe_ebene, RHO_RAND C1/C2a). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
 	}
 	{ // ★ TODO 2 Schritt 4 (12.09.2026) -- derselbe Zensus fuer u, und er braucht ein SCHAERFERES Muster.
 		// Der rho-Zensus zaehlt Teilstrings. Bei u faengt das mehr, als es soll: der Kernel fuehrt einen
@@ -796,7 +797,7 @@ void LBM_Domain::alloc_rho_rek(const ulong max_plane_cells) {
 	rho_rek_max = max_plane_cells;
 	rho_rek_out  = Memory<float>(device, max_plane_cells*4ull, 1u);
 	rho_rek_wort = Memory<rhoxx>(device, max_plane_cells, 1u);
-	kernel_rho_rek_ebene = Kernel(device, max_plane_cells, "rho_rek_ebene", fi, rho, u, flags, t, rho_rek_out, rho_rek_wort, 0u, 0u, 0u, 0u, 1u, 1u, rho_clamp_hits);
+	kernel_rho_rek_ebene = Kernel(device, max_plane_cells, "rho_rek_ebene", fi, rho, u, flags, t, rho_rek_out, rho_rek_wort, 0u, 0u, 0u, 0u, 1u, 1u, 0u, rho_clamp_hits); // ★ C2a: modus an Index 13, hits 14, tile_slot 15
 	if(sparse_on) kernel_rho_rek_ebene.add_parameters(tile_slot); // Guard wie im Kernel (TS_P haengt an SPARSE_TILES, Falle 8)
 	print_info("rho-Rekonstruktion (RHO_RAND C1): Puffer fuer "+to_string(max_plane_cells)+" Ebenenzellen = "
 		+to_string((float)(max_plane_cells*(16ull+(ulong)sizeof(rhoxx)))/1.0e6f,2u)+" MB auf "+device.info.name+".");
@@ -1623,6 +1624,8 @@ void LBM_Domain::finalize_sparse_tiles() {
 	kernel_update_fields.set_parameters(0u, fi);
 	kernel_boden_eq.set_parameters(0u, fi); // XL-Audit B2 (Pruefagent R2: NICHT unter FORCE_FIELD): ohne Rebind hielte boden_eq das cl_mem des FREIGEGEBENEN Platzhalters
 	kernel_einlass_eq.set_parameters(0u, fi); // EINLASS_EQ: dito (Sparse-Rebind AUSSERHALB von FORCE_FIELD)
+	if(rho_rek_max>0ull) kernel_rho_rek_ebene.set_parameters(0u, fi);     // ★ 15.09. RHO_RAND C1/C2a (C2-Plan N7): heute nie gesetzt (Alloc erst nach dem Init),
+	if(rho_aus_max>0ull) kernel_rho_ausgabe_ebene.set_parameters(0u, fi); // aber ohne Rebind hielte ein frueher Alloc das freigegebene fi
 #ifdef FORCE_FIELD
 	kernel_update_force_field.set_parameters(0u, fi);
 #endif // FORCE_FIELD
@@ -3371,17 +3374,49 @@ void LBM::extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_
 	for(ulong i=0ull; i<n_plane*4ull; i++) host_buf[i] = dom->coupling_plane[i];
 }
 
+// ★ 15.09.2026 RHO_RAND C2a (RHO_RAND-C2-PLAN.md §2.5/§3.1): Ausgabekernel, Hausmuster wie alloc_rho_rek.
+void LBM_Domain::alloc_rho_ausgabe(const ulong max_plane_cells) {
+	if(max_plane_cells==0ull) { print_error("alloc_rho_ausgabe mit 0 Zellen."); return; }
+	if(rho_aus_max>=max_plane_cells) return;
+	if(rho_aus_max>0ull) { print_error("alloc_rho_ausgabe: Vergroesserung eines gebundenen Puffers ist die Use-after-free-Klasse -- einmal gross genug anlegen."); return; }
+	rho_aus_max = max_plane_cells;
+	rho_aus = Memory<float>(device, max_plane_cells, 1u);
+	kernel_rho_ausgabe_ebene = Kernel(device, max_plane_cells, "rho_ausgabe_ebene", fi, rho, flags, t, rho_aus, 0u, 0u, 0u, 0u, 1u, 1u, 0u, rho_clamp_hits); // fi 0, rho 1, flags 2, t 3, out 4, Ebene 5..10, zaehlen 11, hits 12, tile_slot 13
+	if(sparse_on) kernel_rho_ausgabe_ebene.add_parameters(tile_slot); // Guard wie im Kernel (Falle 8)
+	print_info("rho-Ausgabe (RHO_RAND C2a, Nachkollisionssumme): Puffer fuer "+to_string(max_plane_cells)+" Ebenenzellen = "+to_string((float)(4ull*max_plane_cells)/1.0e6f,2u)+" MB auf "+device.info.name+".");
+}
+
+// ★ 15.09.2026 RHO_RAND C2a: Ausgabe-rho einer Ebene. t_aus = get_t()-1 (Nachkollisions-Populationen des letzten Schritts).
+void LBM::rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const bool zaehlen, std::vector<float>& out) {
+	LBM_Domain* dom = lbm_domain[0];
+	const ulong n_plane = (ulong)plane.extent_a*(ulong)plane.extent_b;
+	if(get_D()>1u) { print_error("rho_ausgabe_ebene: nur fuer eine Domaene gebaut (D=1)."); return; }
+	if(!initialized) { print_error("rho_ausgabe_ebene vor der Initialisierung."); return; }
+	if(!plane_fits(plane, "rho_ausgabe_ebene")) return;
+	if(dom->rho_aus_max<n_plane) { print_error("rho_ausgabe_ebene: Ebene mit "+to_string(n_plane)+" Zellen, Puffer "+to_string(dom->rho_aus_max)+" -- alloc_rho_ausgabe vorher gross genug rufen."); return; }
+	dom->kernel_rho_ausgabe_ebene.set_ranges(n_plane);
+	dom->kernel_rho_ausgabe_ebene.set_parameters(3u, t_aus);
+	dom->kernel_rho_ausgabe_ebene.set_parameters(5u, plane.axis, plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b, zaehlen ? 1u : 0u);
+	dom->kernel_rho_ausgabe_ebene.enqueue_run();
+	dom->finish_queue(); // Zero-Copy-Falle
+	dom->rho_aus.read_from_device(0ull, n_plane);
+	out.resize(n_plane);
+	for(ulong i=0ull; i<n_plane; i++) out[i] = dom->rho_aus[i];
+}
+
 // ★ 15.09.2026 RHO_RAND C1: rho einer Ebene aus den DDFs. t_rek ist normalerweise das aktuelle Domaenen-t (dann
 // liefert der Kernel das rho, das stream_collide(t) gleich speichert); t-1 ist der Negativtest der Pruefung.
-void LBM::rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, std::vector<float>& out4, std::vector<rhoxx>& worte) {
+void LBM::rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, const uint modus, std::vector<float>& out4, std::vector<rhoxx>& worte) {
 	LBM_Domain* dom = lbm_domain[0];
 	const ulong n_plane = (ulong)plane.extent_a*(ulong)plane.extent_b;
 	if(get_D()>1u) { print_error("rho_rek_ebene: nur fuer eine Domaene gebaut (Plan §6, D=1)."); return; }
+	if(!initialized) { print_error("rho_rek_ebene vor der Initialisierung."); return; } // C2-Plan N7
+	if(modus>1u) { print_error("rho_rek_ebene: modus kennt nur 0 (Identitaet) und 1 (Nachkollision)."); return; }
 	if(!plane_fits(plane, "rho_rek_ebene")) return;
 	if(dom->rho_rek_max<n_plane) { print_error("rho_rek_ebene: Ebene mit "+to_string(n_plane)+" Zellen, Puffer "+to_string(dom->rho_rek_max)+" -- alloc_rho_rek vorher gross genug rufen."); return; }
 	dom->kernel_rho_rek_ebene.set_ranges(n_plane);
 	dom->kernel_rho_rek_ebene.set_parameters(4u, t_rek);
-	dom->kernel_rho_rek_ebene.set_parameters(7u, plane.axis, plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b);
+	dom->kernel_rho_rek_ebene.set_parameters(7u, plane.axis, plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b, modus);
 	dom->kernel_rho_rek_ebene.enqueue_run();
 	dom->finish_queue(); // Zero-Copy-Falle: vor dem Lesen die Ausfuehrung erzwingen
 	dom->rho_rek_out.read_from_device(0ull, n_plane*4ull);

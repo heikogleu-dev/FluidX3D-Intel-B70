@@ -299,6 +299,11 @@ public:
 	ulong rho_rek_max = 0ull;
 	Kernel kernel_rho_rek_ebene;
 	void alloc_rho_rek(const ulong max_plane_cells);
+	// ★ 15.09.2026 RHO_RAND C2a: Ausgabe-rho einer Ebene (Nachkollisionssumme, Entscheidung (b)). Eigener Puffer, 1 float je Zelle.
+	Memory<float> rho_aus;
+	ulong rho_aus_max = 0ull;
+	Kernel kernel_rho_ausgabe_ebene;
+	void alloc_rho_ausgabe(const ulong max_plane_cells);
 	std::vector<ulong> po_zellen_liste() { std::vector<ulong> v; v.reserve(po_N_active); for(uint i=0u; i<po_N_active; i++) v.push_back((ulong)po_cells[i]); return v; } // ★ 15.09. C1-Pruefung: Auslasszellen fuer die Klasse "TYPE_E Auslass"
 	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr, const uint sgs_gdiag=0u, const uint sgs_fdwand=0u, const uint sgs_sism=0u); // sgs_gdiag als PARAMETER statt Statik (02.09.: zwei Statik-Lebensdauer-Fallen hintereinander -- ffc-Parsing und H1-Resetliste nullten s_sgs_gdiag vor alloc; env-getriebener Parameter hat keine Lebensdauer) // C1b: Puffer bauen + binden; qmap = Remesh-q (B1-Stufe 2)
 
@@ -987,7 +992,8 @@ public:
 	bool plane_fits(const PlaneSpec& plane, const char* who) const; // prueft, dass die Ebene ganz in der Domaene liegt
 	void alloc_coupling_planes(const ulong max_plane_cells);
 	void extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf); // liest (rho,u) einer Ebene in host_buf (4 floats/Zelle)
-	void rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, std::vector<float>& out4, std::vector<rhoxx>& worte); // ★ 15.09. RHO_RAND C1: rho einer Ebene aus den DDFs bei Zeitschritt t_rek (Soll: aktuelles t)
+	void rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, const uint modus, std::vector<float>& out4, std::vector<rhoxx>& worte); // ★ 15.09. RHO_RAND C1/C2a: rho einer Ebene aus den DDFs bei t_rek; modus 0 = Identitaet (t), 1 = Nachkollision (t-1, ohne MS)
+	void rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const bool zaehlen, std::vector<float>& out); // ★ 15.09. RHO_RAND C2a: Ausgabe-rho (Nachkollisionssumme), t_aus = get_t()-1
 	void lese_yslice_in_host(const uint y); // ★ Slice-Ebenen-Read 2026-08-26: (rho,u,flags) EINER y-Ebene per Device-Gather in die Host-Arrays streuen (Transportweg-Optimierung, wertgleich)
 	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Reihenfolge: alloc_schale() auf

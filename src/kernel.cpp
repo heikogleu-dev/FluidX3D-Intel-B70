@@ -4352,9 +4352,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 } // extract_plane_macros()
 
 )+R(kernel void rho_rek_ebene)+"("+R(const global fpxx* fi, const global rhoxx* rho, const global velxx* u, const global uchar* flags, const ulong t, global float* out, global rhoxx* out_wort,
-	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z, const uint extent_a, const uint extent_b, global uint* rho_clamp_hits
+	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z, const uint extent_a, const uint extent_b, const uint modus, global uint* rho_clamp_hits
 )+R( TS_P
 )+") {"+R( // rho_rek_ebene()
+	// ★ 15.09.2026 C2a: modus 0 = wie C1 (Identitaetspruefung, MIT apply_moving_boundaries, out[1] = rho roh).
+	// modus 1 = Nachkollisionsmodus (Aufruf mit t-1): OHNE apply_moving_boundaries -- die MS-Korrektur steckt schon in der
+	// Summe der Nachkollisions-Populationen (die Kollision erhaelt die Masse) -- und out[1] = Summe |f~_i| fuer die
+	// FP16S-Rundungsschranke der Pruefung (RHO_RAND-C2-PLAN.md §1.2, §4.4).
 	// ★ 15.09.2026 RHO_RAND C1 (RHO_RAND-PLAN.md §5/§11): rho einer achsen-normalen Ebene AUS DEN DDFs, ohne
 	// den rho-Puffer zu lesen -- ausser dort, wo stream_collide selbst ihn liest (TYPE_E) oder nie schreibt (TYPE_S).
 	// Aufgerufen mit dem AKTUELLEN Domaenen-t (nach increment_time_step): load_f liest dann genau die Slots, die
@@ -4395,11 +4399,16 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		float fhn[def_velocity_set];
 		load_f(n, fhn, fi, j, t TS_A);
 )+"#ifdef MOVING_BOUNDARIES"+R(
-		if(flagsn_bo==TYPE_MS) { apply_moving_boundaries(fhn, j, u, flags); klasse = 3.0f; }
+		if(flagsn_bo==TYPE_MS) { if(modus==0u) apply_moving_boundaries(fhn, j, u, flags); klasse = 3.0f; }
 )+"#endif"+R( // MOVING_BOUNDARIES
-		rho_roh = fhn[0];
-		for(uint i=1u; i<def_velocity_set; i++) rho_roh += fhn[i];
-		rho_roh += 1.0f; // dieselbe Summenreihenfolge wie calculate_rho_u, nur ohne RHO_CLAMP
+		if(modus==0u) {
+			rho_roh = fhn[0];
+			for(uint i=1u; i<def_velocity_set; i++) rho_roh += fhn[i];
+			rho_roh += 1.0f; // dieselbe Summenreihenfolge wie calculate_rho_u, nur ohne RHO_CLAMP
+		} else {
+			rho_roh = fabs(fhn[0]);
+			for(uint i=1u; i<def_velocity_set; i++) rho_roh += fabs(fhn[i]); // modus 1: Summe |f~_i| (Schranke), NICHT rho
+		}
 		float uxn, uyn, uzn;
 		calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn);
 	}
@@ -4409,6 +4418,42 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[o+3ul] = load_rho(rho, n);
 	store_rho(out_wort, gid, rhon);
 } // rho_rek_ebene()
+
+)+R(kernel void rho_ausgabe_ebene)+"("+R(const global fpxx* fi, const global rhoxx* rho, const global uchar* flags, const ulong t, global float* out,
+	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z, const uint extent_a, const uint extent_b, const uint zaehlen, global uint* rho_clamp_hits
+)+R( TS_P
+)+") {"+R( // rho_ausgabe_ebene()
+	// ★ 15.09.2026 RHO_RAND C2a (RHO_RAND-C2-PLAN.md §2.5, Entscheidung (b) Heiko): rho einer Ebene fuer die AUSGABE (Slices,
+	// Sonde, VTK) als Summe der eigenen Nachkollisions-Populationen. Der Host uebergibt t = get_t()-1: load_f liest dann die
+	// Populationen, die stream_collide(t) nach der Kollision abgelegt hat (Paare getauscht, Summe gleich). KEIN
+	// apply_moving_boundaries (die Korrektur steckt schon in der Summe), calculate_rho_u MIT RHO_CLAMP wie das heutige
+	// Speicherwort; die Klemmzaehler 0/1 werden bewusst NICHT mitgezaehlt. TYPE_E liest den Puffer (heutiger Stand),
+	// TYPE_S = 1 (dort schreibt niemand). Zaehler nur mit zaehlen != 0: [219] Besuche, [220] davon TYPE_E -- nicht je VTK-Zelle.
+	const uint gid = get_global_id(0);
+	if(gid>=extent_a*extent_b) return;
+	if(zaehlen!=0u&&rho_clamp_hits[219]<0xF0000000u) atomic_inc(&rho_clamp_hits[219]);
+	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
+	if(n>=(uxx)def_N) { out[gid] = 1.0f; return; }
+)+"#ifdef SPARSE_TILES"+R(
+	if(is_dead_tile(n, tile_slot)) { out[gid] = 1.0f; return; }
+)+"#endif"+R( // SPARSE_TILES
+	const uchar flagsn_bo = flags[n]&TYPE_BO;
+	if(flagsn_bo==TYPE_S) { out[gid] = 1.0f; return; }
+	)+"#ifdef EQUILIBRIUM_BOUNDARIES"+R(
+	if(flagsn_bo==TYPE_E) {
+		out[gid] = load_rho(rho, n);
+		if(zaehlen!=0u&&rho_clamp_hits[220]<0xF0000000u) atomic_inc(&rho_clamp_hits[220]);
+		return;
+	}
+	)+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
+	uxx j[def_velocity_set];
+	neighbors(n, j);
+	float fhn[def_velocity_set];
+	load_f(n, fhn, fi, j, t TS_A);
+	float rhon, uxn, uyn, uzn;
+	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn);
+	out[gid] = rhon;
+} // rho_ausgabe_ebene()
 
 )+R(kernel void extract_plane_flags(const global uchar* flags, global uchar* out,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
