@@ -352,6 +352,7 @@ public:
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_u_takt; // ★ TODO 2 Schritt 3 (CFD_U_SPARSAM): 0 = aus, sonst ratio (u voll am letzten Substep jedes Grobschritts)
 	static uint s_rho_takt; // ★ TODO 2 Schritt 1 (CFD_RHO_SPARSAM): Sample-Kadenz in FEINEN Schritten; 0 = aus (dann ist der Geraetecode zeichengleich zu vorher)
+	static uint s_rho_rand; // ★ 15.09.2026 RHO_RAND (CFD_RHO_RAND, RHO_RAND-PLAN.md): 0 = aus, 1 = rho nur in der Domaenen-Randschale R1. NUR NAHFELD; das Setup nullt die Statik vor dem Fernfeld-Bau
 	static uint s_fac_alpha;
 	static bool s_fac_elibb;
 	static uint s_sgs_fdwand;  // ★ 02.09. SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND=1): w an Facettenzellen aus |S|_FD des u-Felds (FD-Kernel, ein Schritt versetzt) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert (B66/B69)
@@ -381,6 +382,7 @@ public:
 	uint boden_eq_n = 0u; float boden_eq_u = 0.0f; uint boden_eq_down = 0u, boden_eq_split = 0xFFFFFFFFu, boden_eq_abstand = 0u; // Konstruktionszeit-Kopien (BODEN_EQ)
 	uint einlass_eq_n = 0u; float einlass_eq_u = 0.0f; // Konstruktionszeit-Kopien (EINLASS_EQ)
 	uint rho_takt = 0u;        // Konstruktionszeit-Kopie von s_rho_takt (read-once-Doktrin)
+	bool rho_rand_on = false;  // ★ 15.09. Konstruktionszeit-Kopie von s_rho_rand (read-once-Doktrin); das Setup liest DIESEN Wert, nicht die Umgebungsvariable
 	uint u_takt = 0u;          // Konstruktionszeit-Kopie von s_u_takt
 	uint felder_voll_h = 3u;   // je Schritt gesetzter Kernelparameter, BITFELD: Bit 0 = rho ueberall, Bit 1 = u ueberall (3 = heutiges Verhalten)
 	bool rho_voll_zwang = false; // Host erzwingt Vollschreiben (Abschlusspfad, unregelmaessige Feldlesung)
@@ -468,6 +470,7 @@ public:
 	ulong band_n_lage[8] = {0,0,0,0,0,0,0,0}; // Zellzahl je Lage, fuer den Bericht und Ist=Soll
 	Kernel kernel_sgs_band;
 	void alloc_sgs_band(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const uint lagen);
+	uint pruefe_rho_rand_c0(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const bool testhaken); // ★ 15.09. RHO_RAND C0: Host-Waechter (R1-Abdeckung aller rho-Leser) + APG-Zensus; liefert die Zahl der Beanstandungen
 	void alloc_f_liste(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz); // baut Maske+Praefix, legt F neu an, rebindet
 	// Zelle (als F-BBox-Index) -> F-Slot. AUSDRUCKSGLEICH zu f_slot() in kernel.cpp -- beide Pfade
 	// werden von CFD_FAC_GPU_PRUEF zahlenscharf gegeneinander gestellt.

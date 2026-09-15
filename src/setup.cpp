@@ -6071,6 +6071,29 @@ static void main_setup_fahrzeug_dd() {
 	    if(us_>0u) print_info("u-SPARSAM (CFD_U_SPARSAM, TODO 2 Schritt 3): stream_collide schreibt u nur noch in der Randschale der Dicke 2 (deckt deriv_reg an den 6 Nachbarn jeder TYPE_E-Zelle und po_interior) und in der um 2 dilatierten F-BBox (deckt sgs_fdwand und fac_nachbar_ab); am letzten Substep jedes Grobschritts (jeder "+to_string(ratio)+"-te feine Schritt) wird u wieder UEBERALL geschrieben, weil die N2F-Entnahme dort 4^3-Bloecke ueber rund ein Viertel der Domaene liest. Der Gewinn ist dadurch konstruktiv auf (ratio-1)/ratio gedeckelt. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_U_SPARSAM=0.");
 	    if(rs_>0u) print_info("rho-SPARSAM (CFD_RHO_SPARSAM, TODO 2 Schritt 1): stream_collide schreibt rho nur noch fuer x >= Nx-2 (konstruktive Obermenge von po_interior -- der Druckauslass ist die x_max-Flaeche, die Innenzelle stammt aus einer 26er-Nachbarsuche) sowie an jedem "+to_string(LBM_Domain::s_rho_takt)+"-ten feinen Schritt, also an der Sample-Kadenz, nach der der Host das Feld liest. u bleibt UNANGETASTET. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_RHO_SPARSAM=0.");
 	  }
+	  { // ★ 15.09.2026 RHO_RAND, Commit C0 (RHO_RAND-PLAN.md): rho nur noch in der Domaenen-Randschale R1,
+	    // sonst aus den DDFs rekonstruiert. NUR NAHFELD (Plan K3: die Fernfeld-Entnahme liest rho(t_c), das nach
+	    // dem Schritt nicht mehr rekonstruierbar ist); Heiko 15.09.: spaeter auch im Fernfeld, dann mit einer
+	    // eigenen Region R3 fuer die Entnahmeebenen. In C0 gibt es NUR Lesestelle, Sperren, Waechter und Zensus --
+	    // der Lauf endet hinter der Kopplungspruefung mit einem harten Fehler, damit der Schalter nie still wirkt.
+	    const uint rr_ = env_u("CFD_RHO_RAND", 0u);
+	    if(rr_>1u) print_error("CFD_RHO_RAND kennt nur 0 (aus) und 1 (rho nur in der Randschale R1).");
+	    LBM_Domain::s_rho_rand = rr_;
+	    if(rr_==0u&&env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u) print_warning("CFD_RHO_RAND_TESTHAKEN ist gesetzt, CFD_RHO_RAND aber 0 -- der Testhaken ist wirkungslos (Ansage-Doktrin).");
+	    if(rr_>0u) {
+	      if(env_u("CFD_RHO_SPARSAM", 0u)>0u) print_error("CFD_RHO_RAND und CFD_RHO_SPARSAM schliessen sich aus: RHO_RAND ersetzt die Schreibmaske in dieser Domaene (RHO_RAND-PLAN.md §6). Einen von beiden setzen.");
+	      if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus: APG liest rho an den 18 Nachbarn jeder Facettenzelle im Inneren, dort gibt es unter RHO_RAND keinen Puffer. Die APG-Lesemenge zaehlt der C0-Zensus; der APG-Weg (Region oder DDFs) ist eine eigene Entscheidung.");
+	      if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0: der Voll-Read-Slicepfad liest den ganzen rho-Puffer vom Geraet, den es unter RHO_RAND nicht mehr gibt. Den Ebenen-Gather (CFD_SLICE_GPU=1) benutzen.");
+	      if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1: der Pruefarm vergleicht gegen den vollen rho-Puffer. Unter RHO_RAND gehoert dieser Vergleich in den eigenen Pruefmodus (Plan C3), der noch nicht gebaut ist.");
+#ifndef UPDATE_FIELDS
+	      print_error("CFD_RHO_RAND ohne UPDATE_FIELDS: der rho-Schreibpfad in stream_collide fehlt, die Randschale wuerde nie beschrieben.");
+#endif
+#if defined(SURFACE) || defined(GRAPHICS)
+	      print_error("CFD_RHO_RAND mit SURFACE/GRAPHICS: deren rho-Leser greifen auf das volle Feld zu.");
+#endif
+	      print_info("RHO_RAND C0 (CFD_RHO_RAND=1, 15.09.2026): Sperren bestanden. In diesem Commit laufen nur Host-Waechter und APG-Zensus hinter der Kopplungspruefung; danach endet der Lauf bewusst mit einem Fehler (Kernelteil C1/C2 fehlt).");
+	    }
+	  }
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz; einlass_eq EXPLIZIT 0 fuers Feingitter (Pruefagent M1: Statik-Doktrin, nicht nur Initialisierer); Schalen-alpha EXPLIZIT 0 -- lbm_f traegt spaeter eine Extract-Liste, darf aber NIE blenden (P9c-Wirkpfad-Soll nah==0)
 	  if(LBM_Domain::s_boden_eq_abstand>3u&&(LBM_Domain::s_boden_eq_n>0u||env_u("CFD_FERN_BODEN_EQ",0u)>0u)) print_warning("CFD_BODEN_EQ_ABSTAND > 3: der Scan kostet (2A+1)^2*(A+1) Flag-Reads je Bandzelle je Schritt -- stiller Perf-Fresser (XL-R2).");
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2) -- Kraefteverfaelschung waechst mit N.");
@@ -6117,6 +6140,7 @@ static void main_setup_fahrzeug_dd() {
 	  LBM_Domain::s_smbox[0]=NF_OX; LBM_Domain::s_smbox[1]=NF_OY; LBM_Domain::s_smbox[2]=NF_OZ;
 	  LBM_Domain::s_smbox[3]=cex;   LBM_Domain::s_smbox[4]=cey;   LBM_Domain::s_smbox[5]=cez;
 	  LBM_Domain::s_rho_takt = (rs_>0u) ? se_ : 0u; // Fernfeld: Takt in GROBEN Schritten
+	  LBM_Domain::s_rho_rand = 0u; // ★ 15.09. RHO_RAND: Fernfeld bleibt voll (Plan K3); explizit, weil die Statik vom Nahfeld-Bau noch steht
 	  LBM_Domain::s_u_takt   = (us_>0u) ? se_ : 0u;
 	  if(rs_>0u||us_>0u) print_info("FELD-SPARSAM Fernfeld: Schreibmasken-Box = Nahfeld-Fussabdruck ("+to_string(NF_OX)+","+to_string(NF_OY)+","+to_string(NF_OZ)+") + ("+to_string(cex)+","+to_string(cey)+","+to_string(cez)+"), plus Randschale 2; Takt "+to_string(se_)+" GROBE Schritte fuer die Hostlesungen. Gleiche Bauform wie im Nahfeld, andere Box.");
 	}
@@ -6679,6 +6703,26 @@ static void main_setup_fahrzeug_dd() {
 		}
 		if(bad>0u) print_error("Kopplungspruefung: "+to_string(bad)+" Beanstandung(en) -- siehe oben. Lauf nicht gestartet.");
 		else print_info("Kopplungspruefung: Deckungspunkte, Fahrzeugfreiheit und Weltlage aller fuenf Ebenen in Ordnung.");
+	}
+
+	// ---------------------------------------------------------------- RHO_RAND C0: Waechter + Zensus (15.09.2026)
+	// Liest den KONSTRUKTIONSZUSTAND der Domaene (rho_rand_on), nicht die Umgebungsvariable. Steht hinter der
+	// Kopplungspruefung, weil hier po_interior, fp[] und die Facettenmaske fertig sind, und VOR run(0), damit
+	// der bewusste Abbruch keine Initialisierung kostet.
+	if(lbm_c.lbm_domain[0]->rho_rand_on) print_error("RHO_RAND: das Fernfeld traegt rho_rand_on -- die Statik wurde vor lbm_c nicht genullt (Plan K3).");
+	if(lbm_f.lbm_domain[0]->rho_rand_on) {
+		uint bad = 0u;
+		// Regressionsschutz: lbm_f wird heute mit EINEM Geraet gebaut (D=1 konstruktiv). Sofort abbrechen, weil
+		// die Pruefung unten die Flags von Domaene 0 mit den GESAMTmassen liest (Pruefbefund N2).
+		if(lbm_f.get_Dx()*lbm_f.get_Dy()*lbm_f.get_Dz()>1u) print_error("RHO_RAND: das Nahfeld ist in mehrere Domaenen zerlegt -- der Halo-Transfer liest rho am Domaenenschnitt (Plan 3.1).");
+		for(uint p=0u; p<5u; p++) { // Lift-Ziele: jede feine Kopplungsebene muss in R1 liegen. Regressionsschutz -- fp[] ist heute konstruktiv flaechig (Pruefbefund N1)
+			const uint pos = fp[p].axis==0u ? fp[p].origin.x : (fp[p].axis==1u ? fp[p].origin.y : fp[p].origin.z);
+			const uint Na  = fp[p].axis==0u ? fNx : (fp[p].axis==1u ? fNy : fNz);
+			if(pos>=2u&&pos+2u<Na) { print_warning(string("RHO_RAND-Waechter: feine Kopplungsebene ")+face_name[p]+" liegt bei "+to_string(pos)+" von "+to_string(Na)+" und damit ausserhalb R1 -- drive_boundary_cubic_lift schriebe rho ins Leere."); bad++; }
+		}
+		bad += lbm_f.lbm_domain[0]->pruefe_rho_rand_c0(&lbm_f.flags[0], fNx, fNy, fNz, env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u);
+		if(bad>0u) print_error("RHO_RAND C0: "+to_string(bad)+" Beanstandung(en) -- siehe oben. Lauf nicht gestartet.");
+		print_error("RHO_RAND C0: Waechter und Zensus ohne Beanstandung. Der Kernelteil (RHO_RAND-PLAN.md C1/C2) ist noch nicht gebaut -- der Lauf endet hier BEWUSST, sonst waere CFD_RHO_RAND=1 ein stiller No-Op.");
 	}
 
 	// ---------------------------------------------------------------- P9c N2F-Schale: Listenbau
@@ -9411,6 +9455,7 @@ void main_setup_facetten_test() {
 
 void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeug | fahrzeug_dd | fernfeld | facetten_test
 	const char* c = getenv("CFD_CASE");
+	if(getenv("CFD_RHO_RAND")!=nullptr&&(c==nullptr||string(c)!="fahrzeug_dd")) print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
 	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).
 	if(c!=nullptr && string(c)=="kanal") main_setup_kanal();

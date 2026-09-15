@@ -422,6 +422,7 @@ uint LBM_Domain::s_einlass_eq_n = 0u; // ★ EINLASS_EQ (V1-Port apply_inlet_vel
 uint LBM_Domain::s_smbox[6] = {0u,0u,0u,0u,0u,0u}; // ★ TODO 2: Schreibmasken-Box; 0 -> F-BBox
 uint LBM_Domain::s_u_takt = 0u;     // ★ TODO 2 Schritt 3 (CFD_U_SPARSAM): 0 = aus, sonst ratio
 uint LBM_Domain::s_rho_takt = 0u;   // ★ TODO 2 Schritt 1 (CFD_RHO_SPARSAM): 0 = aus, sonst Sample-Kadenz in FEINEN Schritten
+uint LBM_Domain::s_rho_rand = 0u;   // ★ 15.09.2026 RHO_RAND (CFD_RHO_RAND): 0 = aus; nur Nahfeld
 float LBM_Domain::s_einlass_eq_u = -1.0f; // Setup reicht sein u_lat durch (Konvention wie s_boden_eq_u); Sentinel wie dort, Pruefbefund B7
 bool LBM_Domain::s_schale_paritaet = false; // CFD_N2F_PARITAET (Beweisarm, s. lbm.hpp)
 float LBM_Domain::s_schale_alpha = 0.0f; // ★ P9c N2F-SCHALE: Blendfaktor der near->far-Rueckkopplung; 0 = aus. Read-once wie EINLASS_EQ; Setup setzt lbm_f EXPLIZIT 0.
@@ -623,6 +624,7 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
 	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
 	rho_takt = s_rho_takt; // ★ TODO 2: Konstruktionszeit-Kopie wie die uebrigen (read-once-Doktrin)
+	rho_rand_on = s_rho_rand>0u; // ★ 15.09. RHO_RAND: dito; in C0 wirkt der Schalter nur host-seitig (Waechter + Abbruch im Setup)
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
 	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
 	schale_alpha = s_schale_alpha; // ★ P9c N2F-SCHALE: Konstruktionszeit-Kopie (read-once-Doktrin); die Kernel entstehen erst in alloc_schale (Indexlisten-Groesse steht erst nach dem Listenbau fest)
@@ -1041,6 +1043,189 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	print_info("SGS-BAND gebunden: "+to_string(band_N)+" Bandzellen = "+je+"; Speicher "
 		+to_string((float)(band_N*(sism_on?32ull:8ull)+2ull*FNB*4ull)/1048576.0f,1u)+" MB (Liste+w+EMA+Maske) auf "+device.info.name
 		+". Lage 1 (Facetten, "+to_string(n_fac)+" Zellen) bleibt UNVERAENDERT -- eigene Puffer, eigener Launch.");
+}
+
+// ★ 15.09.2026 RHO_RAND, Commit C0 (RHO_RAND-PLAN.md §7/§9). Reine HOST-Pruefung: kein Kernel, kein
+// Geraetepuffer, keine Aenderung am Rechenweg. Sie beantwortet vor dem Umbau zwei Fragen am echten Gitter:
+//  (1) WAECHTER: Liegt jede Zelle, deren rho-Puffer nach dem Umbau noch gelesen wird, in der Randschale
+//      R1 (Dicke 2 an allen sechs Flaechen)? Das sind die TYPE_E-Zellen (stream_collide, Lift, Verify),
+//      die po_interior-Zellen (po_reduce_mean, apply_pressure_outlet) und die vi_interior-Zellen
+//      (apply_velocity_inlet). po/vi muessen zusaetzlich in der Schreibmaske x >= Nx-2 liegen -- das ist
+//      AUSDRUCKSGLEICH die RHO_SPARSAM-Maske in stream_collide (kernel.cpp: (n%Nx)+2 >= Nx).
+//  (2) ZENSUS fuer die APG-Linie: welche Zellen liest APG (alle 18 D3Q19-Nachbarn j[ia] einer
+//      Facettenzelle, uebersprungen wird nur reines TYPE_S, kernel.cpp apply_facette_imem), und wie viele
+//      davon liegen NICHT in Lage 1 + Lage 2 (Heikos Vorschlag "rho-Region auf den SGS-Bandzellen")?
+//      Lage 2 wird hier UNABHAENGIG von CFD_SGS_BAND nach genau den Regeln von alloc_sgs_band gebildet
+//      (6-Flaechen-Dilatation, nur Fluid, F-BBox-beschnitten, x/y gewickelt, z nicht) -- ist das Band
+//      gebaut, muss |L2| mit band_n_lage[2] uebereinstimmen (Ist=Soll).
+// Beanstandungen werden gesammelt (print_warning) und als Zahl zurueckgegeben; abgebrochen wird im Setup
+// EINMAL am Ende, damit man alle Befunde auf einmal sieht (Muster Kopplungspruefung).
+// testhaken: zaehlt eine kuenstliche TYPE_E-Zelle in der Domaenenmitte als Innenzelle -- der Negativtest,
+// der beweist, dass Waechter (1) ueberhaupt ausloesen kann. Die Flags werden dabei NICHT veraendert.
+uint LBM_Domain::pruefe_rho_rand_c0(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const bool testhaken) {
+	uint bad = 0u;
+	const ulong NxNy = (ulong)Nx*(ulong)Ny, NN = NxNy*(ulong)Nz;
+	auto in_r1 = [&](const ulong n) {
+		const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/NxNy);
+		return x<2u||x+2u>=Nx||y<2u||y+2u>=Ny||z<2u||z+2u>=Nz;
+	};
+	auto in_maske = [&](const ulong n) { return (uint)(n%(ulong)Nx)+2u>=Nx; };
+	const ulong r1_N = (Nx>4u&&Ny>4u&&Nz>4u) ? NN-(ulong)(Nx-4u)*(ulong)(Ny-4u)*(ulong)(Nz-4u) : NN;
+
+	// ---- (0) SELBSTTEST der beiden Praedikate an konstruierten Zellen (Pruefbefund M1: der Testhaken allein
+	// bewies nur den Meldeweg, nicht die Klassifizierung). Mitte der y/z-Ebene, x an beiden Seiten der Grenze.
+	if(Nx>=6u&&Ny>=6u&&Nz>=6u) {
+		const ulong yz = ((ulong)(Ny/2u)+(ulong)(Nz/2u)*(ulong)Ny)*(ulong)Nx;
+		const bool ok = in_r1(yz+1ull) && !in_r1(yz+2ull) && !in_r1(yz+(ulong)(Nx-3u)) && in_r1(yz+(ulong)(Nx-2u))
+		             && !in_maske(yz+(ulong)(Nx-3u)) && in_maske(yz+(ulong)(Nx-2u)) && !in_maske(yz+1ull);
+		if(!ok) { print_warning("RHO_RAND-SELBSTTEST: in_r1/in_maske klassifizieren die Grenzzellen x=1/2 bzw. x=Nx-3/Nx-2 falsch -- alle Waechter unten waeren wertlos."); bad++; }
+	}
+	// ---- (1a) TYPE_E-Zellen. Die Schleife laeuft ueber Koordinaten (keine Division je Zelle) und zaehlt
+	// nebenbei die R1-Zellen -- das ist der Ist=Soll-Beleg des Koordinatentests gegen die geschlossene Formel.
+	ulong n_e = 0ull, n_e_innen = 0ull, erste_innen = 0xFFFFFFFFFFFFFFFFull, n_r1_gezaehlt = 0ull, n_e_praedikat = 0ull;
+	for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) {
+		const bool rand_yz = y<2u||y+2u>=Ny||z<2u||z+2u>=Nz;
+		const ulong n0 = ((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+		for(uint x=0u; x<Nx; x++) {
+			const bool r = rand_yz||x<2u||x+2u>=Nx;
+			if(r) n_r1_gezaehlt++;
+			const ulong n = n0+(ulong)x;
+			if((flags_host[n]&TYPE_E)==0u) continue;
+			n_e++;
+			if(in_r1(n)!=r) n_e_praedikat++; // Lambda und Koordinatentest muessen an jeder TYPE_E-Zelle uebereinstimmen
+			if(!r) { if(n_e_innen==0ull) erste_innen = n; n_e_innen++; }
+		}
+	}
+	if(n_r1_gezaehlt!=r1_N||n_e_praedikat>0ull) { print_warning("RHO_RAND-SELBSTTEST: R1 gezaehlt "+to_string(n_r1_gezaehlt)+" gegen Formel "+to_string(r1_N)+", Praedikat-Abweichungen an TYPE_E-Zellen "+to_string(n_e_praedikat)+" (Soll gleich / 0)."); bad++; }
+	else print_info("RHO_RAND C0 Selbsttest: R1 gezaehlt = Formel ("+to_string(n_r1_gezaehlt)+"), Praedikat an allen TYPE_E-Zellen gleich"+string(Nx>=6u&&Ny>=6u&&Nz>=6u ? ", Grenzzellen bestanden" : ", Grenzzellen UEBERSPRUNGEN (Kante < 6)")); // Pruefpass 2, Hinweis 1: ein bestandener Test muss sichtbar sein
+	if(testhaken) { // laeuft DURCH das Praedikat: ein in_r1, das immer true liefert, faellt hier auf
+		const ulong mitte = (ulong)(Nx/2u)+(ulong)(Ny/2u)*(ulong)Nx+(ulong)(Nz/2u)*NxNy;
+		print_warning("RHO_RAND-TESTHAKEN (CFD_RHO_RAND_TESTHAKEN=1): Zelle "+to_string(mitte)+" in der Domaenenmitte wird als TYPE_E-Zelle behandelt (Flags unveraendert). Soll: Waechter (1a) schlaegt an.");
+		if(!in_r1(mitte)) { if(n_e_innen==0ull) erste_innen = mitte; n_e_innen++; }
+		else { print_warning("RHO_RAND-TESTHAKEN: in_r1 haelt die Domaenenmitte fuer eine Randzelle -- Praedikat defekt."); bad++; }
+		if(in_maske(mitte)) { print_warning("RHO_RAND-TESTHAKEN: in_maske haelt die Domaenenmitte fuer beschrieben -- Praedikat defekt."); bad++; }
+	}
+	if(n_e_innen>0ull) {
+		const uint x = (uint)(erste_innen%(ulong)Nx), y = (uint)((erste_innen/(ulong)Nx)%(ulong)Ny), z = (uint)(erste_innen/NxNy);
+		print_warning("RHO_RAND-Waechter (1a): "+to_string(n_e_innen)+" TYPE_E-Zelle(n) liegen AUSSERHALB der Randschale R1, erste bei ("+to_string(x)+","+to_string(y)+","+to_string(z)+"). stream_collide liest dort rho aus dem Puffer, den es unter RHO_RAND nicht mehr gibt.");
+		bad++;
+	}
+	// ---- (1b) po_interior: in R1 UND in der Schreibmaske
+	ulong po_aus_r1 = 0ull, po_aus_maske = 0ull;
+	for(uint i=0u; i<po_N_active; i++) { const ulong m = (ulong)po_interior[i]; if(!in_r1(m)) po_aus_r1++; if(!in_maske(m)) po_aus_maske++; }
+	if(po_aus_r1>0ull||po_aus_maske>0ull) {
+		print_warning("RHO_RAND-Waechter (1b): von "+to_string(po_N_active)+" po_interior-Zellen liegen "+to_string(po_aus_r1)+" ausserhalb R1 und "+to_string(po_aus_maske)+" ausserhalb der Schreibmaske x >= Nx-2. po_reduce_mean und apply_pressure_outlet laesen dort veraltetes rho.");
+		bad++;
+	}
+	// ---- (1c) vi_interior: dito (im Nahfeld heute leer)
+	ulong vi_aus_r1 = 0ull, vi_aus_maske = 0ull;
+	for(uint i=0u; i<vi_N_active; i++) { const ulong m = vi_interior[i]; if(!in_r1(m)) vi_aus_r1++; if(!in_maske(m)) vi_aus_maske++; }
+	if(vi_aus_r1>0ull||vi_aus_maske>0ull) {
+		print_warning("RHO_RAND-Waechter (1c): von "+to_string(vi_N_active)+" vi_interior-Zellen liegen "+to_string(vi_aus_r1)+" ausserhalb R1 und "+to_string(vi_aus_maske)+" ausserhalb der Schreibmaske x >= Nx-2. apply_velocity_inlet laese dort veraltetes rho; ein Einlass an x- braucht eine erweiterte Maske.");
+		bad++;
+	}
+	// Je Kennzahl eine kurze Zeile (Pruefbefund N6: der Konsolenumbruch macht Zahlen am Ende langer Zeilen fuer grep unsichtbar).
+	print_info("RHO_RAND C0 R1-Zellen: "+to_string(r1_N)+" von "+to_string(NN));
+	print_info("RHO_RAND C0 R1-Speicher 2 B: "+to_string((float)(2ull*r1_N)/1.0e6f,2u)+" MB = "+to_string((float)(2ull*r1_N)/1048576.0f,2u)+" MiB");
+	print_info("RHO_RAND C0 TYPE_E: "+to_string(n_e)+", ausserhalb R1: "+to_string(n_e_innen)+" (Soll 0)");
+	print_info("RHO_RAND C0 po_interior: "+to_string(po_N_active)+", ausserhalb R1/Maske: "+to_string(po_aus_r1)+"/"+to_string(po_aus_maske)+" (Soll 0/0)");
+	print_info("RHO_RAND C0 vi_interior: "+to_string(vi_N_active)+", ausserhalb R1/Maske: "+to_string(vi_aus_r1)+"/"+to_string(vi_aus_maske)+" (Soll 0/0)");
+
+	// ---- (2) APG-Zensus
+	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
+	if(fac_N==0ull||FN==0ull) { print_info("RHO_RAND C0 Zensus: keine aktiven Facetten in dieser Domaene -- APG-Zensus entfaellt."); return bad; }
+	auto ist_fac = [&](const ulong fbi) {
+		return fac_idx_voll_on ? fac_idx[fbi]!=0xFFFFFFFFu : ((fac_idx[2ull*(fbi>>5)]>>(uint)(fbi&31ull))&1u)!=0u;
+	};
+	// Rechenbox = F-BBox plus eine Zelle Rand (APG-Nachbarn einer Facette am BBox-Rand liegen dort),
+	// auf die Domaene beschnitten. Bitfelder nur ueber diese Box, nicht ueber die Domaene.
+	const uint bx0 = fbx0>0u ? fbx0-1u : 0u, by0 = fby0>0u ? fby0-1u : 0u, bz0 = fbz0>0u ? fbz0-1u : 0u;
+	const uint bx1 = min(Nx, fbx0+fbnx+1u), by1 = min(Ny, fby0+fbny+1u), bz1 = min(Nz, fbz0+fbnz+1u);
+	const uint bnx = bx1-bx0, bny = by1-by0, bnz = bz1-bz0;
+	const ulong BN = (ulong)bnx*(ulong)bny*(ulong)bnz, BW = (BN+63ull)/64ull;
+	std::vector<ulong> b_l1((size_t)BW,0ull), b_l2((size_t)BW,0ull), b_n18((size_t)BW,0ull);
+	auto bget = [&](const std::vector<ulong>& v, const ulong i) { return ((v[(size_t)(i>>6)]>>(uint)(i&63ull))&1ull)!=0ull; };
+	auto bset = [&](std::vector<ulong>& v, const ulong i) { v[(size_t)(i>>6)] |= 1ull<<(uint)(i&63ull); };
+	auto bidx = [&](const uint x, const uint y, const uint z) { return (ulong)(x-bx0)+((ulong)(y-by0)+(ulong)(z-bz0)*(ulong)bny)*(ulong)bnx; };
+	// Lage 1
+	ulong n_l1 = 0ull;
+	for(uint zb=0u; zb<fbnz; zb++) for(uint yb=0u; yb<fbny; yb++) for(uint xb=0u; xb<fbnx; xb++) {
+		const ulong fbi = (ulong)xb+((ulong)yb+(ulong)zb*(ulong)fbny)*(ulong)fbnx;
+		if(!ist_fac(fbi)) continue;
+		bset(b_l1, bidx(fbx0+xb, fby0+yb, fbz0+zb)); n_l1++;
+	}
+	static const int FZ6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+	static const int D18[18][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+	ulong n_l2 = 0ull, n_n18 = 0ull, n_n18_aus_box = 0ull, n_n18_e = 0ull;
+	for(uint z=fbz0; z<fbz0+fbnz; z++) for(uint y=fby0; y<fby0+fbny; y++) for(uint x=fbx0; x<fbx0+fbnx; x++) {
+		if(!bget(b_l1, bidx(x,y,z))) continue;
+		// Lage 2: Regeln wie alloc_sgs_band
+		for(uint i=0u; i<6u; i++) {
+			const int zn = (int)z+FZ6[i][2]; if(zn<0||zn>=(int)Nz) continue;
+			const uint xn = (uint)((((int)x+FZ6[i][0])%(int)Nx+(int)Nx)%(int)Nx);
+			const uint yn = (uint)((((int)y+FZ6[i][1])%(int)Ny+(int)Ny)%(int)Ny);
+			if(xn<fbx0||xn>=fbx0+fbnx||yn<fby0||yn>=fby0+fbny||(uint)zn<fbz0||(uint)zn>=fbz0+fbnz) continue;
+			const ulong nn = (ulong)xn+((ulong)yn+(ulong)zn*(ulong)Ny)*(ulong)Nx;
+			if((flags_host[nn]&(TYPE_S|TYPE_E))!=0u) continue;
+			const ulong bi = bidx(xn, yn, (uint)zn);
+			if(bget(b_l1, bi)||bget(b_l2, bi)) continue;
+			bset(b_l2, bi); n_l2++;
+		}
+		// APG-Lesemenge: 18 Nachbarn, periodisch wie neighbors() im Kernel, nur reines TYPE_S entfaellt
+		for(uint i=0u; i<18u; i++) {
+			const uint xn = (uint)((((int)x+D18[i][0])%(int)Nx+(int)Nx)%(int)Nx);
+			const uint yn = (uint)((((int)y+D18[i][1])%(int)Ny+(int)Ny)%(int)Ny);
+			const uint zn = (uint)((((int)z+D18[i][2])%(int)Nz+(int)Nz)%(int)Nz);
+			const ulong nn = (ulong)xn+((ulong)yn+(ulong)zn*(ulong)Ny)*(ulong)Nx;
+			if((flags_host[nn]&(TYPE_S|TYPE_E))==TYPE_S) continue;
+			if(xn<bx0||xn>=bx1||yn<by0||yn>=by1||zn<bz0||zn>=bz1) { n_n18_aus_box++; continue; } // gewickelt oder ausserhalb der Rechenbox
+			const ulong bi = bidx(xn, yn, zn);
+			if(bget(b_n18, bi)) continue;
+			bset(b_n18, bi); n_n18++;
+			if((flags_host[nn]&TYPE_E)!=0u) n_n18_e++;
+		}
+	}
+	ulong n_n18_ohne_l12 = 0ull, n_n18_ohne_l12_kante = 0ull;
+	for(ulong w=0ull; w<BW; w++) {
+		const ulong rest = b_n18[(size_t)w]&~(b_l1[(size_t)w]|b_l2[(size_t)w]);
+		n_n18_ohne_l12 += (ulong)__builtin_popcountll(rest);
+	}
+	// Die fehlenden Zellen einordnen: haben sie einen Flaechennachbarn in L1 (dann waeren sie L2 -- darf nicht
+	// vorkommen, ausser am F-BBox-Rand) oder nur Kanten-/Diagonalkontakt?
+	for(uint z=bz0; z<bz1; z++) for(uint y=by0; y<by1; y++) for(uint x=bx0; x<bx1; x++) {
+		const ulong bi = bidx(x,y,z);
+		if(!bget(b_n18, bi)||bget(b_l1, bi)||bget(b_l2, bi)) continue;
+		if((flags_host[(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx]&TYPE_E)!=0u) continue; // TYPE_E ist nie L2 und oben schon als Plausibilitaet gemeldet (Pruefpass 2, Hinweis 2)
+		bool flaeche = false;
+		for(uint i=0u; i<6u&&!flaeche; i++) {
+			const int xn=(int)x+FZ6[i][0], yn=(int)y+FZ6[i][1], zn=(int)z+FZ6[i][2];
+			if(xn<(int)bx0||xn>=(int)bx1||yn<(int)by0||yn>=(int)by1||zn<(int)bz0||zn>=(int)bz1) continue;
+			if(bget(b_l1, bidx((uint)xn,(uint)yn,(uint)zn))) flaeche = true;
+		}
+		if(!flaeche) n_n18_ohne_l12_kante++;
+	}
+	// PLAUSIBILITAET, keine RHO_RAND-Verletzung (Pruefbefund N4): TYPE_E liegt in R1. Es waere aber ein Zeichen fuer einen zu engen Nahkasten.
+	if(n_n18_e>0ull) print_warning("RHO_RAND C0 Zensus (Plausibilitaet): "+to_string(n_n18_e)+" APG-gelesene Zellen sind TYPE_E -- Facetten liegen am Domaenenrand, der Nahkasten ist sehr eng.");
+	// Zellen der Lesemenge MIT Flaechenkontakt zu L1, die trotzdem nicht in L1+L2 liegen, duerfte es nicht geben
+	// (sie waeren Lage 2), ausser am F-BBox-Rand -- die Box ist aber um M=4 aufgeweitet. Soll 0 (Pruefbefund M2c).
+	const ulong n_n18_ohne_l12_flaeche = n_n18_ohne_l12-n_n18_ohne_l12_kante;
+	if(n_n18_ohne_l12_flaeche>0ull) { print_warning("RHO_RAND C0 Zensus: "+to_string(n_n18_ohne_l12_flaeche)+" Zellen der APG-Lesemenge haben Flaechenkontakt zu L1, liegen aber nicht in L1+L2 -- die L2-Nachbildung oder der F-BBox-Beschnitt stimmt nicht."); bad++; }
+	if(n_n18_aus_box>0ull) { print_warning("RHO_RAND C0 Zensus: "+to_string(n_n18_aus_box)+" APG-Lesungen (Mehrfachzaehlung) fallen ausserhalb der Rechenbox F-BBox+1 oder werden periodisch gewickelt -- der Zensus waere dort unvollstaendig."); bad++; }
+	if(band_on&&band_lagen>=2u) {
+		if(band_n_lage[2]!=n_l2) { print_warning("RHO_RAND C0 Zensus: |L2| = "+to_string(n_l2)+" weicht vom gebauten SGS-Band ab (band_n_lage[2] = "+to_string(band_n_lage[2])+") -- die Nachbildung von alloc_sgs_band ist nicht ausdrucksgleich (oder CFD_FAC_IDX_VOLL=1: alloc_sgs_band liest fac_idx immer als Bitmaske)."); bad++; }
+		else print_info("RHO_RAND C0 L2 Ist=Soll: "+to_string(n_l2)+" = band_n_lage[2]");
+	} else print_info("RHO_RAND C0 L2 NICHT gegen alloc_sgs_band geprueft (Band nicht gebaut) -- Beleg nur aus einem Lauf mit CFD_SGS_BAND=2");
+	// Regressionsschutz: alloc_facetten_domain prueft dieselbe Gleichheit schon hart (Pruefbefund N1).
+	if(n_l1!=fac_N) { print_warning("RHO_RAND C0 Zensus: |L1| = "+to_string(n_l1)+" aus fac_idx, aber fac_N = "+to_string(fac_N)+"."); bad++; }
+	// "Obermenge": auf dem Geraet fallen TYPE_MS-Facetten und Fruehausstiege (u_t ~ 0, MESSNUR, ELIBB pur) weg (Pruefbefund N3).
+	// Fuer die Auslegung einer Speicherregion ist die statische Obermenge die richtige Zahl.
+	print_info("RHO_RAND C0 Zensus L1 (Facetten): "+to_string(n_l1)+" (fac_N "+to_string(fac_N)+")");
+	print_info("RHO_RAND C0 Zensus L2 (6-Flaechen-Dilatation): "+to_string(n_l2));
+	print_info("RHO_RAND C0 Zensus APG-Lesemenge (statische Obermenge, N18(L1) ohne TYPE_S): "+to_string(n_n18));
+	print_info("RHO_RAND C0 Zensus davon NICHT in L1+L2: "+to_string(n_n18_ohne_l12)+" (nur Kanten-/Diagonalkontakt: "+to_string(n_n18_ohne_l12_kante)+", mit Flaechenkontakt: "+to_string(n_n18_ohne_l12_flaeche)+", Soll 0)");
+	print_info("RHO_RAND C0 Zensus Speicher APG-Region: "+to_string((float)(4ull*n_n18)/1.0e6f,2u)+" MB FP32 / "+to_string((float)(2ull*n_n18)/1.0e6f,2u)+" MB FP16");
+	print_info("RHO_RAND C0 Zensus Rechenbox "+to_string(bnx)+"x"+to_string(bny)+"x"+to_string(bnz)+", Bitfelder "+to_string((float)(3ull*8ull*BW)/1.0e6f,1u)+" MB Host");
+	return bad;
 }
 
 void LBM_Domain::alloc_f_liste(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz) {
