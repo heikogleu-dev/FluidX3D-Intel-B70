@@ -4111,6 +4111,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
 	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz); // XL-B8: post-stream-load = Paare vertauscht -> u waere NEGIERT (nur rho ist invariant und wird genutzt); XL-B7: coordinates() lokal -- Multi-Domain braeuchte def_O-Offsets (heute D=1)
+)+"#if defined(KLEMM_BILANZ)&&defined(RHO_CLAMP)"+R(
+	if(rho_local<=RHO_CLAMP_MIN||rho_local>=RHO_CLAMP_MAX) { // ★ 15.09.2026 Klemmen S0d (KLEMMEN-STUFE0-PLAN.md §1 Punkt 2): Faktor 1, weil f hier durch f_eq(rho_c) ERSETZT wird
+		const float dq_ = fabs(rho_local-klemm_rho_roh(fhn));
+		if(diag[266]<0xF0000000u) atomic_inc(&diag[266]);
+		if(dq_>2.0f&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0
+		atomic_add(&diag[rho_local<=RHO_CLAMP_MIN ? 267u : 268u], convert_uint_sat(fma(fmin(dq_, 2.0f), def_klemm_s, 0.5f)));
+	}
+)+"#endif"+R( // KLEMM_BILANZ
 	float feq[def_velocity_set]; calculate_f_eq(rho_local, u_road, 0.0f, 0.0f, feq);
 	store_f(n, feq, fi, j, t TS_A);
 }
@@ -4142,6 +4150,14 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	uxx j[def_velocity_set]; neighbors(n, j);
 	float fhn[def_velocity_set]; load_f(n, fhn, fi, j, t TS_A);
 	float rho_local, ux, uy, uz; calculate_rho_u(fhn, &rho_local, &ux, &uy, &uz); // LOKALES rho (Druck erhalten); post-stream-load = Paare vertauscht -> u waere NEGIERT (nur rho ist invariant und wird genutzt, XL-B8)
+)+"#if defined(KLEMM_BILANZ)&&defined(RHO_CLAMP)"+R(
+	if(rho_local<=RHO_CLAMP_MIN||rho_local>=RHO_CLAMP_MAX) { // ★ 15.09.2026 Klemmen S0d (KLEMMEN-STUFE0-PLAN.md §1 Punkt 2): Faktor 1, weil f hier durch f_eq(rho_c) ERSETZT wird
+		const float dq_ = fabs(rho_local-klemm_rho_roh(fhn));
+		if(diag[266]<0xF0000000u) atomic_inc(&diag[266]);
+		if(dq_>2.0f&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0
+		atomic_add(&diag[rho_local<=RHO_CLAMP_MIN ? 267u : 268u], convert_uint_sat(fma(fmin(dq_, 2.0f), def_klemm_s, 0.5f)));
+	}
+)+"#endif"+R( // KLEMM_BILANZ
 	float feq[def_velocity_set]; calculate_f_eq(rho_local, u_road, 0.0f, 0.0f, feq);
 	store_f(n, feq, fi, j, t TS_A);
 }
@@ -4639,7 +4655,12 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		v[3] += wij*coarse_plane[cb+3ul];
 	}
 	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
-	if(!(v[0]>0.5f&&v[0]<2.0f)) return;
+	if(!(v[0]>0.5f&&v[0]<2.0f)) {
+)+"#ifdef KLEMM_BILANZ"+R(
+		if(hits[270]<0xF0000000u) atomic_inc(&hits[270]); // ★ 15.09.2026 Klemmen S0d: Lift-rho-Tor griff, der vorige Randwert bleibt stehen
+)+"#endif"+R( // KLEMM_BILANZ
+		return;
+	}
 	// ★ Gross-Audit M: isfinite ist unter -cl-finite-math-only toter Code (Compiler faltet zu true) --
 	// Bit-Test auf Exponent 0xFF faengt NaN/Inf treiberunabhaengig.
 	if((as_uint(v[0])&0x7F800000u)==0x7F800000u||(as_uint(v[1])&0x7F800000u)==0x7F800000u||(as_uint(v[2])&0x7F800000u)==0x7F800000u||(as_uint(v[3])&0x7F800000u)==0x7F800000u) return; // R2: auch rho bit-testen (Bereichsvergleich ist unter finite-math NaN-unzuverlaessig)
@@ -4762,6 +4783,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	uxx j[def_velocity_set]; neighbors(nn, j);
 	float fhn[def_velocity_set]; load_f(nn, fhn, fi, j, t TS_A);
 	float rho_l, uxm, uym, uzm; calculate_rho_u(fhn, &rho_l, &uxm, &uym, &uzm);
+)+"#if defined(KLEMM_BILANZ)&&defined(RHO_CLAMP)"+R(
+	if((rho_l<=RHO_CLAMP_MIN||rho_l>=RHO_CLAMP_MAX)&&diag[269]<0xF0000000u) atomic_inc(&diag[269]); // ★ 15.09.2026 Klemmen S0d: Klemme in schale_blend (FNEQ-Arm massenerhaltend, nur gezaehlt)
+)+"#endif"+R( // KLEMM_BILANZ
 	// ★★ XL-B8, hier TRAGEND (anders als in boden_eq/einlass_eq, die u verwerfen durften):
 	// post-stream-load liest die Esoteric-Pull-Paare VERTAUSCHT -- calculate_rho_u liefert damit
 	// u EXAKT NEGIERT (rho ist invariant). Das lokale u ist also u_lokal = -(uxm,uym,uzm).

@@ -630,7 +630,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [136..140] RDIAG |2(rho-1)(S1.t1)|/|Ziel| an RUECKFALLbesuchen | [141]/[142] dessen Vorzeichen + / -
 	// [143] RDIAG Nenner (Rueckfallbesuche mit Ziel>0) | [144..148] s1_soll/u_t bei G11>0 (Gate-Rueckfall)
 	// [149] G11roh ~ 0 (c_1 parallel n) | [150..154] s1_soll/u_t bei G11==0 (Rang 0) -- HYPOTHETISCH, s. kernel.cpp
-	// [BERICHTIGT 15.09.2026: nicht ALLE -- 0/1/28/29 und 221 ff. sind ungegatet] ALLE Ereignis-Slots sind t%100-Stichproben; 49..58 und 60..63 zusaetzlich hash-ausgeduennt (jede 64.). RDIAG (136..154) ist NICHT ausgeduennt.
+	// [BERICHTIGT 15.09.2026: nicht ALLE -- 0/1/28/29/66 und 221 ff. sind ungegatet] ALLE Ereignis-Slots sind t%100-Stichproben; 49..58 und 60..63 zusaetzlich hash-ausgeduennt (jede 64.). RDIAG (136..154) ist NICHT ausgeduennt.
 	// [126..127] SISM Wirkpfad/Klemme | [160..167] VAN DRIEST D^2-Histogramm, Zeitintegral aller Zaehlslots ab CFD_SGS_VD_AB
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). [HISTORISCH, siehe unten] NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
@@ -647,6 +647,7 @@ void LBM_Domain::allocate(Device& device) {
 	klemm_bilanz_on = klemm_bilanz_env(); // ★ 15.09.2026 Klemmen S0b: Konstruktionszeit-Kopie, dieselbe Quelle wie die Emission (nur SRT, siehe Emission)
 #else
 	klemm_bilanz_on = false;
+	if(klemm_bilanz_env()) print_warning("CFD_KLEMM_BILANZ ist an, das Messinstrument ist aber nur fuer SRT gebaut -- hier AUS (Ansage-Doktrin, Pruefpass S0b-2).");
 #endif
 	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : "RHO_CLAMP 1,001/1,002")+string(klemm_haken_env()==3u&&klemm_bilanz_on ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt; im dd-Fall je Domaene eine Warnung)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis.");
 	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");

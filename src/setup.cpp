@@ -1403,6 +1403,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	const double S = 16384.0, ob[6] = {1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0, 16.0};
 	double B_r = 0.0, B_u = 0.0;
 	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*2.1*ob[b]*S+1.0); }
+	B_r = fmax(B_r, (double)dlt[266]*(2.0*S+1.0)); // ★ S0d: BODEN/EINLASS_EQ-Summen 267/268, Faktor 1, Kappe 2
 	const double grenze = klemm_haken_env()==4u ? 65536.0 : 4294967296.0; // Haken 4: Schranke kuenstlich 2^16 -> die Warnung MUSS feuern
 	const bool mehrd = B_r>=grenze||B_u>=grenze;
 	if(mehrd) { if(K.mehrdeutig==0ull) print_warning(string("KLEMM-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG (Schranke rho "+to_string(B_r,0u)+", u "+to_string(B_u,0u)+" >= "+to_string(grenze,0u)+") -- die Festkomma-Summen koennen gewickelt sein; weitere Fenster nur im Bericht gezaehlt."); K.mehrdeutig++; }
@@ -1433,10 +1434,12 @@ static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const 
 		const double m_zu = su(a,226u,5u)/S, m_ab = su(a,231u,5u)/S, m_netto = m_zu-m_ab;
 		const double jx = (su(a,247u,5u)-su(a,252u,5u))/S, jz = (a[263]-a[264])/S;
 		const double mdot = (double)u_lat*(double)Ny*(double)Nz;
+		const double eq_zu = a[267]/S, eq_ab = a[268]/S; // ★ S0d: BODEN_EQ/EINLASS_EQ (Faktor 1)
 		const double Fx_N = (double)u.si_F((float)(jx/(double)n)), Fz_N = (double)u.si_F((float)(jz/(double)n));
 		const double dcd = -Fx_N/qA, dcz = -Fz_N/qA;
 		print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+", "+to_string(n)+" Schritte, "+to_string(K.fenster)+" Fenster): rho-Treffer "+to_string(hr,0u)+", u-Treffer "+to_string(hu,0u));
 		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Einlass-Massenstroms; Rundungsschranke "+to_string(hr/(2.0*S),4u));
+		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+" (massenerhaltend, nur gezaehlt); Lift-rho-Tor "+to_string(a[270],0u));
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
 		if(ph==1u) {
 			string kl = "    Klassen K0..K4 (Facette/MS/F-BBox/Randschale/Rest) nach Warmlauf -- rho-Treffer ";
