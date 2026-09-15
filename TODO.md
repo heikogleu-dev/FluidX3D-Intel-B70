@@ -25,6 +25,7 @@ mit Commit. Eine Variable je Lauf; 4-mm- und Produktionsläufe nur nach Heikos G
 | 4 | **APG/Mozaffari-Linie reaktivieren** (Todo 2) | geparkt; ELIBB × APG, deterministisches Nachbar-ρ; Serienzeilen brauchen `CFD_RHO_RAND=0` | 8-mm-A/B κ 0,5 gegen 0 mit `CFD_VTK_DT=0.025` | Wissensspeicher-Todo, `UEBERGABE-2026-09-14.md` |
 | 5 | **iGPU-Leistungsleiter** — PFLICHT vor 3,75 mm | offen; absolute Grobschrittzeit ungemessen | zuerst Timer um den Fernfeldschritt (`CFD_QUEUE_DEV=2`) | Anhang „Der Deckel“ |
 | 6 | **3,75 mm / 15 m** | rechnerisch machbar seit 12.09. (Anhang 1g); 3,5 mm fehlen ~3,8 GB | nach 5 | Anhang 1g |
+| 7 | **Gemischter Satz D3Q19/D3Q27 nur an Wandzellen** (Heiko 15.09. spät) | Idee mit Gate, NICHT begonnen; Prüfnotiz: „44 %“-Ausgangszahl ohne Quelle, Ein-Link-Fläche schon bedient (07.09.), rekonstruierte Eckpopulationen transportieren keinen Impuls | **erst nach Punkt 4 (APG)**: Stufe 1 Zensus (8 mm, eigener Lauf mit KDIAG) + Flächen-Gate | `PLAN-D3Q27-WANDZELLEN.md` |
 
 ## 2 · Performance — offen
 
