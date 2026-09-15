@@ -98,8 +98,16 @@
 // Wieviele Zellen er wirklich trifft, meldet der Waechter zur Laufzeit -- eine still greifende
 // Klemme waere genau der lautlose No-op, den dieses Projekt jagt.
 #define RHO_CLAMP
-#define RHO_CLAMP_MIN 0.5f
-#define RHO_CLAMP_MAX 1.5f
+// ★ 15.09.2026 Klemmen Z2a (KLEMMEN-STUFE2-PLAN.md §2.2, Heiko: "Handwerte automatisch physikalisch setzen"): die Grenzen sind
+// HERGELEITET, nicht gewaehlt. Konsistenzhuelle der Zustandsgleichung p = c_s^2*rho: der Staudruck eines Pakets an der
+// Positivitaetsgrenze |u| = c_s betraegt 1/2*rho*c_s^2, also |rho-1| <= u_max^2/(2*c_s^2) = 1/2. Das ist das Druckaequivalent der
+// Positivitaetsgrenze des Gleichgewichts zweiter Ordnung (|u|^2 <= c_s^2 = 1/3) -- keine Positivitaetsgrenze selbst, sondern ein
+// Kriterium "Rechnung kaputt". c_s^2 ist das PHYSIKALISCHE 1/3, NICHT das emittierte def_c (sonst schrumpfte die Huelle unter dem
+// Klemmen-Haken 2). In float exakt: (1/3)/(2*(1/3)) = 0,5 -- die Werte sind bitgleich zu den bisherigen Literalen 0,5f/1,5f.
+#define RHO_KLEMM_CS2 (1.0f/3.0f)
+#define RHO_KLEMM_UMAX2 RHO_KLEMM_CS2
+#define RHO_CLAMP_MIN (1.0f-RHO_KLEMM_UMAX2/(2.0f*RHO_KLEMM_CS2))
+#define RHO_CLAMP_MAX (1.0f+RHO_KLEMM_UMAX2/(2.0f*RHO_KLEMM_CS2))
 #define EQUILIBRIUM_BOUNDARIES // enables fixing the velocity/density by marking cells with TYPE_E; can be used for inflow/outflow; does not reflect shock waves
 #define MOVING_BOUNDARIES // enables moving solids: set solid cells to TYPE_S and set their velocity u unequal to zero
 //#define SURFACE // enables free surface LBM: mark fluid cells with TYPE_F; at initialization the TYPE_I interface and TYPE_G gas domains will automatically be completed; allocates an extra 12 Bytes/cell

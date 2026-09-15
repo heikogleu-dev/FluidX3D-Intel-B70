@@ -506,6 +506,7 @@ void ulat_skal_setzen(const double s) {
 }
 // Der Zaehltakt ist ein SCHRITT-Schalter und skaliert deshalb mit. Ohne das laege die
 // Wirkpfad-Zaehlung bei geaendertem u_lat an einer anderen physikalischen Zeit als in der Vorgabe.
+static_assert(RHO_CLAMP_MIN==0.5f&&RHO_CLAMP_MAX==1.5f, "Z2a: die hergeleiteten RHO_CLAMP-Grenzen muessen bitgleich 0,5f/1,5f sein (Kontrollarm).");
 ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEHL_TAKT", 100u))*ulat_skal()); static const ulong t = (ulong)(r<1ll ? 1ll : r); return t; }
 // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md): CFD_KLEMM_BILANZ = Messinstrument der beiden Zustandsklemmen (Vorgabe 1 = an,
 // 0 = aus -- nur fuer den Wanduhr-A/B). CFD_KLEMM_HAKEN = Negativ-/Positivtests, NUR Testarme (aendern die Physik):
