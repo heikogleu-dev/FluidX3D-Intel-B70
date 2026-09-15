@@ -1373,7 +1373,11 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 }
 
 bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueber alle Domaenen; print_error erst in klemm_bilanz_abschluss() am FALLENDE (Pruefpass S0b MITTEL 1: print_error = exit)
-void klemm_bilanz_abschluss(const char* fall) { if(klemm_bilanz_verletzt) print_error(string("KLEMM-BILANZ (")+fall+"): Abnahme des Klemmen-Messinstruments verletzt -- siehe KLEMM-BILANZ-Zeilen im Bericht."); }
+bool klemm_budget_verletzt = false; // ★ 15.09.2026 Klemmen Z2c (KLEMMEN-STUFE2-PLAN.md §2.4/§3): Budget gerissen -- Abbruch ebenfalls erst am Fallende
+bool klemm_bilanz_aktiv = false;    // ★ Z2c: fuer den Fazittext -- das Messinstrument lief in diesem Fall
+void klemm_bilanz_abschluss(const char* fall) {
+	if(klemm_bilanz_verletzt||klemm_budget_verletzt) print_error(string("KLEMM-BILANZ (")+fall+"): "+string(klemm_bilanz_verletzt ? "Abnahme des Klemmen-Messinstruments verletzt" : "")+string(klemm_bilanz_verletzt&&klemm_budget_verletzt ? " UND " : "")+string(klemm_budget_verletzt ? "Klemm-Budget gerissen (KLEMM-BUDGET-Zeilen)" : "")+" -- siehe Bericht.");
+}
 // ★ 15.09.2026 Klemmen S0c (KLEMMEN-STUFE0-PLAN.md §4/§7): PERIODISCHER LESER der Stufe-0-Slots im Sample-Takt.
 // Die Festkomma-Summenslots wickeln absichtlich mod 2^32; der Host bildet je Fenster die uint-Differenz und summiert in double.
 // Eindeutig ist die Differenz nur, solange die Fenstersumme < 2^32 bleibt -- das prueft der WICKELWAECHTER aus den Dekaden-
@@ -1406,9 +1410,9 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*2.1*ob[b]*S+1.0); }
 	B_r = fmax(B_r, (double)dlt[266]*(2.0*S+1.0)); // ★ S0d: BODEN/EINLASS_EQ-Summen 267/268, Faktor 1, Kappe 2
 	const double grenze = klemm_haken_env()==4u ? 65536.0 : 4294967296.0; // Haken 4: Schranke kuenstlich 2^16 -> die Warnung MUSS feuern
-	bool satt_dek = false; for(uint b=0u; b<6u; b++) if(d->rho_clamp_hits[236u+b]>=0xF0000000u||d->rho_clamp_hits[257u+b]>=0xF0000000u) satt_dek = true; // Pruefpass S0c N2: gesaettigte Dekade -> Differenz 0 -> Schranke unterschaetzt
-	const bool mehrd = B_r>=grenze||B_u>=grenze||satt_dek||dlt[210]>0u; // N1: rho_max 2,1 gilt nur, solange Slot 210 (rho ausserhalb 0,25..4,0 an TYPE_E) im Fenster 0 bleibt -- sonst ist die u-Schranke keine
-	if(mehrd) { if(K.mehrdeutig==0ull) print_warning(string("KLEMM-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG (Schranke rho "+to_string(B_r,0u)+", u "+to_string(B_u,0u)+" >= "+to_string(grenze,0u)+") -- die Festkomma-Summen koennen gewickelt sein; weitere Fenster nur im Bericht gezaehlt."); K.mehrdeutig++; }
+	bool satt_dek = d->rho_clamp_hits[266]>=0xF0000000u; for(uint b=0u; b<6u; b++) if(d->rho_clamp_hits[236u+b]>=0xF0000000u||d->rho_clamp_hits[257u+b]>=0xF0000000u) satt_dek = true; // Pruefpass S0c-2 N-c: auch 266 (Schranke der S0d-Summen) // Pruefpass S0c N2: gesaettigte Dekade -> Differenz 0 -> Schranke unterschaetzt
+	const bool mehrd = B_r>=grenze||B_u>=grenze||satt_dek||dlt[210]>0u; // N1: rho_max 2,1 gilt nur, solange Slot 210 (rho ausserhalb [0,4; 2,1] an TYPE_E, kernel.cpp Bereichswaechter) im Fenster 0 bleibt -- sonst ist die u-Schranke keine
+	if(mehrd) { if(K.mehrdeutig==0ull) print_warning(string("KLEMM-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG -- Ursache: "+string(B_r>=grenze||B_u>=grenze ? "Schranke rho "+to_string(B_r,0u)+" / u "+to_string(B_u,0u)+" >= "+to_string(grenze,0u) : "")+string(satt_dek ? " gesaettigte Dekade/Slot 266" : "")+string(dlt[210]>0u ? " Slot 210 > 0 (rho-Huelle 2,1 an TYPE_E verletzt)" : "")+"; die Festkomma-Summen koennen gewickelt sein, weitere Fenster nur im Bericht gezaehlt."); K.mehrdeutig++; } // Pruefpass S0c-2 N-b
 	for(uint k=0u; k<288u; k++) { K.ges[k] += (double)dlt[k]; if(nach_warmup) K.nach[k] += (double)dlt[k]; K.alt[k] = d->rho_clamp_hits[k]; }
 	if(nach_warmup&&!K.warm) { K.warm = true; K.t_warm = K.t_ende; } // Pruefpass S0c M1: Phase beginnt am Anfang DIESES Fensters (voriges Lesen), nicht an seinem Ende
 	K.fenster++; if(nach_warmup) K.fenster_nach++; K.t_ende = L.get_t();
@@ -1422,16 +1426,56 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 }
 // ★ 15.09.2026 Klemmen S0c: Bericht in physikalischen Groessen. NUR EIN GROESSENVERGLEICH (Plan §1 Punkt 6): entfernter FLUIDimpuls
 // ist keine Koerperkraft; ΔCd_aeq = (Fluid-x-Impulsverlust je Schritt, in N) / (q_inf*A_ref), Vorzeichen positiv = Fluid verliert +x-Impuls.
-// Die Masse wird auf den Einlass-Massenstrom u_lat*Ny*Nz (rho = 1) je Schritt bezogen. n_Schritte = Schritte DIESER Domaene.
-static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const double qA, const float u_lat, const uint Ny, const uint Nz, const double sigma_cdrest, const char* sigma_name = "sigma(cd_rest, Block-SEM 4)") {
-	if(!K.init) return;
+// Die Masse wird auf den Durchfluss u_lat*Ny*Nz (rho = 1) je Schritt bezogen (Groessenbezug; das Nahfeld hat keinen Einlass). n_Schritte = Schritte DIESER Domaene.
+// ★ 15.09.2026 Klemmen Z2c: Budget-Kennwerte der Phase "nach Warmlauf" je Domaene (Plan §2.4). dcd_m = Massenaequivalent ueber den
+// Impulsfluss bei u_inf (Lagally, deklariertes Interim "netto bei u_inf"; Ablösebedingung: brutto reisst, netto nicht).
+struct KlemmUrteil { bool pruefbar = false, kappung = false; ulong n = 0ull; double dcd_j = 0.0, dcz_j = 0.0, dcd_m = 0.0, dcd_m_brutto = 0.0; string grund; };
+// k(B) = sqrt((1+r)^2 - 1), r = sqrt(1-c4^2)/c4, c4(B) = sqrt(2/(B-1))*Gamma(B/2)/Gamma((B-1)/2): die Klemme darf die Gesamtunsicherheit
+// sqrt(sigma^2+b^2) nicht staerker verschieben, als sigma-Dach selbst unsicher ist. k(4) = 1,011, k(8) = 0,786, k(16) = 0,634. Kein Handwert.
+static double klemm_budget_k(const uint B) {
+	const double c4 = sqrt(2.0/(double)(B-1u))*exp(lgamma(0.5*(double)B)-lgamma(0.5*(double)(B-1u)));
+	const double r = sqrt(fmax(0.0, 1.0-c4*c4))/c4;
+	return sqrt((1.0+r)*(1.0+r)-1.0);
+}
+static void klemm_budget_bewerten(const char* wo, const KlemmUrteil& U, const double sig_cd, const double sig_cz, const string& csv_pfad, const bool neu) {
+	const uint modus = env_u("CFD_KLEMM_BUDGET", 2u); // 0 = nicht bewerten, 1 = nur Warnung, 2 = Fehler am Fallende (Vorgabe, Uebergabe §1.4)
+	if(modus==0u) return;
+	if(modus>2u) print_error("CFD_KLEMM_BUDGET kennt nur 0, 1, 2.");
+	const uint B = 4u; const double k = klemm_budget_k(B);
+	const double lhs = fabs(U.dcd_j)+fabs(U.dcd_m), lhs_b = fabs(U.dcd_j)+fabs(U.dcd_m_brutto);
+	string urteil;
+	if(!U.pruefbar) urteil = "nicht pruefbar ("+U.grund+")";
+	else if(!(sig_cd>0.0)) urteil = "nicht pruefbar (sigma_cd fehlt: weniger als 2B Samples nach Warmlauf)";
+	else {
+		const bool cd_ok = lhs<=k*sig_cd, cz_ok = !(sig_cz>0.0)||fabs(U.dcz_j)<=k*sig_cz;
+		urteil = (cd_ok&&cz_ok) ? "eingehalten" : "GERISSEN";
+		if(!cd_ok||!cz_ok) {
+			if(U.kappung) urteil += " (schon mit gekappten Summen = Untergrenzen)";
+			if(modus==2u) klemm_budget_verletzt = true;
+		} else if(U.kappung) urteil += " (Summen gekappt = Untergrenzen, Urteil unsicher)";
+		if(cd_ok&&lhs_b>k*sig_cd) print_warning(string("  KLEMM-BUDGET ")+wo+": netto eingehalten, BRUTTO gerissen ("+to_string(lhs_b/sig_cd,3u)+" sigma) -- Ablösebedingung des Interims \"netto bei u_inf\" ausgeloest: das Urteil haengt am Ort der Quellen (Plan §2.4, lokale Summen noetig).");
+	}
+	const string txt = string("  KLEMM-BUDGET ")+wo+" (nach Warmlauf, "+to_string(U.n)+" Schritte): |dCd_j| + |dCd_m| = "+to_string(fabs(U.dcd_j),6u)+" + "+to_string(fabs(U.dcd_m),6u)
+		+(sig_cd>0.0 ? " = "+to_string(lhs/sig_cd,4u)+" sigma_cd" : string(""))+" (brutto "+(sig_cd>0.0 ? to_string(lhs_b/sig_cd,4u)+" sigma" : to_string(lhs_b,6u))+"), |dCz_j| = "+to_string(fabs(U.dcz_j),6u)
+		+(sig_cz>0.0 ? " = "+to_string(fabs(U.dcz_j)/sig_cz,4u)+" sigma_cz" : string(" (sigma_cz fehlt)"))+"; Grenze k(4)*sigma = "+to_string(k,4u)+" sigma -> "+urteil;
+	if(urteil.rfind("GERISSEN",0)==0) print_warning(txt+(modus==2u ? " -- Abbruch am Fallende (CFD_KLEMM_BUDGET=2)." : " (CFD_KLEMM_BUDGET=1: nur Warnung)."));
+	else if(urteil.rfind("nicht",0)==0) print_warning(txt);
+	else print_info(txt);
+	std::ofstream c(csv_pfad, neu ? std::ios::trunc : std::ios::app); c.precision(8);
+	if(neu) c << "# Klemm-Budget (KLEMMEN-STUFE2-PLAN.md §2.4): |dCd_j|+|dCd_m| <= k(B)*sigma_cd, |dCz_j| <= k(B)*sigma_cz, B = " << B << ", k = " << k << "; nur Phase nach Warmlauf; dCd_m = Massenaequivalent bei u_inf (Interim)\n"
+		<< "bereich,n_schritte,dCd_j,dCz_j,dCd_m_netto,dCd_m_brutto,sigma_cd,sigma_cz,k,kappung,urteil\n";
+	c << wo << "," << U.n << "," << U.dcd_j << "," << U.dcz_j << "," << U.dcd_m << "," << U.dcd_m_brutto << "," << sig_cd << "," << sig_cz << "," << k << "," << (U.kappung?1:0) << "," << urteil << "\n";
+}
+static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const double qA, const float u_lat, const uint Ny, const uint Nz, const double sigma_cdrest, const char* sigma_name = "sigma(cd_rest, Block-SEM 4)") {
+	KlemmUrteil U;
+	if(!K.init) { U.grund = "Instrument aus"; return U; }
 	const double S = 16384.0;
 	auto su = [&](const double* a, const uint b, const uint n) { double s = 0.0; for(uint k=b; k<b+n; k++) s += a[k]; return s; };
 	for(uint ph=0u; ph<2u; ph++) {
 		const double* a = ph==0u ? K.ges : K.nach;
 		const ulong n = ph==0u ? K.t_ende-K.t_start : (K.warm ? K.t_ende-K.t_warm : 0ull);
 		const string pn = ph==0u ? "ganzer Lauf" : "nach Warmlauf";
-		if(n==0ull) { print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+"): keine Schritte in dieser Phase."); continue; }
+		if(n==0ull) { print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+"): keine Schritte in dieser Phase."); if(ph==1u) U.grund = "keine Schritte nach Warmlauf"; continue; }
 		const double hr = su(a,221u,5u), hu = su(a,242u,5u);
 		const double m_zu = su(a,226u,5u)/S, m_ab = su(a,231u,5u)/S, m_netto = m_zu-m_ab;
 		const double jx = (su(a,247u,5u)-su(a,252u,5u))/S, jz = (a[263]-a[264])/S;
@@ -1443,7 +1487,11 @@ static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const 
 		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Durchflusses u_lat*Ny*Nz (Groessenbezug; das Nahfeld hat keinen Einlass); Rundungsschranke "+to_string(hr/(2.0*S),4u));
 		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+" (massenerhaltend, nur gezaehlt); Lift-rho-Tor "+to_string(a[270],0u));
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
-		if(ph==1u) {
+		if(ph==1u) { // ★ Z2c: Budget-Kennwerte (Masse inkl. BODEN/EINLASS_EQ, S0d)
+			const double Qn = (m_netto+eq_zu-eq_ab)/(double)n, Qb = (m_zu+m_ab+eq_zu+eq_ab)/(double)n;
+			U.n = n; U.dcd_j = dcd; U.dcz_j = dcz;
+			U.dcd_m = -(double)u.si_F((float)((double)u_lat*Qn))/qA; U.dcd_m_brutto = fabs((double)u.si_F((float)((double)u_lat*Qb))/qA);
+			U.kappung = a[265]>0.0; U.pruefbar = K.mehrdeutig==0ull; if(!U.pruefbar) U.grund = "Wickelwaechter MEHRDEUTIG";
 			string kl = "    Klassen K0..K4 (Facette/MS/F-BBox/Randschale/Rest) nach Warmlauf -- rho-Treffer ";
 			for(uint k=0u; k<5u; k++) kl += (k?"/":"")+to_string(a[221u+k],0u);
 			kl += ", Masse netto "; for(uint k=0u; k<5u; k++) kl += (k?"/":"")+to_string((a[226u+k]-a[231u+k])/S,4u);
@@ -1451,7 +1499,7 @@ static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const 
 			kl += ", dCd_aeq "; for(uint k=0u; k<5u; k++) kl += (k?"/":"")+to_string(-(double)u.si_F((float)((a[247u+k]-a[252u+k])/S/(double)n))/qA,6u);
 			print_info(kl);
 			if(sigma_cdrest>0.0) print_info(string("    Vergleich: |dCd_aeq| / ")+sigma_name+" = "+to_string(fabs(dcd)/sigma_cdrest,4u)+" (sigma "+to_string(sigma_cdrest,5u)+"); Entscheidungsregel Uebergabe §1.2: << 1 Hygiene, >~ 1 Stufe 1 Rang 1.");
-			else print_info("    Vergleich gegen sigma(cd_rest): keine Reihe verfuegbar (zu wenige Samples oder Facettenpfad aus).");
+			else print_info(string("    Vergleich gegen ")+sigma_name+": keine Reihe verfuegbar (zu wenige Samples oder Facettenpfad aus).");
 		}
 	}
 	if(K.mehrdeutig>0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": "+to_string(K.mehrdeutig)+" von "+to_string(K.fenster)+" Fenstern MEHRDEUTIG -- Summen unsicher"+string(klemm_haken_env()==4u ? " (Haken 4 erwartet das)." : "."));
@@ -1460,6 +1508,7 @@ static void berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const 
 		print_warning(string("  KLEMM-BILANZ ")+wo+": HAKEN 4 gesetzt, aber kein Fenster MEHRDEUTIG trotz Treffern -- der Wickelwaechter feuert nicht. Abbruch am Fallende.");
 		klemm_bilanz_verletzt = true;
 	}
+	return U;
 }
 static // ---------------------------------------------------------------------------- Dichte-Klemme berichten
 // ★★ Heikos Einwand 2026-08-09: "rho clamp ist doch auch nur ne Kruecke die man benoetigt wenn der
@@ -1470,6 +1519,7 @@ static // ----------------------------------------------------------------------
 void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_lat=0.0f) { // u_lat nur fuer die Freistrom-Ansage unter U_FP16; 0 = nicht bekannt, dann entfaellt sie
 #ifdef RHO_CLAMP
 	if(L.lbm_domain[0]->klemm_bilanz_on) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §6): Ist=Soll des Messinstruments am Laufende
+		klemm_bilanz_aktiv = true; // ★ Z2c
 		ulong v[288]; for(uint k=0u; k<288u; k++) v[k] = 0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); for(uint k=0u; k<288u; k++) v[k] += (ulong)L.lbm_domain[d]->rho_clamp_hits[k]; }
 		ulong rk=0ull, rd=0ull, uk=0ull, ud=0ull; bool satt_r=false, satt_u=false; // Pruefpass S0b NIEDRIG: getrennt, sonst schaltet eine gesaettigte rho-Seite (H1) auch die u-Abnahme ab
@@ -1758,6 +1808,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 void dichteklemme_fazit(const ulong summe) {
 #ifdef RHO_CLAMP
 	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben. (Der Zaehler ist saettigend, nicht gegatet: eine Null ist wieder eine echte Aussage.)");
+	else if(klemm_bilanz_aktiv) print_info("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen. Ob das ein Ergebnis entwertet, bewertet seit Z2c das KLEMM-BUDGET weiter unten (entfernte Masse und Impuls gegen k(4)*sigma), nicht die Trefferzahl."); // ★ Z2c
 	else print_warning("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen: rho hat den physikalischen Bereich verlassen. Dieser Lauf rechnete stellenweise auf einem GEKLEMMTEN Feld und ist kein belastbares Ergebnis -- die Ursache liegt im Betriebspunkt (fehlende Volumenviskositaet bei w gegen 2), nicht in der Klemme.");
 #else
 	(void)summe;
@@ -5607,7 +5658,8 @@ void main_setup_kugel() {
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h); }
-	berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u), "sigma(Cd der Kugel aus object_force, Block-SEM 4)"); // ★ 15.09.2026 Klemmen S0c (Pruefpass S0c N4: Kugel hat kein cd_rest)
+	{ const KlemmUrteil ku_ = berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u), "sigma(Cd der Kugel aus object_force, Block-SEM 4)");
+	  if(kb_kugel.init) klemm_budget_bewerten("Gitter", ku_, block_sem(cd_w, 4u), block_sem(cz_w, 4u), out_dir+"klemm_budget.csv", true); } // ★ Z2c // ★ 15.09.2026 Klemmen S0c (Pruefpass S0c N4: Kugel hat kein cd_rest)
 	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd_w.size(); i++) { mcd+=cd_w[i]; mcz+=cz_w[i]; }
@@ -9142,8 +9194,16 @@ static void main_setup_fahrzeug_dd() {
 	{ // ★ 15.09.2026 Klemmen S0c: Restfenster seit dem letzten Sample lesen, dann Bericht (sigma aus ber_cd = cd_rest-Reihe nach Warmlauf)
 	  klemm_lesen(lbm_f, kb_nah, t_si_letzt, t_si_letzt>=(double)t_warmup, out_dir+"klemmen_nah.csv", "Nahfeld"); klemm_lesen(lbm_c, kb_fern, t_si_letzt, t_si_letzt>=(double)t_warmup, out_dir+"klemmen_fern.csv", "Fernfeld");
 	  const double sig_ = block_sem(ber_cd, 4u);
-	  berichte_klemmbilanz(kb_nah, "Nahfeld", units_fine, (double)q_inf*(double)A_ref, u_lat, fNy, fNz, sig_);
-	  berichte_klemmbilanz(kb_fern, "Fernfeld", units_coarse, (double)q_inf*(double)A_ref, u_lat, cNy, cNz, sig_); }
+	  const KlemmUrteil un_ = berichte_klemmbilanz(kb_nah, "Nahfeld", units_fine, (double)q_inf*(double)A_ref, u_lat, fNy, fNz, sig_);
+	  const KlemmUrteil uf_ = berichte_klemmbilanz(kb_fern, "Fernfeld", units_coarse, (double)q_inf*(double)A_ref, u_lat, cNy, cNz, sig_);
+	  if(kb_nah.init) { // ★ Z2c: Budget je Domaene und gemeinsam (sigma immer aus dem Nahfeld)
+	    const double sgz_ = block_sem(ber_cz, 4u);
+	    klemm_budget_bewerten("Nahfeld", un_, sig_, sgz_, out_dir+"klemm_budget.csv", true);
+	    klemm_budget_bewerten("Fernfeld", uf_, sig_, sgz_, out_dir+"klemm_budget.csv", false);
+	    KlemmUrteil ug_; ug_.pruefbar = un_.pruefbar&&uf_.pruefbar; ug_.grund = un_.pruefbar ? uf_.grund : un_.grund; ug_.kappung = un_.kappung||uf_.kappung; ug_.n = un_.n;
+	    ug_.dcd_j = un_.dcd_j+uf_.dcd_j; ug_.dcz_j = un_.dcz_j+uf_.dcz_j; ug_.dcd_m = un_.dcd_m+uf_.dcd_m; ug_.dcd_m_brutto = un_.dcd_m_brutto+uf_.dcd_m_brutto;
+	    klemm_budget_bewerten("Nah+Fern", ug_, sig_, sgz_, out_dir+"klemm_budget.csv", false);
+	  } }
 	if(stat_ok) {
 	// ★ 03.09.2026 INSTRUMENTEN-ETIKETT (Befund B79). Diese Zeilen stammen aus object_force, also aus
 	// dem Impulsaustausch an den Koerperzellen. Sobald die Facettenkette laeuft, traegt dieser Pfad

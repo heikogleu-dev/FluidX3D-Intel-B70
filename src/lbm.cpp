@@ -660,6 +660,7 @@ void LBM_Domain::allocate(Device& device) {
 	if(klemm_bilanz_env()) print_warning("CFD_KLEMM_BILANZ ist an, das Messinstrument ist aber nur fuer SRT gebaut -- hier AUS (Ansage-Doktrin, Pruefpass S0b-2).");
 #endif
 	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : (klemm_haken_env()==4u ? "RHO_CLAMP 1,001/1,002 und Host-Wickelschranke 2^16 (Soll: MEHRDEUTIG)" : "RHO_CLAMP 1,001/1,002"))+string(klemm_haken_env()==3u&&klemm_bilanz_on ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt; im dd-Fall je Domaene eine Warnung)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis.");
+	if((klemm_haken_env()==3u||klemm_haken_env()==4u)&&!klemm_bilanz_on) print_error("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+" ist ein Negativtest des Messinstruments, das hier AUS ist (CFD_KLEMM_BILANZ=0 oder nicht SRT) -- er liefe still ins Leere (Pruefpass S0c-2 N-d).");
 	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3/4 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
 	// rho_rand_on steht seit C2c VOR der rho-Allokation (allocate), nicht mehr hier.
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
