@@ -6382,14 +6382,15 @@ static void main_setup_fahrzeug_dd() {
 	    LBM_Domain::s_u_takt = (us_>0u) ? ratio : 0u;
 	    if(us_>0u&&env_u("CFD_SGS_BAND", 0u)>0u) print_error("CFD_U_SPARSAM und CFD_SGS_BAND schliessen sich aus: das Band liest u an den Lagen 2..8 von der Wand, also bis zu 8 Zellen ausserhalb der Facettenzelle. Die Maske dilatiert die F-BBox nur um 2 und waere keine Obermenge mehr.");
 	    if(us_>0u) print_info("u-SPARSAM (CFD_U_SPARSAM, TODO 2 Schritt 3): stream_collide schreibt u nur noch in der Randschale der Dicke 2 (deckt deriv_reg an den 6 Nachbarn jeder TYPE_E-Zelle und po_interior) und in der um 2 dilatierten F-BBox (deckt sgs_fdwand und fac_nachbar_ab); am letzten Substep jedes Grobschritts (jeder "+to_string(ratio)+"-te feine Schritt) wird u wieder UEBERALL geschrieben, weil die N2F-Entnahme dort 4^3-Bloecke ueber rund ein Viertel der Domaene liest. Der Gewinn ist dadurch konstruktiv auf (ratio-1)/ratio gedeckelt. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_U_SPARSAM=0.");
-	    if(rs_>0u&&env_u("CFD_RHO_RAND", 0u)==0u) print_info("rho-SPARSAM (CFD_RHO_SPARSAM, TODO 2 Schritt 1): stream_collide schreibt rho nur noch fuer x >= Nx-2 (konstruktive Obermenge von po_interior -- der Druckauslass ist die x_max-Flaeche, die Innenzelle stammt aus einer 26er-Nachbarsuche) sowie an jedem "+to_string(LBM_Domain::s_rho_takt)+"-ten feinen Schritt, also an der Sample-Kadenz, nach der der Host das Feld liest. u bleibt UNANGETASTET. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_RHO_SPARSAM=0.");
+	    if(rs_>0u&&env_u("CFD_RHO_RAND", 1u)==0u) print_info("rho-SPARSAM (CFD_RHO_SPARSAM, TODO 2 Schritt 1): stream_collide schreibt rho nur noch fuer x >= Nx-2 (konstruktive Obermenge von po_interior -- der Druckauslass ist die x_max-Flaeche, die Innenzelle stammt aus einer 26er-Nachbarsuche) sowie an jedem "+to_string(LBM_Domain::s_rho_takt)+"-ten feinen Schritt, also an der Sample-Kadenz, nach der der Host das Feld liest. u bleibt UNANGETASTET. Abnahme ist der Bytevergleich gegen einen Arm mit CFD_RHO_SPARSAM=0.");
 	  }
 	  { // ★ 15.09.2026 RHO_RAND, Commit C0 (RHO_RAND-PLAN.md): rho nur noch in der Domaenen-Randschale R1,
 	    // sonst aus den DDFs rekonstruiert. NUR NAHFELD (Plan K3: die Fernfeld-Entnahme liest rho(t_c), das nach
 	    // dem Schritt nicht mehr rekonstruierbar ist); Heiko 15.09.: spaeter auch im Fernfeld, dann mit einer
 	    // eigenen Region R3 fuer die Entnahmeebenen. In C0 gibt es NUR Lesestelle, Sperren, Waechter und Zensus --
 	    // C2c 15.09.: der C0-Abbruch ist entfallen -- RHO_RAND ist aktiv, Waechter/Zensus laufen weiter hinter der Kopplungspruefung.
-	    const uint rr_ = env_u("CFD_RHO_RAND", 0u);
+	    const uint rr_ = env_u("CFD_RHO_RAND", 1u); // ★ STANDARD seit 15.09.2026 nachmittags (Heiko: "in die Standardkonfiguration, erst recht fuer die Produktion"); C2d: Kraefte/Facetten/u bitgleich, Nahfeld -121 MiB bei 8 mm
+	    const string rr_aus_ = " -- RHO_RAND ist seit 15.09. STANDARD im fahrzeug_dd-Nahfeld; fuer diesen Arm CFD_RHO_RAND=0 setzen.";
 	    if(rr_>1u) print_error("CFD_RHO_RAND kennt nur 0 (aus) und 1 (rho nur in der Randschale R1).");
 	    LBM_Domain::s_rho_rand = rr_;
 	    if(rr_==0u&&env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u) print_warning("CFD_RHO_RAND_TESTHAKEN ist gesetzt, CFD_RHO_RAND aber 0 -- der Testhaken ist wirkungslos (Ansage-Doktrin).");
@@ -6401,9 +6402,9 @@ static void main_setup_fahrzeug_dd() {
 	        LBM_Domain::s_rho_takt = 0u;
 	        print_info("CFD_RHO_RAND ersetzt CFD_RHO_SPARSAM im NAHFELD (rho-Takt dort 0); das FERNFELD behaelt seine rho-Schreibmaske (Entscheidung Heiko 15.09.).");
 	      }
-	      if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus: APG liest rho an den 18 Nachbarn jeder Facettenzelle im Inneren, dort gibt es unter RHO_RAND keinen Puffer. Die APG-Lesemenge zaehlt der C0-Zensus; der APG-Weg (Region oder DDFs) ist eine eigene Entscheidung.");
-	      if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0: der Voll-Read-Slicepfad liest den ganzen rho-Puffer vom Geraet, den es unter RHO_RAND nicht mehr gibt. Den Ebenen-Gather (CFD_SLICE_GPU=1) benutzen.");
-	      if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1: der Pruefarm vergleicht gegen den vollen rho-Puffer. Unter RHO_RAND gehoert dieser Vergleich in den eigenen Pruefmodus (Plan C3), der noch nicht gebaut ist.");
+	      if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus: APG liest rho an den 18 Nachbarn jeder Facettenzelle im Inneren, dort gibt es unter RHO_RAND keinen Puffer. Die APG-Lesemenge zaehlt der C0-Zensus; der APG-Weg (Region oder DDFs) ist eine eigene Entscheidung."+rr_aus_);
+	      if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0: der Voll-Read-Slicepfad liest den ganzen rho-Puffer vom Geraet, den es unter RHO_RAND nicht mehr gibt. Den Ebenen-Gather (CFD_SLICE_GPU=1) benutzen."+rr_aus_);
+	      if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1: der Pruefarm vergleicht gegen den vollen rho-Puffer. Unter RHO_RAND gehoert dieser Vergleich in den eigenen Pruefmodus (Plan C3), der noch nicht gebaut ist."+rr_aus_);
 #ifndef UPDATE_FIELDS
 	      print_error("CFD_RHO_RAND ohne UPDATE_FIELDS: der rho-Schreibpfad in stream_collide fehlt, die Randschale wuerde nie beschrieben.");
 #endif
@@ -6411,8 +6412,8 @@ static void main_setup_fahrzeug_dd() {
 	      print_error("CFD_RHO_RAND mit SURFACE/GRAPHICS: deren rho-Leser greifen auf das volle Feld zu.");
 #endif
 	      { const uint hk_ = env_u("CFD_RHO_RAND_TESTHAKEN", 0u); if(hk_!=0u&&hk_!=1u&&hk_!=4u&&hk_!=6u&&hk_!=7u&&hk_!=8u) print_error("CFD_RHO_RAND_TESTHAKEN="+to_string(hk_)+" ist im fahrzeug_dd-Fall nicht gebaut (gueltig: 1 C0-Waechter, 4 Innenzelle abseits der Ebene, 6 veraltete Ebene, 7 Soll+1 in der Abnahme, 8 ungepflegte R1-Zelle)."); }
-	      if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_RHO_REK_PRUEF=1: das Pruefinstrument vergleicht gegen den VOLLEN rho-Puffer, den es unter RHO_RAND nicht gibt. Den Pruefarm ohne RHO_RAND fahren (C2-Plan §4.2).");
-	      print_info("RHO_RAND AKTIV (CFD_RHO_RAND=1, C2c 15.09.2026): rho im Nahfeld nur in der Randschale R1; Slices/Sonde/VTK zeigen die Nachkollisionssumme (Entscheidung (b)). Waechter + Zensus laufen hinter der Kopplungspruefung.");
+	      if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_RHO_REK_PRUEF=1: das Pruefinstrument vergleicht gegen den VOLLEN rho-Puffer, den es unter RHO_RAND nicht gibt. Den Pruefarm ohne RHO_RAND fahren (C2-Plan §4.2)."+rr_aus_);
+	      print_info(string(getenv("CFD_RHO_RAND")==nullptr ? "RHO_RAND AKTIV als STANDARD (CFD_RHO_RAND nicht gesetzt -> 1; abschalten mit CFD_RHO_RAND=0). " : "")+"RHO_RAND AKTIV (CFD_RHO_RAND=1, C2c 15.09.2026): rho im Nahfeld nur in der Randschale R1; Slices/Sonde/VTK zeigen die Nachkollisionssumme (Entscheidung (b)). Waechter + Zensus laufen hinter der Kopplungspruefung.");
 	    }
 	  }
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz; einlass_eq EXPLIZIT 0 fuers Feingitter (Pruefagent M1: Statik-Doktrin, nicht nur Initialisierer); Schalen-alpha EXPLIZIT 0 -- lbm_f traegt spaeter eine Extract-Liste, darf aber NIE blenden (P9c-Wirkpfad-Soll nah==0)
