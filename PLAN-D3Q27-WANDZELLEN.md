@@ -28,8 +28,17 @@ Prüfnotiz der Hauptsitzung.
    8 mm genügt fürs Gate, 4 mm zur Bestätigung). Datenbasis: `facetten_klassen.csv` braucht `CFD_FAC_KDIAG=1` (seit 11.09. aus, kostet
    laut TODO.md Anhang 1d 191 MiB VRAM bei 4 mm) — für den Zensus einen eigenen 8-mm-Lauf mit KDIAG fahren, nicht die Baseline ändern.
 
-**Einschätzung in einem Satz:** Stufe 1 (Zensus mit zusätzlichem Flächen-Gate) ist sinnvoll und günstig; einen Bau erwarte ich eher nicht,
-weil rekonstruierte Eckpopulationen den Impuls nicht transportieren und die Ein-Link-Fläche schon bedient ist.
+6. **Variante Heiko (15.09. spät): D3Q27 als Layerband oder enger Block um das Fahrzeug.** Das beseitigt Punkt 3 im Inneren: die
+   Eckpopulationen advektieren im Band echt, rekonstruiert wird nur noch an der Band-/Blockgrenze zum D3Q19-Gebiet, weg von der Wand.
+   Neue Kosten, alle ungemessen: Zellzahl des Bandes × 8 Populationen × 2 B (Rechengrundlage: am 12.09. an der STL gerechnet liegen 2,33 %
+   des 4-mm-Nahkastens innerhalb 16 mm der Wand), ein zweiter Kollisionspfad bzw. Kernel, die Grenzrekonstruktion und die Frage, ob P-TRT
+   und Wandmodell im Band ihre Eichung behalten. Nebeneffekt: in einem D3Q27-Block wären auch Operatoren möglich, die in der Literatur nur
+   auf D3Q27 validiert sind (Cumulant/KBC — Recherche vom 16.06.2026 im ALTEN Projekt FluidX3D, für v2 nicht nachgeprüft). Der Zensus
+   (Stufe 1) ändert sich dadurch nicht; für die Band-Variante kommt eine Zellzahl- und Speicherrechnung je Banddicke hinzu.
+
+**Einschätzung in einem Satz:** Stufe 1 (Zensus mit zusätzlichem Flächen-Gate) ist sinnvoll und günstig; die reine Wandzellen-Variante
+erwarte ich tot (rekonstruierte Eckpopulationen transportieren keinen Impuls), die Band-/Block-Variante ist physikalisch tragfähig, aber
+ein eigenes Bauprojekt, dessen Preis erst eine Zellzahlrechnung je Banddicke zeigt.
 
 ## Teil B — Auftrag im Wortlaut (Heiko, 15.09.2026)
 
