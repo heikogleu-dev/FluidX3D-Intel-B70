@@ -4876,9 +4876,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	}
 )+"#ifdef KLEMM_BILANZ"+R(
 	// ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §2.3): Slot 300 = Lift-rho ausserhalb der BILDHUELLE 1 +- Lambda^2*(RHO_CLAMP_MAX-1) =
-	// (0,21875; 1,78125). Lambda = 1,25 je Achse (Catmull-Rom, siehe u-Tor unten), Eingang geklemmt -> Soll 0; das Tor darunter verwirft heute
+	// (0,21875; 1,78125). Lambda = 1,25 je Achse (Summe |w| der Lagrange-4-Punkt-/3-Punkt-Gewichte = 1 + t(1-t), Pruefbefund Z2b N2), Huelle GESCHLOSSEN (Randwerte legal, N1), Eingang geklemmt -> Soll 0; das Tor darunter verwirft heute
 	// auch legale Werte in (0,219; 0,5].
-	if(!(v[0]>def_tor_lo&&v[0]<def_tor_hi)&&hits[300]<0xF0000000u) atomic_inc(&hits[300]);
+	if((v[0]<def_tor_lo||v[0]>def_tor_hi)&&hits[300]<0xF0000000u) atomic_inc(&hits[300]);
 )+"#endif"+R( // KLEMM_BILANZ
 	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
 	// ★ Z2e/Z2f: Torgrenzen emittiert -- Vorgabe (0,5; 2,0) wie bisher, CFD_TOR_HUELLE=1 die Bildhuelle (Tor wird Invariante, Soll [270] = 0),

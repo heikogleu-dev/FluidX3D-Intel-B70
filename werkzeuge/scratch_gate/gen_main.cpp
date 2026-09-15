@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
 			// ★ Z2d: optionales Endzeichen 'u' = zusaetzlich U_BETRAG (CFD_U_KLEMME=1); "u" allein = nur U_BETRAG
 			bool ub = false, th = false, rh = false; // ★ Z2d/Z2e/Z2f: Endzeichen u = U_BETRAG, t = TOR_HUELLE, r = RHO_HUELLE (beliebige Reihenfolge)
 			while(!a.empty()&&(a.back()=='u'||a.back()=='t'||a.back()=='r')) { if(a.back()=='u') ub = true; else if(a.back()=='t') th = true; else rh = true; a.pop_back(); }
-			huellen = th ? string("\n #define def_tor_gate_lo def_tor_lo\n #define def_tor_gate_hi def_tor_hi\n #define def_w210_lo (def_tor_lo-16.0f/32768.0f)\n #define def_w210_hi (def_tor_hi+16.0f/32768.0f)")
+			huellen = th ? string("\n #define def_tor_gate_lo (def_tor_lo-16.0f/32768.0f)\n #define def_tor_gate_hi (def_tor_hi+16.0f/32768.0f)\n #define def_w210_lo (def_tor_lo-32.0f/32768.0f)\n #define def_w210_hi (def_tor_hi+32.0f/32768.0f)")
 				: (rh ? string("\n #undef RHO_CLAMP_MIN\n #undef RHO_CLAMP_MAX\n #define RHO_CLAMP_MIN (20.0f/32768.0f)\n #define RHO_CLAMP_MAX (1.0f+65504.0f/32768.0f)\n #define RHO_HUELLE\n #define def_rho_kons_lo 0.500000f\n #define def_rho_kons_hi 1.500000f\n #define def_tor_gate_lo RHO_CLAMP_MIN\n #define def_tor_gate_hi RHO_CLAMP_MAX\n #define def_w210_lo 0.0f\n #define def_w210_hi 3.0f") : huellen);
 			if(a.empty()) { pos = ub ? "\n #define U_BETRAG" : ""; goto schreiben; }
 			// Pruefbefund P1a NIEDRIG 4: exakt pos<1|2>[f][h<1..3>], sonst Abbruch -- keine stille Umdeutung (pos1h, pos12, pos1x)
