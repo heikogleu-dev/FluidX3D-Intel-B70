@@ -383,7 +383,7 @@ Je Klasse 1–3 Zellen, Index im Log.
 
 1. **Nur Nahfeld:** ja. **Später auch Fernfeld**, dann mit einer eigenen Region R3 für die Entnahmeebenen (K3).
 2. **rho-Ausgabe:** float.
-3. **Deklarierte Abweichung** der rho-Spalten ist akzeptiert: rho(t+1), an Facetten vor dem Wandmodell.
+3. **Deklarierte Abweichung** der rho-Spalten: ~~rho(t+1), an Facetten vor dem Wandmodell~~ **ERSETZT 15.09. durch Entscheidung (b), §14:** Die Ausgabe ist die Nachkollisionssumme, also der heutige Zeitpunkt einschließlich Wandmodell. Die Abweichung bleibt auf FP16S-Rundungsniveau, nicht bitgleich.
 4. **R1:** überall Dicke 2.
 5. **RHO_RAND × RHO_SPARSAM:** **Entscheidung B** (Prüfbefund M3). RHO_RAND ersetzt die rho-Schreibmaske
    NUR im Nahfeld, das Fernfeld behält seine Maske. Umgesetzt an der Lesestelle (s_rho_takt Nahfeld = 0,
@@ -430,3 +430,30 @@ ist deshalb |x − w_vor| und nicht |x − w_nach|.
   Ausgabe.
 * **Physikleser sind nicht betroffen:** TYPE_E, po_interior und der Lift lesen R1.
 * **Vorbehalt:** früher Anlauf an der Kugel. Die Bestätigung im dd-Fall bei entwickelter Strömung gehört in C3.
+
+**Entscheidung Heiko 15.09.: (b) Nachkollisionssumme** für Slices, VTK und Sonden. Vor C2 wird sie im dd-Fall
+bei 8 mm und entwickelter Strömung bestätigt (dd-Probezellen, nur Host).
+
+### 14a Bestätigung im dd-Fall, 8 mm, entwickelte Strömung (rr_c1h_dd8, B70, t0 = 15 048 ≈ 300 ms)
+
+Ebene y = 166, 196 885 Zellen. Standard-8-mm-Zeile ohne CFD_RHO_SPARSAM.
+
+* **Identität** (Rekonstruktion t0 = Wort nach stream_collide(t0)):
+  * Bitgleich: Fluid 145 409/145 409, TYPE_E 1075, TYPE_S 42 882, TYPE_MS 843, Bandlage 2 2482/2482,
+    APG-Kante 1362/1362, Bodenband 843/843.
+  * Facette (ELIBB) nur 754/1757 bitgleich.
+  * Auslass: alle 232 Zellen gleich dem Wort VOR dem Schritt.
+  * Zähler Ist=Soll.
+
+| Ausgabe gegen heutigen Slice-Wert | Fluid | MS (inkl. boden_eq-Zeile z=1) | Facette | Bandlage 2 | APG-Kante | z-Zeile 2 geometrisch* |
+|---|---|---|---|---|---|---|
+| Rekonstruktion t0: Median cp | 0,005 | 0,002 | 0,018 | 0,010 | 0,009 | 0,005 |
+| Rekonstruktion t0: max cp | 0,24 | 0,05 | 0,41 | 0,23 | 0,09 | 0,14 |
+| **Nachkollisionssumme: max cp** | **0,0028** | **0,0033** | **0,0015** | **0,0016** | **0,0016** | **0,0028** |
+
+\* BERICHTIGT (Prüfpass 3): Die Klasse hieß im Lauf „Bodenband“, ist aber die geometrische Fluidzeile z = 2 und nicht die
+boden_eq-Menge. Die boden_eq-behandelte Zeile z = 1 ist bei mitbewegtem Boden TYPE_MS und steht in der MS-Spalte.
+
+**Entscheidung (b) ist bei entwickelter Strömung bestätigt.** Die Nachkollisionssumme bleibt in allen Klassen unter
+cp 0,0034, auch an der boden_eq-Zeile (TYPE_MS) und an ELIBB-Facetten. Die t+1-Rekonstruktion ist bei 300 ms kleiner als im
+Kugelanlauf, erreicht aber an Facetten und im Band noch max cp 0,2–0,4.

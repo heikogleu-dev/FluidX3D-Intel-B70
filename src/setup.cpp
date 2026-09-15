@@ -4757,7 +4757,11 @@ void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz,
 //                     Wert hinkt dort einen Schritt nach (Pruefpass C1, M1). Deklarierte Abweichung der rho-Ausgabe.
 // Rekonstruktion und Speichern laufen in verschiedenen Kernels in verschiedene Puffer -- kein Rueckleser.
 // Kostet EINEN zusaetzlichen Zeitschritt am Laufende; deshalb nur mit CFD_RHO_REK_PRUEF=1 und hinter allen Abnahmen.
-// Die dd-Klassen aus §11 (Bandlage 2, APG-Kantennachbar, boden_eq-Band) gibt es an der Kugel nicht; sie gehoeren in C3.
+// Zusatzklassen aus §11, fuer Kugel UND dd aus Facettenmaske und Host-Flags bestimmt: Bandlage 2 (6-Flaechen-Nachbar einer
+// Facette, Regeln wie alloc_sgs_band), APG-Kante (18-Nachbar einer Facette, weder L1 noch L2), z-Band geometrisch (Fluid mit
+// z = 1..boden_eq_n -- NICHT die boden_eq-Menge: die haengt an split/down/abstand, und ihre Zeile z=1 ist bei mitbewegtem
+// Boden fast ganz TYPE_MS, steht also in Klasse 3; Pruefpass 3, b).
+// ★ 15.09. im dd-Fall ans Ende von main_setup_fahrzeug_dd gehaengt (Entscheidung (b) bei entwickelter Stroemung bestaetigen).
 static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, const uint Nz, const float u_lat, const string& out_dir, const string& fall) {
 	LBM_Domain* d = lbm.lbm_domain[0];
 	const uint y = Ny/2u;
@@ -4793,21 +4797,45 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 	d->rho_clamp_hits.read_from_device();
 	const ulong d217 = (ulong)(d->rho_clamp_hits[217]-h217_0), d218 = (ulong)(d->rho_clamp_hits[218]-h218_0);
 	// Klassen: 0 Fluid, 1 TYPE_E, 2 TYPE_S, 3 TYPE_MS, 4 tote Kachel, 5 ausserhalb (aus dem Kernel); 6 Facette, 7 TYPE_E Auslass (Host)
-	const uint NK = 8u; const char* kname[8] = {"Fluid", "TYPE_E", "TYPE_S", "TYPE_MS", "tote Kachel", "ausserhalb", "Facette", "TYPE_E Auslass"};
+	const uint NK = 11u; const char* kname[11] = {"Fluid", "TYPE_E", "TYPE_S", "TYPE_MS", "tote Kachel", "ausserhalb", "Facette", "TYPE_E Auslass", "Bandlage 2", "APG-Kante", "z-Band geometrisch"};
+	auto idx_wrap = [&](const int x, const int yy, const int z) { // Zellindex mit periodischem Umlauf in allen drei Achsen (Klassenbestimmung, liest keine Flags)
+		const ulong nn = (ulong)((x%(int)Nx+(int)Nx)%(int)Nx)+((ulong)((yy%(int)Ny+(int)Ny)%(int)Ny)+(ulong)((z%(int)Nz+(int)Nz)%(int)Nz)*(ulong)Ny)*(ulong)Nx;
+		return nn; };
+	auto ist_band2 = [&](const ulong n) { // Nicht-Facette mit Facette als Flaechennachbar, in der F-BBox, z nicht gewickelt (alloc_sgs_band)
+		const int x = (int)(n%(ulong)Nx), yy = (int)((n/(ulong)Nx)%(ulong)Ny), z = (int)(n/NxNy);
+		if((uint)x<d->fbx0||(uint)x>=d->fbx0+d->fbnx||(uint)yy<d->fby0||(uint)yy>=d->fby0+d->fbny||(uint)z<d->fbz0||(uint)z>=d->fbz0+d->fbnz) return false;
+		static const int F6[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+		for(uint i=0u; i<6u; i++) { const int zn = z+F6[i][2]; if(zn<0||zn>=(int)Nz) continue; if(ist_facette(idx_wrap(x+F6[i][0], yy+F6[i][1], zn))) return true; }
+		return false; };
+	auto ist_apg_kante = [&](const ulong n) { // 18-Nachbar einer Facette (periodisch wie neighbors()), weder L1 noch L2
+		const int x = (int)(n%(ulong)Nx), yy = (int)((n/(ulong)Nx)%(ulong)Ny), z = (int)(n/NxNy);
+		for(int dz=-1; dz<=1; dz++) for(int dy=-1; dy<=1; dy++) for(int dx=-1; dx<=1; dx++) {
+			const int m = (dx!=0)+(dy!=0)+(dz!=0); if(m==0||m==3) continue; // D3Q19: Flaechen- und Kantennachbarn
+			if(ist_facette(idx_wrap(x+dx, yy+dy, z+dz))) return true;
+		}
+		return false; };
 	auto klasse_von = [&](const ulong g) {
 		uint k = (uint)(rek[(size_t)(4ull*g+2ull)]+0.5f); if(k>5u) k = 5u;
-		if(k==0u&&ist_facette(zelle(g))) k = 6u;
 		if(k==1u&&auslass[(size_t)g]!=0u) k = 7u;
+		if(k==0u) {
+			const ulong n = zelle(g);
+			if(ist_facette(n)) k = 6u;
+			else if(d->fac_N>0ull&&ist_band2(n)) k = 8u;
+			else if(d->fac_N>0ull&&ist_apg_kante(n)) k = 9u;
+			else if(d->boden_eq_n>0u&&n/NxNy>=1ull&&n/NxNy<=(ulong)d->boden_eq_n) k = 10u;
+		}
 		return k;
 	};
-	ulong anz[8]={0}, gleich[8]={0}, neg_gleich[8]={0}, neg_gleich_vor[8]={0}, vor_gleich[8]={0}, rek_gleich_vor[8]={0}, n_e_ebene=0ull;
+	std::vector<uint> klasse((size_t)NP); for(ulong g=0ull; g<NP; g++) klasse[(size_t)g] = klasse_von(g); // einmal bestimmen (18 Nachbar-Lookups je Zelle)
+	// Hinweis Pruefpass 3 (c): im dd-Fall haelt Klasse 1 ihr Soll nur, weil in den Zusatzschritt kein Kopplungs-Lift faellt.
+	ulong anz[11]={0}, gleich[11]={0}, neg_gleich[11]={0}, neg_gleich_vor[11]={0}, vor_gleich[11]={0}, rek_gleich_vor[11]={0}, n_e_ebene=0ull;
 	std::vector<std::pair<uint,ulong>> klemm; std::vector<std::vector<ulong>> abweicher(NK); ulong n_klemm = 0ull;
 	std::vector<std::vector<double>> abs_diff(NK);  // |rho_rek - rho_puffer_nach| je Klasse: wie weit die Rekonstruktion vom gespeicherten Wert desselben Schritts liegt
 	std::vector<std::vector<double>> abs_ausg(NK);  // |rho_rek - rho_puffer_vor| je Klasse: AUSGABEABWEICHUNG. Ein Slice liest heute den Puffer nach dem letzten
 	                                                // Schritt (= w_vor), unter RHO_RAND die Rekonstruktion (Fluid t+1, Facette vor dem Wandmodell; TYPE_E aus dem Puffer = 0)
 	std::vector<std::vector<double>> abs_alt(NK);   // |rho(t0-1-Paritaet) - rho_puffer_vor|: Summe der EIGENEN Nachkollisions-Populationen -- Kandidat fuer eine Ausgabe OHNE Zeitversatz
 	for(ulong g=0ull; g<NP; g++) {
-		const uint k = klasse_von(g);
+		const uint k = klasse[(size_t)g];
 		if(k==1u||k==7u) n_e_ebene++;
 		anz[k]++;
 		if(rek_w[(size_t)g]==w_nach[(size_t)g]) gleich[k]++; else if(abweicher[k].size()<2u) abweicher[k].push_back(g);
@@ -4826,8 +4854,8 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 	bool ok = true;
 	for(uint k=0u; k<NK; k++) {
 		if(anz[k]==0ull) continue;
-		print_info("  "+string(kname[k])+": "+to_string(anz[k])+" Zellen, bitgleich "+to_string(gleich[k])+(k<=3u ? " (Soll alle)" : " (kein Soll)")+", Puffer im Schritt unveraendert "+to_string(vor_gleich[k]));
-		if(k<=3u&&gleich[k]!=anz[k]) ok = false;
+		print_info("  "+string(kname[k])+": "+to_string(anz[k])+" Zellen, bitgleich "+to_string(gleich[k])+((k<=3u||k>=8u) ? " (Soll alle)" : " (kein Soll)")+", Puffer im Schritt unveraendert "+to_string(vor_gleich[k]));
+		if((k<=3u||k>=8u)&&gleich[k]!=anz[k]) ok = false; // Bandlage 2, APG-Kante, Bodenband sind gewoehnliche Fluidzellen: Soll wie Fluid
 	}
 	if(anz[7]>0ull) print_info("  TYPE_E Auslass: Rekonstruktion = Wort VOR dem Schritt an "+to_string(rek_gleich_vor[7])+" von "+to_string(anz[7])+" (Soll alle: hinkt deklariert einen Schritt nach)");
 	if(rek_gleich_vor[7]!=anz[7]) ok = false; // Pruefpass 2, N1: sonst entgeht eine falsch als Auslass markierte Zelle jedem Soll
@@ -4840,8 +4868,8 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 			+" = cp max "+to_string(v.back()*cp, 4u)+", Median "+to_string(v[v.size()/2u]*cp, 4u)+", RMS "+to_string(q*cp, 4u));
 	};
 	for(const uint k : {0u, 6u, 7u}) statistik(abs_diff[k], "|rek - Puffer nach| "+string(kname[k])+" (Identitaet)");
-	for(const uint k : {0u, 3u, 6u}) statistik(abs_ausg[k], "AUSGABE |rek - heutiger Slice-Wert| "+string(kname[k]));
-	for(const uint k : {0u, 3u, 6u}) statistik(abs_alt[k], "ALTERNATIVE |Nachkollisionssumme - heutiger Slice-Wert| "+string(kname[k]));
+	for(const uint k : {0u, 3u, 6u, 8u, 9u, 10u}) statistik(abs_ausg[k], "AUSGABE |rek - heutiger Slice-Wert| "+string(kname[k]));
+	for(const uint k : {0u, 3u, 6u, 8u, 9u, 10u}) statistik(abs_alt[k], "ALTERNATIVE |Nachkollisionssumme - heutiger Slice-Wert| "+string(kname[k]));
 	if(anz[6]>0ull) print_info("  Facette: "+to_string(anz[6]-gleich[6])+" Wortabweichungen (erwartet 0 bei massenerhaltendem Wandmodell)");
 	// Negativtest (Pruefpass C1, N1): bei t0-1 liefert load_f im Wesentlichen den Stand VOR dem Schritt. Er muss sich
 	// dort vom Soll unterscheiden, wo sich der Puffer im Schritt geaendert hat -- geprueft an der Fluidklasse selbst.
@@ -4863,7 +4891,7 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 	std::ofstream pz(out_dir+"rho_rek_probezellen.csv");
 	pz << "probe,klasse,x,z,wort_nach,rho_puffer_nach,wort_vor,rho_puffer_vor,wort_rek,rho_rek,rho_roh,rek_gleich_nach,rek_gleich_vor,rho_rek_minus_puffer_nach,wort_neg,rho_neg\n";
 	auto zeile = [&](const string& probe, const ulong g) {
-		const uint k = klasse_von(g);
+		const uint k = klasse[(size_t)g];
 		const float rp = rho_unpack(w_nach[(size_t)g]), rv = rho_unpack(w_vor[(size_t)g]), rn = rho_unpack(neg_w[(size_t)g]);
 		const float rr = rek[(size_t)(4ull*g)], ro = rek[(size_t)(4ull*g+1ull)];
 		const bool gn = rek_w[(size_t)g]==w_nach[(size_t)g], gv = rek_w[(size_t)g]==w_vor[(size_t)g];
@@ -4872,16 +4900,16 @@ static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, co
 		print_info("  PROBE "+probe+" ["+string(kname[k])+"] (x="+to_string(g%(ulong)Nx)+",z="+to_string(g/(ulong)Nx)+"): Puffer nach "+to_string(rp,7u)+" vor "+to_string(rv,7u)+" rek "+to_string(rr,7u)+" roh "+to_string(ro,7u)+(gn?" [= nach]":(gv?" [= vor]":" [ABWEICHUNG]")));
 	};
 	auto g_von = [&](const uint x, const uint z) { return (ulong)x+(ulong)z*(ulong)Nx; };
-	auto erste_der_klasse = [&](const uint k) { for(ulong g=0ull; g<NP; g++) if(klasse_von(g)==k) return g; return NP; };
+	auto erste_der_klasse = [&](const uint k) { for(ulong g=0ull; g<NP; g++) if(klasse[(size_t)g]==k) return g; return NP; };
 	{	// freie Nachlaufzelle: ab 3/4 Nx auf halber Hoehe die erste Fluidzelle
-		ulong g = NP; for(uint x=(3u*Nx)/4u; x+2u<Nx; x++) if(klasse_von(g_von(x, Nz/2u))==0u) { g = g_von(x, Nz/2u); break; }
+		ulong g = NP; for(uint x=(3u*Nx)/4u; x+2u<Nx; x++) if(klasse[(size_t)g_von(x, Nz/2u)]==0u) { g = g_von(x, Nz/2u); break; }
 		if(g<NP) zeile("frei_nachlauf", g);
 	}
 	zeile("einlass_x0", g_von(0u, Nz/2u));
 	zeile("zmax_mitte (TYPE_E nur mit CFD_KUGEL_FREE=1)", g_von(Nx/2u, Nz-1u));
 	zeile("auslass_xmax", g_von(Nx-1u, Nz/2u));
 	zeile("po_interior_xmax-1", g_von(Nx-2u, Nz/2u));
-	for(const uint k : {2u, 3u, 6u}) { const ulong g = erste_der_klasse(k); if(g<NP) zeile(string("erste_")+kname[k], g); }
+	for(const uint k : {2u, 3u, 6u, 8u, 9u, 10u}) { const ulong g = erste_der_klasse(k); if(g<NP) zeile(string("erste_")+kname[k], g); }
 	for(uint k=0u; k<NK; k++) for(const ulong g : abweicher[k]) zeile(string("abweichung_")+kname[k], g);
 	for(const auto& kg : klemm) zeile("klemme", kg.second);
 	pz.close();
@@ -9139,6 +9167,10 @@ static void main_setup_fahrzeug_dd() {
 	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
 	pruefe_ptrt(lbm_f.lbm_domain[0], "Nahfeld");
 	pruefe_ptrt(lbm_c.lbm_domain[0], "Fernfeld"); // ★ das Fernfeld bekommt PTRT ueber dasselbe getenv MIT -- ungeprueft waere es eine zweite, stille Variable
+	if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) { // ★ 15.09. RHO_RAND C1: Probezellen und Ausgabe-Kandidaten im NAHFELD bei entwickelter Stroemung, hinter allen Abnahmen
+		if(lbm_f.lbm_domain[0]->rho_takt>0u) print_error("CFD_RHO_REK_PRUEF im dd-Fall braucht CFD_RHO_SPARSAM=0 (Nahfeld): sonst schreibt stream_collide rho im Inneren nicht, und der Vergleich laese Altwerte.");
+		pruefe_rho_rekonstruktion(lbm_f, fNx, fNy, fNz, u_lat, get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/", "Nahfeld");
+	}
 	_exit(0);
 }
 
