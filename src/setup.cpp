@@ -1416,7 +1416,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	for(uint k=0u; k<LBM_Domain::hits_n; k++) dlt[k] = d->rho_clamp_hits[k]-K.alt[k]; // uint-Arithmetik: mod 2^32
 	const double S = 16384.0, ob[6] = {1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0, 16.0};
 	double B_r = 0.0, B_u = 0.0;
-	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*2.1*ob[b]*S+1.0); }
+	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*(rho_huelle_env()>0u ? 3.0 : 2.1)*ob[b]*S+1.0); } // ★ Z2f: rho_max = numerische Huelle 2,99902
 	B_r = fmax(B_r, (double)dlt[266]*(2.0*S+1.0)); // ★ S0d: BODEN/EINLASS_EQ-Summen 267/268, Faktor 1, Kappe 2
 	const double grenze = klemm_haken_env()==4u ? 65536.0 : 4294967296.0; // Haken 4: Schranke kuenstlich 2^16 -> die Warnung MUSS feuern
 	bool satt_dek = d->rho_clamp_hits[266]>=0xF0000000u; for(uint b=0u; b<6u; b++) if(d->rho_clamp_hits[236u+b]>=0xF0000000u||d->rho_clamp_hits[257u+b]>=0xF0000000u) satt_dek = true; // Pruefpass S0c-2 N-c: auch 266 (Schranke der S0d-Summen) // Pruefpass S0c N2: gesaettigte Dekade -> Differenz 0 -> Schranke unterschaetzt
@@ -1603,7 +1603,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
 		{ // ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §4): Huellenzaehler
 			const bool satt_h = v[28]>=4026531840ull||v[295]>=4026531840ull||v[296]>=4026531840ull||v[297]>=4026531840ull;
-			print_info(string("  KLEMM-HUELLEN ")+wo+": u-Komponentenhuelle [295] "+to_string(v[295])+(L.lbm_domain[0]->u_klemme>0u ? string(", Betragshuelle [296] ")+to_string(v[296])+" (Soll [28] = "+to_string(v[28])+", CFD_U_KLEMME=1)," : " (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+",")+" davon Diagonalluecke [297] "+to_string(v[297])+" (nicht von der Komponentenklemme gefasst), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+" (Soll 0; Tor [270] "+to_string(v[270])+")");
+			print_info(string("  KLEMM-HUELLEN ")+wo+(rho_huelle_env()>0u ? ": [RHO_HUELLE] Konsistenzhuelle unten/oben verlassen [298]/[299] = "+to_string(v[298])+"/"+to_string(v[299])+" (nur gezaehlt), " : string(": "))+(tor_huelle_env()>0u ? string("[TOR_HUELLE] ") : string(""))+"u-Komponentenhuelle [295] "+to_string(v[295])+(L.lbm_domain[0]->u_klemme>0u ? string(", Betragshuelle [296] ")+to_string(v[296])+" (Soll [28] = "+to_string(v[28])+", CFD_U_KLEMME=1)," : " (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+",")+" davon Diagonalluecke [297] "+to_string(v[297])+" (nicht von der Komponentenklemme gefasst), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+" (Soll 0; Tor [270] "+to_string(v[270])+")");
 			string hv_;
 			if(!satt_h) {
 				const bool betrag_ = L.lbm_domain[0]->u_klemme>0u; // ★ Z2d: unter der Betragsklemme zaehlt [28] die Betragshuelle
@@ -1611,6 +1611,8 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				if(betrag_&&v[296]!=v[28]) hv_ += " [296] "+to_string(v[296])+" != [28] "+to_string(v[28])+" (Betragshuelle muss unter CFD_U_KLEMME=1 genau die Klemmtreffer zaehlen);";
 				if(v[297]>v[296]||v[296]-v[297]!=v[295]) hv_ += " [296] - [297] = "+to_string((ulong)(v[296]>=v[297] ? v[296]-v[297] : 0ull))+" != [295] "+to_string(v[295])+" (Komponentenhuelle muss in der Betragshuelle liegen; Rundung/Kontraktion?);";
 			}
+			if(tor_huelle_env()>0u&&v[270]!=0ull) hv_ += " TOR_HUELLE: das Lift-Tor griff "+to_string(v[270])+" mal -- die Bildhuelle ist dann keine Invariante (Soll 0);";
+			if(tor_huelle_env()==0u&&rho_huelle_env()==0u&&v[300]!=0ull) print_warning(string("  KLEMM-HUELLEN ")+wo+": Lift-rho ausserhalb der Bildhuelle [300] = "+to_string(v[300])+" -- der Eingang des Lifts verlaesst die Klemmhuelle (Plan §2.3: dann Arm M-T fahren).");
 			if(!hv_.empty()) { print_warning(string("  KLEMM-HUELLEN ")+wo+": ABNAHME VERLETZT --"+hv_+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }
 		}
 		if(L.lbm_domain[0]->positiv_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1b (KLEMMEN-STUFE1-PLAN.md §4, Nachtrag P1b): Ist=Soll des Positiv-Messarms

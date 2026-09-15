@@ -3078,6 +3078,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// [BERICHTIGT 15.09.2026, Klemmen-Plan §1: ueberholt -- seit Pruefbefund A1 UNGEGATET und saettigend, siehe die Zeile darunter.]
 	if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend statt gegatet (Pruefbefund A1)
 	else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
+)+"#ifdef RHO_HUELLE"+R(
+	{ if(rhon<=def_rho_kons_lo&&rho_clamp_hits[298]<0xF0000000u) atomic_inc(&rho_clamp_hits[298]); else if(rhon>=def_rho_kons_hi&&rho_clamp_hits[299]<0xF0000000u) atomic_inc(&rho_clamp_hits[299]); } // ★ Z2f: Konsistenzhuelle (0,5/1,5) nur GEZAEHLT, geklemmt wird an der numerischen Huelle
+)+"#endif"+R( // RHO_HUELLE
 )+"#ifdef KLEMM_BILANZ"+R(
 	if(rhon<=RHO_CLAMP_MIN) kl |= 1u; else if(rhon>=RHO_CLAMP_MAX) kl |= 2u; // Bedingung woertlich wie Slot 0/1 -- das traegt die Abnahme Summe(221..225) = [0]+[1]
 )+"#endif"+R( // KLEMM_BILANZ
@@ -3119,7 +3122,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		//   ohne feuernden Besuchszaehler ist in diesem Projekt ein harter Fehler): EIN Schritt,
 		//   damit die Zahl die TYPE_E-Zellen dieses Schritts ist und kein Mittel ueber viele.
 		//   Es ist ein BESUCHSZAEHLER, kein Ist=Soll -- verglichen wird er auf dem Host mit nichts.
-		if(((as_uint(rhon)&0x7F800000u)==0x7F800000u||rhon<=0.4f||rhon>=2.1f)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0
+		if(((as_uint(rhon)&0x7F800000u)==0x7F800000u||rhon<=def_w210_lo||rhon>=def_w210_hi)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0 -- Huelle seit Z2e/Z2f emittiert (Vorgabe 0,4/2,1; TOR_HUELLE: Bildhuelle +- 16/32768; RHO_HUELLE: (0; 3))
 		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[211]<0xF0000000u) atomic_inc(&rho_clamp_hits[211]); // Besuche
 		uxn  = load_u(u, n);
 		uyn  = load_u(u, def_N+(ulong)n);
@@ -3160,6 +3163,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// No-Op, vor dem der eigene Kommentar im anderen Zweig warnt.
 		if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend, siehe oben
 		else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
+)+"#ifdef RHO_HUELLE"+R(
+		{ if(rhon<=def_rho_kons_lo&&rho_clamp_hits[298]<0xF0000000u) atomic_inc(&rho_clamp_hits[298]); else if(rhon>=def_rho_kons_hi&&rho_clamp_hits[299]<0xF0000000u) atomic_inc(&rho_clamp_hits[299]); } // ★ Z2f: Konsistenzhuelle (0,5/1,5) nur GEZAEHLT, geklemmt wird an der numerischen Huelle
+)+"#endif"+R( // RHO_HUELLE
 )+"#ifdef KLEMM_BILANZ"+R(
 		if(rhon<=RHO_CLAMP_MIN) kl |= 1u; else if(rhon>=RHO_CLAMP_MAX) kl |= 2u; // Bedingung woertlich wie Slot 0/1 -- das traegt die Abnahme Summe(221..225) = [0]+[1]
 )+"#endif"+R( // KLEMM_BILANZ
@@ -4875,7 +4881,9 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(!(v[0]>def_tor_lo&&v[0]<def_tor_hi)&&hits[300]<0xF0000000u) atomic_inc(&hits[300]);
 )+"#endif"+R( // KLEMM_BILANZ
 	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
-	if(!(v[0]>0.5f&&v[0]<2.0f)) {
+	// ★ Z2e/Z2f: Torgrenzen emittiert -- Vorgabe (0,5; 2,0) wie bisher, CFD_TOR_HUELLE=1 die Bildhuelle (Tor wird Invariante, Soll [270] = 0),
+	// CFD_RHO_HUELLE=1 die numerische Huelle (dort gibt es kein Bild, das Tor darf greifen, Plan §2.3).
+	if(!(v[0]>def_tor_gate_lo&&v[0]<def_tor_gate_hi)) {
 )+"#ifdef KLEMM_BILANZ"+R(
 		if(hits[270]<0xF0000000u) atomic_inc(&hits[270]); // ★ 15.09.2026 Klemmen S0d: Lift-rho-Tor griff, der vorige Randwert bleibt stehen
 )+"#endif"+R( // KLEMM_BILANZ

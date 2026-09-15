@@ -70,6 +70,10 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 	"\n#define def_u2max (def_c*def_c)" // ★ Z2b (lbm.cpp-Emission unter KLEMM_BILANZ)
 	"\n#define def_tor_lo (1.0f-1.5625f*0.500000f)"
 	"\n#define def_tor_hi (1.0f+1.5625f*0.500000f)"
+	"\n#define def_tor_gate_lo 0.5f" // ★ Z2e/Z2f-Vorgaben (lbm.cpp-Emission)
+	"\n#define def_tor_gate_hi 2.0f"
+	"\n#define def_w210_lo 0.4f"
+	"\n#define def_w210_hi 2.1f"
 	"\n#define FACETTEN"
 	"\n#define def_fac_Y 86206.89844f"
 	"\n#define def_fac_utkorr 1.000000f"
@@ -203,11 +207,15 @@ int main(int argc, char** argv) {
 			+(defs.find("#define def_u2max")==string::npos ? string("\n #define def_u2max (def_c*def_c)\n #define def_tor_lo (1.0f-1.5625f*0.500000f)\n #define def_tor_hi (1.0f+1.5625f*0.500000f)") : string("")) // ★ Z2b: Schnappschuesse vor Z2b tragen die Huellen-Defines nicht
 			+(string(argv[1])=="dateih3" ? string("\n #define KLEMM_HAKEN3") : string(""));
 		string pos = "";
+		string huellen = defs.find("#define def_tor_gate_lo")==string::npos ? string("\n #define def_tor_gate_lo 0.5f\n #define def_tor_gate_hi 2.0f\n #define def_w210_lo 0.4f\n #define def_w210_hi 2.1f") : string(""); // ★ Z2e/Z2f-Vorgaben fuer Schnappschuesse vor Z2e
 		if(argc>=5) { // ★ 15.09.2026 Klemmen Stufe 1 P1a: Positiv-Arme ueber die EMISSIONSFUNKTION selbst, keine Zwillingsliste
 			string a = argv[4];
 			// ★ Z2d: optionales Endzeichen 'u' = zusaetzlich U_BETRAG (CFD_U_KLEMME=1); "u" allein = nur U_BETRAG
-			bool ub = false; if(!a.empty()&&a.back()=='u') { ub = true; a.pop_back(); }
-			if(a.empty()) { pos = "\n #define U_BETRAG"; goto schreiben; }
+			bool ub = false, th = false, rh = false; // ★ Z2d/Z2e/Z2f: Endzeichen u = U_BETRAG, t = TOR_HUELLE, r = RHO_HUELLE (beliebige Reihenfolge)
+			while(!a.empty()&&(a.back()=='u'||a.back()=='t'||a.back()=='r')) { if(a.back()=='u') ub = true; else if(a.back()=='t') th = true; else rh = true; a.pop_back(); }
+			huellen = th ? string("\n #define def_tor_gate_lo def_tor_lo\n #define def_tor_gate_hi def_tor_hi\n #define def_w210_lo (def_tor_lo-16.0f/32768.0f)\n #define def_w210_hi (def_tor_hi+16.0f/32768.0f)")
+				: (rh ? string("\n #undef RHO_CLAMP_MIN\n #undef RHO_CLAMP_MAX\n #define RHO_CLAMP_MIN (20.0f/32768.0f)\n #define RHO_CLAMP_MAX (1.0f+65504.0f/32768.0f)\n #define RHO_HUELLE\n #define def_rho_kons_lo 0.500000f\n #define def_rho_kons_hi 1.500000f\n #define def_tor_gate_lo RHO_CLAMP_MIN\n #define def_tor_gate_hi RHO_CLAMP_MAX\n #define def_w210_lo 0.0f\n #define def_w210_hi 3.0f") : huellen);
+			if(a.empty()) { pos = ub ? "\n #define U_BETRAG" : ""; goto schreiben; }
 			// Pruefbefund P1a NIEDRIG 4: exakt pos<1|2>[f][h<1..3>], sonst Abbruch -- keine stille Umdeutung (pos1h, pos12, pos1x)
 			size_t q = 4; const bool fmt = a.size()>=4&&a.substr(0, 3)=="pos"&&(a[3]=='1'||a[3]=='2');
 			bool fac = false; unsigned haken = 0u; bool ok = fmt;
@@ -223,7 +231,7 @@ int main(int argc, char** argv) {
 			if(ub) pos += "\n #define U_BETRAG";
 		}
 		schreiben:
-		const string code = geraet + defs + klemm + pos + get_opencl_c_code();
+		const string code = geraet + defs + klemm + huellen + pos + get_opencl_c_code();
 		std::ofstream f(argv[3]); f << code; f.close();
 		std::cout << "geschrieben: " << argv[3] << " (" << code.size() << " Bytes, Defines aus " << argv[2] << ")\n";
 		return 0;

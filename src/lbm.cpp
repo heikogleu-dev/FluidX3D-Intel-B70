@@ -383,6 +383,19 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// CL_OUT_OF_RESOURCES, der Desktop auf derselben Karte hing bis zum Neustart (logs/kl_s0d_dd8_h1_b70.log, journalctl 15:49:34).
 	// Grenze = das GROESSTE Gitter, an dem ein solcher Haken nachweislich lief: Kugel 16 mm, 340x171x105 = 6 104 700 Zellen
 	// (kl_s0b/kl_s0d_ku_h1_b70, rc 0) -- ein Messwert, kein geschaetztes Zeitlimit. Groesser nur auf Geraet 0 (CPU, kein Watchdog).
+	{ // ★ 15.09.2026 Klemmen Z2e/Z2f: Sperren VOR dem Kernelbau
+	  if(rho_huelle_env()>0u) {
+#if !defined(FP16S)||!defined(RHO_FP16)||!defined(RHO_CLAMP)
+		print_error("CFD_RHO_HUELLE braucht FP16S, RHO_FP16 und RHO_CLAMP: die numerische Huelle ist die des Halbworts (Plan §2.2).");
+#endif
+		if(positiv_env()!=2u||u_klemme_env()!=1u) print_error("CFD_RHO_HUELLE=1 (Arm B2) nur mit CFD_POSITIV=2 und CFD_U_KLEMME=1: erst Positivitaet und Betragsklemme machen die Konsistenzhuelle numerisch entbehrlich (Plan §2.2).");
+		if(tor_huelle_env()>0u) print_error("CFD_RHO_HUELLE und CFD_TOR_HUELLE schliessen sich aus: unter der numerischen Huelle gibt es keine Bildhuelle (Plan §2.3).");
+		if(klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) print_warning("CFD_KLEMM_HAKEN 1/3/4 uebersteuert CFD_RHO_HUELLE (Testband 1,001/1,002).");
+		if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_RHO_HUELLE mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit 0,5/1,5.");
+		print_warning("CFD_RHO_HUELLE=1: Dichteklemme an der NUMERISCHEN Huelle (Stabilitaetsversuch B2) -- die Physik dieses Laufs aendert sich; Host-Diagnosen mit 0,5/1,5 (N2F-Band) bleiben unveraendert.");
+	  }
+	  if(tor_huelle_env()>0u) print_info("CFD_TOR_HUELLE=1: Lift-rho-Tor und Waechter [210] aus der Bildhuelle 1 +- Lambda^2 (RHO_CLAMP_MAX-1) -- Soll [270] = 0.");
+	}
 	{ // ★ 15.09.2026 Klemmen Stufe 1: Sperren des Positivitaetsbegrenzers VOR Kernelbau und Grossallokation (Pruefbefund P1a NIEDRIG 2)
 	  const uint pm_ = positiv_env();
 	  if(pm_==0u&&(positiv_haken_env()>0u||positiv_facette_env()>0u)) print_error("CFD_POSITIV_HAKEN / CFD_POSITIV_FACETTE ohne CFD_POSITIV > 0 -- wirkungslos (Ansage-Doktrin).");
@@ -535,6 +548,10 @@ uint klemm_haken_env() { const uint h = env_u("CFD_KLEMM_HAKEN", 0u); if(h>4u) p
 // CFD_POSITIV_HAKEN (nur Testarme): 1 = Stoerung an K4-Zellen der Kugel (Soll Eimer [0,25;0,5)), 2 = tau_i -> 1,2*w_i (jede Zelle Kandidat),
 // 3 = Klassenzaehlung fuer n%7 == 0 uebersprungen (Soll: genau eine Beanstandung). CFD_POSITIV_FACETTE: 0 = K0 in Modus 2 ausgenommen (E2), 1 = eingeschlossen.
 // ★ 15.09.2026 Klemmen Z2d (KLEMMEN-STUFE2-PLAN.md §2.1, E6): CFD_U_KLEMME 0 = Komponentenklemme |u_a| <= c_s (Vorgabe, FluidX3D), 1 = Betragsklemme |u|^2 <= c_s^2.
+// ★ 15.09.2026 Klemmen Z2e/Z2f (KLEMMEN-STUFE2-PLAN.md §2.2/§2.3): CFD_TOR_HUELLE=1 Lift-rho-Tor und Waechter 210 aus der Bildhuelle;
+// CFD_RHO_HUELLE=1 Zustandsklemme an der NUMERISCHEN Huelle [20/32768; 1+65504/32768] (Arm B2), Konsistenzhuelle 0,5/1,5 nur gezaehlt (298/299).
+uint tor_huelle_env() { const uint k = env_u("CFD_TOR_HUELLE", 0u); if(k>1u) print_error("CFD_TOR_HUELLE kennt nur 0 und 1."); return k; }
+uint rho_huelle_env() { const uint k = env_u("CFD_RHO_HUELLE", 0u); if(k>1u) print_error("CFD_RHO_HUELLE kennt nur 0 und 1."); return k; }
 uint u_klemme_env() { const uint k = env_u("CFD_U_KLEMME", 0u); if(k>1u) print_error("CFD_U_KLEMME kennt nur 0 (Komponente) und 1 (Betrag)."); return k; }
 uint positiv_env() { const uint m = env_u("CFD_POSITIV", 0u); if(m>2u) print_error("CFD_POSITIV kennt nur 0 (aus), 1 (Messarm) und 2 (anwenden)."); return m; }
 uint positiv_haken_env() { const uint h = env_u("CFD_POSITIV_HAKEN", 0u); if(h>3u) print_error("CFD_POSITIV_HAKEN kennt nur 0..3."); return h; }
@@ -2215,14 +2232,18 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 #endif // REGULARIZED_BOUNDARIES
 	#ifdef RHO_CLAMP
 	"\n	#define RHO_CLAMP"
-	"\n	#define RHO_CLAMP_MIN "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? 1.001f : RHO_CLAMP_MIN,4u)+"f" // ★ Klemmen-Haken 1/3: nur Testarme
-	"\n	#define RHO_CLAMP_MAX "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? 1.002f : RHO_CLAMP_MAX,4u)+"f"
+	+((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? string("\n	#define RHO_CLAMP_MIN 1.0010f\n	#define RHO_CLAMP_MAX 1.0020f") // ★ Klemmen-Haken 1/3/4: nur Testarme
+	  : (rho_huelle_env()>0u ? string("\n	#define RHO_CLAMP_MIN (20.0f/32768.0f)\n	#define RHO_CLAMP_MAX (1.0f+65504.0f/32768.0f)\n	#define RHO_HUELLE") // ★ Z2f: numerische Huelle als BRUECHE (to_string schnitte 20/32768 auf 0,0006)
+	    +"\n	#define def_rho_kons_lo "+to_string(RHO_CLAMP_MIN, 6u)+"f\n	#define def_rho_kons_hi "+to_string(RHO_CLAMP_MAX, 6u)+"f"
+	  : "\n	#define RHO_CLAMP_MIN "+to_string(RHO_CLAMP_MIN,4u)+"f\n	#define RHO_CLAMP_MAX "+to_string(RHO_CLAMP_MAX,4u)+"f")) // Vorgabe: Zeichenfolge wie bisher (\"0.5000f\")
+	+((klemm_bilanz_env()||tor_huelle_env()>0u) ? "\n	#define def_tor_lo (1.0f-1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)"+"\n	#define def_tor_hi (1.0f+1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)" : string("")) // ★ Z2b/Z2e: Bildhuelle aus dem PHYSIKALISCHEN RHO_CLAMP_MAX (Host-Makro), Lambda^2 = 1,5625; ausserhalb von SRT, weil Lift-Kernel und Waechter immer gebaut werden
+	+(tor_huelle_env()>0u ? string("\n	#define def_tor_gate_lo def_tor_lo\n	#define def_tor_gate_hi def_tor_hi\n	#define def_w210_lo (def_tor_lo-16.0f/32768.0f)\n	#define def_w210_hi (def_tor_hi+16.0f/32768.0f)") // ★ Z2e: groesste RHO_FP16-ULP unter 2^15 ist 16
+	  : (rho_huelle_env()>0u ? string("\n	#define def_tor_gate_lo RHO_CLAMP_MIN\n	#define def_tor_gate_hi RHO_CLAMP_MAX\n	#define def_w210_lo 0.0f\n	#define def_w210_hi 3.0f") // ★ Z2f: numerische Huelle
+	  : string("\n	#define def_tor_gate_lo 0.5f\n	#define def_tor_gate_hi 2.0f\n	#define def_w210_lo 0.4f\n	#define def_w210_hi 2.1f"))) // Vorgabe: Werte wie vor Z2e
 #ifdef SRT // Pruefpass S0b NIEDRIG: die Buchung dj = w*rho*du gilt nur fuer SRT (unter TRT relaxiert der Impuls mit wm)
 	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)
 	+(klemm_bilanz_env()||u_klemme_env()>0u ? string("\n	#define def_u2max (def_c*def_c)") : string("")) // ★ Z2b/Z2d: Betragshuelle folgt def_c (Haken 2 schrumpft sie mit, gewollt); die Klemme haengt NICHT am Instrument
 	+(u_klemme_env()>0u ? string("\n	#define U_BETRAG") : string("")) // ★ Z2d: CFD_U_KLEMME=1
-	+(klemm_bilanz_env() ? string("") // (Z2b-Bildhuelle folgt)
-		+"\n	#define def_tor_lo (1.0f-1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)"+"\n	#define def_tor_hi (1.0f+1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)" : string("")) // ★ Z2b: Bildhuelle aus dem PHYSIKALISCHEN RHO_CLAMP_MAX (Host-Makro), Lambda^2 = 1,5625
 	+(klemm_bilanz_env()&&klemm_haken_env()==3u ? string("\n	#define KLEMM_HAKEN3") : string(""))
 #if defined(D3Q19)&&defined(FP16S) // ★ 15.09.2026 Klemmen Stufe 1 P1a: bei CFD_POSITIV=0 leer (Kernelquelle zeichengleich); Sperren im Konstruktor
 	+(klemm_bilanz_env() ? positiv_defines(positiv_env(), positiv_haken_env(), positiv_facette_env(), true, (unsigned long long)get_N(), get_Nx(), get_Ny()) : string(""))

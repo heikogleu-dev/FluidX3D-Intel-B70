@@ -175,6 +175,8 @@ ulong zaehl_takt(); // ★ 11.09.2026 gemeinsamer Zaehltakt fuer Kernel-Gatter U
 bool klemm_bilanz_env(); // ★ 15.09.2026 Klemmen S0b (lbm.cpp)
 uint klemm_haken_env();
 uint u_klemme_env(); // ★ Z2d (lbm.cpp)
+uint tor_huelle_env(); // ★ Z2e
+uint rho_huelle_env(); // ★ Z2f
 uint positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a (lbm.cpp): CFD_POSITIV 0/1/2, CFD_POSITIV_HAKEN 0..3, CFD_POSITIV_FACETTE 0/1
 uint positiv_haken_env();
 uint positiv_facette_env();
