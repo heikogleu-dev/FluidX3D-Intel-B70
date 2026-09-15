@@ -1566,7 +1566,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		  // der Nachbarblock sieben Zeilen darueber fuer 204..207 schon mit zaehlschritt_im_lauf behoben
 		  // hat. Endet der Lauf VOR t = Zaehltakt+2, ist die Null kein Geometriebefund, sondern gar
 		  // keine Messung. Beide Faelle werden jetzt getrennt benannt.
-		  const bool zschritt_erreicht = L.get_t() > zaehl_takt()+1ull;
+		  const bool zschritt_erreicht = L.get_t() > zaehl_takt()+2ull; // Pruefpass C2c-3 NIEDRIG 4: der Kernel sieht t = 0..get_t()-1, der Zaehlschritt ist zaehl_takt+2 (war +1)
 		  if(besuche==0ull) print_warning(string("rho-Bereichswaechter ")+wo+(zschritt_erreicht
 			? ": Slot 211 = 0 -- diese Domaene hat am Zaehlschritt keine TYPE_E-Zelle besucht. Die Null in Slot 210 beweist damit NICHTS; der Bereichswaechter hat hier keine Abdeckung."
 			: ": Slot 211 = 0, aber der Zaehlschritt t = "+to_string((ulong)(zaehl_takt()+2ull))+" lag gar nicht im Lauf (t = "+to_string(L.get_t())+"). Es wurde nicht gemessen -- das ist KEIN Befund ueber die Geometrie."));
@@ -4780,8 +4780,12 @@ static void berichte_rho_rand(LBM& L, const string& wo, const bool mit_lift) {
 	if(h[4]!=0ull) ok = false;
 	const ulong zschritt = zaehl_takt()+2ull;
 	const bool zaehlschritt_im_lauf = L.get_t()>zschritt; // Pruefpass C2c Pass 2 N2: 211 zaehlt am selben Schritt wie 204/205
-	if(h[2]==0ull&&!zaehlschritt_im_lauf) { print_warning("  RHO_RAND ("+wo+"): der Zaehlschritt t = "+to_string(zschritt)+" liegt hinter dem Laufende -- 211 und 204/205 ungeprueft (TEILABNAHME)."); teil = true; }
-	if((h[2]==0ull&&zaehlschritt_im_lauf)||h[6]==0ull||(mit_lift&&h[3]==0ull)) { print_warning("  RHO_RAND ("+wo+"): Besuche fehlen (Soll 211 > 0, 220 > 0"+string(mit_lift?", 215 > 0":"")+") -- die Null in 216 beweist sonst nichts."); ok = false; }
+	if(!zaehlschritt_im_lauf) { // Pruefpass C2c-3 NIEDRIG 1: teil haengt am Laufende, nicht an h[2]; Werte in 204/205/211 waeren dann ein Instrumentenfehler
+		print_warning("  RHO_RAND ("+wo+"): der Zaehlschritt t = "+to_string(zschritt)+" liegt hinter dem Laufende -- 211 und 204/205 ungeprueft (TEILABNAHME).");
+		teil = true;
+		if(h[0]!=0ull||h[1]!=0ull||h[2]!=0ull) { print_warning("  RHO_RAND ("+wo+"): 204/205/211 = "+to_string(h[0])+"/"+to_string(h[1])+"/"+to_string(h[2])+", obwohl der Zaehlschritt nicht im Lauf lag (Soll 0/0/0) -- Instrumentenfehler."); ok = false; }
+	}
+	if((h[2]==0ull&&zaehlschritt_im_lauf)||h[6]==0ull||(mit_lift&&h[3]==0ull)) { print_warning("  RHO_RAND ("+wo+"): Besuche fehlen (Soll "+string(zaehlschritt_im_lauf?"211 > 0, ":"")+"220 > 0"+string(mit_lift?", 215 > 0":"")+") -- die Null in 216 beweist sonst nichts."); ok = false; }
 	print_info("  Slots 219/220 (gezaehlte Ausgabe): "+to_string(h[5])+"/"+to_string(h[6])+" (Soll "+to_string(L.rho_aus_gezaehlt_zellen)+"/"+to_string(L.rho_aus_gezaehlt_e)+"; Wrapper-Ist "+to_string(L.rho_aus_ist_219)+"/"+to_string(L.rho_aus_ist_220)+")");
 	if(L.rho_aus_gezaehlt_zellen==0ull) { print_warning("  RHO_RAND ("+wo+"): kein gezaehlter Ausgabeaufruf -- Slice-Kadenz aus? Die Ausgabe ist ungeprueft."); ok = false; }
 	if(h[5]!=L.rho_aus_gezaehlt_zellen+haken7||h[6]!=L.rho_aus_gezaehlt_e+haken7||L.rho_aus_ist_219!=L.rho_aus_gezaehlt_zellen+haken7||L.rho_aus_ist_220!=L.rho_aus_gezaehlt_e+haken7) ok = false;
@@ -4799,7 +4803,7 @@ static void berichte_rho_rand(LBM& L, const string& wo, const bool mit_lift) {
 	}
 	print_info("  Rho_Feld-Hostzugriffe: aus der Ausgabe-Ebene "+to_string(L.rho.n_cache)+", aus R1 "+to_string(L.rho.n_r1));
 	if(!ok) print_error("RHO_RAND ("+wo+"): Abnahme verletzt -- siehe Zeilen darueber.");
-	print_info(teil ? "RHO_RAND ("+wo+"): TEILABNAHME erfuellt (204/205 ungeprueft, Lauf zu kurz)." : "RHO_RAND ("+wo+"): Abnahme erfuellt.");
+	print_info(teil ? "RHO_RAND ("+wo+"): TEILABNAHME erfuellt (211 und 204/205 ungeprueft, Lauf zu kurz)." : "RHO_RAND ("+wo+"): Abnahme erfuellt.");
 }
 
 // ★ 15.09.2026 RHO_RAND C1/C2a -- PRUEFINSTRUMENT UND PROBEZELLEN (RHO_RAND-PLAN.md §5/§7/§11/§14, RHO_RAND-C2-PLAN.md §4).
@@ -5338,7 +5342,8 @@ void main_setup_kugel() {
 			print_warning("RHO_RAND-TESTHAKEN 5: Innenzelle "+to_string(nh)+" als TYPE_E gesetzt; der C0-Waechter meldet das nur als Warnung. Soll: Slot 216 > 0, Abnahme verletzt.");
 		}
 		const uint bad = lbm.lbm_domain[0]->pruefe_rho_rand_c0(&lbm.flags[0], Nx, Ny, Nz, env_u("CFD_RHO_RAND_TESTHAKEN", 0u)==1u);
-		if(bad>(haken5 ? 1u : 0u)) print_error("RHO_RAND (Kugel): "+to_string(bad)+" Beanstandung(en) -- siehe oben."); // Pruefpass C2c Pass 2 N3: Haken 5 zieht nur die EINE erwartete Beanstandung (1a) ab
+		// Pruefpass C2c Pass 2 N3 / Pass 3 NIEDRIG 2: unter Haken 5 ist GENAU die eine Beanstandung (1a) Soll -- 0 hiesse, (1a) schlaegt nicht an
+		if(haken5 ? bad!=1u : bad>0u) print_error("RHO_RAND (Kugel): "+to_string(bad)+" Beanstandung(en)"+string(haken5?" unter Testhaken 5 (Soll genau 1: Waechter 1a)":"")+" -- siehe oben.");
 	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.

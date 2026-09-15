@@ -457,3 +457,36 @@ boden_eq-Menge. Die boden_eq-behandelte Zeile z = 1 ist bei mitbewegtem Boden TY
 **Entscheidung (b) ist bei entwickelter Strömung bestätigt.** Die Nachkollisionssumme bleibt in allen Klassen unter
 cp 0,0034, auch an der boden_eq-Zeile (TYPE_MS) und an ELIBB-Facetten. Die t+1-Rekonstruktion ist bei 300 ms kleiner als im
 Kugelanlauf, erreicht aber an Facetten und im Band noch max cp 0,2–0,4.
+
+## 15 C2d: 8-mm-A/B bis 300 ms (15.09.2026, B70, HEAD 99c77d9, Serie logs/rr_c2d.txt)
+
+A = Produktionszeile spz_b70c mit CFD_RHO_SPARSAM=1 (T_END 0,301, T_WARMUP 0,2), B = dieselbe Zeile + CFD_RHO_RAND=1.
+Ein Lauf je Arm; Rauschen der Wanduhr nicht gemessen. 4 mm bewusst nicht gerechnet (Heiko).
+
+| Größe | A | B | Quelle |
+|---|---|---|---|
+| forces.csv, cd_facetten.csv | — | bitgleich zu A | cmp |
+| u im VTK-Enddump 300 ms (196 688 115 Komponenten) | — | 0 verschieden | rho_rand_ab.py |
+| flags, rho an TYPE_E (824 697) und TYPE_S (8 380 764) | — | identisch | rho_rand_ab.py |
+| Nahfeld belegt (rechnerisch, Log-Einheit „MB“) | 3030 | 2909 (−121) | SPEICHER-ZWISCHENSTAND |
+| gemessen frei auf der Karte (fdinfo, inkl. Desktop) | 28 209 MB | 28 432 MB | SPEICHER-ZWISCHENSTAND |
+| Wanduhr Zeitschleife 300 ms | 198,6 s | 196,7 s | LEISTUNG-GESAMT |
+| Durchsatz ab 100 ms | 5452 MLUPs | 5500 MLUPs | LEISTUNG-AB-MARKE |
+| Abnahme RHO_RAND (Nahfeld) | — | erfüllt | B-Log |
+
+**rho |B−A| am vollen Feld** (cp = (2/3)·Δρ/u_lat², u_lat 0,075; logs/rr_c2d_vtk_ab.txt):
+- Fluid (56 081 419): max cp 0,0040, Median 0,00031, 99,9 % 0,0018.
+- TYPE_MS (275 624): max cp 0,0203, Median 0,00085, 99,9 % 0,0036.
+- Klemmzellen (A-Wort auf 0,5/1,5): 201 Zellen, bis cp 2,88 — erwartet, dort ist das geklemmte Wort ≠ Nachkollisionssumme.
+- Über cp 0,0034 außerhalb der Klemmzellen: 497 Zellen, davon 483 TYPE_MS, z-Verteilung 483 × z=1, 13 × z=2, 1 × z=9.
+  334 davon liegen mehr als 5 Zellen (Chebyshev) von der nächsten Klemmzelle entfernt, sind also keine Klemmnachbarn.
+  Ort ist das Bodenband z ≤ boden_eq_n, wo die Schranke S mit k=2 rechnet; das Prüfinstrument hat an der z=1-Ebene
+  (rr_c2a2_dd8_b70) alle Zellen innerhalb S gefunden (max. Quote 0,42). Am 300-ms-Feld selbst ist S nicht auswertbar
+  (keine DDFs im VTK) — die Zuordnung „FP16S-Rundung im Bodenband“ ist deshalb eine Ortsaussage, keine Schrankenprüfung.
+
+**Nachprüfung der Prüfpass-2-Fixes** (5dc69ae, nur Host-Code): logs/rr_c2c4_b70.txt.
+- Kugel B: FELD-HASH(u) 13385224609926903411 (= C2c3), forces.csv bitgleich zu rr_c2c3_ku_b_b70; rr-Vergleich 206/0; Abnahme erfüllt.
+- Kugel Haken 5: genau ein Error, und zwar aus der Abnahme (216 = 504); der C0-Wächter meldet nur noch Warnung (N3).
+  rr-Vergleich 207/1 — die eine Abweichung ist die TYPE_E-Innenzelle, deren rr_idx_host der Papierkorb ist (erwartet).
+- dd 8 mm B 60 ms: forces.csv bitgleich zu rr_c2c3_dd8_b_b70; rr-Vergleich 1307/0 mit der neuen Ursprungsformel (N1); Abnahme erfüllt.
+- N2 (TEILABNAHME bei Lauf kürzer als der Zählschritt) ist zur Laufzeit nicht ausgelöst worden — nur durch Prüfagent gedeckt.
