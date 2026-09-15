@@ -394,7 +394,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		if(pm_==2u) print_error("CFD_POSITIV=2 (anwenden) folgt mit Stufe 1 P1c -- gebaut ist erst der Messarm, der Schalter waere ein stiller No-Op.");
 		if(positiv_facette_env()>0u) print_warning("CFD_POSITIV_FACETTE wirkt nur in Modus 2 -- im Messarm zaehlt K0 ohnehin als \"wuerde begrenzen\" (Ansage-Doktrin).");
 		const uint ph0_ = positiv_haken_env();
-		if(ph0_>0u) print_warning("CFD_POSITIV_HAKEN="+to_string(ph0_)+": TESTARM -- "+string(ph0_==1u ? "masse- und impulsfreie Stoerung an jeder "+to_string(positiv_haken_periode())+". reinen Fluidzelle ausserhalb der Randschale bei t = zaehl_takt+2 (aendert die Physik)" : (ph0_==2u ? "tau_i = 1,2 w_i: jede Zelle Kandidat und machtlos (Felder im Messarm bitgleich)" : "Klassenzaehlung fuer n%7 == 0 uebersprungen, Soll: genau die Klassen-Beanstandung"))+".");
+		if(ph0_>0u) print_warning("CFD_POSITIV_HAKEN="+to_string(ph0_)+": TESTARM -- "+string(ph0_==1u ? "masse- und impulsfreie Stoerung an jeder "+to_string(positiv_haken_periode())+". reinen Fluidzelle ausserhalb der Randschale bei t = zaehl_takt+2 (aendert die Physik)" : (ph0_==2u ? "tau_i = 1,2 w_i: jede Zelle Kandidat und machtlos (Felder im Messarm bitgleich)" : "Haken-1-Stoerung UND Klassenzaehlung fuer n%7 == 0 uebersprungen (aendert die Physik), Soll: genau die Klassen-Beanstandung"))+".");
 	  }
 	}
 	{ const uint kh_ = klemm_haken_env(); const uint ph_ = positiv_haken_env();

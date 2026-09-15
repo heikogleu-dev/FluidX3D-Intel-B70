@@ -6679,7 +6679,7 @@ string positiv_defines(const unsigned modus, const unsigned haken, const unsigne
 	else if(fp16s) s += "\n	#define def_pos_t0 (4.0f/32768.0f)\n	#define def_pos_ts (0.5f/32768.0f)\n	#define def_pos_te (0.25f/32768.0f)";
 	else s += "\n	#define def_pos_t0 0.0f\n	#define def_pos_ts 0.0f\n	#define def_pos_te 0.0f";
 	s += "\n	#define def_pos_g0 (def_pos_t0-def_w0)\n	#define def_pos_gs (def_pos_ts-def_ws)\n	#define def_pos_ge (def_pos_te-def_we)"; // Kandidat: fhn[i] < tau_i - w_i
-	if(haken==1u) s += "\n	#define POSITIV_HAKEN1\n	#define def_pos_hP "+std::to_string(positiv_haken_periode())+"u"; // Periode der Hakenzellen (Host-Soll liest dieselbe Funktion)
-	if(haken==3u) s += "\n	#define POSITIV_HAKEN3";
+	if(haken==1u||haken==3u) s += "\n	#define POSITIV_HAKEN1\n	#define def_pos_hP "+std::to_string(positiv_haken_periode())+"u"; // Periode der Hakenzellen (Host-Soll liest dieselbe Funktion)
+	if(haken==3u) s += "\n	#define POSITIV_HAKEN3"; // H3 = H1-Stoerung + Klassenluecke: ohne natuerliche Kandidaten (Kugel 40 mm: 0) feuerte der Negativtest sonst nie (P1b-CPU 15.09.)
 	return s;
 }

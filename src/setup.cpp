@@ -1591,13 +1591,13 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				for(ulong n=0ull; n<N; n++) {
 					const uchar fb = d0->flags[n]&(TYPE_S|TYPE_E);
 					if(fb!=TYPE_S) besuch++; // stream_collide kehrt nur bei TYPE_S (und Gas, ohne SURFACE nie) sofort zurueck
-					if(hk==1u&&fb==0u&&n%(ulong)P==0ull&&n%(ulong)sub==0ull) { const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/((ulong)Nx*(ulong)Ny));
+					if((hk==1u||hk==3u)&&fb==0u&&n%(ulong)P==0ull&&n%(ulong)sub==0ull) { const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/((ulong)Nx*(ulong)Ny));
 						if(!(x<2u||x+2u>=Nx||y<2u||y+2u>=Ny||z<2u||z+2u>=Nz)) nh++; }
 				}
-				print_info(string("  POSITIV ")+wo+": Besuche am Pruefpunkt "+to_string(v[271])+" (Soll Host-Flagzaehlung "+to_string(besuch)+"); Kandidatenrate "+to_string(zs>0ull&&besuch>0ull ? 100.0*(double)v[272]*(double)sub/((double)zs*(double)besuch) : 0.0, 5u)+" % der Zellschritte"+(hk==1u ? "; Haken-1-Zellen im Eimer [0,25;0,5) "+to_string(v[288])+" (Soll "+to_string(nh)+")" : string("")));
+				print_info(string("  POSITIV ")+wo+": Besuche am Pruefpunkt "+to_string(v[271])+" (Soll Host-Flagzaehlung "+to_string(besuch)+"); Kandidatenrate "+to_string(zs>0ull&&besuch>0ull ? 100.0*(double)v[272]*(double)sub/((double)zs*(double)besuch) : 0.0, 5u)+" % der Zellschritte"+(hk==1u||hk==3u ? "; Haken-1-Zellen im Eimer [0,25;0,5) "+to_string(v[288])+" (Soll "+to_string(nh)+")" : string("")));
 				if(v[271]!=besuch) verl += " Besuche "+to_string(v[271])+" != "+to_string(besuch)+";";
-				if(hk==1u&&v[288]!=nh) verl += " Haken 1: Eimer [0,25;0,5) "+to_string(v[288])+" != Hakenzellen "+to_string(nh)+";";
-				if(hk==1u&&nh==0ull) verl += " Haken 1 ohne Hakenzelle (Gitter zu klein);";
+				if((hk==1u||hk==3u)&&v[288]!=nh) verl += " Haken 1: Eimer [0,25;0,5) "+to_string(v[288])+" != Hakenzellen "+to_string(nh)+";";
+				if((hk==1u||hk==3u)&&nh==0ull) verl += " Haken 1 ohne Hakenzelle (Gitter zu klein);";
 			}
 			if(erreicht&&v[271]==0ull) verl += " NO-OP: Pruefpunkt erreicht, aber keine Besuche;";
 			if(hk==3u&&verl.find("Klassen")==string::npos) verl += " Haken 3 gesetzt, aber die Klassen-Abnahme beanstandet nichts -- der Negativtest feuert nicht;";
