@@ -1387,6 +1387,7 @@ struct KlemmBilanz {
 	bool init = false; uint alt[LBM_Domain::hits_n]; double ges[LBM_Domain::hits_n], nach[LBM_Domain::hits_n]; // ★ P1a: 288 -> hits_n (320)
 	ulong fenster = 0ull, fenster_nach = 0ull, mehrdeutig = 0ull, t_start = 0ull, t_warm = 0ull, t_ende = 0ull; bool warm = false; // Pruefpass S0c M1: t_ende = get_t() des VORIGEN Lesens bis zum Update
 	std::ofstream csv;
+	std::ofstream csv_pos; uint pos_modus = 0u; ulong pos_zellen = 0ull, pos_mehrdeutig = 0ull; // ★ P1d: Positiv-Messarm je Fenster (Stichprobenzellen je Zaehlschritt, Wickelwaechter 292/293)
 };
 static uint klemm_budget_modus() { const uint m = env_u("CFD_KLEMM_BUDGET", 2u); if(m>2u) print_error("CFD_KLEMM_BUDGET kennt nur 0 (nicht bewerten), 1 (nur Warnung), 2 (Fehler am Fallende, Vorgabe)."); return m; } // ★ Z2c Pruefpass NIEDRIG 3: beim Startstand geprueft
 static bool klemm_summenslot(const uint k) { return (k>=226u&&k<=235u)||(k>=247u&&k<=256u)||k==263u||k==264u||k==267u||k==268u||k==292u||k==293u; } // ★ P1a: 292/293 Stufe-1-Summen
@@ -1400,6 +1401,14 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 		K.csv.open(csv_pfad); K.csv.precision(10);
 		K.csv << "# Klemmen Stufe 0 (KLEMMEN-STUFE0-PLAN.md), "<<wo<<": je Fenster (Sample-Takt) die Differenzen. Masse in Gittereinheiten (rho*Zelle), Impuls in Gittereinheiten; Festkomma S = 16384 bereits herausgerechnet.\n";
 		K.csv << "t_si,t_lat,nach_warmup,rho_K0,rho_K1,rho_K2,rho_K3,rho_K4,u_K0,u_K1,u_K2,u_K3,u_K4,m_zu,m_ab,jx_plus,jx_minus,jz_plus,jz_minus,kappung,mehrdeutig\n";
+		K.pos_modus = d->positiv_modus;
+		if(K.pos_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1d: Positiv-Messarm je Fenster
+			const ulong sub_ = (ulong)positiv_stichprobe((unsigned long long)d->get_N(), d->get_Nx(), d->get_Ny()); K.pos_zellen = (d->get_N()+sub_-1ull)/sub_;
+			string pp_ = csv_pfad; const size_t pk_ = pp_.rfind("klemmen"); if(pk_!=string::npos) pp_.replace(pk_, 7, "positiv"); else pp_ += ".positiv.csv";
+			K.csv_pos.open(pp_); K.csv_pos.precision(10);
+			K.csv_pos << "# Klemmen Stufe 1 (KLEMMEN-STUFE1-PLAN.md), "<<wo<<", Modus "<<K.pos_modus<<": Differenzen je Fenster, gezaehlt NUR an Zaehlschritten t%"<<zaehl_takt()<<" == 2 und Stichprobenzellen n%"<<sub_<<" == 0 ("<<K.pos_zellen<<" Zellen inkl. Solid je Zaehlschritt); Summen (1-s) und |df| in Gittereinheiten (Festkomma S herausgerechnet)\n";
+			K.csv_pos << "t_si,t_lat,nach_warmup,zaehlschritte,kandidaten,machtlos,feq_negativ,K0,K1,K2,K3,K4,E0,E1,E2,E3,E4,koinz_rho,koinz_u,typeE,neg_geladen,summe_1ms,summe_absdf,kappung294,selbstpruef290,mehrdeutig292,mehrdeutig293\n";
+		}
 		return;
 	}
 	if(L.get_t()==K.t_ende) return; // Pruefpass S0c N3: kein Schritt seit dem letzten Lesen (Restfenster nach dem letzten Sample, Stopp) -> kein leeres Fenster
@@ -1415,6 +1424,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	if(mehrd) { if(K.mehrdeutig==0ull) print_warning(string("KLEMM-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG -- Ursache: "+string(B_r>=grenze||B_u>=grenze ? "Schranke rho "+to_string(B_r,0u)+" / u "+to_string(B_u,0u)+" >= "+to_string(grenze,0u) : "")+string(satt_dek ? " gesaettigte Dekade/Slot 266" : "")+string(dlt[210]>0u ? " Slot 210 > 0 (rho-Huelle 2,1 an TYPE_E verletzt)" : "")+"; die Festkomma-Summen koennen gewickelt sein, weitere Fenster nur im Bericht gezaehlt."); K.mehrdeutig++; } // Pruefpass S0c-2 N-b
 	for(uint k=0u; k<LBM_Domain::hits_n; k++) { K.ges[k] += (double)dlt[k]; if(nach_warmup) K.nach[k] += (double)dlt[k]; K.alt[k] = d->rho_clamp_hits[k]; }
 	if(nach_warmup&&!K.warm) { K.warm = true; K.t_warm = K.t_ende; } // Pruefpass S0c M1: Phase beginnt am Anfang DIESES Fensters (voriges Lesen), nicht an seinem Ende
+	const ulong t_vorher_ = K.t_ende; // ★ P1d: Fensteranfang fuer die Zaehlschritte je Fenster
 	K.fenster++; if(nach_warmup) K.fenster_nach++; K.t_ende = L.get_t();
 	auto su = [&](const uint a, const uint n) { double s = 0.0; for(uint k=a; k<a+n; k++) s += (double)dlt[k]; return s; };
 	if(K.csv.is_open()) {
@@ -1422,6 +1432,18 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 		for(uint k=0u; k<5u; k++) K.csv << "," << dlt[221u+k];
 		for(uint k=0u; k<5u; k++) K.csv << "," << dlt[242u+k];
 		K.csv << "," << su(226u,5u)/S << "," << su(231u,5u)/S << "," << su(247u,5u)/S << "," << su(252u,5u)/S << "," << (double)dlt[263]/S << "," << (double)dlt[264]/S << "," << dlt[265] << "," << (mehrd?1:0) << "\n" << std::flush;
+	}
+	if(K.pos_modus>0u) { // ★ P1d: Wickelwaechter 292/293 -- je begrenzter Stichprobenzelle hoechstens S (1-s <= 1) bzw. 16 S (Kappe)
+		const double ne_ = su(280u,5u);
+		const bool pmd_ = ne_*(S+1.0)>=4294967296.0, pmd3_ = ne_*(16.0*S+1.0)>=4294967296.0; // 292 exakt pruefbar; 293 nur Groessenmass (Schranke 16 S je Zelle ist grob)
+		if(pmd_) { if(K.pos_mehrdeutig==0ull) print_warning(string("POSITIV-BILANZ ")+wo+": Fenster bei t = "+to_string((float)t_si,4u)+" s MEHRDEUTIG -- "+to_string(ne_,0u)+" begrenzte Stichprobenzellen, die Festkomma-Summe 292 kann gewickelt sein."); K.pos_mehrdeutig++; }
+		if(K.csv_pos.is_open()) {
+			const ulong tk_ = zaehl_takt(); auto zf_ = [&](const ulong t) { return t>=3ull ? (t-3ull)/tk_+1ull : 0ull; };
+			K.csv_pos << t_si << "," << L.get_t() << "," << (nach_warmup?1:0) << "," << zf_(L.get_t())-zf_(t_vorher_) << "," << dlt[272] << "," << dlt[278] << "," << dlt[279];
+			for(uint k=0u; k<5u; k++) K.csv_pos << "," << dlt[273u+k];
+			for(uint k=0u; k<5u; k++) K.csv_pos << "," << dlt[280u+k];
+			K.csv_pos << "," << dlt[286] << "," << dlt[287] << "," << dlt[291] << "," << dlt[285] << "," << (double)dlt[292]/S << "," << (double)dlt[293]/S << "," << dlt[294] << "," << dlt[290] << "," << (pmd_?1:0) << "," << (pmd3_?1:0) << "\n" << std::flush;
+		}
 	}
 }
 // ★ 15.09.2026 Klemmen S0c: Bericht in physikalischen Groessen. NUR EIN GROESSENVERGLEICH (Plan §1 Punkt 6): entfernter FLUIDimpuls
@@ -1523,6 +1545,22 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 			else print_info(string("    Vergleich gegen ")+sigma_name+": keine Reihe verfuegbar (zu wenige Samples oder Facettenpfad aus).");
 		}
 	}
+	if(K.pos_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1d: Positiv-Messarm je Phase (gleiche Fenster wie die Klemm-Bilanz)
+		const ulong tk_ = zaehl_takt(); auto zf_ = [&](const ulong t) { return t>=3ull ? (t-3ull)/tk_+1ull : 0ull; };
+		for(uint ph=0u; ph<2u; ph++) {
+			if(ph==1u&&!K.warm) { print_info(string("  POSITIV-BILANZ ")+wo+" (nach Warmlauf): keine Fenster in dieser Phase."); continue; }
+			const double* a = ph==0u ? K.ges : K.nach;
+			const double zs_ = (double)(zf_(K.t_ende)-zf_(ph==0u ? K.t_start : K.t_warm)), zell_ = zs_*(double)K.pos_zellen;
+			const double kand_ = a[272], ppm_ = zell_>0.0 ? 1.0e6*kand_/zell_ : 0.0;
+			auto proz_ = [&](const double x) { return kand_>0.0 ? to_string(100.0*x/kand_, 2u)+" %" : string("-"); };
+			string kl_ = "", ei_ = "";
+			for(uint k=0u; k<5u; k++) { kl_ += (k?"/":"")+to_string(a[273u+k], 0u); ei_ += (k?"/":"")+to_string(a[280u+k], 0u); }
+			print_info(string("  POSITIV-BILANZ ")+wo+" ("+string(ph==0u ? "ganzer Lauf" : "nach Warmlauf")+", "+to_string(zs_, 0u)+" Zaehlschritte x "+to_string(K.pos_zellen)+" Stichprobenzellen): Kandidaten "+to_string(kand_, 0u)+" = "+to_string(ppm_, 3u)+" ppm der Stichprobenzellschritte (inkl. Solid), machtlos "+to_string(a[278], 0u)+" ("+proz_(a[278])+", f_eq negativ "+to_string(a[279], 0u)+"), begrenzbar K0..K4 = "+kl_+", s-Eimer = "+ei_);
+			print_info(string("    Koinzidenz Dichteklemme ")+to_string(a[286], 0u)+" ("+proz_(a[286])+"), u-Klemme "+to_string(a[287], 0u)+" ("+proz_(a[287])+"); TYPE_E-Kandidaten "+to_string(a[291], 0u)+"; negativ geladen "+to_string(a[285], 0u)
+				+(K.pos_modus==2u ? "; angewandt: Summe (1-s) "+to_string(a[292]/16384.0, 4u)+", Summe |df| "+to_string(a[293]/16384.0, 6u)+", Kappung "+to_string(a[294], 0u)+", Selbstpruefung [290] "+to_string(a[290], 0u) : string("")));
+		}
+		if(K.pos_mehrdeutig>0ull) print_warning(string("  POSITIV-BILANZ ")+wo+": "+to_string(K.pos_mehrdeutig)+" Fenster mit moeglicher Wicklung der Summe (1-s) -- Summe unsicher.");
+	}
 	if(K.mehrdeutig>0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": "+to_string(K.mehrdeutig)+" von "+to_string(K.fenster)+" Fenstern MEHRDEUTIG -- Summen unsicher"+string(klemm_haken_env()==4u ? " (Haken 4 erwartet das)." : "."));
 	else print_info(string("  KLEMM-BILANZ ")+wo+": Wickelwaechter still in allen "+to_string(K.fenster)+" Fenstern.");
 	if(klemm_haken_env()==4u&&K.mehrdeutig==0ull&&K.ges[0]+K.ges[1]+K.ges[28]>0.0) { // Pruefpass S0c M2: ein Negativtest, der ohne Beanstandung besteht, ist keiner
@@ -1569,7 +1607,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 			const uint sub = positiv_stichprobe((unsigned long long)L.lbm_domain[0]->get_N(), L.lbm_domain[0]->get_Nx(), L.lbm_domain[0]->get_Ny()); // Stichprobenperiode der Zellzaehler (kernel.cpp)
 			ulong kl5 = 0ull, ei5 = 0ull; for(uint k=0u; k<5u; k++) { kl5 += v[273u+k]; ei5 += v[280u+k]; }
 			bool satt = false; for(uint k=272u; k<=291u; k++) if(k!=285u&&k!=289u&&v[k]>=4026531840ull) satt = true;
-			print_info(string("  POSITIV ")+wo+": Modus "+to_string(L.lbm_domain[0]->positiv_modus)+" (Messarm), "+to_string(zs)+" Zaehlschritte (t%"+to_string(tk)+" == 2) an jeder "+to_string(sub)+". Zelle (n%"+to_string(sub)+" == 0): Kandidaten (Nicht-E) "+to_string(v[272])+", davon machtlos (konservativ) "+to_string(v[278])+" (f_eq selbst negativ "+to_string(v[279])+"), begrenzbar K0..K4 = "+fuenf(273u)+" (Summe "+to_string(kl5)+")");
+			print_info(string("  POSITIV ")+wo+": Modus "+to_string(L.lbm_domain[0]->positiv_modus)+(L.lbm_domain[0]->positiv_modus==2u ? string(" (ANWENDEN)") : string(" (Messarm)"))+", "+to_string(zs)+" Zaehlschritte (t%"+to_string(tk)+" == 2) an jeder "+to_string(sub)+". Zelle (n%"+to_string(sub)+" == 0): Kandidaten (Nicht-E) "+to_string(v[272])+", davon machtlos (konservativ) "+to_string(v[278])+" (f_eq selbst negativ "+to_string(v[279])+"), begrenzbar K0..K4 = "+fuenf(273u)+" (Summe "+to_string(kl5)+")");
 			print_info(string("  POSITIV ")+wo+": s-Eimer [0;0,25) [0,25;0,5) [0,5;0,75) [0,75;0,95) [0,95;1] = "+fuenf(280u)+"; Koinzidenz Dichteklemme "+to_string(v[286])+", u-Klemme "+to_string(v[287])+"; TYPE_E-Kandidaten "+to_string(v[291])+"; Zellen mit negativer GELADENER Population "+to_string(v[285])+" (Zaehlschritte), Nachladeprobe t = takt+3: "+to_string(v[289]));
 			string verl;
 			if(satt) print_info(string("  POSITIV ")+wo+": Zaehler GESAETTIGT -- Summen-Soll nicht pruefbar (keine Beanstandung).");
@@ -1600,6 +1638,17 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				if((hk==1u||hk==3u)&&nh==0ull) verl += " Haken 1 ohne Hakenzelle (Gitter zu klein);";
 			}
 			if(erreicht&&v[271]==0ull) verl += " NO-OP: Pruefpunkt erreicht, aber keine Besuche;";
+			if(L.lbm_domain[0]->positiv_modus==2u) { // ★ 15.09.2026 P1c: Wirkung und Selbstpruefung
+				const double S = 16384.0;
+				print_info(string("  POSITIV ")+wo+": angewandt (Stichprobe) -- Summe (1-s) "+to_string((double)v[292]/S, 4u)+", Summe |df| "+to_string((double)v[293]/S, 6u)+" (Festkomma, mod 2^32; Fensterdifferenzen im KLEMM-Leser), Kappung [294] "+to_string(v[294])+(hk==1u||hk==3u ? ", Selbstpruefung [290] "+to_string(v[290])+" (Soll 0)" : string("")));
+				if((hk==1u||hk==3u)&&v[290]!=0ull) verl += " Selbstpruefung: "+to_string(v[290])+" angewandte Zellen verletzen Masse/Impuls ueber der Toleranz;";
+				const bool facette_ = L.lbm_domain[0]->positiv_facette>0u; // Konstruktionszeit-Kopie
+				const ulong erlaubt_ = facette_ ? kl5 : kl5-v[273];
+				// No-Op-Waechter: gibt es an Stichprobenzellen erlaubte Klassen mit s < 0,95 (Eimer 0..3), muss Summe (1-s) > 0 sein. Ohne K0 exakt: Summe >= 0,05 S je Zelle.
+				ulong e03_ = 0ull; for(uint k=0u; k<4u; k++) e03_ += v[280u+k];
+				if(!satt&&erlaubt_>0ull&&(facette_||v[273]==0ull)&&(double)v[292]<0.05*S*(double)e03_-0.5*(double)e03_) verl += " NO-OP Modus 2: "+to_string(e03_)+" Stichprobenzellen mit s < 0,95, aber Summe (1-s) nur "+to_string((double)v[292]/S, 4u)+";";
+				if(!satt&&erlaubt_>0ull&&v[292]==0ull&&e03_>0ull) verl += " NO-OP Modus 2: erlaubte Begrenzungen, aber keine angewandt;";
+			}
 			if(hk==3u&&verl.find("Klassen")==string::npos) verl += " Haken 3 gesetzt, aber die Klassen-Abnahme beanstandet nichts -- der Negativtest feuert nicht;";
 			if(!verl.empty()) { print_warning(string("  POSITIV ")+wo+": ABNAHME VERLETZT --"+verl+(hk==3u ? " (Haken 3 erwartet genau die Klassen-Beanstandung.)" : "")+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }
 			else print_info(string("  POSITIV ")+wo+": Ist=Soll erfuellt.");

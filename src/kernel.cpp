@@ -2943,6 +2943,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(fh<gk) return (b-gk)/(-g);          // Kandidat: s_i = (B_i - tau_i)/(-G_i), hier -G_i > 0
 	return 2.0f;                           // kein Beitrag
 }
+)+R(void pos_summe(global uint* hits, const uint slot, const float a) { // ★ P1c: Festkomma-Summand wie klemm_summe, eigene Kappung Slot 294 (Stufe 0 behaelt 265)
+	float b = a;
+	if(b>16.0f) { b = 16.0f; if(hits[294]<0xF0000000u) atomic_inc(&hits[294]); }
+	atomic_add((volatile global uint*)&hits[slot], convert_uint_sat(fma(b, def_klemm_s, 0.5f)));
+}
 )+"#endif"+R( // POSITIV
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global velxx* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
@@ -3934,6 +3939,62 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 					if(ph_&&pb_==1u&&rho_clamp_hits[288]<0xF0000000u) atomic_inc(&rho_clamp_hits[288]);
 )+"#endif"+R( // POSITIV_HAKEN1
 				}
+)+"#ifdef POSITIV_ANWENDEN"+R(
+				// ★ 15.09.2026 Klemmen Stufe 1 P1c: ANWENDEN. f** = f* - (1-s) G_i erhaelt Masse und Impuls fuer jedes s (Projektionsform, E1).
+				// E2: Facettenzellen K0 ausgenommen (Wandschub-Weitergabe), ausser CFD_POSITIV_FACETTE=1. s = 1 (Rundung) aendert nichts.
+				bool pan_ = ps_<1.0f;
+)+"#ifndef POSITIV_FACETTE"+R(
+				pan_ = pan_&&pkl_!=0u;
+)+"#endif"+R( // POSITIV_FACETTE
+				if(pan_) {
+					const float pq_ = 1.0f-ps_;
+					float pab_ = 0.0f; // Summe |d_i| (Wirkungsgroesse)
+)+"#ifdef POSITIV_HAKEN1"+R(
+					float pdm_ = 0.0f, pdx_ = 0.0f, pdy_ = 0.0f, pdz_ = 0.0f; // Selbstpruefung: Masse und Impuls der Korrektur
+					{ const float d_ = pq_*((fhn[0]-feq[0])-def_w0*(pm0_)); fhn[0] -= d_; pab_ += fabs(d_); pdm_ += d_; }
+					{ const float d_ = pq_*((fhn[1]-feq[1])-def_ws*(pm0_+3.0f*(pmx_))); fhn[1] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ += d_; }
+					{ const float d_ = pq_*((fhn[2]-feq[2])-def_ws*(pm0_+3.0f*(-pmx_))); fhn[2] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ -= d_; }
+					{ const float d_ = pq_*((fhn[3]-feq[3])-def_ws*(pm0_+3.0f*(pmy_))); fhn[3] -= d_; pab_ += fabs(d_); pdm_ += d_; pdy_ += d_; }
+					{ const float d_ = pq_*((fhn[4]-feq[4])-def_ws*(pm0_+3.0f*(-pmy_))); fhn[4] -= d_; pab_ += fabs(d_); pdm_ += d_; pdy_ -= d_; }
+					{ const float d_ = pq_*((fhn[5]-feq[5])-def_ws*(pm0_+3.0f*(pmz_))); fhn[5] -= d_; pab_ += fabs(d_); pdm_ += d_; pdz_ += d_; }
+					{ const float d_ = pq_*((fhn[6]-feq[6])-def_ws*(pm0_+3.0f*(-pmz_))); fhn[6] -= d_; pab_ += fabs(d_); pdm_ += d_; pdz_ -= d_; }
+					{ const float d_ = pq_*((fhn[7]-feq[7])-def_we*(pm0_+3.0f*(pmx_+pmy_))); fhn[7] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ += d_; pdy_ += d_; }
+					{ const float d_ = pq_*((fhn[8]-feq[8])-def_we*(pm0_+3.0f*(-pmx_-pmy_))); fhn[8] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ -= d_; pdy_ -= d_; }
+					{ const float d_ = pq_*((fhn[9]-feq[9])-def_we*(pm0_+3.0f*(pmx_+pmz_))); fhn[9] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ += d_; pdz_ += d_; }
+					{ const float d_ = pq_*((fhn[10]-feq[10])-def_we*(pm0_+3.0f*(-pmx_-pmz_))); fhn[10] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ -= d_; pdz_ -= d_; }
+					{ const float d_ = pq_*((fhn[11]-feq[11])-def_we*(pm0_+3.0f*(pmy_+pmz_))); fhn[11] -= d_; pab_ += fabs(d_); pdm_ += d_; pdy_ += d_; pdz_ += d_; }
+					{ const float d_ = pq_*((fhn[12]-feq[12])-def_we*(pm0_+3.0f*(-pmy_-pmz_))); fhn[12] -= d_; pab_ += fabs(d_); pdm_ += d_; pdy_ -= d_; pdz_ -= d_; }
+					{ const float d_ = pq_*((fhn[13]-feq[13])-def_we*(pm0_+3.0f*(pmx_-pmy_))); fhn[13] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ += d_; pdy_ -= d_; }
+					{ const float d_ = pq_*((fhn[14]-feq[14])-def_we*(pm0_+3.0f*(-pmx_+pmy_))); fhn[14] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ -= d_; pdy_ += d_; }
+					{ const float d_ = pq_*((fhn[15]-feq[15])-def_we*(pm0_+3.0f*(pmx_-pmz_))); fhn[15] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ += d_; pdz_ -= d_; }
+					{ const float d_ = pq_*((fhn[16]-feq[16])-def_we*(pm0_+3.0f*(-pmx_+pmz_))); fhn[16] -= d_; pab_ += fabs(d_); pdm_ += d_; pdx_ -= d_; pdz_ += d_; }
+					{ const float d_ = pq_*((fhn[17]-feq[17])-def_we*(pm0_+3.0f*(pmy_-pmz_))); fhn[17] -= d_; pab_ += fabs(d_); pdm_ += d_; pdy_ += d_; pdz_ -= d_; }
+					{ const float d_ = pq_*((fhn[18]-feq[18])-def_we*(pm0_+3.0f*(-pmy_+pmz_))); fhn[18] -= d_; pab_ += fabs(d_); pdm_ += d_; pdy_ -= d_; pdz_ += d_; }
+					if(pz_&&(fabs(pdm_)>1.0E-5f*pab_+1.0E-9f||fabs(pdx_)>1.0E-5f*pab_+1.0E-9f||fabs(pdy_)>1.0E-5f*pab_+1.0E-9f||fabs(pdz_)>1.0E-5f*pab_+1.0E-9f)&&rho_clamp_hits[290]<0xF0000000u) atomic_inc(&rho_clamp_hits[290]); // Soll 0: Toleranz 1e-5 der Korrekturgroesse (float32-Summe ueber 19 Terme)
+)+"#else"+R(
+					{ const float d_ = pq_*((fhn[0]-feq[0])-def_w0*(pm0_)); fhn[0] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[1]-feq[1])-def_ws*(pm0_+3.0f*(pmx_))); fhn[1] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[2]-feq[2])-def_ws*(pm0_+3.0f*(-pmx_))); fhn[2] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[3]-feq[3])-def_ws*(pm0_+3.0f*(pmy_))); fhn[3] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[4]-feq[4])-def_ws*(pm0_+3.0f*(-pmy_))); fhn[4] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[5]-feq[5])-def_ws*(pm0_+3.0f*(pmz_))); fhn[5] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[6]-feq[6])-def_ws*(pm0_+3.0f*(-pmz_))); fhn[6] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[7]-feq[7])-def_we*(pm0_+3.0f*(pmx_+pmy_))); fhn[7] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[8]-feq[8])-def_we*(pm0_+3.0f*(-pmx_-pmy_))); fhn[8] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[9]-feq[9])-def_we*(pm0_+3.0f*(pmx_+pmz_))); fhn[9] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[10]-feq[10])-def_we*(pm0_+3.0f*(-pmx_-pmz_))); fhn[10] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[11]-feq[11])-def_we*(pm0_+3.0f*(pmy_+pmz_))); fhn[11] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[12]-feq[12])-def_we*(pm0_+3.0f*(-pmy_-pmz_))); fhn[12] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[13]-feq[13])-def_we*(pm0_+3.0f*(pmx_-pmy_))); fhn[13] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[14]-feq[14])-def_we*(pm0_+3.0f*(-pmx_+pmy_))); fhn[14] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[15]-feq[15])-def_we*(pm0_+3.0f*(pmx_-pmz_))); fhn[15] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[16]-feq[16])-def_we*(pm0_+3.0f*(-pmx_+pmz_))); fhn[16] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[17]-feq[17])-def_we*(pm0_+3.0f*(pmy_-pmz_))); fhn[17] -= d_; pab_ += fabs(d_); }
+					{ const float d_ = pq_*((fhn[18]-feq[18])-def_we*(pm0_+3.0f*(-pmy_+pmz_))); fhn[18] -= d_; pab_ += fabs(d_); }
+)+"#endif"+R( // POSITIV_HAKEN1
+					if(pz_) { pos_summe(rho_clamp_hits, 292u, pq_); pos_summe(rho_clamp_hits, 293u, pab_); } // Festkomma-Summen (1-s) und Sum|d| an Zaehlschritten und Stichprobenzellen
+				}
+)+"#endif"+R( // POSITIV_ANWENDEN
 			}
 		}
 	  }

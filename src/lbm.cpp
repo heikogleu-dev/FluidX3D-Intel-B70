@@ -392,8 +392,8 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #endif
 		if(zaehl_takt()<3ull) print_error("CFD_POSITIV braucht einen Zaehltakt >= 3 (Zaehlschritte t%takt == 2, Pruefpunkt takt+2/+3) -- hier "+to_string(zaehl_takt())+" (Pruefbefund P1b NIEDRIG 5).");
 		if(!klemm_bilanz_env()) print_error("CFD_POSITIV braucht das Klemm-Messinstrument (CFD_KLEMM_BILANZ=1, Vorgabe): Klassen K0..K4, Fensterleser und Bericht haengen daran.");
-		if(pm_==2u) print_error("CFD_POSITIV=2 (anwenden) folgt mit Stufe 1 P1c -- gebaut ist erst der Messarm, der Schalter waere ein stiller No-Op.");
-		if(positiv_facette_env()>0u) print_warning("CFD_POSITIV_FACETTE wirkt nur in Modus 2 -- im Messarm zaehlt K0 ohnehin als \"wuerde begrenzen\" (Ansage-Doktrin).");
+		if(pm_==2u) print_warning("CFD_POSITIV=2: Positivitaetsbegrenzer WENDET AN (Projektionsform, Masse und Impuls erhalten) -- die Physik dieses Laufs aendert sich"+string(positiv_facette_env()>0u ? ", Facettenzellen K0 eingeschlossen." : ", Facettenzellen K0 ausgenommen (E2)."));
+		if(pm_==1u&&positiv_facette_env()>0u) print_warning("CFD_POSITIV_FACETTE wirkt nur in Modus 2 -- im Messarm zaehlt K0 ohnehin als \"wuerde begrenzen\" (Ansage-Doktrin).");
 		const uint ph0_ = positiv_haken_env();
 		if(ph0_>0u) print_warning("CFD_POSITIV_HAKEN="+to_string(ph0_)+": TESTARM -- "+string(ph0_==1u ? "masse- und impulsfreie Stoerung an jeder "+to_string(positiv_haken_periode())+". reinen Fluidzelle ausserhalb der Randschale bei t = zaehl_takt+2 (aendert die Physik)" : (ph0_==2u ? "tau_i = 1,2 w_i: jede Zelle Kandidat und machtlos (Felder im Messarm bitgleich)" : "Haken-1-Stoerung UND Klassenzaehlung fuer n%7 == 0 uebersprungen (aendert die Physik), Soll: genau die Klassen-Beanstandung"))+".");
 	  }
@@ -692,7 +692,8 @@ void LBM_Domain::allocate(Device& device) {
 	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3/4 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
 	positiv_modus = positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie, dieselbe Quelle wie die Emission (Sperren seit P1b VOR dem Kernelbau, Pruefbefund P1a NIEDRIG 2)
 	positiv_haken = positiv_env()>0u ? positiv_haken_env() : 0u; positiv_facette = positiv_env()>0u ? positiv_facette_env() : 0u;
-	if(positiv_modus>0u) print_info("CFD_POSITIV="+to_string(positiv_modus)+": Positivitaetsbegrenzer (Projektionsform) als MESSARM -- s wird an den Zaehlschritten t%"+to_string(zaehl_takt())+" == 2 gerechnet und gezaehlt, die Felder bleiben bitgleich.");
+	if(positiv_modus==1u) print_info("CFD_POSITIV=1: Positivitaetsbegrenzer (Projektionsform) als MESSARM -- s wird an den Zaehlschritten t%"+to_string(zaehl_takt())+" == 2 gerechnet und gezaehlt, die Felder bleiben bitgleich.");
+	if(positiv_modus==2u) print_info("CFD_POSITIV=2: Positivitaetsbegrenzer wird JEDEN Schritt geprueft und angewandt; gezaehlt wird an den Zaehlschritten t%"+to_string(zaehl_takt())+" == 2 (Stichprobe).");
 	// rho_rand_on steht seit C2c VOR der rho-Allokation (allocate), nicht mehr hier.
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
 	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
