@@ -177,7 +177,9 @@ uint klemm_haken_env();
 uint positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a (lbm.cpp): CFD_POSITIV 0/1/2, CFD_POSITIV_HAKEN 0..3, CFD_POSITIV_FACETTE 0/1
 uint positiv_haken_env();
 uint positiv_facette_env();
-string positiv_defines(const uint modus, const uint haken, const uint facette, const bool fp16s); // kernel.cpp, einzige Quelle (auch Scratch-Gate)
+string positiv_defines(const uint modus, const uint haken, const uint facette, const bool fp16s, const unsigned long long N); // kernel.cpp, einzige Quelle (auch Scratch-Gate)
+uint positiv_stichprobe(const unsigned long long N); // kernel.cpp: Stichprobenperiode der Messarm-Zellzaehler = ceil(N / 6 104 700)
+uint positiv_haken_periode(); // kernel.cpp: Periode P der Haken-1-Zellen (Kernel-Define def_pos_hP und Host-Soll)
 
 // ★ 12.09.2026 (Heiko): SCHRITTBASIERTE SCHALTER FOLGEN u_lat JETZT VON SELBST.
 // Bis heute taten sie es ausdruecklich NICHT -- die Begruendung stand an u_lat_schalter in

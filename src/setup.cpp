@@ -1563,6 +1563,47 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		}
 		if(v[265]!=0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": Kappung [265] = "+to_string(v[265])+" -- mindestens ein |w*drho| oder |dj| > 16 (stream_collide) oder |drho| > 2 (boden_eq/einlass_eq, S0d); die Festkomma-Summen sind damit UNTERGRENZEN (kein Abbruch, Pruefpass S0b MITTEL 1).");
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
+		if(L.lbm_domain[0]->positiv_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1b (KLEMMEN-STUFE1-PLAN.md §4, Nachtrag P1b): Ist=Soll des Positiv-Messarms
+			const ulong tk = zaehl_takt(), tl = L.get_t(); const uint hk = positiv_haken_env();
+			const ulong zs = tl>=3ull ? (tl-3ull)/tk+1ull : 0ull; // Zaehlschritte t%tk == 2 mit t < get_t()
+			const uint sub = positiv_stichprobe((unsigned long long)L.lbm_domain[0]->get_N()); // Stichprobenperiode der Zellzaehler (kernel.cpp)
+			ulong kl5 = 0ull, ei5 = 0ull; for(uint k=0u; k<5u; k++) { kl5 += v[273u+k]; ei5 += v[280u+k]; }
+			bool satt = false; for(uint k=272u; k<=291u; k++) if(k!=285u&&k!=289u&&v[k]>=4026531840ull) satt = true;
+			print_info(string("  POSITIV ")+wo+": Modus "+to_string(L.lbm_domain[0]->positiv_modus)+" (Messarm), "+to_string(zs)+" Zaehlschritte (t%"+to_string(tk)+" == 2) an jeder "+to_string(sub)+". Zelle (n%"+to_string(sub)+" == 0): Kandidaten (Nicht-E) "+to_string(v[272])+", davon machtlos "+to_string(v[278])+" (f_eq selbst negativ "+to_string(v[279])+"), begrenzbar K0..K4 = "+fuenf(273u)+" (Summe "+to_string(kl5)+")");
+			print_info(string("  POSITIV ")+wo+": s-Eimer [0;0,25) [0,25;0,5) [0,5;0,75) [0,75;0,95) [0,95;1] = "+fuenf(280u)+"; Koinzidenz Dichteklemme "+to_string(v[286])+", u-Klemme "+to_string(v[287])+"; TYPE_E-Kandidaten "+to_string(v[291])+"; Zellen mit negativer GELADENER Population "+to_string(v[285])+" (Zaehlschritte), Nachladeprobe t = takt+3: "+to_string(v[289]));
+			string verl;
+			if(satt) print_info(string("  POSITIV ")+wo+": Zaehler GESAETTIGT -- Summen-Soll nicht pruefbar (keine Beanstandung).");
+			else {
+				if(v[272]!=v[278]+kl5) verl += " Kandidaten "+to_string(v[272])+" != machtlos + Klassen "+to_string(v[278]+kl5)+";";
+				if(v[272]!=v[278]+ei5) verl += " Kandidaten "+to_string(v[272])+" != machtlos + Eimer "+to_string(v[278]+ei5)+";";
+				if(v[279]>v[278]) verl += " f_eq-negativ "+to_string(v[279])+" > machtlos "+to_string(v[278])+";";
+				// Pruefbefund P1a M1: unter Haken 2 ist jeder Kandidat machtlos (B_0 < 1,2 w_0) -- scharfes Soll: [272] = [278] > 0, Klassen 0
+				if(hk==2u&&(v[278]==0ull||v[278]!=v[272]||kl5!=0ull)) verl += " Haken 2: Soll Kandidaten = machtlos > 0 und Klassen 0, Ist "+to_string(v[272])+"/"+to_string(v[278])+"/"+to_string(kl5)+";";
+			}
+			const bool erreicht = tl>=tk+4ull; // t == tk+2 und tk+3 liefen
+			LBM_Domain* d0 = L.lbm_domain[0];
+			if(!erreicht) print_info(string("  POSITIV ")+wo+": Pruefpunkt t = "+to_string((ulong)(tk+2ull))+"/"+to_string((ulong)(tk+3ull))+" nicht erreicht ("+to_string(tl)+" Schritte) -- Besuchs- und Haken-Soll nicht pruefbar.");
+			else if(L.get_D()!=1u||LBM_Domain::s_sparse_tiles_on) print_info(string("  POSITIV ")+wo+": Besuchs- und Haken-Soll nur fuer eine Domaene ohne Block-Tiling gebaut -- hier nicht geprueft.");
+			else {
+				d0->flags.read_from_device();
+				const ulong N = d0->get_N(); const uint Nx = d0->get_Nx(), Ny = d0->get_Ny(), Nz = d0->get_Nz(), P = positiv_haken_periode();
+				ulong besuch = 0ull, nh = 0ull;
+				for(ulong n=0ull; n<N; n++) {
+					const uchar fb = d0->flags[n]&(TYPE_S|TYPE_E);
+					if(fb!=TYPE_S) besuch++; // stream_collide kehrt nur bei TYPE_S (und Gas, ohne SURFACE nie) sofort zurueck
+					if(hk==1u&&fb==0u&&n%(ulong)P==0ull&&n%(ulong)sub==0ull) { const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/((ulong)Nx*(ulong)Ny));
+						if(!(x<2u||x+2u>=Nx||y<2u||y+2u>=Ny||z<2u||z+2u>=Nz)) nh++; }
+				}
+				print_info(string("  POSITIV ")+wo+": Besuche am Pruefpunkt "+to_string(v[271])+" (Soll Host-Flagzaehlung "+to_string(besuch)+"); Kandidatenrate "+to_string(zs>0ull&&besuch>0ull ? 100.0*(double)v[272]*(double)sub/((double)zs*(double)besuch) : 0.0, 5u)+" % der Zellschritte"+(hk==1u ? "; Haken-1-Zellen im Eimer [0,25;0,5) "+to_string(v[288])+" (Soll "+to_string(nh)+")" : string("")));
+				if(v[271]!=besuch) verl += " Besuche "+to_string(v[271])+" != "+to_string(besuch)+";";
+				if(hk==1u&&v[288]!=nh) verl += " Haken 1: Eimer [0,25;0,5) "+to_string(v[288])+" != Hakenzellen "+to_string(nh)+";";
+				if(hk==1u&&nh==0ull) verl += " Haken 1 ohne Hakenzelle (Gitter zu klein);";
+			}
+			if(erreicht&&v[271]==0ull) verl += " NO-OP: Pruefpunkt erreicht, aber keine Besuche;";
+			if(hk==3u&&verl.find("Klassen")==string::npos) verl += " Haken 3 gesetzt, aber die Klassen-Abnahme beanstandet nichts -- der Negativtest feuert nicht;";
+			if(!verl.empty()) { print_warning(string("  POSITIV ")+wo+": ABNAHME VERLETZT --"+verl+(hk==3u ? " (Haken 3 erwartet genau die Klassen-Beanstandung.)" : "")+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }
+			else print_info(string("  POSITIV ")+wo+": Ist=Soll erfuellt.");
+		}
 	}
 #endif // RHO_CLAMP
 	// ★ Re-Audit R2 (Rest von Befund 2): SGS_WANDFREI bekommt seinen Wirkpfad-Nachweis -- Slot 6,

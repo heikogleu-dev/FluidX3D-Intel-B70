@@ -2934,6 +2934,16 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	return c.x<2u||c.x+2u>=def_Nx||c.y<2u||c.y+2u>=def_Ny||c.z<2u||c.z+2u>=def_Nz;
 }
 )+"#endif"+R( // KLEMM_BILANZ
+)+"#ifdef POSITIV"+R(
+)+R(float pos_s(const float fh, const float fe, const float w, const float gk, const float cm) { // ★ 15.09.2026 Klemmen Stufe 1 P1b (KLEMMEN-STUFE1-PLAN.md §1.3): Beitrag der Population i zum Skalierungsfaktor s
+	// fh, fe in Rechenform (f - w_i); gk = tau_i - w_i (Kandidatenschwelle); cm = m0 + 3 c_i.m (Momente des Nichtgleichgewichts g = f* - f_eq)
+	const float g = (fh-fe)-w*cm; // G_i = g_i - w_i (m0 + 3 c_i.m): Nichtgleichgewicht ohne 0. und 1. Moment
+	const float b = fh-g;         // B_i - w_i = f_eq,i + w_i cm; Positivitaet verlangt B_i + s G_i >= tau_i
+	if(b<gk) return fe<-w ? -2.0f : -1.0f; // machtlos: schon die Basis liegt unter tau_i (-2: f_eq,i selbst negativ)
+	if(fh<gk) return (b-gk)/(-g);          // Kandidat: s_i = (B_i - tau_i)/(-G_i), hier -G_i > 0
+	return 2.0f;                           // kein Beitrag
+}
+)+"#endif"+R( // POSITIV
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global velxx* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
@@ -2990,6 +3000,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 
 	float fhn[def_velocity_set]; // local DDFs
 	load_f(n, fhn, fi, j, t TS_A); // perform streaming (part 2)
+)+"#ifdef POSITIV"+R(
+	// ★ 15.09.2026 Klemmen Stufe 1 P1b: Slot 285 = Zelle mit negativer GELADENER Population (Nicht-E, vor MB/Facette), gezaehlt an den
+	// Zaehlschritten t%def_zaehl_takt == 2 an Stichprobenzellen n%def_pos_sub == 0; Slot 289 = dieselbe Probe genau bei t == def_zaehl_takt+3 (Nachladeprobe fuer Haken 1).
+	// Hier nur das FLAG, gezaehlt wird im Positiv-Block hinter der Kollision: die Atomics direkt nach load_f brachten Spill 448 (iGPU,
+	// Nahfeld-Arme; Gate-Bisektion 15.09. abends), das Flag allein Spill 0 in allen Armen auf beiden Geraeten.
+	const bool pneg_ = flagsn_bo!=TYPE_E&&((t%def_zaehl_takt==2ul&&n%(uxx)def_pos_sub==0u)|(t==(ulong)def_zaehl_takt+3ul))&&((fhn[0]<-def_w0)|(fhn[1]<-def_ws)|(fhn[2]<-def_ws)|(fhn[3]<-def_ws)|(fhn[4]<-def_ws)|(fhn[5]<-def_ws)|(fhn[6]<-def_ws)|(fhn[7]<-def_we)|(fhn[8]<-def_we)|(fhn[9]<-def_we)|(fhn[10]<-def_we)|(fhn[11]<-def_we)|(fhn[12]<-def_we)|(fhn[13]<-def_we)|(fhn[14]<-def_we)|(fhn[15]<-def_we)|(fhn[16]<-def_we)|(fhn[17]<-def_we)|(fhn[18]<-def_we));
+)+"#endif"+R( // POSITIV
 
 )+"#ifdef MOVING_BOUNDARIES"+R(
 	if(flagsn_bo==TYPE_MS) apply_moving_boundaries(fhn, j, u, flags); // apply Dirichlet velocity boundaries if necessary (reads velocities of only neighboring boundary cells, which do not change during simulation)
@@ -3844,6 +3861,84 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // PTRT
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
+)+"#ifdef POSITIV"+R(
+	{ // ★ 15.09.2026 Klemmen Stufe 1 P1b (KLEMMEN-STUFE1-PLAN.md §1-§4): Positivitaetsbegrenzer in PROJEKTIONSFORM, hier der Messarm.
+	  // f* = fhn + w_i nach Kollision und P-TRT; g = f* - f_eq; G_i = g_i - w_i (m0 + 3 c_i.m) traegt weder Masse noch Impuls,
+	  // f** = f* - (1-s) G_i erhaelt beide fuer JEDES s. s = kleinster Faktor, der alle f**_i >= tau_i haelt (pos_s).
+	  // Nachtrag P1b (Absturzsperre 15.09.): alle Zellzaehler nur an Zaehlschritten t%def_zaehl_takt == 2 -- die natuerliche Rate
+	  // negativer Populationen ist ungemessen, ungegatete Atomics in vielen Zellen je Schritt haben die B70 schon einmal lahmgelegt.
+	  const bool pz_ = t%def_zaehl_takt==2ul&&n%(uxx)def_pos_sub==0u; // Zaehlschritt UND Stichprobenzelle (def_pos_sub aus dem belegt sicheren Gitter)
+	  if(pneg_) { if(t%def_zaehl_takt==2ul&&n%(uxx)def_pos_sub==0u&&rho_clamp_hits[285]<0xF0000000u) atomic_inc(&rho_clamp_hits[285]); if(t==(ulong)def_zaehl_takt+3ul&&rho_clamp_hits[289]<0xF0000000u) atomic_inc(&rho_clamp_hits[289]); }
+	  if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[271]<0xF0000000u) atomic_inc(&rho_clamp_hits[271]); // Besuche am Pruefpunkt (Soll: Host-Flagzaehlung)
+)+"#ifdef POSITIV_HAKEN1"+R(
+	  bool ph_ = false; // Haken 1: masse- und impulsfreie Stoerung a = 2,5 w_s an reinen Fluidzellen ausserhalb der Randschale, Soll s zwischen 0,25 und 0,5
+	  if(t==(ulong)def_zaehl_takt+2ul&&flagsn_bo==0u&&n%def_pos_hP==0u&&!klemm_randschale(n)) { fhn[0] += 5.0f*def_ws; fhn[1] -= 2.5f*def_ws; fhn[2] -= 2.5f*def_ws; ph_ = true; }
+)+"#endif"+R( // POSITIV_HAKEN1
+)+"#ifdef POSITIV_ANWENDEN"+R(
+	  const bool pk_ = (fhn[0]<def_pos_g0)|(fhn[1]<def_pos_gs)|(fhn[2]<def_pos_gs)|(fhn[3]<def_pos_gs)|(fhn[4]<def_pos_gs)|(fhn[5]<def_pos_gs)|(fhn[6]<def_pos_gs)|(fhn[7]<def_pos_ge)|(fhn[8]<def_pos_ge)|(fhn[9]<def_pos_ge)|(fhn[10]<def_pos_ge)|(fhn[11]<def_pos_ge)|(fhn[12]<def_pos_ge)|(fhn[13]<def_pos_ge)|(fhn[14]<def_pos_ge)|(fhn[15]<def_pos_ge)|(fhn[16]<def_pos_ge)|(fhn[17]<def_pos_ge)|(fhn[18]<def_pos_ge);
+)+"#else"+R(
+	  const bool pk_ = pz_&&((fhn[0]<def_pos_g0)|(fhn[1]<def_pos_gs)|(fhn[2]<def_pos_gs)|(fhn[3]<def_pos_gs)|(fhn[4]<def_pos_gs)|(fhn[5]<def_pos_gs)|(fhn[6]<def_pos_gs)|(fhn[7]<def_pos_ge)|(fhn[8]<def_pos_ge)|(fhn[9]<def_pos_ge)|(fhn[10]<def_pos_ge)|(fhn[11]<def_pos_ge)|(fhn[12]<def_pos_ge)|(fhn[13]<def_pos_ge)|(fhn[14]<def_pos_ge)|(fhn[15]<def_pos_ge)|(fhn[16]<def_pos_ge)|(fhn[17]<def_pos_ge)|(fhn[18]<def_pos_ge)); // Modus 1: nur an Zaehlschritten pruefen -- die Felder bleiben ohnehin unberuehrt
+)+"#endif"+R( // POSITIV_ANWENDEN
+	  if(pk_) {
+		if(flagsn_bo==TYPE_E) { if(pz_&&rho_clamp_hits[291]<0xF0000000u) atomic_inc(&rho_clamp_hits[291]); } // TYPE_E: f = f_eq, begrenzen sinnlos -- nur zaehlen
+		else {
+			const float pm0_ = (fhn[0]-feq[0])+(fhn[1]-feq[1])+(fhn[2]-feq[2])+(fhn[3]-feq[3])+(fhn[4]-feq[4])+(fhn[5]-feq[5])+(fhn[6]-feq[6])+(fhn[7]-feq[7])+(fhn[8]-feq[8])+(fhn[9]-feq[9])+(fhn[10]-feq[10])+(fhn[11]-feq[11])+(fhn[12]-feq[12])+(fhn[13]-feq[13])+(fhn[14]-feq[14])+(fhn[15]-feq[15])+(fhn[16]-feq[16])+(fhn[17]-feq[17])+(fhn[18]-feq[18]);
+			const float pmx_ = (fhn[1]-feq[1])-(fhn[2]-feq[2])+(fhn[7]-feq[7])-(fhn[8]-feq[8])+(fhn[9]-feq[9])-(fhn[10]-feq[10])+(fhn[13]-feq[13])-(fhn[14]-feq[14])+(fhn[15]-feq[15])-(fhn[16]-feq[16]);
+			const float pmy_ = (fhn[3]-feq[3])-(fhn[4]-feq[4])+(fhn[7]-feq[7])-(fhn[8]-feq[8])+(fhn[11]-feq[11])-(fhn[12]-feq[12])-(fhn[13]-feq[13])+(fhn[14]-feq[14])+(fhn[17]-feq[17])-(fhn[18]-feq[18]);
+			const float pmz_ = (fhn[5]-feq[5])-(fhn[6]-feq[6])+(fhn[9]-feq[9])-(fhn[10]-feq[10])+(fhn[11]-feq[11])-(fhn[12]-feq[12])-(fhn[15]-feq[15])+(fhn[16]-feq[16])-(fhn[17]-feq[17])+(fhn[18]-feq[18]);
+			float ps_ = 1.0f;
+			ps_ = fmin(ps_, pos_s(fhn[0], feq[0], def_w0, def_pos_g0, pm0_));
+			ps_ = fmin(ps_, pos_s(fhn[1], feq[1], def_ws, def_pos_gs, pm0_+3.0f*(pmx_)));
+			ps_ = fmin(ps_, pos_s(fhn[2], feq[2], def_ws, def_pos_gs, pm0_+3.0f*(-pmx_)));
+			ps_ = fmin(ps_, pos_s(fhn[3], feq[3], def_ws, def_pos_gs, pm0_+3.0f*(pmy_)));
+			ps_ = fmin(ps_, pos_s(fhn[4], feq[4], def_ws, def_pos_gs, pm0_+3.0f*(-pmy_)));
+			ps_ = fmin(ps_, pos_s(fhn[5], feq[5], def_ws, def_pos_gs, pm0_+3.0f*(pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[6], feq[6], def_ws, def_pos_gs, pm0_+3.0f*(-pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[7], feq[7], def_we, def_pos_ge, pm0_+3.0f*(pmx_+pmy_)));
+			ps_ = fmin(ps_, pos_s(fhn[8], feq[8], def_we, def_pos_ge, pm0_+3.0f*(-pmx_-pmy_)));
+			ps_ = fmin(ps_, pos_s(fhn[9], feq[9], def_we, def_pos_ge, pm0_+3.0f*(pmx_+pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[10], feq[10], def_we, def_pos_ge, pm0_+3.0f*(-pmx_-pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[11], feq[11], def_we, def_pos_ge, pm0_+3.0f*(pmy_+pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[12], feq[12], def_we, def_pos_ge, pm0_+3.0f*(-pmy_-pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[13], feq[13], def_we, def_pos_ge, pm0_+3.0f*(pmx_-pmy_)));
+			ps_ = fmin(ps_, pos_s(fhn[14], feq[14], def_we, def_pos_ge, pm0_+3.0f*(-pmx_+pmy_)));
+			ps_ = fmin(ps_, pos_s(fhn[15], feq[15], def_we, def_pos_ge, pm0_+3.0f*(pmx_-pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[16], feq[16], def_we, def_pos_ge, pm0_+3.0f*(-pmx_+pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[17], feq[17], def_we, def_pos_ge, pm0_+3.0f*(pmy_-pmz_)));
+			ps_ = fmin(ps_, pos_s(fhn[18], feq[18], def_we, def_pos_ge, pm0_+3.0f*(-pmy_+pmz_)));
+			if(pz_) {
+				if(rho_clamp_hits[272]<0xF0000000u) atomic_inc(&rho_clamp_hits[272]); // Kandidat (Nicht-E)
+				if((kl&3u)!=0u&&rho_clamp_hits[286]<0xF0000000u) atomic_inc(&rho_clamp_hits[286]); // Koinzidenz Dichteklemme
+				if((kl&4u)!=0u&&rho_clamp_hits[287]<0xF0000000u) atomic_inc(&rho_clamp_hits[287]); // Koinzidenz u-Klemme
+			}
+			if(ps_<0.0f) { // machtlos (E3): f* bleibt, nur zaehlen
+				if(pz_) { if(rho_clamp_hits[278]<0xF0000000u) atomic_inc(&rho_clamp_hits[278]); if(ps_<-1.5f&&rho_clamp_hits[279]<0xF0000000u) atomic_inc(&rho_clamp_hits[279]); }
+			} else {
+				uint pkl_ = 4u; bool pfb_ = false; // Klassen K0..K4 wie Stufe 0 (koordinatenbasiert, keine Nachbarsuche)
+)+"#ifdef FORCE_FIELD"+R(
+				{ uxx pfbk_; pfb_ = f_bbox(n, &pfbk_);
+)+"#ifdef FACETTEN"+R(
+				  if(pfb_&&flagsn_bo!=TYPE_MS) { if(fac_fid(fac_idx, pfbk_)!=0xFFFFFFFFu) pkl_ = 0u; }
+)+"#endif"+R( // FACETTEN
+				}
+)+"#endif"+R( // FORCE_FIELD
+				if(pkl_==4u) { if(flagsn_bo==TYPE_MS) pkl_ = 1u; else if(pfb_) pkl_ = 2u; else if(klemm_randschale(n)) pkl_ = 3u; }
+				if(pz_) {
+)+"#ifdef POSITIV_HAKEN3"+R(
+					if(n%7u!=0u)
+)+"#endif"+R( // POSITIV_HAKEN3
+					{ if(rho_clamp_hits[273u+pkl_]<0xF0000000u) atomic_inc(&rho_clamp_hits[273u+pkl_]); }
+					const uint pb_ = ps_<0.25f ? 0u : (ps_<0.5f ? 1u : (ps_<0.75f ? 2u : (ps_<0.95f ? 3u : 4u)));
+					if(rho_clamp_hits[280u+pb_]<0xF0000000u) atomic_inc(&rho_clamp_hits[280u+pb_]);
+)+"#ifdef POSITIV_HAKEN1"+R(
+					if(ph_&&pb_==1u&&rho_clamp_hits[288]<0xF0000000u) atomic_inc(&rho_clamp_hits[288]);
+)+"#endif"+R( // POSITIV_HAKEN1
+				}
+			}
+		}
+	  }
+	}
+)+"#endif"+R( // POSITIV
 )+"#elif defined(TRT)"+R(
 	const float wp = w; // TRT: inverse of "+" relaxation time
 	const float wm = 1.0f/(def_lambda/(1.0f/w-0.5f)+0.5f); // TRT: inverse of "-" relaxation time wm = 1.0f/(0.1875f/(3.0f*nu)+0.5f), nu = (1.0f/w-0.5f)/3.0f;
@@ -6566,18 +6661,25 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 // modus 0 = leer (Kernelquelle zeichengleich), 1 = POSITIV (Messarm: s gerechnet und gezaehlt, Felder bitgleich), 2 = zusaetzlich
 // POSITIV_ANWENDEN; facette 1 = K0 (Facettenzellen) in Modus 2 eingeschlossen (Vorgabe 0 = ausgenommen, Entscheidung E2).
 // tau_i = halbe ULP des FP16S-Halbworts bei f = 0: Rechenform f - w_i = -w_i, gespeichert -w_i*2^15 (i = 0: 10 922,7 -> ULP 8;
-// Achsen 1 820,4 -> ULP 1; Diagonalen 910,2 -> ULP 1/2), vstore_half_rte rundet zur naechsten Stufe -> nach dem Speichern f >= 0.
-// FP32: tau = 0. Haken 2 (Negativtest): tau_i = 1,2*w_i, jede Zelle ist Kandidat. Als AUSDRUECKE emittiert (Plan §2a, nicht to_string).
-string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s) { // unsigned statt uint: kernel.hpp definiert uint fuer die Syntaxfaerbung leer
+// Achsen 1 820,4 -> ULP 1; Diagonalen 910,2 -> ULP 1/2), vstore_half_rte rundet zur naechsten Stufe -> nach dem LADEN f >= 0 (gespeichert wird f - w_i). Pruefbefund P1a: weil -w_i 2^15 nicht auf dem Raster liegt,
+// liefert schon tau = 0 dieselben Minima -- tau ist vorsichtig, [272] zaehlt f* < tau, nicht f* < 0; [285] sieht deshalb weniger.
+// FP32: tau = 0 (f >= 0 nur bis auf die float-Rundung, ~1e-8). Haken 2 (Negativtest): tau_i = 1,2*w_i, jede Zelle ist Kandidat UND machtlos (B_0 < 1,2 w_0 fuer rho < 1,2). Als AUSDRUECKE emittiert (Plan §2a, nicht to_string).
+unsigned positiv_haken_periode() { return 1009u; } // ★ P1b: Haken-1-Zellen n mod P == 0 (Primzahl, keine Gitterresonanz); EINE Quelle fuer Kernel-Define und Host-Soll
+// ★ P1b Nachtrag: sicheres_gitter = groesstes Gitter, an dem Atomics in (fast) jeder Zelle je Schritt nachweislich liefen (Kugel 16 mm,
+// 6 104 700 Zellen, Absturzsperre lbm.cpp). Die Zellzaehler des Messarms laufen nur fuer n mod def_pos_sub == 0 mit
+// def_pos_sub = ceil(N / sicheres_gitter): je Zaehlschritt hoechstens so viele zaehlende Zellen wie am belegt sicheren Gitter -- automatisch, kein Handwert.
+unsigned positiv_stichprobe(const unsigned long long N) { const unsigned long long g = 6104700ull; return (unsigned)((N+g-1ull)/g); }
+string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s, const unsigned long long N) { // unsigned statt uint: kernel.hpp definiert uint fuer die Syntaxfaerbung leer
 	if(modus==0u) return "";
 	string s = "\n	#define POSITIV";
 	if(modus>=2u) s += "\n	#define POSITIV_ANWENDEN";
 	if(facette>0u) s += "\n	#define POSITIV_FACETTE";
+	s += "\n	#define def_pos_sub "+std::to_string(positiv_stichprobe(N))+"u"; // Stichprobenperiode der Zellzaehler
 	if(haken==2u) s += "\n	#define def_pos_t0 (1.2f*def_w0)\n	#define def_pos_ts (1.2f*def_ws)\n	#define def_pos_te (1.2f*def_we)";
 	else if(fp16s) s += "\n	#define def_pos_t0 (4.0f/32768.0f)\n	#define def_pos_ts (0.5f/32768.0f)\n	#define def_pos_te (0.25f/32768.0f)";
 	else s += "\n	#define def_pos_t0 0.0f\n	#define def_pos_ts 0.0f\n	#define def_pos_te 0.0f";
 	s += "\n	#define def_pos_g0 (def_pos_t0-def_w0)\n	#define def_pos_gs (def_pos_ts-def_ws)\n	#define def_pos_ge (def_pos_te-def_we)"; // Kandidat: fhn[i] < tau_i - w_i
-	if(haken==1u) s += "\n	#define POSITIV_HAKEN1";
+	if(haken==1u) s += "\n	#define POSITIV_HAKEN1\n	#define def_pos_hP "+std::to_string(positiv_haken_periode())+"u"; // Periode der Hakenzellen (Host-Soll liest dieselbe Funktion)
 	if(haken==3u) s += "\n	#define POSITIV_HAKEN3";
 	return s;
 }

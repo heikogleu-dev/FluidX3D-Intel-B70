@@ -188,3 +188,24 @@ koordinatenbasierte S0b-Klassenlogik übernehmen**); ob rhon/uxn für 286/287 Le
 Modus 1 gegen 0 unter -cl-mad-enable; τ-Werte am Gerät; ob apply_facette_imem fhn nur an Zellen mit fac_fid ≠ FFFFFFFF ändert; H1-Details
 (Host-Nachbildung N_H, |u_x| ≤ 0,11); ob IGC Slot 290 zu 0 vereinfacht; negative Populationen aus Kopplungs-Lift/schale_blend; Wanduhr;
 Reaktion von update_force_field auf umverteilte Populationen.
+
+## Nachtrag P1a/P1b (Hauptsitzung 15.09.2026 abends, nach Prüfagent P1a)
+
+* **Zähler gegatet statt ungegatet (Abweichung von §4, Absturzsperre):** Alle Zellzähler des Messarms (272–288, 291, 285) zählen nur an
+  Zählschritten `t % zaehl_takt == 2` UND an Stichprobenzellen `n % def_pos_sub == 0`, `def_pos_sub = ⌈N / 6 104 700⌉` (größtes Gitter,
+  an dem Atomics in fast jeder Zelle je Schritt belegt liefen, Kugel 16 mm). 8 mm Nahfeld: 11, Fernfeld: 5; Kugel ≤ 16 mm: 1. Grund: die
+  natürliche Rate negativer Populationen ist ungemessen; ungegatete Atomics in vielen Zellen haben die B70 am 15.09. lahmgelegt. 271 und
+  289 zählen je genau einen Schritt in allen Zellen (Last wie 204/205, belegt). Die Ist=Soll-Identitäten bleiben exakt, weil alle
+  Klassenzähler dasselbe Gatter tragen. Modus 1 prüft die Kandidaten nur an Zählschritten (Hot Path ≈ 1 Vergleich); Modus 2 prüft jeden Schritt.
+* **Soll-Identitäten (P1b):** [272] = [278] + Σ[273..277] (H3 verletzt genau diese); [272] = [278] + Σ[280..284]; [279] ≤ [278];
+  [271] = Host-Flagzählung (Zellen ≠ TYPE_S, Flags vom Gerät); No-Op: Prüfpunkt erreicht und [271] = 0.
+* **H2 berichtigt (Prüfbefund P1a M1):** τ = 1,2·w macht jede Zelle zum Kandidaten UND machtlos (B₀ < 1,2·w₀ für ρ < 1,2) → Soll
+  [272] = [278] > 0, Σ[273..277] = 0. H2 prüft den Machtlos-Pfad, nicht die Klassen; K0..K3 haben keinen Positivtest (nur 8 mm M1).
+* **H1-Zellen:** reine Fluidzellen (Flags & TYPE_BO = 0) außerhalb der Randschale mit n mod 1009 = 0 (und Stichprobe); an der Kugel ist die
+  F-BBox die ganze Domäne, „K4“ wäre leer. Soll [288] = Host-Zählung derselben Bedingung.
+* **291** = TYPE_E-Kandidaten (f_eq,i + w_i < τ_i), nicht in 272.
+* **Spill:** Atomics direkt nach load_f (285/289) brachten Spill 448 auf der iGPU in allen Nahfeld-Positiv-Armen (Bisektion); dort nur ein
+  Flag, gezählt hinter der Kollision → Spill 0 in allen Armen auf beiden Geräten.
+* **τ (Prüfbefund P1a NIEDRIG 1):** −w_i·2¹⁵ liegt nicht auf dem Halbwort-Raster; schon τ = 0 liefert dieselben geladenen Minima. τ ist
+  vorsichtig; [272] zählt f* < τ, nicht f* < 0; [285] sieht deshalb weniger als [272].
+* Sperren seit P1b vor Kernelbau und Großallokation (Prüfbefund P1a NIEDRIG 2); Gate-Parser streng; Arm prod8fernp1 ergänzt.

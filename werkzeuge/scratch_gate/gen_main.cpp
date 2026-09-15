@@ -9,7 +9,7 @@
 using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
-string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s); // ★ 15.09.2026 Klemmen Stufe 1 P1a: kernel.o, dieselbe Quelle wie lbm.cpp
+string positiv_defines(const unsigned modus, const unsigned haken, const unsigned facette, const bool fp16s, const unsigned long long N); // ★ 15.09.2026 Klemmen Stufe 1 P1a: kernel.o, dieselbe Quelle wie lbm.cpp
 
 static string device_defines(const bool elibb, const bool ptrt, const bool rho16, const bool sparsam, const bool u16, const bool rand) {
 	string s =
@@ -201,11 +201,15 @@ int main(int argc, char** argv) {
 		string pos = "";
 		if(argc>=5) { // ★ 15.09.2026 Klemmen Stufe 1 P1a: Positiv-Arme ueber die EMISSIONSFUNKTION selbst, keine Zwillingsliste
 			const string a = argv[4];
-			if(a.size()<4||a.substr(0, 3)!="pos"||a[3]<'1'||a[3]>'2') { std::cerr << "gen: 4. Argument pos<1|2>[f][h<1..3>]: " << a << "\n"; return 2; }
-			const size_t h = a.find('h');
-			const unsigned haken = (h==string::npos||h+1>=a.size()) ? 0u : (unsigned)(a[h+1]-'0');
-			if(haken>3u) { std::cerr << "gen: Haken 1..3: " << a << "\n"; return 2; }
-			pos = positiv_defines((unsigned)(a[3]-'0'), haken, a.find('f')!=string::npos ? 1u : 0u, defs.find("#define fpxx half")!=string::npos);
+			// Pruefbefund P1a NIEDRIG 4: exakt pos<1|2>[f][h<1..3>], sonst Abbruch -- keine stille Umdeutung (pos1h, pos12, pos1x)
+			size_t q = 4; const bool fmt = a.size()>=4&&a.substr(0, 3)=="pos"&&(a[3]=='1'||a[3]=='2');
+			bool fac = false; unsigned haken = 0u; bool ok = fmt;
+			if(ok&&q<a.size()&&a[q]=='f') { fac = true; q++; }
+			if(ok&&q<a.size()&&a[q]=='h') { if(q+1<a.size()&&a[q+1]>='1'&&a[q+1]<='3') { haken = (unsigned)(a[q+1]-'0'); q += 2; } else ok = false; }
+			if(ok&&q!=a.size()) ok = false;
+			if(!ok) { std::cerr << "gen: 4. Argument exakt pos<1|2>[f][h<1..3>]: " << a << "\n"; return 2; }
+			unsigned long long N_defs = 1ull; { const size_t pn = defs.find("#define def_N "); if(pn!=string::npos) N_defs = std::stoull(defs.substr(pn+14)); }
+			pos = positiv_defines((unsigned)(a[3]-'0'), haken, fac ? 1u : 0u, defs.find("#define fpxx half")!=string::npos, N_defs); // N aus def_N der defs (Stichprobenperiode wie im Lauf)
 		}
 		const string code = geraet + defs + klemm + pos + get_opencl_c_code();
 		std::ofstream f(argv[3]); f << code; f.close();
