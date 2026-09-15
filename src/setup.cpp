@@ -1453,7 +1453,7 @@ static void klemm_budget_bewerten(const char* wo, const KlemmUrteil& U, const do
 			if(U.kappung) urteil += " (Summen gekappt: brutto nur Untergrenze, netto unsicher)"; // Z2c Pruefpass NIEDRIG 1
 			// Pruefpass 2 NIEDRIG 4: auch der Riss wird gegen die Worst-Case-Rundung gestellt (Fehler-Flag bleibt -- konservativ)
 			const bool cd_r = !cd_ok&&fmax(0.0, lhs-U.rund_cd)<=k*sig_cd, cz_r = !cz_ok&&fmax(0.0, fabs(U.dcz_j)-U.rund_cz)<=k*sig_cz;
-			if(cd_r||cz_r) urteil += " (Riss liegt innerhalb der Worst-Case-Rundung: "+string(cd_r ? "Cd "+to_string(U.rund_cd/sig_cd,3u)+" sigma" : "")+string(cd_r&&cz_r ? ", " : "")+string(cz_r ? "Cz "+to_string(U.rund_cz/sig_cz,3u)+" sigma" : "")+" -- nicht sicher)";
+			if(cd_r||cz_r) urteil += " (Riss liegt innerhalb der Worst-Case-Rundung: "+string(cd_r ? "Cd "+to_string(U.rund_cd/sig_cd,3u)+" sigma" : "")+string(cd_r&&cz_r ? ", " : "")+string(cz_r ? "Cz "+to_string(U.rund_cz/sig_cz,3u)+" sigma" : "")+" -- nicht sicher"+string(cd_r&&!cz_r&&!cz_ok ? "; Cz-Riss sicher" : "")+string(cz_r&&!cd_r&&!cd_ok ? "; Cd-Riss sicher" : "")+")"; // Pruefpass 3 NIEDRIG A
 			if(modus==2u) klemm_budget_verletzt = true;
 		} else {
 			if(U.kappung) urteil += " (Summen gekappt: brutto nur Untergrenze, netto unsicher -- Urteil unsicher)";
@@ -1496,7 +1496,7 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 		const double Fx_N = (double)u.si_F((float)(jx/(double)n)), Fz_N = (double)u.si_F((float)(jz/(double)n));
 		const double dcd = -Fx_N/qA, dcz = -Fz_N/qA;
 		print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+", "+to_string(n)+" Schritte, "+to_string(ph==0u ? K.fenster : K.fenster_nach)+" Fenster): rho-Treffer "+to_string(hr,0u)+", u-Treffer "+to_string(hu,0u));
-		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Durchflusses u_lat*Ny*Nz (Groessenbezug; das Nahfeld hat keinen Einlass); Rundungsschranke "+to_string(hr/(2.0*S),4u));
+		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Durchflusses u_lat*Ny*Nz (Groessenbezug; das Nahfeld hat keinen Einlass); Rundungsschranke "+to_string((su(a,236u,6u)+a[266])/(2.0*S),4u)); // Pruefpass 3 NIEDRIG B: ungegatete Dekaden + EQ, wie rund_cd
 		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+" (massenerhaltend, nur gezaehlt); Lift-rho-Tor "+to_string(a[270],0u));
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
 		if(ph==1u) { // ★ Z2c: Budget-Kennwerte (Masse inkl. BODEN/EINLASS_EQ, S0d)
@@ -1505,7 +1505,7 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 			// Deklaration: die EQ-Masse setzt f_eq(rho_c, u_road bzw. u_inf) und traegt ihren Impuls mit -- dort ist die Lagally-Kraft ~0;
 			// sie bei u_inf mitzuzaehlen liegt auf der sicheren Seite, und zwar jetzt auch netto.
 			const double Qi = m_netto/(double)n, Qe = (eq_zu-eq_ab)/(double)n, Qb = (m_zu+m_ab+eq_zu+eq_ab)/(double)n;
-			const double Qn_betrag = fabs(Qi)+fabs(Qe), Qn_vz = (Qi+Qe<0.0) ? -1.0 : 1.0;
+			const double Qn_betrag = fabs(Qi)+fabs(Qe), Qn_vz = (Qi+Qe<0.0||(Qi+Qe==0.0&&(fabs(Qi)>=fabs(Qe) ? Qi : Qe)<0.0)) ? -1.0 : 1.0; // Pruefpass 3 NIEDRIG C: bei exakter Aufhebung das Vorzeichen des groesseren Anteils
 			U.n = n; U.dcd_j = dcd; U.dcz_j = dcz;
 			U.dcd_m = -Qn_vz*(double)u.si_F((float)((double)u_lat*Qn_betrag))/qA; U.dcd_m_brutto = fabs((double)u.si_F((float)((double)u_lat*Qb))/qA);
 			U.q_netto = -Qn_vz*Qn_betrag; U.q_brutto = Qb; // Senke positiv wie dCd_m (m_netto > 0 = zugefuehrt = Quelle); ACHTUNG Plan §2.4 schreibt Q_netto mit Quelle +
