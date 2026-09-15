@@ -221,3 +221,24 @@ zwei Binarys bitgleich bleiben (genau die Abnahme).
   Stufe 0 gebaut; eigener Planungsagent gestartet. Der 8-mm-A/B misst dann Schalter an/aus mit Stufe 0 als Instrument.
 - Entscheidungen 1–5 wie empfohlen übernommen (technisch, keine Rückfrage): Puffer 288, Festkomma + Sample-Takt,
   boden_eq/einlass_eq in S0d, fünf Ortsklassen, beide σ drucken / Block-SEM(4) entscheidet. 8 (Positivitätsgrenze) erledigt 086d55b.
+
+## Nachtrag S0b (Hauptsitzung 15.09.2026 ~15:10): Ortsklassen ohne Flag-Lesung — die 18er-Nachbarsuche brachte Spill zurück
+
+Scratch-Gate nach dem ersten S0b-Bau: `stream_collide` spill 1216 (B70) / 864 (iGPU) im Produktionsarm prod8nah, private 0.
+Offline-Bisektion am generierten .cl (igc_offline, prod8nah):
+
+| Variante | B70 spill | iGPU spill |
+|---|---|---|
+| voll (K0 Facette + 18er-Nachbarn S/E) | 1216 | 864 |
+| ohne Buchungsblock (nur kl-Bits) | 0 | 0 |
+| ohne Klassenbestimmung (rho+u-Buchung) | 0 | 0 |
+| ohne rho-Teil / ohne u-Teil | 1344 / 1600 | 768 / 736 |
+| ohne 18er-Nachbarn (K0+MS+TYPE_E selbst) | 0 | 0 |
+| ohne Facettentest (Nachbarn bleiben) | 1280 | 736 |
+| nur 6 Flächennachbarn | 0 | 96 |
+| **Koordinatenklassen (umgesetzt)** | **0** | **0** (auch prod8fern) |
+
+**Umgesetzte Klassen (Abweichung von §5, erzwungen durch das Gate):** K0 Facettenzelle (wie geplant) > K1 TYPE_MS > **K2 in der
+F-BBox ohne Facette („fahrzeugnah“)** > **K3 Randschale Dicke 2 (reiner Koordinatentest; Nahfeld = Koppelrand + Auslass, Fernfeld =
+Domänenrand)** > K4 Rest. „Wandnah ohne Facette“ außerhalb der F-BBox ist damit nicht mehr trennbar (landet in K4); im Fernfeld gibt es
+keine Facetten, dort ist K2 die F-BBox. Volles Gate danach grün (17 Arme × 2 Geräte, rc 0).

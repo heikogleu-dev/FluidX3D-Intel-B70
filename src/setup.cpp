@@ -1378,7 +1378,31 @@ static // ----------------------------------------------------------------------
 // liegt rho bei 1 +- 0,02. Deshalb ist der Zaehler wichtiger als die Klemme selbst: er sagt, ob ein
 // Lauf ueberhaupt ein Ergebnis ist. Bleibt er null, war die Klemme ein nie ausloesender Waechter.
 // Ist er gross, rechnete der Lauf stellenweise auf einem geklemmten, also verfaelschten Feld.
+bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueber alle Domaenen, print_error erst in dichteklemme_fazit (print_error = exit)
 void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_lat=0.0f) { // u_lat nur fuer die Freistrom-Ansage unter U_FP16; 0 = nicht bekannt, dann entfaellt sie
+#ifdef RHO_CLAMP
+	if(L.lbm_domain[0]->klemm_bilanz_on) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §6): Ist=Soll des Messinstruments am Laufende
+		ulong v[288]; for(uint k=0u; k<288u; k++) v[k] = 0ull;
+		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); for(uint k=0u; k<288u; k++) v[k] += (ulong)L.lbm_domain[d]->rho_clamp_hits[k]; }
+		ulong rk=0ull, rd=0ull, uk=0ull, ud=0ull; bool satt=false;
+		for(uint k=0u; k<5u; k++) { rk += v[221u+k]; uk += v[242u+k]; }
+		for(uint k=0u; k<6u; k++) { rd += v[236u+k]; ud += v[257u+k]; }
+		for(uint k : {0u, 1u, 28u}) if(v[k]>=4026531840ull) satt = true;
+		for(uint k=221u; k<=262u; k++) { const bool summenslot = (k>=226u&&k<=235u)||(k>=247u&&k<=256u); if(!summenslot&&v[k]>=4026531840ull) satt = true; }
+		const ulong r01 = v[0]+v[1];
+		auto fuenf = [&](const uint b) { return to_string(v[b])+"/"+to_string(v[b+1u])+"/"+to_string(v[b+2u])+"/"+to_string(v[b+3u])+"/"+to_string(v[b+4u]); };
+		print_info(string("  KLEMM-BILANZ ")+wo+": rho-Treffer K0..K4 (Facette/MS/F-BBox ohne Facette/Randschale 2/Rest) = "+fuenf(221u)+", Summe "+to_string(rk)+" (Soll [0]+[1] = "+to_string(r01)+")");
+		print_info(string("  KLEMM-BILANZ ")+wo+": |drho|-Dekaden <1e-4..>=1 = "+to_string(v[236])+"/"+to_string(v[237])+"/"+to_string(v[238])+"/"+to_string(v[239])+"/"+to_string(v[240])+"/"+to_string(v[241])+", Summe "+to_string(rd)+" (Soll "+to_string(r01)+")");
+		print_info(string("  KLEMM-BILANZ ")+wo+": u-Treffer K0..K4 = "+fuenf(242u)+", Summe "+to_string(uk)+" (Soll [28] = "+to_string(v[28])+"); |du|-Dekaden = "+to_string(v[257])+"/"+to_string(v[258])+"/"+to_string(v[259])+"/"+to_string(v[260])+"/"+to_string(v[261])+"/"+to_string(v[262])+", Summe "+to_string(ud)+"; Kappung [265] = "+to_string(v[265])+" (Soll 0)");
+		print_info(string("  KLEMM-BILANZ ")+wo+": Rohsummen mod 2^32 (Festkomma S = 16384; die Umrechnung in Masse/Kraft kommt mit S0c) -- w*drho unten "+fuenf(226u)+", oben "+fuenf(231u)+"; dj_x+ "+fuenf(247u)+", dj_x- "+fuenf(252u)+"; dj_z+/- "+to_string(v[263])+"/"+to_string(v[264]));
+		if(satt) print_info(string("  KLEMM-BILANZ ")+wo+": mindestens ein Zaehler GESAETTIGT -- Ist=Soll nicht pruefbar (keine Beanstandung).");
+		else if(rk!=r01||rd!=r01||uk!=v[28]||ud!=v[28]||v[265]!=0ull) {
+			print_warning(string("  KLEMM-BILANZ ")+wo+": ABNAHME VERLETZT -- Klassen "+to_string(rk)+" / Dekaden "+to_string(rd)+" gegen [0]+[1] = "+to_string(r01)+", u-Klassen "+to_string(uk)+" / u-Dekaden "+to_string(ud)+" gegen [28] = "+to_string(v[28])+", Kappung "+to_string(v[265])+".");
+			klemm_bilanz_verletzt = true;
+		}
+		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
+	}
+#endif // RHO_CLAMP
 	// ★ Re-Audit R2 (Rest von Befund 2): SGS_WANDFREI bekommt seinen Wirkpfad-Nachweis -- Slot 6,
 	// im Kernel gegatet t%100. Null Treffer bei gesetztem Schalter = lautloser No-Op = harter Fehler.
 	if(LBM_Domain::s_sgs_wandfrei) {
@@ -1641,6 +1665,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 }
 void dichteklemme_fazit(const ulong summe) {
 #ifdef RHO_CLAMP
+	if(klemm_bilanz_verletzt) print_error("KLEMM-BILANZ: Abnahme des Klemmen-Messinstruments verletzt -- siehe KLEMM-BILANZ-Zeilen darueber."); // ★ 15.09.2026 S0b: am Ende, weil print_error = exit
 	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben. (Der Zaehler ist saettigend, nicht gegatet: eine Null ist wieder eine echte Aussage.)");
 	else print_warning("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen: rho hat den physikalischen Bereich verlassen. Dieser Lauf rechnete stellenweise auf einem GEKLEMMTEN Feld und ist kein belastbares Ergebnis -- die Ursache liegt im Betriebspunkt (fehlende Volumenviskositaet bei w gegen 2), nicht in der Klemme.");
 #else

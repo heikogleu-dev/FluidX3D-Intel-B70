@@ -73,11 +73,13 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 # Die defs-Dateien sind ein SCHNAPPSCHUSS: aendert sich die Produktionszeile, neu dumpen (Anleitung gen_main.cpp).
 "$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8nah.cl"  >/dev/null
 "$T/gen" datei "$HIER/defs_prod8_fern.txt" "$T/prod8fern.cl" >/dev/null
+# ★ 15.09.2026 Klemmen S0b: Negativhaken-Arm (KLEMM_HAKEN3 veraendert den Buchungsblock, muss ebenfalls sauber bauen)
+"$T/gen" dateih3 "$HIER/defs_prod8_nah.txt" "$T/prod8nahh3.cl" >/dev/null
 
 rc=0
 neu_bekannt=""
 for dev in 0x7d67 0xe223; do
-  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR prod8nah prod8fern; do
+  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR prod8nah prod8fern prod8nahh3; do
     ausgabe=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" ALLE || true)
     # ★ 11.09.2026: BAUFEHLER IST NICHT SCRATCH. Vorher fiel ein gescheiterter Bau in beide
     # Gates, weil die Zeile dann schlicht kein "private_size=0" enthielt -- das Gate meldete

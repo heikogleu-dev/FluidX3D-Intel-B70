@@ -2915,6 +2915,25 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 // Im BINARY bleibt der Bereichswaechter an der TYPE_E-Lesestelle (Slots 210/211). Der liest einen
 // Wert, den ein ANDERER Kernel-Launch geschrieben hat -- dieser Ladevorgang kann nicht entfallen.
 
+)+"#ifdef KLEMM_BILANZ"+R(
+)+R(uint klemm_dekade(const float a) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §6): Eimer 0..5 fuer <1e-4, <1e-3, <1e-2, <1e-1, <1, >=1
+	return a<1.0E-4f ? 0u : (a<1.0E-3f ? 1u : (a<1.0E-2f ? 2u : (a<1.0E-1f ? 3u : (a<1.0f ? 4u : 5u))));
+}
+)+R(void klemm_summe(global uint* hits, const uint slot, const float a) { // Festkomma-Summand q = round(a*S) mit a >= 0; wickelt ABSICHTLICH mod 2^32 (Host bildet Fensterdifferenzen)
+	float b = a;
+	if(b>16.0f) { b = 16.0f; if(hits[265]<0xF0000000u) atomic_inc(&hits[265]); } // Kappung, Soll 0 -- sonst sind die Summen Untergrenzen
+	atomic_add((volatile global uint*)&hits[slot], convert_uint_sat(fma(b, def_klemm_s, 0.5f)));
+}
+)+R(float klemm_rho_roh(const float* f) { // rho VOR der Dichteklemme, Summenreihenfolge wie calculate_rho_u
+	float rho = f[0];
+	for(uint i=1u; i<def_velocity_set; i++) rho += f[i];
+	return rho+1.0f;
+}
+)+R(bool klemm_randschale(const uxx n) { // Randschale der Dicke 2 als reiner Koordinatentest (keine Flag-Lesung): Nahfeld = Koppelrand + Auslass, Fernfeld = Domaenenrand
+	const uint3 c = coordinates(n); // ★ 15.09.2026 S0b: die 18er-Nachbarsuche brachte Spill 1216/864 (B70/iGPU) in stream_collide zurueck -- Gate-Bisektion, siehe KLEMMEN-STUFE0-PLAN.md Nachtrag
+	return c.x<2u||c.x+2u>=def_Nx||c.y<2u||c.y+2u>=def_Ny||c.z<2u||c.z+2u>=def_Nz;
+}
+)+"#endif"+R( // KLEMM_BILANZ
 )+R(kernel void stream_collide)+"("+R(global fpxx* fi, global rhoxx* rho, global velxx* u, global uchar* flags, const ulong t, const float fx, const float fy, const float fz, const uint felder_voll, global uint* rho_clamp_hits // ) { // main LBM kernel
 )+"#ifdef FORCE_FIELD"+R(
 	, const global float* F, const global uint* f_maske // argument order is important (f_maske: F-Markerliste, 03.09.; im Vollfeld-Arm ungelesen)
@@ -3016,6 +3035,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FACETTEN_IMEM
 )+"#endif"+R( // FACETTEN
 	float rhon, uxn, uyn, uzn; // calculate local density and velocity for collision
+)+"#ifdef KLEMM_BILANZ"+R(
+	uint kl = 0u; // ★ 15.09.2026 Klemmen S0b: Bit 0 Dichteklemme unten, Bit 1 oben, Bit 2 u-Klemme -- gebucht wird hinter SPONGE, wenn w feststeht
+)+"#endif"+R( // KLEMM_BILANZ
 )+"#ifndef EQUILIBRIUM_BOUNDARIES"+R(
 	calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn); // calculate density and velocity fields from fi
 )+"#ifdef RHO_CLAMP"+R(
@@ -3034,6 +3056,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// [BERICHTIGT 15.09.2026, Klemmen-Plan §1: ueberholt -- seit Pruefbefund A1 UNGEGATET und saettigend, siehe die Zeile darunter.]
 	if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend statt gegatet (Pruefbefund A1)
 	else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
+)+"#ifdef KLEMM_BILANZ"+R(
+	if(rhon<=RHO_CLAMP_MIN) kl |= 1u; else if(rhon>=RHO_CLAMP_MAX) kl |= 2u; // Bedingung woertlich wie Slot 0/1 -- das traegt die Abnahme Summe(221..225) = [0]+[1]
+)+"#endif"+R( // KLEMM_BILANZ
 )+"#endif"+R(
 )+"#else"+R( // EQUILIBRIUM_BOUNDARIES
 	if(flagsn_bo==TYPE_E) {
@@ -3113,6 +3138,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// No-Op, vor dem der eigene Kommentar im anderen Zweig warnt.
 		if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend, siehe oben
 		else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
+)+"#ifdef KLEMM_BILANZ"+R(
+		if(rhon<=RHO_CLAMP_MIN) kl |= 1u; else if(rhon>=RHO_CLAMP_MAX) kl |= 2u; // Bedingung woertlich wie Slot 0/1 -- das traegt die Abnahme Summe(221..225) = [0]+[1]
+)+"#endif"+R( // KLEMM_BILANZ
 )+"#endif"+R( // RHO_CLAMP
 	}
 )+"#endif"+R( // EQUILIBRIUM_BOUNDARIES
@@ -3190,12 +3218,18 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// unbeobachtete Klemme im Kernel -- greift sie, ist der Impuls NICHT mehr erhalten
 		// (f_eq traegt rho*u_geklemmt statt j+F/2). [BERICHTIGT 15.09.: UNGEGATET und saettigend, hier stand "gegatet".]
 		if((fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // saettigend statt gegatet
+)+"#ifdef KLEMM_BILANZ"+R(
+		if(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c) kl |= 4u; // Bedingung woertlich wie Slot 28
+)+"#endif"+R( // KLEMM_BILANZ
 		calculate_forcing_terms(uxn, uyn, uzn, fxn, fyn, fzn, Fin); // calculate volume force terms Fin from velocity field (Guo forcing, Krueger p.233f)
 )+"#else"+R( // VOLUME_FORCE
 		uxn = clamp(uxn, -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(uyn, -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(uzn, -def_c, def_c);
 		if((fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // saettigend statt gegatet // Slot 28, siehe oben
+)+"#ifdef KLEMM_BILANZ"+R(
+		if(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c) kl |= 4u; // Bedingung woertlich wie Slot 28
+)+"#endif"+R( // KLEMM_BILANZ
 		for(uint i=0u; i<def_velocity_set; i++) Fin[i] = 0.0f;
 )+"#endif"+R( // VOLUME_FORCE
 	}
@@ -3597,6 +3631,45 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		}
 	}
 )+"#endif"+R( // SPONGE
+)+"#ifdef KLEMM_BILANZ"+R(
+	if(kl!=0u) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §2/§5/§6): hier steht w endgueltig fest (SGS und SPONGE vorbei, P-TRT liest w nur)
+		uint kk = 4u; // Ortsklasse (ohne Flag-Lesung, spillfrei): K0 Facettenzelle > K1 TYPE_MS > K2 F-BBox ohne Facette ("fahrzeugnah") > K3 Randschale Dicke 2 > K4 Rest
+		bool fb_in_ = false;
+)+"#ifdef FORCE_FIELD"+R(
+		{ uxx fbk_; fb_in_ = f_bbox(n, &fbk_);
+)+"#ifdef FACETTEN"+R(
+		  if(fb_in_&&flagsn_bo!=TYPE_S&&flagsn_bo!=TYPE_E&&flagsn_bo!=TYPE_MS) { if(fac_fid(fac_idx, fbk_)!=0xFFFFFFFFu) kk = 0u; }
+)+"#endif"+R( // FACETTEN
+		}
+)+"#endif"+R( // FORCE_FIELD
+		if(kk==4u) { if(flagsn_bo==TYPE_MS) kk = 1u; else if(fb_in_) kk = 2u; else if(klemm_randschale(n)) kk = 3u; }
+)+"#ifdef RHO_CLAMP"+R(
+		if((kl&3u)!=0u) { // Masse: dm = w*(rho_c - rho_roh); der Impuls bleibt, weil u = j/rho_c
+			const float drho_ = rhon-klemm_rho_roh(fhn);
+)+"#ifdef KLEMM_HAKEN3"+R(
+			if(n%7u!=0u)
+)+"#endif"+R( // KLEMM_HAKEN3
+			{ if(rho_clamp_hits[221u+kk]<0xF0000000u) atomic_inc(&rho_clamp_hits[221u+kk]); }
+			{ const uint dk_ = 236u+klemm_dekade(fabs(drho_)); if(rho_clamp_hits[dk_]<0xF0000000u) atomic_inc(&rho_clamp_hits[dk_]); }
+			klemm_summe(rho_clamp_hits, ((kl&1u)!=0u ? 226u : 231u)+kk, fabs(w*drho_));
+		}
+)+"#endif"+R( // RHO_CLAMP
+		if((kl&4u)!=0u) { // Impuls: dj = f*rho_c*(u_c - u_roh), f = w im Inneren, f = 1 an TYPE_E (REG_E = f_eq ohne Guo)
+			float uxr_, uyr_, uzr_;
+			if(flagsn_bo==TYPE_E) { uxr_ = load_u(u, n); uyr_ = load_u(u, def_N+(ulong)n); uzr_ = load_u(u, 2ul*def_N+(ulong)n); }
+			else { float rr_; calculate_rho_u(fhn, &rr_, &uxr_, &uyr_, &uzr_); }
+)+"#ifdef VOLUME_FORCE"+R(
+			{ const float r2_ = 0.5f/rhon; uxr_ = fma(fxn, r2_, uxr_); uyr_ = fma(fyn, r2_, uyr_); uzr_ = fma(fzn, r2_, uzr_); }
+)+"#endif"+R( // VOLUME_FORCE
+			const float fak_ = (flagsn_bo==TYPE_E ? 1.0f : w)*rhon;
+			const float djx_ = fak_*(uxn-uxr_), djz_ = fak_*(uzn-uzr_);
+			if(rho_clamp_hits[242u+kk]<0xF0000000u) atomic_inc(&rho_clamp_hits[242u+kk]);
+			{ const uint dk_ = 257u+klemm_dekade(fmax(fabs(uxn-uxr_), fmax(fabs(uyn-uyr_), fabs(uzn-uzr_)))); if(rho_clamp_hits[dk_]<0xF0000000u) atomic_inc(&rho_clamp_hits[dk_]); }
+			if(djx_>0.0f) klemm_summe(rho_clamp_hits, 247u+kk, djx_); else if(djx_<0.0f) klemm_summe(rho_clamp_hits, 252u+kk, -djx_);
+			if(djz_>0.0f) klemm_summe(rho_clamp_hits, 263u, djz_); else if(djz_<0.0f) klemm_summe(rho_clamp_hits, 264u, -djz_);
+		}
+	}
+)+"#endif"+R( // KLEMM_BILANZ
 
 )+"#if defined(EQUILIBRIUM_BOUNDARIES)&&defined(REGULARIZED_BOUNDARIES)"+R(
 	// ★★ REGULARISIERTER GLEICHGEWICHTSRAND (Latt/Chopard 2006).

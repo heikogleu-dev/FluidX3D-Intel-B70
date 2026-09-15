@@ -64,6 +64,8 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 	"\n#define RHO_CLAMP"
 	"\n#define RHO_CLAMP_MIN 0.5000f"
 	"\n#define RHO_CLAMP_MAX 1.5000f"
+	"\n#define KLEMM_BILANZ" // ★ 15.09.2026 Klemmen S0b: Produktionsvorgabe CFD_KLEMM_BILANZ=1
+	"\n#define def_klemm_s 16384.0f"
 	"\n#define FACETTEN"
 	"\n#define def_fac_Y 86206.89844f"
 	"\n#define def_fac_utkorr 1.000000f"
@@ -183,7 +185,7 @@ int main(int argc, char** argv) {
 	//   gen nurcode <ausgabe>            -> nur get_opencl_c_code() (zum Abschneiden des Vorspanns aus einem Dump)
 	//   gen datei <defs.txt> <ausgabe.cl> -> defs + aktueller Kernel
 	if(argc>=3&&string(argv[1])=="nurcode") { std::ofstream f(argv[2]); f << get_opencl_c_code(); return 0; }
-	if(argc>=4&&string(argv[1])=="datei") {
+	if(argc>=4&&(string(argv[1])=="datei"||string(argv[1])=="dateih3")) { // dateih3: zusaetzlich KLEMM_HAKEN3 (Gate-Arm fuer den Negativhaken)
 		std::ifstream d(argv[2]); if(!d) { std::cerr << "gen: defs-Datei fehlt: " << argv[2] << "\n"; return 2; }
 		const string defs((std::istreambuf_iterator<char>(d)), std::istreambuf_iterator<char>());
 		// Geraete-Vorspann wie opencl.hpp enable_device_capabilities() (ohne die geraeteabhaengigen Patches) -- der
@@ -191,7 +193,10 @@ int main(int argc, char** argv) {
 		const string geraet = "\n #define cl_workgroup_size 64u\n #ifdef cl_khr_fp64\n #pragma OPENCL EXTENSION cl_khr_fp64 : enable\n #endif"
 			"\n #ifdef cl_khr_fp16\n #pragma OPENCL EXTENSION cl_khr_fp16 : enable\n #endif"
 			"\n #ifdef cl_khr_int64_base_atomics\n #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable\n #endif";
-		const string code = geraet + defs + get_opencl_c_code();
+		// Die Dumps vom 15.09. (b9329a5) sind VOR Klemmen-S0b entstanden -- KLEMM_BILANZ (Produktionsvorgabe) wird angehaengt.
+		const string klemm = (defs.find("#define KLEMM_BILANZ")==string::npos ? string("\n #define KLEMM_BILANZ\n #define def_klemm_s 16384.0f") : string(""))
+			+(string(argv[1])=="dateih3" ? string("\n #define KLEMM_HAKEN3") : string(""));
+		const string code = geraet + defs + klemm + get_opencl_c_code();
 		std::ofstream f(argv[3]); f << code; f.close();
 		std::cout << "geschrieben: " << argv[3] << " (" << code.size() << " Bytes, Defines aus " << argv[2] << ")\n";
 		return 0;

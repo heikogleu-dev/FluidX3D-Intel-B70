@@ -498,6 +498,12 @@ void ulat_skal_setzen(const double s) {
 // Der Zaehltakt ist ein SCHRITT-Schalter und skaliert deshalb mit. Ohne das laege die
 // Wirkpfad-Zaehlung bei geaendertem u_lat an einer anderen physikalischen Zeit als in der Vorgabe.
 ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEHL_TAKT", 100u))*ulat_skal()); static const ulong t = (ulong)(r<1ll ? 1ll : r); return t; }
+// ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md): CFD_KLEMM_BILANZ = Messinstrument der beiden Zustandsklemmen (Vorgabe 1 = an,
+// 0 = aus -- nur fuer den Wanduhr-A/B). CFD_KLEMM_HAKEN = Negativ-/Positivtests, NUR Testarme (aendern die Physik):
+// 1 = RHO_CLAMP auf 1,001/1,002 (Treffer fast ueberall), 2 = def_c = 0,05 (u-Klemme fast ueberall), 3 = wie 1 und
+// die rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: genau eine Ist!=Soll-Beanstandung).
+bool klemm_bilanz_env() { return env_u("CFD_KLEMM_BILANZ", 1u)>0u; }
+uint klemm_haken_env() { const uint h = env_u("CFD_KLEMM_HAKEN", 0u); if(h>3u) print_error("CFD_KLEMM_HAKEN kennt nur 0..3."); return h; }
 
 
 // ★ 11.09.2026 SPALDING-TABELLE (CFD_SPALDING_TAB, Default AUS).
@@ -637,6 +643,8 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
 	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
 	rho_takt = s_rho_takt; // ★ TODO 2: Konstruktionszeit-Kopie wie die uebrigen (read-once-Doktrin)
+	klemm_bilanz_on = klemm_bilanz_env(); // ★ 15.09.2026 Klemmen S0b: Konstruktionszeit-Kopie, dieselbe Quelle wie die Emission
+	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : "RHO_CLAMP 1,001/1,002")+string(klemm_haken_env()==3u ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis.");
 	// rho_rand_on steht seit C2c VOR der rho-Allokation (allocate), nicht mehr hier.
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
 	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
@@ -2006,8 +2014,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_dimensions "+to_string(dimensions)+"u" // number spatial dimensions (2D or 3D)
 	"\n	#define def_transfers "+to_string(transfers)+"u" // number of DDFs that are transferred between multiple domains
 
-	"\n	#define def_c 0.57735027f" // lattice speed of sound c = 1/sqrt(3)*dt
-	"\n	#define def_w " +to_string(1.0f/get_tau())+"f" // relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
+	+(klemm_haken_env()==2u ? "\n	#define def_c 0.05000000f" : "\n	#define def_c 0.57735027f") // lattice speed of sound c = 1/sqrt(3)*dt; ★ Klemmen-Haken 2 (nur Testarme): u-Klemme auf 0,05
+	+	"\n	#define def_w " +to_string(1.0f/get_tau())+"f" // relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
 #if defined(D2Q9)
 	"\n	#define def_w0 (1.0f/2.25f)" // center (0)
 	"\n	#define def_ws (1.0f/9.0f)" // straight (1-4)
@@ -2154,8 +2162,10 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 #endif // REGULARIZED_BOUNDARIES
 	#ifdef RHO_CLAMP
 	"\n	#define RHO_CLAMP"
-	"\n	#define RHO_CLAMP_MIN "+to_string(RHO_CLAMP_MIN,4u)+"f"
-	"\n	#define RHO_CLAMP_MAX "+to_string(RHO_CLAMP_MAX,4u)+"f"
+	"\n	#define RHO_CLAMP_MIN "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u) ? 1.001f : RHO_CLAMP_MIN,4u)+"f" // ★ Klemmen-Haken 1/3: nur Testarme
+	"\n	#define RHO_CLAMP_MAX "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u) ? 1.002f : RHO_CLAMP_MAX,4u)+"f"
+	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)
+	+(klemm_bilanz_env()&&klemm_haken_env()==3u ? string("\n	#define KLEMM_HAKEN3") : string(""))
 #endif // RHO_CLAMP
 	// ★ Audit-Nacharbeit 2: SGS_WANDFREI und WANDFUNKTION standen im #ifdef-SUBGRID-Block -- mit
 	// abgeschaltetem SUBGRID (die Kugel-Validierung verlangt das) waeren beide LAUTLOSE No-Ops
