@@ -1483,6 +1483,10 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				// Ausnahme haette sie MESS-NUR-Laeufe ab rund 1,24 s Physik per exit(1) um ihren Bericht
 				// gebracht, also genau den Schaden angerichtet, den sie verhindern sollte.
 				if(sl==7u||sl==75u) { if(v>mx7) mx7=v; continue; }
+				// ★ 15.09.2026 Klemmen Stufe 0 (KLEMMEN-STUFE0-PLAN.md §6): die Festkomma-Summenslots wickeln ABSICHTLICH mod 2^32 --
+				// der Host bildet Fensterdifferenzen und summiert in double. Ohne diese Ausnahme stuende rund ein Viertel
+				// des uint-Bereichs im exit(1)-Band, also bei ~24 Slots etwa jeder dritte Lauf (Planungsagent, Rechnung).
+				if((sl>=226u&&sl<=235u)||(sl>=247u&&sl<=256u)||sl==263u||sl==264u||sl==267u||sl==268u) continue;
 				if(v>mx) { mx=v; mxs=sl; } } }
 		// ★ g12-Befund (2026-08-25 nacht): SAETTIGUNG ist der GEWOLLTE Endzustand der saettigenden
 		// Zaehler (Parken ab 0xF0000000) -- der Waechter hat sie als "Wickelgefahr" gemeldet und
@@ -1500,7 +1504,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 			+" -- Solver-Kaskade, Rueckfallquote, Modellabdeckung -- sind ab dem Wickel wertlos. Kein Abbruch: die Physik und die CSVs sind unberuehrt.");
 	}
 	// ★ 2026-08-25: Ansage der beiden neuen Wirkpfad-Zaehler. Beide gegatet (t%100), also
-	// Stichproben, keine Ereigniszahlen.
+	// Stichproben, keine Ereigniszahlen. [BERICHTIGT 15.09.2026: Slot 28 ist UNGEGATET und saettigend (kernel.cpp u-Klemme); Slot 29 hier nicht geprueft.]
 	{
 		ulong vk=0ull, sp=0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
@@ -1629,6 +1633,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 	// ★ Pruefbefund X-3 (2026-08-25): seit der Gatung sind das STICHPROBEN auf t%100, keine
 	// Ereigniszahlen. Null hier schliesst Klemmungen zwischen den Abtastpunkten NICHT aus -- der
 	// Text darf also keine Unbedenklichkeitsbescheinigung mehr sein.
+	// [BERICHTIGT 15.09.2026: ueberholt -- Slots 0/1 sind seit Pruefbefund A1 UNGEGATET und saettigend, die Zahlen sind Ereignisse.]
 	print_info(string("  RHO_CLAMP ")+wo+": "+to_string(u+o)+" Treffer (untere Grenze "+to_string(u)+", obere "+to_string(o)+"); Zaehler SAETTIGT bei 4026531840 statt zu wickeln");
 #else
 	(void)L; (void)wo; (void)summe;

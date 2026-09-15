@@ -5,6 +5,7 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 using std::string;
 
 string get_opencl_c_code(); // aus kernel.hpp via kernel.o
@@ -175,6 +176,26 @@ static string device_defines(const bool elibb, const bool ptrt, const bool rho16
 }
 
 int main(int argc, char** argv) {
+	// ★ 15.09.2026 Klemmen S0a -- PRODUKTIONSPARITAET: statt handgepflegter Kanal-Defines die ECHTEN Defines eines
+	// Laufs. Quelle: CFD_DUMP_CL=1 (lbm.cpp) schreibt device_defines+Kernel nach /tmp/fx3d_kernel_dump_N.cl; der Vorspann
+	// VOR get_opencl_c_code() wird als defs-Datei abgelegt (werkzeuge/scratch_gate/defs_*.txt). Anlass: gen_main kannte
+	// weder SGS_FDWAND/SISM noch SPONGE -- der Buchungsort der Klemmen-Stufe-0 laege im Produktionsbau ungeprueft.
+	//   gen nurcode <ausgabe>            -> nur get_opencl_c_code() (zum Abschneiden des Vorspanns aus einem Dump)
+	//   gen datei <defs.txt> <ausgabe.cl> -> defs + aktueller Kernel
+	if(argc>=3&&string(argv[1])=="nurcode") { std::ofstream f(argv[2]); f << get_opencl_c_code(); return 0; }
+	if(argc>=4&&string(argv[1])=="datei") {
+		std::ifstream d(argv[2]); if(!d) { std::cerr << "gen: defs-Datei fehlt: " << argv[2] << "\n"; return 2; }
+		const string defs((std::istreambuf_iterator<char>(d)), std::istreambuf_iterator<char>());
+		// Geraete-Vorspann wie opencl.hpp enable_device_capabilities() (ohne die geraeteabhaengigen Patches) -- der
+		// CFD_DUMP_CL-Dump enthaelt ihn NICHT, weil Device() ihn erst beim Bauen voranstellt.
+		const string geraet = "\n #define cl_workgroup_size 64u\n #ifdef cl_khr_fp64\n #pragma OPENCL EXTENSION cl_khr_fp64 : enable\n #endif"
+			"\n #ifdef cl_khr_fp16\n #pragma OPENCL EXTENSION cl_khr_fp16 : enable\n #endif"
+			"\n #ifdef cl_khr_int64_base_atomics\n #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable\n #endif";
+		const string code = geraet + defs + get_opencl_c_code();
+		std::ofstream f(argv[3]); f << code; f.close();
+		std::cout << "geschrieben: " << argv[3] << " (" << code.size() << " Bytes, Defines aus " << argv[2] << ")\n";
+		return 0;
+	}
 	// Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <u16:on|off> <rand:on|off> <ausgabe.cl>
 	if(argc<8) { std::cerr << "Aufruf: gen <elibb:on|off> <ptrt:on|off> <rho16:on|off> <sparsam:on|off> <u16:on|off> <rand:on|off> <ausgabe.cl>\n"; return 2; }
 	const bool elibb   = string(argv[1])=="on";

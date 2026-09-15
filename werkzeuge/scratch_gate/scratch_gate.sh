@@ -67,11 +67,17 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 # einmal mit 2-Byte-rho (die Produktion) und einmal mit float-rho.
 "$T/gen" on  on  on  off on  on  "$T/e1p1ruR.cl" >/dev/null
 "$T/gen" on  on  off off on  on  "$T/e1p1uR.cl" >/dev/null
+# ★ 15.09.2026 Klemmen S0a -- PRODUKTIONSPARITAET: zwei Arme aus den ECHTEN Defines des 8-mm-Standardlaufs
+# (CFD_DUMP_CL=1, Lauf rr_s0_dump_b70 @ b9329a5; Vorspann vor get_opencl_c_code() abgeschnitten). Die Kanal-Arme oben
+# kennen weder SGS_FDWAND/SGS_SISM (Nahfeld) noch SPONGE (Fernfeld) -- genau dort liegt der Buchungsort der Stufe 0.
+# Die defs-Dateien sind ein SCHNAPPSCHUSS: aendert sich die Produktionszeile, neu dumpen (Anleitung gen_main.cpp).
+"$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8nah.cl"  >/dev/null
+"$T/gen" datei "$HIER/defs_prod8_fern.txt" "$T/prod8fern.cl" >/dev/null
 
 rc=0
 neu_bekannt=""
 for dev in 0x7d67 0xe223; do
-  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR; do
+  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR prod8nah prod8fern; do
     ausgabe=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" ALLE || true)
     # ★ 11.09.2026: BAUFEHLER IST NICHT SCRATCH. Vorher fiel ein gescheiterter Bau in beide
     # Gates, weil die Zeile dann schlicht kein "private_size=0" enthielt -- das Gate meldete

@@ -3031,6 +3031,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// (auch meine eigene Rechnung "0,00039 Prozent der Zellaktualisierungen" vom 23.08.).
 	// Jetzt Stichprobe wie alle uebrigen Zaehler: 1/100 der Schritte. Die Zahl ist damit ein
 	// SAMPLE, kein Ereigniszaehler -- Legende in lbm.hpp sagt es.
+	// [BERICHTIGT 15.09.2026, Klemmen-Plan §1: ueberholt -- seit Pruefbefund A1 UNGEGATET und saettigend, siehe die Zeile darunter.]
 	if(rhon<=RHO_CLAMP_MIN) { if(rho_clamp_hits[0]<0xF0000000u) atomic_inc(&rho_clamp_hits[0]); } // saettigend statt gegatet (Pruefbefund A1)
 	else if(rhon>=RHO_CLAMP_MAX) { if(rho_clamp_hits[1]<0xF0000000u) atomic_inc(&rho_clamp_hits[1]); }
 )+"#endif"+R(
@@ -3187,7 +3188,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		uzn = clamp(fma(fzn, rho2, uzn), -def_c, def_c);
 		// ★ 2026-08-25: Wirkpfad-Zaehler Slot 28. Die Geschwindigkeitsklemme war die EINZIGE
 		// unbeobachtete Klemme im Kernel -- greift sie, ist der Impuls NICHT mehr erhalten
-		// (f_eq traegt rho*u_geklemmt statt j+F/2). Gegatet wie alle uebrigen Zaehler.
+		// (f_eq traegt rho*u_geklemmt statt j+F/2). [BERICHTIGT 15.09.: UNGEGATET und saettigend, hier stand "gegatet".]
 		if((fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c)&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // saettigend statt gegatet
 		calculate_forcing_terms(uxn, uyn, uzn, fxn, fyn, fzn, Fin); // calculate volume force terms Fin from velocity field (Guo forcing, Krueger p.233f)
 )+"#else"+R( // VOLUME_FORCE

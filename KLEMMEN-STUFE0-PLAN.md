@@ -214,3 +214,10 @@ atomic_add (uint) und convert_uint_sat auf der CPU-Laufzeit; Gate-Arme ohne weit
 Klemmzellen bei 300 ms; boden_eq-Echo-Treffer (abgeleitet, nicht gemessen); ob „Near-Step“ in p4_register feine Schritte zählt;
 u_lat der Kugel (für H2) und ob die Kugel-Schleife nach Schritt 1 zuerst liest; Wanduhr-Rauschen; ob HEAD und S0 bei 8 mm über
 zwei Binarys bitgleich bleiben (genau die Abnahme).
+
+## Entscheidungen Heiko 15.09.2026 (~14:45)
+- **Alles an 8 mm testen** (Entscheidung 7: kein 4-mm-Lauf jetzt; die u-Klemmen-Entscheidungszahl bleibt damit offen, siehe §7).
+- **Erhaltende Klemmen als Schalter implementieren** → Stufe 1 (Positivitätsbegrenzer, `CFD_POSITIV`, Vorgabe 0) wird nach
+  Stufe 0 gebaut; eigener Planungsagent gestartet. Der 8-mm-A/B misst dann Schalter an/aus mit Stufe 0 als Instrument.
+- Entscheidungen 1–5 wie empfohlen übernommen (technisch, keine Rückfrage): Puffer 288, Festkomma + Sample-Takt,
+  boden_eq/einlass_eq in S0d, fünf Ortsklassen, beide σ drucken / Block-SEM(4) entscheidet. 8 (Positivitätsgrenze) erledigt 086d55b.
