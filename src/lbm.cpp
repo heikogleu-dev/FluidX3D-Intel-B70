@@ -583,7 +583,17 @@ void LBM_Domain::allocate(Device& device) {
 	// allozierten 19-GB-fi-Buffers bringt den Intel-NEO mit CL_OUT_OF_RESOURCES zu Fall. Das Move-Assign
 	// in finalize gibt so nur den Platzhalter frei, was trivial ist.
 	fi = Memory<fpxx>(device, sparse_on ? 1ull : N, velocity_set, false);
-	rho = Memory<rhoxx>(device, N, 1u, true, true, rho_pack(1.0f)); // ★ TODO 2 Schritt 4: Speicherwort fuer rho=1 (ohne RHO_FP16 ist das weiterhin 1.0f, mit RHO_FP16 das Wort 0x0000)
+	// ★ 15.09.2026 RHO_RAND C2c: rho_rand_on MUSS vor der rho-Allokation stehen (stand hinter ihr, C2-Plan Falle 3).
+	rho_rand_on = s_rho_rand>0u;
+	rr_N = rho_rand_on ? r1_anzahl((uint)get_Nx(), (uint)get_Ny(), (uint)get_Nz()) : 0ull;
+	if(rho_rand_on) { // Konstruktor-Sperren, setup-unabhaengig
+		if(get_Nx()<5u||get_Ny()<5u||get_Nz()<5u) print_error("RHO_RAND: eine Gitterkante < 5 -- die Randschalen-Packung (rr_idx) ist dort nicht definiert.");
+		if(s_fac_apg!=0.0f) print_error("RHO_RAND x APG: APG liest rho an Facettennachbarn im Inneren, dort gibt es unter RHO_RAND keinen Puffer.");
+#if defined(SURFACE) || defined(GRAPHICS)
+		print_error("RHO_RAND x SURFACE/GRAPHICS: deren rho-Leser greifen auf das volle Feld zu.");
+#endif
+	}
+	rho = Memory<rhoxx>(device, rho_rand_on ? rr_N+1ull : N, 1u, true, true, rho_pack(1.0f)); // ★ TODO 2 Schritt 4: Speicherwort fuer rho=1 (ohne RHO_FP16 1.0f, mit RHO_FP16 0x0000). ★ C2c: unter RHO_RAND nur R1 + 1 Papierkorb-Slot
 	u = Memory<velxx>(device, N, 3u); // ★ TODO 2 Schritt 4: Speicherwort, 4 oder 2 Byte je Komponente
 	flags = Memory<uchar>(device, N);
 	if(sparse_on) { // Tile-Raster aufspannen; der Inhalt kommt erst in finalize_sparse_tiles()
@@ -626,7 +636,7 @@ void LBM_Domain::allocate(Device& device) {
 	kernel_einlass_eq = Kernel(device, N, "einlass_eq", fi, flags, t, 0.0f, 0u, rho_clamp_hits); // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Parameter t/u/nx je Enqueue
 	einlass_eq_n = s_einlass_eq_n; einlass_eq_u = s_einlass_eq_u; // Konstruktionszeit-Kopie (read-once-Doktrin)
 	rho_takt = s_rho_takt; // ★ TODO 2: Konstruktionszeit-Kopie wie die uebrigen (read-once-Doktrin)
-	rho_rand_on = s_rho_rand>0u; // ★ 15.09. RHO_RAND: dito; in C0 wirkt der Schalter nur host-seitig (Waechter + Abbruch im Setup)
+	// rho_rand_on steht seit C2c VOR der rho-Allokation (allocate), nicht mehr hier.
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
 	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
 	schale_alpha = s_schale_alpha; // ★ P9c N2F-SCHALE: Konstruktionszeit-Kopie (read-once-Doktrin); die Kernel entstehen erst in alloc_schale (Indexlisten-Groesse steht erst nach dem Listenbau fest)
@@ -792,6 +802,7 @@ void LBM_Domain::alloc_coupling_planes(const ulong max_plane_cells) { // FORK: D
 // ★ 15.09.2026 RHO_RAND C1 (RHO_RAND-PLAN.md §5). Hausmuster: Puffer anlegen und Kernel MIT echten Puffern erzeugen.
 void LBM_Domain::alloc_rho_rek(const ulong max_plane_cells) {
 	if(max_plane_cells==0ull) { print_error("alloc_rho_rek mit 0 Zellen."); return; }
+	if(rho_rand_on) { print_error("alloc_rho_rek unter RHO_RAND: der Pruefkernel braucht den vollen rho-Puffer (Pruefarm nur ohne RHO_RAND, C2-Plan §4.2)."); return; }
 	if(rho_rek_max>=max_plane_cells) return; // schon gross genug
 	if(rho_rek_max>0ull) { print_error("alloc_rho_rek: Vergroesserung eines gebundenen Puffers ist die Use-after-free-Klasse -- einmal gross genug anlegen."); return; }
 	rho_rek_max = max_plane_cells;
@@ -1111,6 +1122,23 @@ uint LBM_Domain::pruefe_rho_rand_c0(const uchar* flags_host, const uint Nx, cons
 			if(in_r1(n)!=r) n_e_praedikat++; // Lambda und Koordinatentest muessen an jeder TYPE_E-Zelle uebereinstimmen
 			if(!r) { if(n_e_innen==0ull) erste_innen = n; n_e_innen++; }
 		}
+	}
+	{	// ★ 15.09. C2c: Host-Zwilling rr_idx_host ist auf R1 eine Bijektion auf [0, r1_N) und liefert innen den Papierkorb r1_N
+		// (Kernel-rr_idx ist ausdrucksgleich; Geraet gegen Host belegt der Kopplungs-Verify, der ueber den Host-Index liest).
+		std::vector<ulong> belegt((size_t)((r1_N+63ull)/64ull), 0ull);
+		ulong n_doppelt = 0ull, n_ausserhalb = 0ull, n_innen_falsch = 0ull;
+		for(uint z=0u; z<Nz; z++) for(uint y=0u; y<Ny; y++) for(uint x=0u; x<Nx; x++) {
+			const ulong n = (ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+			const ulong ri = rr_idx_host(n, Nx, Ny, Nz);
+			const bool r = x<2u||x+2u>=Nx||y<2u||y+2u>=Ny||z<2u||z+2u>=Nz;
+			if(!r) { if(ri!=r1_N) n_innen_falsch++; continue; }
+			if(ri>=r1_N) { n_ausserhalb++; continue; }
+			ulong& wort = belegt[(size_t)(ri>>6)]; const ulong bit = 1ull<<(uint)(ri&63ull);
+			if(wort&bit) n_doppelt++; else wort |= bit;
+		}
+		ulong n_belegt = 0ull; for(const ulong w : belegt) n_belegt += (ulong)__builtin_popcountll(w);
+		if(n_doppelt>0ull||n_ausserhalb>0ull||n_innen_falsch>0ull||n_belegt!=r1_N) { print_warning("RHO_RAND-SELBSTTEST rr_idx_host: doppelt "+to_string(n_doppelt)+", ausserhalb "+to_string(n_ausserhalb)+", Innenzelle ohne Papierkorb "+to_string(n_innen_falsch)+", belegt "+to_string(n_belegt)+" von "+to_string(r1_N)+" (Soll 0/0/0/alle)."); bad++; }
+		else print_info("RHO_RAND C0 Selbsttest rr_idx_host: Bijektion auf R1 ("+to_string(n_belegt)+" Zellen), innen Papierkorb");
 	}
 	if(n_r1_gezaehlt!=r1_N||n_e_praedikat>0ull) { print_warning("RHO_RAND-SELBSTTEST: R1 gezaehlt "+to_string(n_r1_gezaehlt)+" gegen Formel "+to_string(r1_N)+", Praedikat-Abweichungen an TYPE_E-Zellen "+to_string(n_e_praedikat)+" (Soll gleich / 0)."); bad++; }
 	else print_info("RHO_RAND C0 Selbsttest: R1 gezaehlt = Formel ("+to_string(n_r1_gezaehlt)+"), Praedikat an allen TYPE_E-Zellen gleich"+string(Nx>=6u&&Ny>=6u&&Nz>=6u ? ", Grenzzellen bestanden" : ", Grenzzellen UEBERSPRUNGEN (Kante < 6)")); // Pruefpass 2, Hinweis 1: ein bestandener Test muss sichtbar sein
@@ -2174,6 +2202,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik
 	+((s_rho_takt>0u&&s_smbox[3]>0u) ? (string)"\n	#define RHO_SMBOX" : (string)"") // ★ TODO 2: im Fernfeld deckt die rho-Maske auch die Entnahmeebenen ab
 	+((s_u_takt>0u) ? (string)"\n	#define U_SPARSAM" : (string)"") // ★ TODO 2 Schritt 3: gattert die u-Schreibstelle; ohne das Define ist der Geraetecode dort zeichengleich zu vorher
+	+((s_rho_rand>0u) ? (string)"\n	#define RHO_RAND"+"\n	#define def_RR_N "+to_string(r1_anzahl((uint)get_Nx(), (uint)get_Ny(), (uint)get_Nz()))+"ul" : (string)"") // ★ 15.09. RHO_RAND C2c: rho nur in R1; Fernfeld bleibt ohne (Statik vor lbm_c genullt)
 	+((s_rho_takt>0u) ? (string)"\n	#define RHO_SPARSAM" : (string)"") // ★ TODO 2 Schritt 1: gattert die rho-Schreibstelle in stream_collide; ohne das Define ist der Geraetecode ZEICHENGLEICH zu vorher
 	+((s_facetten&&s_sgs_fdwand>0u) ? (string)"\n	#define SGS_FDWAND" : (string)"") // ★ 02.09. Geistermoden-Fix (braucht Facetten fuer fac_idx, nicht zwingend iMEM -- wirkt auch im MESSNUR/BB-Arm)
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_vandriest>0u) ? (string)"\n	#define SGS_VANDRIEST"
@@ -2636,6 +2665,7 @@ LBM::LBM(const uint Nx, const uint Ny, const uint Nz, const uint Dx, const uint 
 		Memory<rhoxx>** buffers_rho = new Memory<rhoxx>*[D];
 		for(uint d=0u; d<D; d++) buffers_rho[d] = &(lbm_domain[d]->rho);
 		rho = Memory_Container(this, buffers_rho, "rho");
+		if(lbm_domain[0]->rho_rand_on) rho.binde_rand(this); // ★ 15.09. RHO_RAND C2c: Fassade im RAND-Betrieb (Plan K5)
 	} {
 		Memory<velxx>** buffers_u = new Memory<velxx>*[D];
 		for(uint d=0u; d<D; d++) buffers_u[d] = &(lbm_domain[d]->u);
@@ -2686,6 +2716,7 @@ LBM::LBM(const uint3 N, const float nu, const Device_Info& device_info, const fl
 		Memory<rhoxx>** buffers_rho = new Memory<rhoxx>*[1u];
 		buffers_rho[0] = &(lbm_domain[0]->rho);
 		rho = Memory_Container(this, buffers_rho, "rho");
+		if(lbm_domain[0]->rho_rand_on) rho.binde_rand(this); // ★ 15.09. RHO_RAND C2c: Fassade im RAND-Betrieb (Plan K5)
 	} {
 		Memory<velxx>** buffers_u = new Memory<velxx>*[1u];
 		buffers_u[0] = &(lbm_domain[0]->u);
@@ -2804,6 +2835,10 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 			const ulong band_est = fac_est*(ulong)(LBM_Domain::s_sgs_band-1u);
 			bytes_bekannt += 8ull*(((ulong)F_N+31ull)/32ull) + band_est*(LBM_Domain::s_sgs_sism>0u ? 32ull : 8ull);
 		}
+	}
+	if(LBM_Domain::s_rho_rand>0u&&Dx*Dy*Dz==1u) { // ★ 15.09. RHO_RAND C2c: rho nur R1 + Papierkorb, dazu der Ausgabepuffer (groesste Ebene)
+		bytes_bekannt -= N_dom*(ulong)sizeof(rhoxx);
+		bytes_bekannt += (r1_anzahl(Nx, Ny, Nz)+1ull)*(ulong)sizeof(rhoxx) + 4ull*std::max((ulong)Nx*(ulong)Nz, (ulong)Nx*(ulong)Ny);
 	}
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
 	// D1: RESERVE. ★ Pruefagent A-1: die Pruefung sieht `device_info.memory`, also den
@@ -3393,7 +3428,12 @@ void LBM::rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const boo
 	if(get_D()>1u) { print_error("rho_ausgabe_ebene: nur fuer eine Domaene gebaut (D=1)."); return; }
 	if(!initialized) { print_error("rho_ausgabe_ebene vor der Initialisierung."); return; }
 	if(!plane_fits(plane, "rho_ausgabe_ebene")) return;
+	if(dom->rho_rand_on&&get_t()==0ull) { print_error("rho_ausgabe_ebene unter RHO_RAND bei t = 0: es gibt noch keine Nachkollisions-Populationen."); return; }
+	if(dom->rho_aus_max==0ull) dom->alloc_rho_ausgabe(std::max({(ulong)Nx*(ulong)Nz, (ulong)Nx*(ulong)Ny, (ulong)Ny*(ulong)Nz})); // ★ C2c: einmal in der groessten Ebenengroesse -- ein gebundener Puffer darf nicht wachsen
 	if(dom->rho_aus_max<n_plane) { print_error("rho_ausgabe_ebene: Ebene mit "+to_string(n_plane)+" Zellen, Puffer "+to_string(dom->rho_aus_max)+" -- alloc_rho_ausgabe vorher gross genug rufen."); return; }
+	if(t_aus+1ull!=get_t()&&dom->rho_rand_on) print_error("rho_ausgabe_ebene unter RHO_RAND: t_aus muss get_t()-1 sein (Nachkollisions-Populationen des letzten Schritts, C2-Plan Falle 7).");
+	uint h219_0 = 0u, h220_0 = 0u;
+	if(zaehlen) { dom->finish_queue(); dom->rho_clamp_hits.read_from_device(); h219_0 = dom->rho_clamp_hits[219]; h220_0 = dom->rho_clamp_hits[220]; }
 	dom->kernel_rho_ausgabe_ebene.set_ranges(n_plane);
 	dom->kernel_rho_ausgabe_ebene.set_parameters(3u, t_aus);
 	dom->kernel_rho_ausgabe_ebene.set_parameters(5u, plane.axis, plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b, zaehlen ? 1u : 0u);
@@ -3402,6 +3442,17 @@ void LBM::rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const boo
 	dom->rho_aus.read_from_device(0ull, n_plane);
 	out.resize(n_plane);
 	for(ulong i=0ull; i<n_plane; i++) out[i] = dom->rho_aus[i];
+	if(zaehlen) { // ★ C2c: Ist aus den Slots, Soll aus den Geraete-Flags derselben Ebene (TYPE_E ohne TYPE_S-Bit)
+		dom->rho_clamp_hits.read_from_device();
+		rho_aus_ist_219 += (ulong)(dom->rho_clamp_hits[219]-h219_0); rho_aus_ist_220 += (ulong)(dom->rho_clamp_hits[220]-h220_0);
+		dom->kernel_extract_plane_flags.set_ranges(n_plane);
+		dom->kernel_extract_plane_flags.set_parameters(2u, plane.axis, plane.origin.x, plane.origin.y, plane.origin.z, plane.extent_a, plane.extent_b);
+		dom->kernel_extract_plane_flags.enqueue_run();
+		dom->finish_queue();
+		dom->slice_flags.read_from_device(0ull, n_plane);
+		ulong ne = 0ull; for(ulong i=0ull; i<n_plane; i++) if((dom->slice_flags[i]&(TYPE_S|TYPE_E))==TYPE_E) ne++; // TYPE_BO gibt es nur auf dem Geraet (0x03 = TYPE_S|TYPE_E)
+		rho_aus_gezaehlt_zellen += n_plane; rho_aus_gezaehlt_e += ne;
+	}
 }
 
 // ★ 15.09.2026 RHO_RAND C1: rho einer Ebene aus den DDFs. t_rek ist normalerweise das aktuelle Domaenen-t (dann
@@ -3431,6 +3482,33 @@ void LBM::rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, const uint mo
 // lesen unveraendert dieselben Host-Indizes -- es aendert sich NUR der Transportweg
 // (4-mm-Nahdomaene: ~14 MB statt ~8,65 GB je Slice-Ereignis). Wertgleichheit per Konstruktion:
 // identische floats, Indexkonvention exakt plane_cell_index (x + y*Nx + z*Nx*Ny).
+// ★ 15.09.2026 RHO_RAND C2c: Fassade im RAND-Betrieb (lbm.hpp, Rho_Feld).
+void LBM::Rho_Feld::binde_rand(LBM* l) {
+	lbm_ = l; rand = true;
+	if(l->get_D()!=1u) print_error("RHO_RAND: Rho_Feld nur fuer eine Domaene gebaut.");
+}
+float LBM::Rho_Feld::get_rand(const ulong n) {
+	const uint Nx = lbm_->get_Nx(), Ny = lbm_->get_Ny(), Nz = lbm_->get_Nz();
+	const ulong NxNy = (ulong)Nx*(ulong)Ny;
+	const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/NxNy);
+	if(ebene_t==lbm_->get_t()) { // Cache nur fuer den Zeitschritt, zu dem er entstand (C2-Plan Falle 5)
+		if(ebene_achse==1u&&y==ebene_pos) { n_cache++; return ebene[(size_t)((ulong)x+(ulong)z*(ulong)Nx)]; }
+		if(ebene_achse==2u&&z==ebene_pos) { n_cache++; return ebene[(size_t)((ulong)x+(ulong)y*(ulong)Nx)]; }
+	}
+	LBM_Domain* d = lbm_->lbm_domain[0];
+	const ulong rr = rr_idx_host(n, Nx, Ny, Nz);
+	const bool gepflegt = rr<d->rr_N&&(((lbm_->flags[n]&(TYPE_S|TYPE_E))==TYPE_E)||x+2u>=Nx);
+	if(!gepflegt) print_error("RHO_RAND: Hostzugriff auf rho an ("+to_string(x)+","+to_string(y)+","+to_string(z)+") -- weder in der aktuellen Ausgabe-Ebene noch in der gepflegten Randschale (TYPE_E oder x >= Nx-2). Host-Zugriffssperre.");
+	n_r1++;
+	return rho_unpack(d->rho[rr]);
+}
+void LBM::rho_schicht_in_host(const uint z, const bool zaehlen) {
+	PlaneSpec plane; plane.origin = uint3(0u, 0u, z); plane.extent_a = Nx; plane.extent_b = Ny; plane.axis = 2u;
+	std::vector<float> w;
+	rho_ausgabe_ebene(plane, get_t()-1ull, zaehlen, w);
+	rho.setze_ebene(2u, z, get_t(), w);
+}
+
 void LBM::lese_yslice_in_host(const uint y) {
 	LBM_Domain* dom = lbm_domain[0];
 #ifndef UPDATE_FIELDS
@@ -3452,8 +3530,15 @@ void LBM::lese_yslice_in_host(const uint y) {
 		const ulong g = (ulong)x + (ulong)z*(ulong)Nx;                                // Ebenen-Index (a=x, b=z)
 		const ulong n = (ulong)x + ((ulong)y + (ulong)z*(ulong)Ny)*(ulong)Nx;         // Domaenen-Index
 		const ulong o = g*4ull;
-		rho.set(n, ebene[o]); u.x[n] = ebene[o+1ull]; u.y[n] = ebene[o+2ull]; u.z[n] = ebene[o+3ull];
+		if(!dom->rho_rand_on) rho.set(n, ebene[o]); // ★ C2c: unter RHO_RAND traegt ebene[o] den NaN-Marker; rho kommt unten aus der Ausgabe
+		u.x[n] = ebene[o+1ull]; u.y[n] = ebene[o+2ull]; u.z[n] = ebene[o+3ull];
 		flags[n] = dom->slice_flags[g];
+	}
+	if(dom->rho_rand_on) { // ★ 15.09. RHO_RAND C2c: rho der Ebene als Nachkollisionssumme (Entscheidung (b)); der erste Aufruf wird gezaehlt
+		std::vector<float> w;
+		const bool zaehlen = rho_aus_gezaehlt_zellen==0ull;
+		rho_ausgabe_ebene(plane, get_t()-1ull, zaehlen, w);
+		rho.setze_ebene(1u, y, get_t(), w);
 	}
 }
 

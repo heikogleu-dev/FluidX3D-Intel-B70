@@ -1199,7 +1199,9 @@ static void schreibe_vtk_feld(LBM& L, const uint Nx, const uint Ny, const uint N
 	f << "\nSCALARS rho float 1\nLOOKUP_TABLE default\n";
 	{
 		std::vector<float> buf(Sx);
+		const bool rr_ = L.lbm_domain[0]->rho_rand_on; // ★ 15.09. RHO_RAND C2c: rho je z-Schicht als Nachkollisionssumme in den Cache (Entscheidung (b))
 		for(uint z=0u; z<Sz; z++) for(uint y=0u; y<Sy; y++) {
+			if(rr_&&y==0u) L.rho_schicht_in_host(z*stride, false);
 			for(uint x=0u; x<Sx; x++) buf[x] = reverse_bytes(L.rho.get((ulong)(x*stride) + (ulong)Nx*((ulong)(y*stride) + (ulong)Ny*(ulong)(z*stride)))); // get() liefert float -- die VTK-Spalte bleibt "SCALARS rho float 1"
 			f.write((char*)buf.data(), (std::streamsize)(buf.size()*sizeof(float)));
 		}
@@ -1512,7 +1514,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		  for(uint d=0u; d<L.get_D(); d++) { const LBM_Domain* dm=L.lbm_domain[d];
 			rs+=(ulong)dm->rho_clamp_hits[204]; rg+=(ulong)dm->rho_clamp_hits[205];
 			us+=(ulong)dm->rho_clamp_hits[206]; ug+=(ulong)dm->rho_clamp_hits[207]; }
-		  const bool rho_an = L.lbm_domain[0]->rho_takt>0u, u_an = L.lbm_domain[0]->u_takt>0u;
+		  const bool rho_an = L.lbm_domain[0]->rho_takt>0u||L.lbm_domain[0]->rho_rand_on, u_an = L.lbm_domain[0]->u_takt>0u; // ★ C2c: RHO_RAND zaehlt in denselben Slots
 		  // ★ 12.09.2026 abends (Audit-Schleife, Pruefer C): die drei Waechter unten sind print_error,
 		  // also exit(1), und diese Funktion laeuft VOR Facetten-Wirkpfad, F-Markerliste, ELIBB-Pur und
 		  // der Fernfeld-Abnahme. Sie koennen falsch-positiv werden, und zwar berechenbar: die Slots
@@ -4744,6 +4746,51 @@ void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz,
 		+" von u_inf -- die Wand ist zu SCHNELL oder es steht eine Versperrung im Weg.");
 }
 
+// ★ 15.09.2026 RHO_RAND C2c -- LESESTELLE fuer Einzelgitterfaelle (Kugel, Entscheidung Heiko 1: Pruefstand, kein Produktionsschalter).
+static void lese_rho_rand_einzelgitter(const string& fall) {
+	const uint rr_ = env_u("CFD_RHO_RAND", 0u);
+	if(rr_>1u) print_error("CFD_RHO_RAND kennt nur 0 (aus) und 1 (rho nur in der Randschale R1).");
+	LBM_Domain::s_rho_rand = rr_;
+	if(rr_==0u) { if(env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u) print_warning("CFD_RHO_RAND_TESTHAKEN ist gesetzt, CFD_RHO_RAND aber 0 -- wirkungslos."); return; }
+	if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus ("+fall+").");
+	if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0 ("+fall+"): der Voll-Read-Slicepfad liest den ganzen rho-Puffer.");
+	if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1 ("+fall+"): der Pruefarm vergleicht gegen den vollen rho-Puffer.");
+	if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_RHO_REK_PRUEF=1 ("+fall+"): das Pruefinstrument braucht den vollen rho-Puffer.");
+	print_info("RHO_RAND AKTIV ("+fall+", CFD_RHO_RAND=1, Pruefstand): rho nur in der Randschale R1; Slices zeigen die Nachkollisionssumme.");
+}
+
+// ★ 15.09.2026 RHO_RAND C2c -- ABNAHME (RHO_RAND-C2-PLAN.md §4.1). Steht hinter allen uebrigen Abnahmen (print_error = exit(1)).
+//   Slot 216 = 0 (R1-Zugriff ausserhalb der Schale, ungegatet) bei gleichzeitig belegten Besuchen (211 TYPE_E-Lesen, 215 Lift, 220 Ausgabe-TYPE_E)
+//   219/220 = Soll aus den gezaehlten Ausgabeaufrufen (Zellen / Geraete-TYPE_E derselben Ebenen)
+//   205 = Fluidzellen (Host-Flags weder S noch E) mit x >= Nx-2, 204+205 = alle Fluidzellen -- EXAKT, am Zaehlschritt t = zaehl_takt+2
+//   Rho_Feld-Zugriffe aus Cache und aus R1 (Sichtbarkeit, kein Soll)
+static void berichte_rho_rand(LBM& L, const string& wo) {
+	LBM_Domain* d = L.lbm_domain[0];
+	if(!d->rho_rand_on) return;
+	d->finish_queue(); d->rho_clamp_hits.read_from_device();
+	const ulong h[8] = {(ulong)d->rho_clamp_hits[204], (ulong)d->rho_clamp_hits[205], (ulong)d->rho_clamp_hits[211], (ulong)d->rho_clamp_hits[215], (ulong)d->rho_clamp_hits[216], (ulong)d->rho_clamp_hits[219], (ulong)d->rho_clamp_hits[220], 0ull};
+	bool ok = true;
+	print_info("---------------- RHO_RAND ("+wo+") ----------------");
+	print_info("  R1 = "+to_string(d->rr_N)+" Zellen, rho-Puffer "+to_string((float)((d->rr_N+1ull)*(ulong)sizeof(rhoxx))/1.0e6f,2u)+" MB");
+	print_info("  Slot 216 (R1-Zugriff ausserhalb): "+to_string(h[4])+" (Soll 0); Besuche 211 TYPE_E-Lesen "+to_string(h[2])+", 215 Lift "+to_string(h[3])+", 220 Ausgabe-TYPE_E "+to_string(h[6]));
+	if(h[4]!=0ull) ok = false;
+	if(h[2]==0ull&&h[3]==0ull&&h[6]==0ull) { print_warning("  RHO_RAND ("+wo+"): kein einziger Besuch in 211/215/220 -- die Null in 216 beweist nichts."); ok = false; }
+	print_info("  Slots 219/220 (gezaehlte Ausgabe): "+to_string(h[5])+"/"+to_string(h[6])+" (Soll "+to_string(L.rho_aus_gezaehlt_zellen)+"/"+to_string(L.rho_aus_gezaehlt_e)+"; Wrapper-Ist "+to_string(L.rho_aus_ist_219)+"/"+to_string(L.rho_aus_ist_220)+")");
+	if(L.rho_aus_gezaehlt_zellen==0ull) { print_warning("  RHO_RAND ("+wo+"): kein gezaehlter Ausgabeaufruf -- Slice-Kadenz aus? Die Ausgabe ist ungeprueft."); ok = false; }
+	if(h[5]!=L.rho_aus_gezaehlt_zellen||h[6]!=L.rho_aus_gezaehlt_e||L.rho_aus_ist_219!=L.rho_aus_gezaehlt_zellen||L.rho_aus_ist_220!=L.rho_aus_gezaehlt_e) ok = false;
+	const ulong zschritt = zaehl_takt()+2ull;
+	if(L.get_t()>zschritt) {
+		const uint Nx = L.get_Nx(), Ny = L.get_Ny(), Nz = L.get_Nz(); const ulong NN = (ulong)Nx*(ulong)Ny*(ulong)Nz;
+		ulong soll_alle = 0ull, soll_maske = 0ull;
+		for(ulong n=0ull; n<NN; n++) if((L.flags[n]&(TYPE_S|TYPE_E))==0u) { soll_alle++; if((uint)(n%(ulong)Nx)+2u>=Nx) soll_maske++; }
+		print_info("  Slots 204/205 (Schreibmaske): "+to_string(h[0])+"/"+to_string(h[1])+" (Soll "+to_string(soll_alle-soll_maske)+"/"+to_string(soll_maske)+", Host-Flags ohne TYPE_MS)");
+		if(h[0]+h[1]!=soll_alle||h[1]!=soll_maske) ok = false;
+	} else print_warning("  Slots 204/205: der Zaehlschritt t = "+to_string(zschritt)+" liegt hinter dem Laufende -- nicht geprueft.");
+	print_info("  Rho_Feld-Hostzugriffe: aus der Ausgabe-Ebene "+to_string(L.rho.n_cache)+", aus R1 "+to_string(L.rho.n_r1));
+	if(!ok) print_error("RHO_RAND ("+wo+"): Abnahme verletzt -- siehe Zeilen darueber.");
+	print_info("RHO_RAND ("+wo+"): Abnahme erfuellt.");
+}
+
 // ★ 15.09.2026 RHO_RAND C1/C2a -- PRUEFINSTRUMENT UND PROBEZELLEN (RHO_RAND-PLAN.md §5/§7/§11/§14, RHO_RAND-C2-PLAN.md §4).
 // Auf DEMSELBEN fi-Zustand einer achsen-normalen Ebene (achse 1: y=pos, achse 2: z=pos):
 //   w_vor  = heutige Pufferwoerter (Stand nach dem letzten Schritt = was ein Slice heute zeigt)
@@ -5104,6 +5151,7 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_boden_eq_n>3u) print_warning("CFD_BODEN_EQ > 3 verletzt die Heiko-Vorgabe (max 3, besser 2).");
 	  if(LBM_Domain::s_boden_eq_n>0u&&getenv("CFD_KUGEL_MG")&&env_u("CFD_KUGEL_MG",1u)==0u) print_warning("BODEN_EQ mit CFD_KUGEL_MG=0: statischer Boden + u_road-Aufpraegung widersprechen sich (XL-3 B8).");
 	  if(fc>0u) print_info(string("Facettenpfad Kugel: ")+(fc==1u?"Paartausch voll":fc==2u?"Paartausch NUR TAUSCH":fc==3u?"iMEM voll":"iMEM NULLZIEL")+" -- Impulsaustausch-Cd an behandelten Links kontaminiert, nur der projizierte Cd-Pfad zaehlt."); }
+	lese_rho_rand_einzelgitter("Kugel"); // ★ 15.09. RHO_RAND C2c: vor dem Konstruktor (Statik -> Emission, Allokation)
 	LBM lbm(Nx, Ny, Nz, nu_lat);
 
 	print_info("=============== Kugel im Kanal (Neuaufbau auf Upstream 8986874) ===============");
@@ -5270,6 +5318,10 @@ void main_setup_kugel() {
 		if(census_v!=census_n) print_error("Facettenbau hat den 0x41-Census veraendert ("+to_string(census_v)+" -> "+to_string(census_n)+") -- object_force-Falle!");
 		if(env_u("CFD_F_LISTE",0u)>0u) print_error("CFD_F_LISTE ist im KUGELFALL nicht verdrahtet (alloc_f_liste wird dort nicht gerufen) -- der Schalter waere ein stiller No-Op mit 1-Element-F. Fall verdrahten oder Schalter weglassen.");
 		lbm.alloc_facetten(FF, elibb_an_kugel&&!elibb_qmap.empty()?&elibb_qmap:nullptr, env_u("CFD_SGS_GDIAG", 0u), env_u("CFD_SGS_FDWAND", 0u), env_u("CFD_SGS_SISM", 0u)); zensus_statische_klassen(lbm, FF, Nx, Ny, Nz, (uchar)(TYPE_S|TYPE_X), (env_u("CFD_FACETTEN",0u)>=3u&&env_u("CFD_FAC_ALPHA",0u)>=2u&&env_u("CFD_FAC_MASSE_ALLE",0u)==0u), "Kugel", out_dir); if(env_u("CFD_SGS_FDWAND",0u)>0u) print_warning("CFD_SGS_FDWAND ist an der Kugel seit 07.09. VERDRAHTET (Befund C5/C6) und aendert die PHYSIK: die SGS-Relaxationsrate an Facettenzellen kommt dann aus |S|_FD statt aus dem Pi-Tensor. Vorher erschlug der Kohaerenzwaechter jeden solchen Lauf per exit(1), es gibt also KEINE Messung damit."); if(env_u("CFD_SGS_GDIAG",0u)>0u) print_warning("CFD_SGS_GDIAG ist an der Kugel seit 07.09. verdrahtet (Mess-Enqueue in der Zeitschleife, Bericht am Laufende, physikfrei); Verdrahtung bei Bedarf nachziehen."); // ★ C5 (Auditor C, 07.09.): hier standen HARTCODIERTE NULLEN. Folge: CFD_SGS_GDIAG=1 an der Kugel setzte die Statik, druckte die Aktiv-Ansage und den bestandenen Selbsttest -- und war trotzdem ein vollstaendiger No-Op, weil gdiag_on false blieb. Am 07.09. selbst hineingelaufen (Lauf kd_kugel_gdiag: Selbsttest bestanden, Bericht leer, CSV leer).
+	}
+	if(lbm.lbm_domain[0]->rho_rand_on) { // ★ 15.09. RHO_RAND C2c: C0-Waechter (R1-Abdeckung aller rho-Leser) auch am Pruefstand
+		const uint bad = lbm.lbm_domain[0]->pruefe_rho_rand_c0(&lbm.flags[0], Nx, Ny, Nz, env_u("CFD_RHO_RAND_TESTHAKEN", 0u)==1u);
+		if(bad>0u) print_error("RHO_RAND (Kugel): "+to_string(bad)+" Beanstandung(en) -- siehe oben.");
 	}
 	lbm.run(0u, n_steps); // initialisieren ohne Zeitschritt
 	// ★ Mitbewegte Waende pruefen. Bodenkontakt hier bewusst NICHT erwartet: die Kugel schwebt frei.
@@ -5523,6 +5575,7 @@ void main_setup_kugel() {
 	// nach 95 min Rechenzeit ALLE folgenden Abnahmen mit -- SISM, SGS-Band, Facetten, K2.
 	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
 	pruefe_ptrt(lbm.lbm_domain[0], "Kugel");
+	berichte_rho_rand(lbm, "Kugel"); // ★ 15.09. RHO_RAND C2c
 	if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) { // ★ 15.09. RHO_RAND C1/C2a: HINTER allen Abnahmen (rechnet je Ebene einen Schritt mehr, print_error bei Soll-Verletzung)
 		pruefe_rho_rekonstruktion(lbm, Nx, Ny, Nz, 1u, Ny/2u, u_lat, out_dir, "Kugel");
 		pruefe_rho_rekonstruktion(lbm, Nx, Ny, Nz, 2u, 1u, u_lat, out_dir, "Kugel");
@@ -6335,7 +6388,8 @@ static void main_setup_fahrzeug_dd() {
 #if defined(SURFACE) || defined(GRAPHICS)
 	      print_error("CFD_RHO_RAND mit SURFACE/GRAPHICS: deren rho-Leser greifen auf das volle Feld zu.");
 #endif
-	      print_info("RHO_RAND C0 (CFD_RHO_RAND=1, 15.09.2026): Sperren bestanden. In diesem Commit laufen nur Host-Waechter und APG-Zensus hinter der Kopplungspruefung; danach endet der Lauf bewusst mit einem Fehler (Kernelteil C1/C2 fehlt).");
+	      if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_RHO_REK_PRUEF=1: das Pruefinstrument vergleicht gegen den VOLLEN rho-Puffer, den es unter RHO_RAND nicht gibt. Den Pruefarm ohne RHO_RAND fahren (C2-Plan §4.2).");
+	      print_info("RHO_RAND AKTIV (CFD_RHO_RAND=1, C2c 15.09.2026): rho im Nahfeld nur in der Randschale R1; Slices/Sonde/VTK zeigen die Nachkollisionssumme (Entscheidung (b)). Waechter + Zensus laufen hinter der Kopplungspruefung.");
 	    }
 	  }
 	  LBM_Domain::s_boden_eq_n = env_u("CFD_BODEN_EQ", 0u); LBM_Domain::s_boden_eq_u = u_lat; LBM_Domain::s_boden_eq_abstand = env_u("CFD_BODEN_EQ_ABSTAND", 0u); LBM_Domain::s_einlass_eq_n = 0u; LBM_Domain::s_schale_alpha = 0.0f; // V1-Port NAHFELD; u_road folgt dem Setup (XL-B5); Abstand = Heiko-Reifenschutz; einlass_eq EXPLIZIT 0 fuers Feingitter (Pruefagent M1: Statik-Doktrin, nicht nur Initialisierer); Schalen-alpha EXPLIZIT 0 -- lbm_f traegt spaeter eine Extract-Liste, darf aber NIE blenden (P9c-Wirkpfad-Soll nah==0)
@@ -6964,9 +7018,9 @@ static void main_setup_fahrzeug_dd() {
 			const uint Na  = fp[p].axis==0u ? fNx : (fp[p].axis==1u ? fNy : fNz);
 			if(pos>=2u&&pos+2u<Na) { print_warning(string("RHO_RAND-Waechter: feine Kopplungsebene ")+face_name[p]+" liegt bei "+to_string(pos)+" von "+to_string(Na)+" und damit ausserhalb R1 -- drive_boundary_cubic_lift schriebe rho ins Leere."); bad++; }
 		}
-		bad += lbm_f.lbm_domain[0]->pruefe_rho_rand_c0(&lbm_f.flags[0], fNx, fNy, fNz, env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u);
+		bad += lbm_f.lbm_domain[0]->pruefe_rho_rand_c0(&lbm_f.flags[0], fNx, fNy, fNz, env_u("CFD_RHO_RAND_TESTHAKEN", 0u)==1u); // Haken 1 (C0-Waechter 1a); 4 und 6 wirken in der Zeitschleife bzw. am Laufende
 		if(bad>0u) print_error("RHO_RAND C0: "+to_string(bad)+" Beanstandung(en) -- siehe oben. Lauf nicht gestartet.");
-		print_error("RHO_RAND C0: Waechter und Zensus ohne Beanstandung. Der Kernelteil (RHO_RAND-PLAN.md C1/C2) ist noch nicht gebaut -- der Lauf endet hier BEWUSST, sonst waere CFD_RHO_RAND=1 ein stiller No-Op.");
+		print_info("RHO_RAND: Waechter und Zensus ohne Beanstandung -- R1 = "+to_string(lbm_f.lbm_domain[0]->rr_N)+" Zellen, rho-Puffer "+to_string((float)((lbm_f.lbm_domain[0]->rr_N+1ull)*(ulong)sizeof(rhoxx))/1.0e6f,2u)+" MB statt "+to_string((float)((ulong)fNx*(ulong)fNy*(ulong)fNz*(ulong)sizeof(rhoxx))/1.0e6f,1u)+" MB."); // ★ C2c: der bewusste C0-Abbruch entfaellt
 	}
 
 	// ---------------------------------------------------------------- P9c N2F-Schale: Listenbau
@@ -8652,6 +8706,10 @@ static void main_setup_fahrzeug_dd() {
 					pruefe_slice_ebene(lbm_f, fNx, fNy, fNz, fNy/2u, "nah");
 				} else if(slice_gpu) {
 					lbm_f.lese_yslice_in_host(fNy/2u); // deckt Slice, Sonde UND Diff-Nahseite (alle auf y = fNy/2)
+					if(lbm_f.lbm_domain[0]->rho_rand_on&&env_u("CFD_RHO_RAND_TESTHAKEN", 0u)==4u) { // ★ C2c Haken 4: Innenzelle ABSEITS der Ebene -> Soll: Host-Zugriffssperre
+						print_warning("RHO_RAND-TESTHAKEN 4: lese rho an einer Innenzelle abseits der Slice-Ebene.");
+						lbm_f.rho.get((ulong)(fNx/2u)+((ulong)(fNy/2u+3u)+(ulong)(fNz/2u)*(ulong)fNy)*(ulong)fNx);
+					}
 				} else {
 					lbm_f.u.read_from_device(); lbm_f.flags.read_from_device();
 				}
@@ -9230,6 +9288,11 @@ static void main_setup_fahrzeug_dd() {
 	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
 	pruefe_ptrt(lbm_f.lbm_domain[0], "Nahfeld");
 	pruefe_ptrt(lbm_c.lbm_domain[0], "Fernfeld"); // ★ das Fernfeld bekommt PTRT ueber dasselbe getenv MIT -- ungeprueft waere es eine zweite, stille Variable
+	if(lbm_f.lbm_domain[0]->rho_rand_on&&env_u("CFD_RHO_RAND_TESTHAKEN", 0u)==6u) { // ★ C2c Haken 6: veralteter Cache (Slice-Ebene eines frueheren Schritts) muss die Sperre ausloesen
+		print_warning("RHO_RAND-TESTHAKEN 6: lese rho an einer Innenzelle der Slice-Ebene NACH weiteren Schritten -- Soll: Host-Zugriffssperre.");
+		lbm_f.rho.get((ulong)(fNx/2u)+((ulong)(fNy/2u)+(ulong)(fNz/2u)*(ulong)fNy)*(ulong)fNx);
+	}
+	berichte_rho_rand(lbm_f, "Nahfeld"); // ★ 15.09. RHO_RAND C2c
 	if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) { // ★ 15.09. RHO_RAND C1: Probezellen und Ausgabe-Kandidaten im NAHFELD bei entwickelter Stroemung, hinter allen Abnahmen
 		if(lbm_f.lbm_domain[0]->rho_takt>0u) print_error("CFD_RHO_REK_PRUEF im dd-Fall braucht CFD_RHO_SPARSAM=0 (Nahfeld): sonst schreibt stream_collide rho im Inneren nicht, und der Vergleich laese Altwerte.");
 		const string rr_dir = get_exe_path()+"../export/"+(getenv("CFD_RUN_NAME")?string(getenv("CFD_RUN_NAME")):string("fahrzeug_dd"))+"/";
@@ -9705,7 +9768,7 @@ void main_setup_facetten_test() {
 
 void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeug | fahrzeug_dd | fernfeld | facetten_test
 	const char* c = getenv("CFD_CASE");
-	if(getenv("CFD_RHO_RAND")!=nullptr&&(c==nullptr||string(c)!="fahrzeug_dd")) print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0
+	if(getenv("CFD_RHO_RAND")!=nullptr&&c!=nullptr&&string(c)!="fahrzeug_dd"&&string(c)!="kugel") print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld und am Kugel-Pruefstand angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0/C2c
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
 	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).
 	if(c!=nullptr && string(c)=="kanal") main_setup_kanal();

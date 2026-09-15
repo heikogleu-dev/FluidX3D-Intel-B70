@@ -79,6 +79,7 @@ void Info::print_initialize(LBM* lbm) {
 #ifdef FORCE_FIELD
 			b -= 12ull*(lbm->get_N() - (ulong)lbm->get_D()*F_N); // F liegt nur ueber die BBox
 #endif // FORCE_FIELD
+			if(d0->rho_rand_on) b -= (ulong)sizeof(rhoxx)*(lbm->get_N()-(d0->rr_N+1ull)); // ★ 15.09. RHO_RAND C2c: rho-Hostspiegel nur R1
 			cpu_mem_required = (uint)(b/1048576ull); }
 		gpu_mem_required = lbm->lbm_domain[0]->get_device().info.memory_used;
 	}
@@ -117,7 +118,7 @@ void Info::print_update() const {
 	info.allow_printing.lock();
 	reprint(
 		"|"+alignr(8, to_uint((double)lbm->get_N()*1E-6/runtime_lbm_timestep_smooth))+" |"+ // MLUPs
-		alignr(7, to_uint((double)lbm->get_N()*(double)bandwidth_bytes_per_cell_device()*1E-9/runtime_lbm_timestep_smooth))+" GB/s |"+ // memory bandwidth
+		alignr(7, to_uint((double)lbm->get_N()*(double)(bandwidth_bytes_per_cell_device()-(lbm->lbm_domain[0]->rho_rand_on ? (uint)sizeof(rhoxx) : 0u))*1E-9/runtime_lbm_timestep_smooth))+" GB/s |"+ // memory bandwidth
 		alignr(10, to_uint(1.0/runtime_lbm_timestep_smooth))+" | "+ // steps/s
 		(steps==max_ulong ? alignr(17, lbm->get_t()) : alignr(12, lbm->get_t())+" "+print_percentage((float)(lbm->get_t()-steps_last)/(float)steps))+" | "+ // current step
 		alignr(19, print_time(time()))+" |" // either elapsed time or remaining time

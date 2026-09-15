@@ -44,6 +44,24 @@
 // Werte packt, die selbst aus load_rho stammen (rho_pack(1.0f) und Rho_Feld::set in
 // lese_yslice_in_host) -- auf diesen 59.394 Werten stimmen beide Packer exakt ueberein.
 // Wer eine Hostschreibstelle ergaenzt, die ein rho-Feld SAET, laeuft still gegen diese Bedingung.
+// ★ 15.09.2026 RHO_RAND C2c: HOST-ZWILLING der Randschalen-Packung. AUSDRUCKSGLEICH zu rr_idx() in kernel.cpp
+// (RHO_RAND-PLAN.md §4): z<2 -> n; z>=Nz-2 -> 2NxNy + n - (Nz-2)NxNy; sonst Ring je z-Schicht (y<2, y>=Ny-2, x<2, x>=Nx-2).
+// Innenzellen liefern r1_anzahl (= Papierkorb-Slot). Der Selbsttest in pruefe_rho_rand_c0 beweist die Bijektion auf R1.
+inline ulong r1_anzahl(const uint Nx, const uint Ny, const uint Nz) {
+	return (Nx>4u&&Ny>4u&&Nz>4u) ? (ulong)Nx*(ulong)Ny*(ulong)Nz-(ulong)(Nx-4u)*(ulong)(Ny-4u)*(ulong)(Nz-4u) : (ulong)Nx*(ulong)Ny*(ulong)Nz;
+}
+inline ulong rr_idx_host(const ulong n, const uint Nx, const uint Ny, const uint Nz) {
+	const ulong a = (ulong)Nx*(ulong)Ny;
+	const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/a);
+	if(z<2u) return n;
+	if(z+2u>=Nz) return 2ull*a+(n-(ulong)(Nz-2u)*a);
+	const ulong r0 = 4ull*a+(ulong)(z-2u)*(4ull*(ulong)Nx+4ull*(ulong)(Ny-4u));
+	if(y<2u) return r0+(ulong)x+(ulong)y*(ulong)Nx;
+	if(y+2u>=Ny) return r0+2ull*(ulong)Nx+(ulong)x+(ulong)(y+2u-Ny)*(ulong)Nx;
+	if(x<2u) return r0+4ull*(ulong)Nx+4ull*(ulong)(y-2u)+(ulong)x;
+	if(x+2u>=Nx) return r0+4ull*(ulong)Nx+4ull*(ulong)(y-2u)+(ulong)(x+4u-Nx);
+	return r1_anzahl(Nx, Ny, Nz);
+}
 inline float rho_unpack(const rhoxx w) { // Speicherwort -> rho
 #ifdef RHO_FP16
 	// ★★ 12.09.2026 (Audit-Schleife, Pruefer A, HOCH): half_to_float ist ausdruecklich "without
@@ -396,6 +414,7 @@ public:
 	uint einlass_eq_n = 0u; float einlass_eq_u = 0.0f; // Konstruktionszeit-Kopien (EINLASS_EQ)
 	uint rho_takt = 0u;        // Konstruktionszeit-Kopie von s_rho_takt (read-once-Doktrin)
 	bool rho_rand_on = false;  // ★ 15.09. Konstruktionszeit-Kopie von s_rho_rand (read-once-Doktrin); das Setup liest DIESEN Wert, nicht die Umgebungsvariable
+	ulong rr_N = 0ull;         // ★ 15.09. RHO_RAND C2c: Zellen der Randschale R1 (rho-Puffer = rr_N+1, letzter Slot Papierkorb); 0 ohne RHO_RAND
 	uint u_takt = 0u;          // Konstruktionszeit-Kopie von s_u_takt
 	uint felder_voll_h = 3u;   // je Schritt gesetzter Kernelparameter, BITFELD: Bit 0 = rho ueberall, Bit 1 = u ueberall (3 = heutiges Verhalten)
 	bool rho_voll_zwang = false; // Host erzwingt Vollschreiben (Abschlusspfad, unregelmaessige Feldlesung)
@@ -855,16 +874,28 @@ public:
 	// (LBM::lese_yslice_in_host) SCHREIBT. Ein Grep findet, was man sucht; ein geloeschter
 	// operator[] findet, was man NICHT sucht. Deshalb hier get/set statt Indizierung: jede
 	// vergessene Stelle ist ein Uebersetzungsfehler.
+	// ★ 15.09.2026 RHO_RAND C2c (RHO_RAND-C2-PLAN.md §3.2): unter RHO_RAND haelt der Puffer nur die Randschale R1. Der
+	// Memory_Container rechnet aber mit N (lbm.hpp, reference()) -- jedes c[n] waere ein Heap-Ueberlauf (Plan K5). Deshalb
+	// im RAND-Betrieb: get() liest die zuletzt gesetzte Ausgabe-Ebene (Nachkollisionssumme, float, NIE rho_pack -- der
+	// Hostpacker rundet anders), sonst R1 ueber rr_idx_host -- aber nur dort, wo R1 gepflegt wird (TYPE_E oder x >= Nx-2);
+	// alles andere ist ein harter Fehler (Host-Zugriffssperre). set() ist gesperrt.
 	class Rho_Feld {
 	private:
 		Memory_Container<rhoxx> c;
+		LBM* lbm_ = nullptr; bool rand = false;
+		std::vector<float> ebene; uint ebene_achse = 3u, ebene_pos = 0u; ulong ebene_t = ~0ull;
+		float get_rand(const ulong n); // lbm.cpp
 	public:
+		ulong n_cache = 0ull, n_r1 = 0ull; // Zugriffe im RAND-Betrieb (Bericht berichte_rho_rand)
 		inline Rho_Feld() {}
-		inline Rho_Feld(LBM* lbm, Memory<rhoxx>** buffers, const string& name) : c(lbm, buffers, name) {}
+		inline Rho_Feld(LBM* lbm, Memory<rhoxx>** buffers, const string& name) : c(lbm, buffers, name), lbm_(lbm) {}
 		inline Rho_Feld& operator=(Memory_Container<rhoxx>&& m) noexcept { c = std::move(m); return *this; }
-		inline float get(const ulong n) { return rho_unpack(c[n]); } // Dichte in Gitter-Einheiten
-		inline void set(const ulong n, const float r) { c[n] = rho_pack(r); }
-		inline void read_from_device() { c.read_from_device(); }
+		void binde_rand(LBM* l); // lbm.cpp
+		inline bool ist_rand() const { return rand; }
+		inline void setze_ebene(const uint achse, const uint pos, const ulong t, std::vector<float>& w) { ebene.swap(w); ebene_achse = achse; ebene_pos = pos; ebene_t = t; }
+		inline float get(const ulong n) { return rand ? get_rand(n) : rho_unpack(c[n]); } // Dichte in Gitter-Einheiten
+		inline void set(const ulong n, const float r) { if(rand) print_error("RHO_RAND: Rho_Feld::set ist gesperrt -- der Host packt keine Nachkollisionssumme (lbm.hpp, rho_unpack/rho_pack)."); c[n] = rho_pack(r); }
+		inline void read_from_device() { c.read_from_device(); } // RAND: liest den R1-Puffer (Memory liest seine eigene Laenge)
 		inline void write_to_device() { c.write_to_device(); }
 		inline const ulong length() const { return c.length(); }
 	};
@@ -994,6 +1025,8 @@ public:
 	void extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf); // liest (rho,u) einer Ebene in host_buf (4 floats/Zelle)
 	void rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, const uint modus, std::vector<float>& out4, std::vector<rhoxx>& worte); // ★ 15.09. RHO_RAND C1/C2a: rho einer Ebene aus den DDFs bei t_rek; modus 0 = Identitaet (t), 1 = Nachkollision (t-1, ohne MS)
 	void rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const bool zaehlen, std::vector<float>& out); // ★ 15.09. RHO_RAND C2a: Ausgabe-rho (Nachkollisionssumme), t_aus = get_t()-1
+	void rho_schicht_in_host(const uint z, const bool zaehlen); // ★ 15.09. RHO_RAND C2c: z-Schicht der Ausgabe in den rho-Cache (VTK)
+	ulong rho_aus_gezaehlt_zellen = 0ull, rho_aus_gezaehlt_e = 0ull, rho_aus_ist_219 = 0ull, rho_aus_ist_220 = 0ull; // ★ C2c: Ist=Soll der gezaehlten Ausgabeaufrufe (Slots 219/220)
 	void lese_yslice_in_host(const uint y); // ★ Slice-Ebenen-Read 2026-08-26: (rho,u,flags) EINER y-Ebene per Device-Gather in die Host-Arrays streuen (Transportweg-Optimierung, wertgleich)
 	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Reihenfolge: alloc_schale() auf
