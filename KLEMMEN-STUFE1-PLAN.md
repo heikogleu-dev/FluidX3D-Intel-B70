@@ -224,3 +224,10 @@ forces.csv und cd_facetten.csv bitgleich zu kl_z2c_dd8_b70 (Modus 1 bitgleich). 
 bewegten Boden — derselbe Ort wie die Dichteklemme (Stufe 0: 100 % am Boden). s meist 0,5–0,95. Nachladeprobe t = takt+3: Nah 256, Fern 60.
 Folge für Modus 2: der Begrenzer wirkt fast nur im Bodenband; ob boden_eq diese Zellen danach überschreibt (Plan E9), ist mit dem offenen
 Stufe-0-Befund „boden_eq 0 Treffer vs. stream_collide 1,13 Mio am selben Band“ verknüpft und ungeklärt.
+
+**Folge für Modus 2 am Boden (Herleitung aus kernel.cpp boden_eq, nicht gemessen):** boden_eq ersetzt NACH stream_collide alle 19 Populationen
+der Zellen z = 1..nz_eff (TYPE_MS eingeschlossen, ausgenommen Zellen mit Solid im Abstand ≤ CFD_BODEN_EQ_ABSTAND in Ebene/oberhalb) durch
+f_eq(ρ_lokal, u_road). Weil der Begrenzer Masse erhält, bleibt ρ_lokal gleich — die Begrenzerwirkung an diesen K1-Zellen ist danach GELÖSCHT.
+Wirksam bleibt Modus 2 nur an K1-Zellen außerhalb des boden_eq-Bands (Reifennähe) und in K0/K2 (Nah 41 von 4 442 Stichproben). Das 8-mm-M2
+misst daher vor allem, ob Reifennähe und Facetten etwas tragen; eine Kraftänderung ist nicht zu erwarten. Messbar über [292] (Wirkung) gegen
+Kräfte.

@@ -272,3 +272,12 @@ Läufe kl_s0b_dd8_an_b70 / _aus_b70 (dbec4ce) und kl_s0c_dd8_b70 (b470bab), Zeil
     q = round(w·(1,001f−1)·S) = round(32,77) = 33 bei ρ_roh = 1; Dekaden 369 102 in [10⁻⁴;10⁻³), 416 in [10⁻³;10⁻²), 282 in [10⁻²;10⁻¹):
     ρ_roh liegt im ersten Schritt nicht exakt bei 1, die 698 Treffer höherer Dekaden tragen den Überschuss. Systematische Rundung +0,7 %
     (q = 33 statt 32,77) ist im Soll berücksichtigt.
+
+## Nachtrag 15.09.2026 abends: Erklärung „boden_eq 0 Treffer, stream_collide 1,13 Mio am selben Band“ (Herleitung, NICHT gemessen)
+
+SRT nach der Dichteklemme: Σf* = ρ_c + (1−w)(ρ_roh − ρ_c) (Stufe-1-Plan §1.2, m0). Bei 8 mm ist w nahe 2 (def_w in defs_prod8_nah.txt),
+also Σf* ≈ 2ρ_c − ρ_roh: die Masse wird an der Klemmgrenze GESPIEGELT. Unten (ρ_c = 0,5, ρ_roh < 0,5): Σf* ≈ 1 − ρ_roh ∈ (0,5; 1];
+oben (ρ_c = 1,5, ρ_roh > 1,5): Σf* ≈ 3 − ρ_roh < 1,5. boden_eq liest danach genau diese Summe als rho_local und kann die Klemme nur für
+ρ_roh ≤ 0 bzw. ≥ 2,5 treffen. Das erklärt 0 Treffer ohne Defekt. Konsistent mit dem Positivtest (Haken 1: Band 1,001/1,002 → boden_eq
+28 156 Treffer auf der CPU), wo die Spiegelung im schmalen Band nicht aus ihm herausführt. Offen: Messbeleg (z. B. Σf* der Trefferzellen
+im Kernel histogrammieren) — bei Bedarf in der Audit-Schleife.
