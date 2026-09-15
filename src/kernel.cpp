@@ -3244,6 +3244,20 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		}
 		}
 )+"#endif"+R( // KLEMM_BILANZ
+)+"#ifdef U_BETRAG"+R(
+		{ // ★ 15.09.2026 Klemmen Z2d (KLEMMEN-STUFE2-PLAN.md §2.1): BETRAGSklemme |u|^2 <= c_s^2 -- die groesste isotrope Kugel mit f_eq >= 0,
+		  // parameterfrei; die Richtung bleibt, Delta j = w rho_c (s-1) u_roh (Stufe-0-Buchung gilt unveraendert). Kugel in Wuerfel: U_FP16-Marge und Lift-Schranke bleiben.
+		  const float uxb_ = fma(fxn, rho2, uxn), uyb_ = fma(fyn, rho2, uyn), uzb_ = fma(fzn, rho2, uzn);
+		  const float u2b_ = uxb_*uxb_+uyb_*uyb_+uzb_*uzb_;
+		  const bool kb_ = u2b_>=def_u2max;
+		  const float skb_ = kb_ ? sqrt(def_u2max/u2b_) : 1.0f;
+		  uxn = uxb_*skb_; uyn = uyb_*skb_; uzn = uzb_*skb_;
+		  if(kb_&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // Slot 28 = u-Klemme griff (hier: Betragshuelle)
+)+"#ifdef KLEMM_BILANZ"+R(
+		  if(kb_) kl |= 4u; // Bedingung woertlich wie Slot 28
+)+"#endif"+R( // KLEMM_BILANZ
+		}
+)+"#else"+R( // U_BETRAG
 		uxn = clamp(fma(fxn, rho2, uxn), -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(fma(fyn, rho2, uyn), -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(fma(fzn, rho2, uzn), -def_c, def_c);
@@ -3254,6 +3268,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef KLEMM_BILANZ"+R(
 		if(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c) kl |= 4u; // Bedingung woertlich wie Slot 28
 )+"#endif"+R( // KLEMM_BILANZ
+)+"#endif"+R( // U_BETRAG
 		calculate_forcing_terms(uxn, uyn, uzn, fxn, fyn, fzn, Fin); // calculate volume force terms Fin from velocity field (Guo forcing, Krueger p.233f)
 )+"#else"+R( // VOLUME_FORCE
 )+"#ifdef KLEMM_BILANZ"+R(
@@ -3265,6 +3280,20 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		  if(k296_) { if(rho_clamp_hits[296]<0xF0000000u) atomic_inc(&rho_clamp_hits[296]); if(!k295_&&rho_clamp_hits[297]<0xF0000000u) atomic_inc(&rho_clamp_hits[297]); }
 		}
 )+"#endif"+R( // KLEMM_BILANZ
+)+"#ifdef U_BETRAG"+R(
+		{ // ★ 15.09.2026 Klemmen Z2d (KLEMMEN-STUFE2-PLAN.md §2.1): BETRAGSklemme |u|^2 <= c_s^2 -- die groesste isotrope Kugel mit f_eq >= 0,
+		  // parameterfrei; die Richtung bleibt, Delta j = w rho_c (s-1) u_roh (Stufe-0-Buchung gilt unveraendert). Kugel in Wuerfel: U_FP16-Marge und Lift-Schranke bleiben.
+		  const float uxb_ = uxn, uyb_ = uyn, uzb_ = uzn;
+		  const float u2b_ = uxb_*uxb_+uyb_*uyb_+uzb_*uzb_;
+		  const bool kb_ = u2b_>=def_u2max;
+		  const float skb_ = kb_ ? sqrt(def_u2max/u2b_) : 1.0f;
+		  uxn = uxb_*skb_; uyn = uyb_*skb_; uzn = uzb_*skb_;
+		  if(kb_&&rho_clamp_hits[28]<0xF0000000u) atomic_inc(&rho_clamp_hits[28]); // Slot 28 = u-Klemme griff (hier: Betragshuelle)
+)+"#ifdef KLEMM_BILANZ"+R(
+		  if(kb_) kl |= 4u; // Bedingung woertlich wie Slot 28
+)+"#endif"+R( // KLEMM_BILANZ
+		}
+)+"#else"+R( // U_BETRAG
 		uxn = clamp(uxn, -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(uyn, -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(uzn, -def_c, def_c);
@@ -3272,6 +3301,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef KLEMM_BILANZ"+R(
 		if(fabs(uxn)>=def_c||fabs(uyn)>=def_c||fabs(uzn)>=def_c) kl |= 4u; // Bedingung woertlich wie Slot 28
 )+"#endif"+R( // KLEMM_BILANZ
+)+"#endif"+R( // U_BETRAG
 		for(uint i=0u; i<def_velocity_set; i++) Fin[i] = 0.0f;
 )+"#endif"+R( // VOLUME_FORCE
 	}
@@ -4407,13 +4437,21 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	{ // separate block to avoid variable name conflicts
 )+"#ifdef VOLUME_FORCE"+R( // apply force and collision operator, write to fi in video memory
 		const float rho2 = 0.5f/rhon; // apply external volume force (Guo forcing, Krueger p.233f)
+)+"#ifdef U_BETRAG"+R(
+		{ const float uxb_ = fma(fxn, rho2, uxn), uyb_ = fma(fyn, rho2, uyn), uzb_ = fma(fzn, rho2, uzn); const float u2b_ = uxb_*uxb_+uyb_*uyb_+uzb_*uzb_; const float skb_ = u2b_>=def_u2max ? sqrt(def_u2max/u2b_) : 1.0f; uxn = uxb_*skb_; uyn = uyb_*skb_; uzn = uzb_*skb_; } // ★ Z2d: wie stream_collide (Kernel derzeit ohne Aufrufer)
+)+"#else"+R( // U_BETRAG
 		uxn = clamp(fma(fxn, rho2, uxn), -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(fma(fyn, rho2, uyn), -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(fma(fzn, rho2, uzn), -def_c, def_c);
+)+"#endif"+R( // U_BETRAG
 )+"#else"+R( // VOLUME_FORCE
+)+"#ifdef U_BETRAG"+R(
+		{ const float u2b_ = uxn*uxn+uyn*uyn+uzn*uzn; const float skb_ = u2b_>=def_u2max ? sqrt(def_u2max/u2b_) : 1.0f; uxn *= skb_; uyn *= skb_; uzn *= skb_; } // ★ Z2d
+)+"#else"+R( // U_BETRAG
 		uxn = clamp(uxn, -def_c, def_c); // limit velocity (for stability purposes)
 		uyn = clamp(uyn, -def_c, def_c); // force term: F*dt/(2*rho)
 		uzn = clamp(uzn, -def_c, def_c);
+)+"#endif"+R( // U_BETRAG
 )+"#endif"+R( // VOLUME_FORCE
 	}
 

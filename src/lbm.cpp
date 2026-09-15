@@ -534,6 +534,8 @@ uint klemm_haken_env() { const uint h = env_u("CFD_KLEMM_HAKEN", 0u); if(h>4u) p
 // Domaenen (E5). 0 = aus (Vorgabe), 1 = Messarm (s gerechnet und gezaehlt, nicht angewandt -- Felder bitgleich), 2 = anwenden.
 // CFD_POSITIV_HAKEN (nur Testarme): 1 = Stoerung an K4-Zellen der Kugel (Soll Eimer [0,25;0,5)), 2 = tau_i -> 1,2*w_i (jede Zelle Kandidat),
 // 3 = Klassenzaehlung fuer n%7 == 0 uebersprungen (Soll: genau eine Beanstandung). CFD_POSITIV_FACETTE: 0 = K0 in Modus 2 ausgenommen (E2), 1 = eingeschlossen.
+// ★ 15.09.2026 Klemmen Z2d (KLEMMEN-STUFE2-PLAN.md §2.1, E6): CFD_U_KLEMME 0 = Komponentenklemme |u_a| <= c_s (Vorgabe, FluidX3D), 1 = Betragsklemme |u|^2 <= c_s^2.
+uint u_klemme_env() { const uint k = env_u("CFD_U_KLEMME", 0u); if(k>1u) print_error("CFD_U_KLEMME kennt nur 0 (Komponente) und 1 (Betrag)."); return k; }
 uint positiv_env() { const uint m = env_u("CFD_POSITIV", 0u); if(m>2u) print_error("CFD_POSITIV kennt nur 0 (aus), 1 (Messarm) und 2 (anwenden)."); return m; }
 uint positiv_haken_env() { const uint h = env_u("CFD_POSITIV_HAKEN", 0u); if(h>3u) print_error("CFD_POSITIV_HAKEN kennt nur 0..3."); return h; }
 uint positiv_facette_env() { const uint f = env_u("CFD_POSITIV_FACETTE", 0u); if(f>1u) print_error("CFD_POSITIV_FACETTE kennt nur 0 (K0 ausgenommen) und 1 (eingeschlossen)."); return f; }
@@ -691,6 +693,7 @@ void LBM_Domain::allocate(Device& device) {
 	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : (klemm_haken_env()==4u ? "RHO_CLAMP 1,001/1,002 und Host-Wickelschranke 2^16 (Soll: MEHRDEUTIG)" : "RHO_CLAMP 1,001/1,002"))+string(klemm_haken_env()==3u&&klemm_bilanz_on ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt; im dd-Fall je Domaene eine Warnung)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis.");
 	if((klemm_haken_env()==3u||klemm_haken_env()==4u)&&!klemm_bilanz_on) print_error("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+" ist ein Negativtest des Messinstruments, das hier AUS ist (CFD_KLEMM_BILANZ=0 oder nicht SRT) -- er liefe still ins Leere (Pruefpass S0c-2 N-d).");
 	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3/4 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
+	u_klemme = u_klemme_env(); if(u_klemme>0u) print_info("CFD_U_KLEMME=1: u-Klemme als BETRAG |u|^2 <= c_s^2 (Z2d) statt je Komponente -- Slot 28 zaehlt die Betragshuelle.");
 	positiv_modus = positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie, dieselbe Quelle wie die Emission (Sperren seit P1b VOR dem Kernelbau, Pruefbefund P1a NIEDRIG 2)
 	positiv_haken = positiv_env()>0u ? positiv_haken_env() : 0u; positiv_facette = positiv_env()>0u ? positiv_facette_env() : 0u;
 	if(positiv_modus==1u) print_info("CFD_POSITIV=1: Positivitaetsbegrenzer (Projektionsform) als MESSARM -- s wird an den Zaehlschritten t%"+to_string(zaehl_takt())+" == 2 gerechnet und gezaehlt, die Felder bleiben bitgleich.");
@@ -2216,7 +2219,9 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define RHO_CLAMP_MAX "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? 1.002f : RHO_CLAMP_MAX,4u)+"f"
 #ifdef SRT // Pruefpass S0b NIEDRIG: die Buchung dj = w*rho*du gilt nur fuer SRT (unter TRT relaxiert der Impuls mit wm)
 	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)
-	+(klemm_bilanz_env() ? string("\n	#define def_u2max (def_c*def_c)") // ★ Z2b: Betragshuelle folgt def_c (Haken 2 schrumpft sie mit, gewollt)
+	+(klemm_bilanz_env()||u_klemme_env()>0u ? string("\n	#define def_u2max (def_c*def_c)") : string("")) // ★ Z2b/Z2d: Betragshuelle folgt def_c (Haken 2 schrumpft sie mit, gewollt); die Klemme haengt NICHT am Instrument
+	+(u_klemme_env()>0u ? string("\n	#define U_BETRAG") : string("")) // ★ Z2d: CFD_U_KLEMME=1
+	+(klemm_bilanz_env() ? string("") // (Z2b-Bildhuelle folgt)
 		+"\n	#define def_tor_lo (1.0f-1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)"+"\n	#define def_tor_hi (1.0f+1.5625f*"+to_string(RHO_CLAMP_MAX-1.0f, 6u)+"f)" : string("")) // ★ Z2b: Bildhuelle aus dem PHYSIKALISCHEN RHO_CLAMP_MAX (Host-Makro), Lambda^2 = 1,5625
 	+(klemm_bilanz_env()&&klemm_haken_env()==3u ? string("\n	#define KLEMM_HAKEN3") : string(""))
 #if defined(D3Q19)&&defined(FP16S) // ★ 15.09.2026 Klemmen Stufe 1 P1a: bei CFD_POSITIV=0 leer (Kernelquelle zeichengleich); Sperren im Konstruktor

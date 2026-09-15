@@ -174,6 +174,7 @@ struct Facette {
 ulong zaehl_takt(); // ★ 11.09.2026 gemeinsamer Zaehltakt fuer Kernel-Gatter UND Host-Sollformeln
 bool klemm_bilanz_env(); // ★ 15.09.2026 Klemmen S0b (lbm.cpp)
 uint klemm_haken_env();
+uint u_klemme_env(); // ★ Z2d (lbm.cpp)
 uint positiv_env(); // ★ 15.09.2026 Klemmen Stufe 1 P1a (lbm.cpp): CFD_POSITIV 0/1/2, CFD_POSITIV_HAKEN 0..3, CFD_POSITIV_FACETTE 0/1
 uint positiv_haken_env();
 uint positiv_facette_env();
@@ -424,6 +425,7 @@ public:
 	uint einlass_eq_n = 0u; float einlass_eq_u = 0.0f; // Konstruktionszeit-Kopien (EINLASS_EQ)
 	uint rho_takt = 0u;        // Konstruktionszeit-Kopie von s_rho_takt (read-once-Doktrin)
 	bool klemm_bilanz_on = false; // ★ 15.09.2026 Klemmen S0b: Konstruktionszeit-Kopie von CFD_KLEMM_BILANZ (Vorgabe 1)
+	uint u_klemme = 0u; // ★ Z2d: Konstruktionszeit-Kopie von CFD_U_KLEMME
 	uint positiv_modus = 0u; // ★ 15.09.2026 Klemmen Stufe 1 P1a: Konstruktionszeit-Kopie von CFD_POSITIV (0 aus, 1 Messarm, 2 anwenden)
 	uint positiv_haken = 0u, positiv_facette = 0u; // ★ Pruefbefund P1b NIEDRIG 6: Konstruktionszeit-Kopien fuer den Bericht
 	bool rho_rand_on = false;  // ★ 15.09. Konstruktionszeit-Kopie von s_rho_rand (read-once-Doktrin); das Setup liest DIESEN Wert, nicht die Umgebungsvariable

@@ -1603,10 +1603,12 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
 		{ // ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §4): Huellenzaehler
 			const bool satt_h = v[28]>=4026531840ull||v[295]>=4026531840ull||v[296]>=4026531840ull||v[297]>=4026531840ull;
-			print_info(string("  KLEMM-HUELLEN ")+wo+": u-Komponentenhuelle [295] "+to_string(v[295])+" (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+", davon Diagonalluecke [297] "+to_string(v[297])+" (nicht von der Komponentenklemme gefasst), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+" (Soll 0; Tor [270] "+to_string(v[270])+")");
+			print_info(string("  KLEMM-HUELLEN ")+wo+": u-Komponentenhuelle [295] "+to_string(v[295])+(L.lbm_domain[0]->u_klemme>0u ? string(", Betragshuelle [296] ")+to_string(v[296])+" (Soll [28] = "+to_string(v[28])+", CFD_U_KLEMME=1)," : " (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+",")+" davon Diagonalluecke [297] "+to_string(v[297])+" (nicht von der Komponentenklemme gefasst), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+" (Soll 0; Tor [270] "+to_string(v[270])+")");
 			string hv_;
 			if(!satt_h) {
-				if(v[295]!=v[28]) hv_ += " [295] "+to_string(v[295])+" != [28] "+to_string(v[28])+" (Komponentenhuelle muss genau die Klemmtreffer zaehlen);";
+				const bool betrag_ = L.lbm_domain[0]->u_klemme>0u; // ★ Z2d: unter der Betragsklemme zaehlt [28] die Betragshuelle
+				if(!betrag_&&v[295]!=v[28]) hv_ += " [295] "+to_string(v[295])+" != [28] "+to_string(v[28])+" (Komponentenhuelle muss genau die Klemmtreffer zaehlen);";
+				if(betrag_&&v[296]!=v[28]) hv_ += " [296] "+to_string(v[296])+" != [28] "+to_string(v[28])+" (Betragshuelle muss unter CFD_U_KLEMME=1 genau die Klemmtreffer zaehlen);";
 				if(v[297]>v[296]||v[296]-v[297]!=v[295]) hv_ += " [296] - [297] = "+to_string((ulong)(v[296]>=v[297] ? v[296]-v[297] : 0ull))+" != [295] "+to_string(v[295])+" (Komponentenhuelle muss in der Betragshuelle liegen; Rundung/Kontraktion?);";
 			}
 			if(!hv_.empty()) { print_warning(string("  KLEMM-HUELLEN ")+wo+": ABNAHME VERLETZT --"+hv_+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }

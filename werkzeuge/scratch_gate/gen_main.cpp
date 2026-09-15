@@ -204,20 +204,25 @@ int main(int argc, char** argv) {
 			+(string(argv[1])=="dateih3" ? string("\n #define KLEMM_HAKEN3") : string(""));
 		string pos = "";
 		if(argc>=5) { // ★ 15.09.2026 Klemmen Stufe 1 P1a: Positiv-Arme ueber die EMISSIONSFUNKTION selbst, keine Zwillingsliste
-			const string a = argv[4];
+			string a = argv[4];
+			// ★ Z2d: optionales Endzeichen 'u' = zusaetzlich U_BETRAG (CFD_U_KLEMME=1); "u" allein = nur U_BETRAG
+			bool ub = false; if(!a.empty()&&a.back()=='u') { ub = true; a.pop_back(); }
+			if(a.empty()) { pos = "\n #define U_BETRAG"; goto schreiben; }
 			// Pruefbefund P1a NIEDRIG 4: exakt pos<1|2>[f][h<1..3>], sonst Abbruch -- keine stille Umdeutung (pos1h, pos12, pos1x)
 			size_t q = 4; const bool fmt = a.size()>=4&&a.substr(0, 3)=="pos"&&(a[3]=='1'||a[3]=='2');
 			bool fac = false; unsigned haken = 0u; bool ok = fmt;
 			if(ok&&q<a.size()&&a[q]=='f') { fac = true; q++; }
 			if(ok&&q<a.size()&&a[q]=='h') { if(q+1<a.size()&&a[q+1]>='1'&&a[q+1]<='3') { haken = (unsigned)(a[q+1]-'0'); q += 2; } else ok = false; }
 			if(ok&&q!=a.size()) ok = false;
-			if(!ok) { std::cerr << "gen: 4. Argument exakt pos<1|2>[f][h<1..3>]: " << a << "\n"; return 2; }
+			if(!ok) { std::cerr << "gen: 4. Argument exakt pos<1|2>[f][h<1..3>][u] oder u: " << argv[4] << "\n"; return 2; }
 			unsigned long long N_defs = 1ull; unsigned Nx_defs = 1u, Ny_defs = 1u;
 			{ size_t pn = defs.find("#define def_N "); if(pn!=string::npos) N_defs = std::stoull(defs.substr(pn+14));
 			  pn = defs.find("#define def_Nx "); if(pn!=string::npos) Nx_defs = (unsigned)std::stoul(defs.substr(pn+15));
 			  pn = defs.find("#define def_Ny "); if(pn!=string::npos) Ny_defs = (unsigned)std::stoul(defs.substr(pn+15)); }
 			pos = positiv_defines((unsigned)(a[3]-'0'), haken, fac ? 1u : 0u, defs.find("#define fpxx half")!=string::npos, N_defs, Nx_defs, Ny_defs); // N, Nx, Ny aus den defs der defs (Stichprobenperiode wie im Lauf)
+			if(ub) pos += "\n #define U_BETRAG";
 		}
+		schreiben:
 		const string code = geraet + defs + klemm + pos + get_opencl_c_code();
 		std::ofstream f(argv[3]); f << code; f.close();
 		std::cout << "geschrieben: " << argv[3] << " (" << code.size() << " Bytes, Defines aus " << argv[2] << ")\n";
