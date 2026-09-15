@@ -503,7 +503,7 @@ ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEH
 // 1 = RHO_CLAMP auf 1,001/1,002 (Treffer fast ueberall), 2 = def_c = 0,05 (u-Klemme fast ueberall), 3 = wie 1 und
 // die rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: genau eine Ist!=Soll-Beanstandung).
 bool klemm_bilanz_env() { return env_u("CFD_KLEMM_BILANZ", 1u)>0u; }
-uint klemm_haken_env() { const uint h = env_u("CFD_KLEMM_HAKEN", 0u); if(h>3u) print_error("CFD_KLEMM_HAKEN kennt nur 0..3."); return h; }
+uint klemm_haken_env() { const uint h = env_u("CFD_KLEMM_HAKEN", 0u); if(h>4u) print_error("CFD_KLEMM_HAKEN kennt nur 0..4."); return h; } // 4 = wie 1, zusaetzlich Host-Wickelschranke 2^16 (S0c, Soll: MEHRDEUTIG-Warnung)
 
 
 // ★ 11.09.2026 SPALDING-TABELLE (CFD_SPALDING_TAB, Default AUS).
@@ -649,7 +649,7 @@ void LBM_Domain::allocate(Device& device) {
 	klemm_bilanz_on = false;
 #endif
 	if(klemm_haken_env()>0u) print_warning("CFD_KLEMM_HAKEN="+to_string(klemm_haken_env())+": TESTARM -- "+string(klemm_haken_env()==2u ? "u-Klemme def_c = 0,05" : "RHO_CLAMP 1,001/1,002")+string(klemm_haken_env()==3u&&klemm_bilanz_on ? " und rho-Klassenzaehlung fuer n%7==0 uebersprungen (Soll: Abnahme verletzt; im dd-Fall je Domaene eine Warnung)" : "")+". Die Physik dieses Laufs ist KEIN Ergebnis.");
-	if((klemm_haken_env()==1u||klemm_haken_env()==3u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
+	if((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u)&&env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_KLEMM_HAKEN 1/3 mit CFD_RHO_REK_PRUEF: die Host-Rekonstruktionspruefung rechnet mit RHO_CLAMP 0,5/1,5 -- nicht kombinierbar (Pruefpass S0b).");
 	// rho_rand_on steht seit C2c VOR der rho-Allokation (allocate), nicht mehr hier.
 	u_takt = s_u_takt;     // ★ TODO 2 Schritt 3: dito
 	schale_paritaet = s_schale_paritaet; // Beweisarm: Kernel-alpha 0, Enqueue laeuft (read-once)
@@ -2167,8 +2167,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 #endif // REGULARIZED_BOUNDARIES
 	#ifdef RHO_CLAMP
 	"\n	#define RHO_CLAMP"
-	"\n	#define RHO_CLAMP_MIN "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u) ? 1.001f : RHO_CLAMP_MIN,4u)+"f" // ★ Klemmen-Haken 1/3: nur Testarme
-	"\n	#define RHO_CLAMP_MAX "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u) ? 1.002f : RHO_CLAMP_MAX,4u)+"f"
+	"\n	#define RHO_CLAMP_MIN "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? 1.001f : RHO_CLAMP_MIN,4u)+"f" // ★ Klemmen-Haken 1/3: nur Testarme
+	"\n	#define RHO_CLAMP_MAX "+to_string((klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u) ? 1.002f : RHO_CLAMP_MAX,4u)+"f"
 #ifdef SRT // Pruefpass S0b NIEDRIG: die Buchung dj = w*rho*du gilt nur fuer SRT (unter TRT relaxiert der Impuls mit wm)
 	+(klemm_bilanz_env() ? string("\n	#define KLEMM_BILANZ\n	#define def_klemm_s 16384.0f") : string("")) // ★ 15.09.2026 Klemmen S0b; S = 2^14 (Plan §4)
 	+(klemm_bilanz_env()&&klemm_haken_env()==3u ? string("\n	#define KLEMM_HAKEN3") : string(""))
