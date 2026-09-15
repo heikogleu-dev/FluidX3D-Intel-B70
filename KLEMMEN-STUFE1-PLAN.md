@@ -209,3 +209,18 @@ Reaktion von update_force_field auf umverteilte Populationen.
 * **τ (Prüfbefund P1a NIEDRIG 1):** −w_i·2¹⁵ liegt nicht auf dem Halbwort-Raster; schon τ = 0 liefert dieselben geladenen Minima. τ ist
   vorsichtig; [272] zählt f* < τ, nicht f* < 0; [285] sieht deshalb weniger als [272].
 * Sperren seit P1b vor Kernelbau und Großallokation (Prüfbefund P1a NIEDRIG 2); Gate-Parser streng; Arm prod8fernp1 ergänzt.
+
+## Messung P1b 8 mm B70 Modus 1 (kl_p1b_dd8_m1_b70, 03c8eef/8a7051c, Standardzeile 300 ms) — VORLÄUFIG bis Prüfagent P1b
+
+forces.csv und cd_facetten.csv bitgleich zu kl_z2c_dd8_b70 (Modus 1 bitgleich). Ist=Soll in beiden Domänen erfüllt, Besuche = Host-Flagzählung
+(Nah 57 181 941, Fern 25 356 531).
+
+| | Zählschritte × Stichprobe | Kandidaten | Rate | machtlos | K0/K1/K2/K3/K4 | Eimer s | Koinz. ρ-Klemme | u-Klemme | neg. geladen |
+|---|---|---:|---:|---:|---|---|---:|---:|---:|
+| Nahfeld | 151 × n%11 | 4 448 | 5,7 ppm | 6 (f_eq neg. 6) | 24/**4401**/17/0/0 | 5/6/3349/673/409 | 2 316 (52 %) | 5 | 3 540 |
+| Fernfeld | 38 × n%5 | 767 | 4,0 ppm | 0 | 0/**767**/0/0/0 | 0/0/74/491/202 | 74 (10 %) | 0 | 884 |
+
+**Befund:** Negative Nachkollisions-Populationen sind bei 8 mm selten und liegen zu 99 % (Nah) bzw. 100 % (Fern) in K1 = TYPE_MS am
+bewegten Boden — derselbe Ort wie die Dichteklemme (Stufe 0: 100 % am Boden). s meist 0,5–0,95. Nachladeprobe t = takt+3: Nah 256, Fern 60.
+Folge für Modus 2: der Begrenzer wirkt fast nur im Bodenband; ob boden_eq diese Zellen danach überschreibt (Plan E9), ist mit dem offenen
+Stufe-0-Befund „boden_eq 0 Treffer vs. stream_collide 1,13 Mio am selben Band“ verknüpft und ungeklärt.
