@@ -1372,34 +1372,39 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
 }
 
+bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueber alle Domaenen; print_error erst in klemm_bilanz_abschluss() am FALLENDE (Pruefpass S0b MITTEL 1: print_error = exit)
+void klemm_bilanz_abschluss(const char* fall) { if(klemm_bilanz_verletzt) print_error(string("KLEMM-BILANZ (")+fall+"): Abnahme des Klemmen-Messinstruments verletzt -- siehe KLEMM-BILANZ-Zeilen im Bericht."); }
 static // ---------------------------------------------------------------------------- Dichte-Klemme berichten
 // ★★ Heikos Einwand 2026-08-09: "rho clamp ist doch auch nur ne Kruecke die man benoetigt wenn der
 // Code falsch ist oder etwas falsch parametrisiert ist." Richtig -- in einem korrekten Low-Mach-LBM
 // liegt rho bei 1 +- 0,02. Deshalb ist der Zaehler wichtiger als die Klemme selbst: er sagt, ob ein
 // Lauf ueberhaupt ein Ergebnis ist. Bleibt er null, war die Klemme ein nie ausloesender Waechter.
 // Ist er gross, rechnete der Lauf stellenweise auf einem geklemmten, also verfaelschten Feld.
-bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueber alle Domaenen, print_error erst in dichteklemme_fazit (print_error = exit)
 void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_lat=0.0f) { // u_lat nur fuer die Freistrom-Ansage unter U_FP16; 0 = nicht bekannt, dann entfaellt sie
 #ifdef RHO_CLAMP
 	if(L.lbm_domain[0]->klemm_bilanz_on) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §6): Ist=Soll des Messinstruments am Laufende
 		ulong v[288]; for(uint k=0u; k<288u; k++) v[k] = 0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device(); for(uint k=0u; k<288u; k++) v[k] += (ulong)L.lbm_domain[d]->rho_clamp_hits[k]; }
-		ulong rk=0ull, rd=0ull, uk=0ull, ud=0ull; bool satt=false;
+		ulong rk=0ull, rd=0ull, uk=0ull, ud=0ull; bool satt_r=false, satt_u=false; // Pruefpass S0b NIEDRIG: getrennt, sonst schaltet eine gesaettigte rho-Seite (H1) auch die u-Abnahme ab
 		for(uint k=0u; k<5u; k++) { rk += v[221u+k]; uk += v[242u+k]; }
 		for(uint k=0u; k<6u; k++) { rd += v[236u+k]; ud += v[257u+k]; }
-		for(uint k : {0u, 1u, 28u}) if(v[k]>=4026531840ull) satt = true;
-		for(uint k=221u; k<=262u; k++) { const bool summenslot = (k>=226u&&k<=235u)||(k>=247u&&k<=256u); if(!summenslot&&v[k]>=4026531840ull) satt = true; }
+		for(uint k : {0u, 1u, 221u, 222u, 223u, 224u, 225u, 236u, 237u, 238u, 239u, 240u, 241u}) if(v[k]>=4026531840ull) satt_r = true;
+		for(uint k : {28u, 242u, 243u, 244u, 245u, 246u, 257u, 258u, 259u, 260u, 261u, 262u}) if(v[k]>=4026531840ull) satt_u = true;
 		const ulong r01 = v[0]+v[1];
 		auto fuenf = [&](const uint b) { return to_string(v[b])+"/"+to_string(v[b+1u])+"/"+to_string(v[b+2u])+"/"+to_string(v[b+3u])+"/"+to_string(v[b+4u]); };
 		print_info(string("  KLEMM-BILANZ ")+wo+": rho-Treffer K0..K4 (Facette/MS/F-BBox ohne Facette/Randschale 2/Rest) = "+fuenf(221u)+", Summe "+to_string(rk)+" (Soll [0]+[1] = "+to_string(r01)+")");
 		print_info(string("  KLEMM-BILANZ ")+wo+": |drho|-Dekaden <1e-4..>=1 = "+to_string(v[236])+"/"+to_string(v[237])+"/"+to_string(v[238])+"/"+to_string(v[239])+"/"+to_string(v[240])+"/"+to_string(v[241])+", Summe "+to_string(rd)+" (Soll "+to_string(r01)+")");
 		print_info(string("  KLEMM-BILANZ ")+wo+": u-Treffer K0..K4 = "+fuenf(242u)+", Summe "+to_string(uk)+" (Soll [28] = "+to_string(v[28])+"); |du|-Dekaden = "+to_string(v[257])+"/"+to_string(v[258])+"/"+to_string(v[259])+"/"+to_string(v[260])+"/"+to_string(v[261])+"/"+to_string(v[262])+", Summe "+to_string(ud)+"; Kappung [265] = "+to_string(v[265])+" (Soll 0)");
 		print_info(string("  KLEMM-BILANZ ")+wo+": Rohsummen mod 2^32 (Festkomma S = 16384; die Umrechnung in Masse/Kraft kommt mit S0c) -- w*drho unten "+fuenf(226u)+", oben "+fuenf(231u)+"; dj_x+ "+fuenf(247u)+", dj_x- "+fuenf(252u)+"; dj_z+/- "+to_string(v[263])+"/"+to_string(v[264]));
-		if(satt) print_info(string("  KLEMM-BILANZ ")+wo+": mindestens ein Zaehler GESAETTIGT -- Ist=Soll nicht pruefbar (keine Beanstandung).");
-		else if(rk!=r01||rd!=r01||uk!=v[28]||ud!=v[28]||v[265]!=0ull) {
-			print_warning(string("  KLEMM-BILANZ ")+wo+": ABNAHME VERLETZT -- Klassen "+to_string(rk)+" / Dekaden "+to_string(rd)+" gegen [0]+[1] = "+to_string(r01)+", u-Klassen "+to_string(uk)+" / u-Dekaden "+to_string(ud)+" gegen [28] = "+to_string(v[28])+", Kappung "+to_string(v[265])+".");
+		{ const LBM_Domain* d0 = L.lbm_domain[0]; // Pruefpass S0b MITTEL 2: ohne set_force_bbox (Kugel, Kanal) ist die F-BBox die ganze Domaene
+		  if(d0->fbx0==0u&&d0->fby0==0u&&d0->fbz0==0u&&d0->fbnx==d0->get_Nx()&&d0->fbny==d0->get_Ny()&&d0->fbnz==d0->get_Nz()) print_info(string("  KLEMM-BILANZ ")+wo+": F-BBox = ganze Domaene -> K2 umfasst alles ausser Facette/MS (auch TYPE_E und Randschale); K3/K4 sind hier baulich leer."); }
+		if(satt_r) print_info(string("  KLEMM-BILANZ ")+wo+": rho-Seite GESAETTIGT -- deren Ist=Soll ist nicht pruefbar (keine Beanstandung).");
+		if(satt_u) print_info(string("  KLEMM-BILANZ ")+wo+": u-Seite GESAETTIGT -- deren Ist=Soll ist nicht pruefbar (keine Beanstandung).");
+		if((!satt_r&&(rk!=r01||rd!=r01))||(!satt_u&&(uk!=v[28]||ud!=v[28]))) {
+			print_warning(string("  KLEMM-BILANZ ")+wo+": ABNAHME VERLETZT -- Klassen "+to_string(rk)+" / Dekaden "+to_string(rd)+" gegen [0]+[1] = "+to_string(r01)+", u-Klassen "+to_string(uk)+" / u-Dekaden "+to_string(ud)+" gegen [28] = "+to_string(v[28])+". Der Abbruch folgt am Fallende.");
 			klemm_bilanz_verletzt = true;
 		}
+		if(v[265]!=0ull) print_warning(string("  KLEMM-BILANZ ")+wo+": Kappung [265] = "+to_string(v[265])+" -- mindestens ein |w*drho| oder |dj| > 16; die Festkomma-Summen sind damit UNTERGRENZEN (kein Abbruch, Pruefpass S0b MITTEL 1).");
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
 	}
 #endif // RHO_CLAMP
@@ -1528,7 +1533,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 			+" -- Solver-Kaskade, Rueckfallquote, Modellabdeckung -- sind ab dem Wickel wertlos. Kein Abbruch: die Physik und die CSVs sind unberuehrt.");
 	}
 	// ★ 2026-08-25: Ansage der beiden neuen Wirkpfad-Zaehler. Beide gegatet (t%100), also
-	// Stichproben, keine Ereigniszahlen. [BERICHTIGT 15.09.2026: Slot 28 ist UNGEGATET und saettigend (kernel.cpp u-Klemme); Slot 29 hier nicht geprueft.]
+	// Stichproben, keine Ereigniszahlen. [BERICHTIGT 15.09.2026: Slot 28 ist UNGEGATET und saettigend (kernel.cpp u-Klemme); Slot 29 (SPONGE) ist ebenfalls ungegatet und saettigend (kernel.cpp SPONGE-Block), Pruefpass S0b.]
 	{
 		ulong vk=0ull, sp=0ull;
 		for(uint d=0u; d<L.get_D(); d++) { L.lbm_domain[d]->rho_clamp_hits.read_from_device();
@@ -1665,7 +1670,6 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 }
 void dichteklemme_fazit(const ulong summe) {
 #ifdef RHO_CLAMP
-	if(klemm_bilanz_verletzt) print_error("KLEMM-BILANZ: Abnahme des Klemmen-Messinstruments verletzt -- siehe KLEMM-BILANZ-Zeilen darueber."); // ★ 15.09.2026 S0b: am Ende, weil print_error = exit
 	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben. (Der Zaehler ist saettigend, nicht gegatet: eine Null ist wieder eine echte Aussage.)");
 	else print_warning("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen: rho hat den physikalischen Bereich verlassen. Dieser Lauf rechnete stellenweise auf einem GEKLEMMTEN Feld und ist kein belastbares Ergebnis -- die Ursache liegt im Betriebspunkt (fehlende Volumenviskositaet bei w gegen 2), nicht in der Klemme.");
 #else
@@ -4403,6 +4407,7 @@ void main_setup_kanal() {
 	// nach 95 min Rechenzeit ALLE folgenden Abnahmen mit -- SISM, SGS-Band, Facetten, K2.
 	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
 	pruefe_ptrt(lbm.lbm_domain[0], "Kanal");
+	klemm_bilanz_abschluss("main_setup_kanal"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
 
@@ -5632,6 +5637,7 @@ void main_setup_kugel() {
 		pruefe_rho_rekonstruktion(lbm, Nx, Ny, Nz, 1u, Ny/2u, u_lat, out_dir, "Kugel");
 		pruefe_rho_rekonstruktion(lbm, Nx, Ny, Nz, 2u, 1u, u_lat, out_dir, "Kugel");
 	}
+	klemm_bilanz_abschluss("main_setup_kugel"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
 
@@ -5919,6 +5925,7 @@ static void main_setup_fahrzeug() {
 	for(uint k : {4u, 8u, 16u}) { const double se=block_sem(cd,k); if(se>=0.0) print_info("      "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
 	} // stat_ok
 	print_info("---------------------------------------------------------------");
+	klemm_bilanz_abschluss("main_setup_fahrzeug"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
 
@@ -9357,6 +9364,7 @@ static void main_setup_fahrzeug_dd() {
 		pruefe_rho_rekonstruktion(lbm_f, fNx, fNy, fNz, 1u, fNy/2u, u_lat, rr_dir, "Nahfeld");
 		pruefe_rho_rekonstruktion(lbm_f, fNx, fNy, fNz, 2u, 1u, u_lat, rr_dir, "Nahfeld");
 	}
+	klemm_bilanz_abschluss("main_setup_fahrzeug_dd"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
 
@@ -9556,6 +9564,7 @@ static void main_setup_fernfeld() {
 	}
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Fernfeld-Diagnose", h, u_lat); dichteklemme_fazit(h); }
 	print_info("CSV: "+out_dir+"rauschen.csv");
+	klemm_bilanz_abschluss("main_setup_fernfeld"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
 

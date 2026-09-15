@@ -3633,6 +3633,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // SPONGE
 )+"#ifdef KLEMM_BILANZ"+R(
 	if(kl!=0u) { // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md §2/§5/§6): hier steht w endgueltig fest (SGS und SPONGE vorbei, P-TRT liest w nur)
+		// NUR SRT (lbm.cpp emittiert KLEMM_BILANZ nur unter SRT): unter TRT waere dj = wm*rho*du. Der tote #ifndef-EQUILIBRIUM_BOUNDARIES-Zweig setzt zwar kl-Bits, dort waeren load_u und Faktor 1 an TYPE_E aber falsch -- er ist in keinem Build aktiv (defines.hpp).
 		uint kk = 4u; // Ortsklasse (ohne Flag-Lesung, spillfrei): K0 Facettenzelle > K1 TYPE_MS > K2 F-BBox ohne Facette ("fahrzeugnah") > K3 Randschale Dicke 2 > K4 Rest
 		bool fb_in_ = false;
 )+"#ifdef FORCE_FIELD"+R(
