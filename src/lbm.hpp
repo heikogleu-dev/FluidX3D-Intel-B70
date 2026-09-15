@@ -292,6 +292,13 @@ public:
 	Kernel kernel_extract_plane_flags;
 	Kernel kernel_drive_boundary_cubic_lift;
 	void alloc_coupling_planes(const ulong max_plane_cells); // legt coupling_plane an und bindet beide Kernel
+	// ★ 15.09.2026 RHO_RAND C1: Rekonstruktion von rho einer Ebene aus den DDFs. Eigene Puffer (nicht coupling_plane,
+	// den die Kopplung jeden Grobschritt beschreibt); nur angelegt, wenn alloc_rho_rek gerufen wird.
+	Memory<float> rho_rek_out;   // 4 floats je Ebenenzelle: rho rekonstruiert, rho roh, Klasse, heutiger Pufferwert
+	Memory<rhoxx> rho_rek_wort;  // rho rekonstruiert als GERAETE-gepacktes Speicherwort (Wortvergleich gegen den Puffer)
+	ulong rho_rek_max = 0ull;
+	Kernel kernel_rho_rek_ebene;
+	void alloc_rho_rek(const ulong max_plane_cells);
 	void alloc_facetten_domain(const std::vector<Facette>& F, const uint Nx, const uint Ny, const std::unordered_map<ulong,std::array<uchar,18>>* qmap=nullptr, const uint sgs_gdiag=0u, const uint sgs_fdwand=0u, const uint sgs_sism=0u); // sgs_gdiag als PARAMETER statt Statik (02.09.: zwei Statik-Lebensdauer-Fallen hintereinander -- ffc-Parsing und H1-Resetliste nullten s_sgs_gdiag vor alloc; env-getriebener Parameter hat keine Lebensdauer) // C1b: Puffer bauen + binden; qmap = Remesh-q (B1-Stufe 2)
 
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Nur belegt, wenn alloc_schale()
@@ -979,6 +986,7 @@ public:
 	bool plane_fits(const PlaneSpec& plane, const char* who) const; // prueft, dass die Ebene ganz in der Domaene liegt
 	void alloc_coupling_planes(const ulong max_plane_cells);
 	void extract_plane_macros(const PlaneSpec& plane, std::vector<float>& host_buf); // liest (rho,u) einer Ebene in host_buf (4 floats/Zelle)
+	void rho_rek_ebene(const PlaneSpec& plane, const ulong t_rek, std::vector<float>& out4, std::vector<rhoxx>& worte); // ★ 15.09. RHO_RAND C1: rho einer Ebene aus den DDFs bei Zeitschritt t_rek (Soll: aktuelles t)
 	void lese_yslice_in_host(const uint y); // ★ Slice-Ebenen-Read 2026-08-26: (rho,u,flags) EINER y-Ebene per Device-Gather in die Host-Arrays streuen (Transportweg-Optimierung, wertgleich)
 	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Reihenfolge: alloc_schale() auf

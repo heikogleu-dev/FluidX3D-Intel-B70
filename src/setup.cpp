@@ -4744,6 +4744,103 @@ void pruefe_wandwirksamkeit(LBM& L, const uint Nx, const uint Ny, const uint Nz,
 		+" von u_inf -- die Wand ist zu SCHNELL oder es steht eine Versperrung im Weg.");
 }
 
+// ★ 15.09.2026 RHO_RAND C1 -- PRUEFINSTRUMENT UND PROBEZELLEN (RHO_RAND-PLAN.md §5/§7/§11; Probezellen: Heiko 15.09.).
+// Beantwortet vor dem Umbau am echten Feld: liefert die Rekonstruktion aus den DDFs dasselbe Speicherwort, das
+// stream_collide im naechsten Schritt in den rho-Puffer schreibt? Ablauf auf DEMSELBEN fi-Zustand:
+//   (1) Pufferwoerter w_vor lesen (stammen aus stream_collide(t0-1)),
+//   (2) Ebene bei t0 rekonstruieren (Soll) und bei t0-1 (NEGATIVTEST: falsche Paritaet muss abweichen),
+//   (3) GENAU einen Schritt rechnen, Pufferwoerter w_nach lesen (aus stream_collide(t0)).
+// Verglichen wird Geraetewort gegen Geraetewort (der Hostpacker rundet anders, lbm.hpp). Soll je Klasse:
+// Fluid, TYPE_E, TYPE_S, TYPE_MS bitgleich; Facettenzellen duerfen abweichen (Plan K4: das Wandmodell schreibt fhn
+// VOR calculate_rho_u um) und werden getrennt ausgewiesen. Rekonstruktion und Speichern laufen in verschiedenen
+// Kernels in verschiedene Puffer -- kein Rueckleser auf derselben Adresse.
+// Kostet EINEN zusaetzlichen Zeitschritt am Laufende; deshalb nur mit CFD_RHO_REK_PRUEF=1 und hinter allen Abnahmen.
+static void pruefe_rho_rekonstruktion(LBM& lbm, const uint Nx, const uint Ny, const uint Nz, const string& out_dir, const string& fall) {
+	LBM_Domain* d = lbm.lbm_domain[0];
+	const uint y = Ny/2u;
+	PlaneSpec pl; pl.origin = uint3(0u, y, 0u); pl.extent_a = Nx; pl.extent_b = Nz; pl.axis = 1u;
+	const ulong NP = (ulong)Nx*(ulong)Nz, NxNy = (ulong)Nx*(ulong)Ny;
+	auto zelle = [&](const ulong g) { return g%(ulong)Nx+(ulong)y*(ulong)Nx+(g/(ulong)Nx)*NxNy; }; // Ebenenindex -> Zellindex (plane_cell_index, Achse y)
+	const ulong FN = (ulong)d->fbnx*(ulong)d->fbny*(ulong)d->fbnz;
+	auto ist_facette = [&](const ulong n) {
+		if(d->fac_N==0ull||FN==0ull) return false;
+		const uint x = (uint)(n%(ulong)Nx), yy = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/NxNy);
+		if(x<d->fbx0||x>=d->fbx0+d->fbnx||yy<d->fby0||yy>=d->fby0+d->fbny||z<d->fbz0||z>=d->fbz0+d->fbnz) return false;
+		const ulong fbi = (ulong)(x-d->fbx0)+((ulong)(yy-d->fby0)+(ulong)(z-d->fbz0)*(ulong)d->fbny)*(ulong)d->fbnx;
+		return d->fac_idx_voll_on ? d->fac_idx[fbi]!=0xFFFFFFFFu : ((d->fac_idx[2ull*(fbi>>5)]>>(uint)(fbi&31ull))&1u)!=0u;
+	};
+	d->alloc_rho_rek(NP);
+	d->finish_queue();
+	d->rho_clamp_hits.read_from_device();
+	const uint h217_0 = d->rho_clamp_hits[217], h218_0 = d->rho_clamp_hits[218];
+	const ulong t0 = lbm.get_t(); // = Domaenen-t (D=1), naechster stream_collide-Schritt
+	d->rho.read_from_device();
+	std::vector<rhoxx> w_vor((size_t)NP), w_nach((size_t)NP);
+	for(ulong g=0ull; g<NP; g++) w_vor[(size_t)g] = d->rho[zelle(g)];
+	std::vector<float> rek, neg; std::vector<rhoxx> rek_w, neg_w;
+	lbm.rho_rek_ebene(pl, t0, rek, rek_w);
+	lbm.rho_rek_ebene(pl, t0-1ull, neg, neg_w);
+	lbm.run(1u);
+	d->finish_queue();
+	d->rho.read_from_device();
+	for(ulong g=0ull; g<NP; g++) w_nach[(size_t)g] = d->rho[zelle(g)];
+	d->rho_clamp_hits.read_from_device();
+	const ulong d217 = (ulong)(d->rho_clamp_hits[217]-h217_0), d218 = (ulong)(d->rho_clamp_hits[218]-h218_0);
+	// Klassen: 0 Fluid, 1 TYPE_E, 2 TYPE_S, 3 TYPE_MS, 4 tote Kachel, 5 ausserhalb; Facette als eigene Klasse 6 (ueberschreibt 0)
+	const uint NK = 7u; const char* kname[7] = {"Fluid", "TYPE_E", "TYPE_S", "TYPE_MS", "tote Kachel", "ausserhalb", "Facette"};
+	ulong anz[7]={0}, gleich[7]={0}, neg_gleich[7]={0}, vor_gleich[7]={0}, geklemmt=0ull, n_e_ebene=0ull;
+	std::vector<std::vector<ulong>> beispiele(NK);
+	std::vector<ulong> klemm_bsp;
+	for(ulong g=0ull; g<NP; g++) {
+		uint k = (uint)(rek[(size_t)(4ull*g+2ull)]+0.5f); if(k>5u) k = 5u;
+		if(k==1u) n_e_ebene++;
+		if(k==0u&&ist_facette(zelle(g))) k = 6u;
+		anz[k]++;
+		if(rek_w[(size_t)g]==w_nach[(size_t)g]) gleich[k]++; else if(beispiele[k].size()<3u) beispiele[k].push_back(g);
+		if(neg_w[(size_t)g]==w_nach[(size_t)g]) neg_gleich[k]++;
+		if(w_vor[(size_t)g]==w_nach[(size_t)g]) vor_gleich[k]++;
+		const float roh = rek[(size_t)(4ull*g+1ull)];
+		if((k==0u||k==3u||k==6u)&&(roh<=0.5f||roh>=1.5f)) { geklemmt++; if(klemm_bsp.size()<3u) klemm_bsp.push_back(g); }
+		if(beispiele[k].empty()&&g+1ull==NP) {} // (keine Abweichung: Beispiele unten aus den gleichen Zellen)
+	}
+	// Probezellen: je Klasse die ersten Abweichler; hat eine Klasse keine, die erste Zelle der Klasse
+	for(ulong g=0ull; g<NP; g++) {
+		uint k = (uint)(rek[(size_t)(4ull*g+2ull)]+0.5f); if(k>5u) k = 5u;
+		if(k==0u&&ist_facette(zelle(g))) k = 6u;
+		if(beispiele[k].empty()) beispiele[k].push_back(g);
+	}
+	print_info("---------------- RHO-REKONSTRUKTION ("+fall+", RHO_RAND C1) ----------------");
+	print_info("Ebene y="+to_string(y)+", "+to_string(NP)+" Zellen, t0="+to_string(t0)+"; Soll: Rekonstruktion(t0) = Pufferwort nach stream_collide(t0)");
+	bool ok = true;
+	for(uint k=0u; k<NK; k++) {
+		if(anz[k]==0ull) continue;
+		print_info("  "+string(kname[k])+": "+to_string(anz[k])+" Zellen, bitgleich "+to_string(gleich[k])+", Negativtest t0-1 gleich "+to_string(neg_gleich[k])+", Puffer unveraendert "+to_string(vor_gleich[k]));
+		if((k<=3u)&&gleich[k]!=anz[k]) ok = false;
+	}
+	ulong neg_abw = 0ull; for(uint k=0u; k<NK; k++) if(k==0u||k==3u||k==6u) neg_abw += anz[k]-neg_gleich[k];
+	print_info("  Negativtest: "+to_string(neg_abw)+" Abweichungen an rekonstruierten Zellen (Soll > 0)");
+	print_info("  Zaehler 217 (Besuche): +"+to_string(d217)+" (Soll "+to_string((ulong)(2ull*NP))+"), 218 (TYPE_E): +"+to_string(d218)+" (Soll "+to_string((ulong)(2ull*n_e_ebene))+")");
+	print_info("  Zellen mit rho_roh ausserhalb (0,5; 1,5), also geklemmt: "+to_string(geklemmt));
+	if(neg_abw==0ull) ok = false;
+	if(d217!=2ull*NP||d218!=2ull*n_e_ebene) ok = false;
+	// Probezellen-CSV und Log
+	std::ofstream pz(out_dir+"rho_rek_probezellen.csv");
+	pz << "klasse,x,z,wort_nach,rho_puffer_nach,wort_rek,rho_rek,rho_roh,bitgleich,wort_vor,rho_puffer_vor,rho_rek_minus_puffer,wort_neg,rho_neg\n";
+	auto zeile = [&](const uint k, const ulong g) {
+		const float rp = rho_unpack(w_nach[(size_t)g]), rv = rho_unpack(w_vor[(size_t)g]), rn = rho_unpack(neg_w[(size_t)g]);
+		const float rr = rek[(size_t)(4ull*g)], ro = rek[(size_t)(4ull*g+1ull)];
+		pz << kname[k] << "," << g%(ulong)Nx << "," << g/(ulong)Nx << "," << (ulong)w_nach[(size_t)g] << "," << std::setprecision(10) << rp << "," << (ulong)rek_w[(size_t)g] << "," << rr << "," << ro << ","
+		   << (rek_w[(size_t)g]==w_nach[(size_t)g]?1:0) << "," << (ulong)w_vor[(size_t)g] << "," << rv << "," << (rr-rp) << "," << (ulong)neg_w[(size_t)g] << "," << rn << "\n";
+		print_info("  PROBE "+string(kname[k])+" (x="+to_string(g%(ulong)Nx)+",z="+to_string(g/(ulong)Nx)+"): Puffer "+to_string(rp,7u)+" rek "+to_string(rr,7u)+" roh "+to_string(ro,7u)+(rek_w[(size_t)g]==w_nach[(size_t)g]?" [bitgleich]":" [ABWEICHUNG]"));
+	};
+	for(uint k=0u; k<NK; k++) for(const ulong g : beispiele[k]) zeile(k, g);
+	for(const ulong g : klemm_bsp) zeile(0u, g);
+	pz.close();
+	print_info("  Probezellen-CSV: "+out_dir+"rho_rek_probezellen.csv");
+	if(!ok) print_error("RHO-REKONSTRUKTION ("+fall+"): Soll verletzt -- Fluid/TYPE_E/TYPE_S/TYPE_MS nicht bitgleich, Negativtest ohne Abweichung oder Zaehler 217/218 ungleich Soll. Siehe Zeilen darueber.");
+	print_info("RHO-REKONSTRUKTION ("+fall+"): Soll erfuellt (Facettenzellen getrennt ausgewiesen).");
+}
+
 void main_setup_kugel() {
 	// ---------------------------------------------------------------- Physik
 	const float si_u   = 30.0f;                          // Anstroemung und Bodengeschwindigkeit [m/s]
@@ -5289,6 +5386,7 @@ void main_setup_kugel() {
 	// nach 95 min Rechenzeit ALLE folgenden Abnahmen mit -- SISM, SGS-Band, Facetten, K2.
 	// Der Arm waere dann nicht nur P-TRT-disqualifiziert, sondern voellig ungeprueft.
 	pruefe_ptrt(lbm.lbm_domain[0], "Kugel");
+	if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) pruefe_rho_rekonstruktion(lbm, Nx, Ny, Nz, out_dir, "Kugel"); // ★ 15.09. RHO_RAND C1: HINTER allen Abnahmen (rechnet einen Schritt mehr, print_error bei Soll-Verletzung)
 	_exit(0);
 }
 

@@ -4351,6 +4351,60 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[o+3ul] = load_u(u, 2ul*def_N+(ulong)n);
 } // extract_plane_macros()
 
+)+R(kernel void rho_rek_ebene)+"("+R(const global fpxx* fi, const global rhoxx* rho, const global velxx* u, const global uchar* flags, const ulong t, global float* out, global rhoxx* out_wort,
+	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z, const uint extent_a, const uint extent_b, global uint* rho_clamp_hits
+)+R( TS_P
+)+") {"+R( // rho_rek_ebene()
+	// ★ 15.09.2026 RHO_RAND C1 (RHO_RAND-PLAN.md §5/§11): rho einer achsen-normalen Ebene AUS DEN DDFs, ohne
+	// den rho-Puffer zu lesen -- ausser dort, wo stream_collide selbst ihn liest (TYPE_E) oder nie schreibt (TYPE_S).
+	// Aufgerufen mit dem AKTUELLEN Domaenen-t (nach increment_time_step): load_f liest dann genau die Slots, die
+	// stream_collide(t) gleich lesen wird, das Ergebnis ist also das rho, das stream_collide(t) speichern wird --
+	// bitgleich ueberall dort, wo zwischen load_f und calculate_rho_u nichts an fhn aendert (Plan K4: Facetten-
+	// und Wandfunktionszellen weichen ab, weil ihr Wandmodell fhn VOR calculate_rho_u umschreibt).
+	// Ausgabe je Ebenenzelle (4 floats): [0] rho rekonstruiert (MIT RHO_CLAMP, wie gespeichert), [1] rho roh
+	// (Summe ohne Klemme), [2] Klasse (0 Fluid, 1 TYPE_E, 2 TYPE_S, 3 TYPE_MS, 4 tote Kachel, 5 ausserhalb),
+	// [3] heutiger Pufferwert load_rho. out_wort traegt [0] als GERAETE-gepacktes Speicherwort (vstore_half_rte),
+	// damit der Host Woerter vergleichen kann -- der Hostpacker rundet anders (lbm.hpp, rho_unpack).
+	// Die Klemmzaehler 0/1 stehen in stream_collide AUSSERHALB von calculate_rho_u und werden hier bewusst
+	// NICHT mitgezaehlt. Zaehler: [217] Besuche (UNGEGATET, Ist=Soll = Ebenenzellen je Aufruf), [218] davon TYPE_E.
+	const uint gid = get_global_id(0);
+	if(gid>=extent_a*extent_b) return;
+	const ulong o = (ulong)gid*4ul;
+	if(rho_clamp_hits[217]<0xF0000000u) atomic_inc(&rho_clamp_hits[217]);
+	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
+	if(n>=(uxx)def_N) { out[o]=1.0f; out[o+1ul]=1.0f; out[o+2ul]=5.0f; out[o+3ul]=1.0f; store_rho(out_wort, gid, 1.0f); return; }
+	const uchar flagsn_bo = flags[n]&TYPE_BO;
+	float rhon = 1.0f, rho_roh = 1.0f, klasse = 0.0f;
+	bool rekonstruieren = true;
+)+"#ifdef SPARSE_TILES"+R(
+	if(is_dead_tile(n, tile_slot)) { klasse = 4.0f; rekonstruieren = false; }
+)+"#endif"+R( // SPARSE_TILES
+	if(rekonstruieren&&flagsn_bo==TYPE_S) { klasse = 2.0f; rekonstruieren = false; }
+	if(rekonstruieren&&flagsn_bo==TYPE_E) {
+		rhon = load_rho(rho, n); rho_roh = rhon; klasse = 1.0f; rekonstruieren = false;
+		if(rho_clamp_hits[218]<0xF0000000u) atomic_inc(&rho_clamp_hits[218]);
+	}
+	if(rekonstruieren) {
+		uxx j[def_velocity_set];
+		neighbors(n, j);
+		float fhn[def_velocity_set];
+		load_f(n, fhn, fi, j, t TS_A);
+)+"#ifdef MOVING_BOUNDARIES"+R(
+		if(flagsn_bo==TYPE_MS) { apply_moving_boundaries(fhn, j, u, flags); klasse = 3.0f; }
+)+"#endif"+R( // MOVING_BOUNDARIES
+		rho_roh = fhn[0];
+		for(uint i=1u; i<def_velocity_set; i++) rho_roh += fhn[i];
+		rho_roh += 1.0f; // dieselbe Summenreihenfolge wie calculate_rho_u, nur ohne RHO_CLAMP
+		float uxn, uyn, uzn;
+		calculate_rho_u(fhn, &rhon, &uxn, &uyn, &uzn);
+	}
+	out[o+0ul] = rhon;
+	out[o+1ul] = rho_roh;
+	out[o+2ul] = klasse;
+	out[o+3ul] = load_rho(rho, n);
+	store_rho(out_wort, gid, rhon);
+} // rho_rek_ebene()
+
 )+R(kernel void extract_plane_flags(const global uchar* flags, global uchar* out,
 	const uint plane_axis, const uint origin_x, const uint origin_y, const uint origin_z,
 	const uint extent_a, const uint extent_b) {
