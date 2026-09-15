@@ -156,3 +156,18 @@ Arm fahren · E6 Betragskugel statt exakter Region.
 NaN-Verhalten; Monotonie [295] ⊂ [296] unter -cl-mad-enable; Lift-Tor = 0 nur 60 ms belegt; Häufigkeit Diagonallücke; Stabilität B2;
 **Ursache: boden_eq sieht 0 ρ-Treffer, stream_collide am selben Band 1,13 Mio** (Hauptsitzung vermutet apply_moving_boundaries, unbelegt);
 DDF-Summenauflösung 20/32768 am Gerät; Slot 279 unter B1; Kugel-Budgetzahlen H1/H2 nur Größenordnung.
+
+## Messung Stufe-2-Matrix 8 mm B70 (8ab2fe9, Standardzeile 300 ms, je eine Variable) — VORLÄUFIG bis Prüfagent Z2b/Z2d
+
+| Arm | Schalter | forces | Nah [28] / [295] / [296] / [297] | u-Treffer nach Warmlauf (Klasse) | [300]/[270] | cd_rest / cz_rest (250–300 ms) | ΔCd_j / ΔCz_j (σ) | Budget Nah+Fern | Wanduhr ab 100 ms |
+|---|---|---|---|---|---|---|---|---|---|
+| M-A | – | == kl_z2c_dd8_b70 | 1872 / 1872 / 2127 / 255 | 0 | 0/0 | 0,4596 / −0,1728 | 0 / 0 | 0,2227 σ | 132,3 s |
+| M-B1 | CFD_U_KLEMME=1 | verschieden | 31 060 / 2 040 / 31 060 / 29 020 | 9 918 (alle K0) | 0/0 | 0,4415 / −0,1526 | 0,0037 (0,11 σ) / 0,0030 (0,13 σ) | eingehalten | 131,6 s |
+| M-C (= P1c M2) | CFD_POSITIV=2 | verschieden | – | – | – | 0,3984 / −0,4012 | 0 / 0 | 0,0266 σ | 135,5 s |
+| M-CB1 | POSITIV=2 + U_KLEMME=1 | verschieden | 31 745 / 1 142 / 31 745 / 30 603 | 10 292 (alle K0) | 0/0 | 0,3909 / −0,4347 | 0,0036 / 0,0026 | eingehalten | 134,6 s |
+
+**Befunde:** (1) Z2b ist am Fahrzeug bitgleich; [295] = [28] exakt. (2) Die Komponentenklemme greift nur im Anlauf (bis t = 28 ms, alle K0);
+die Betragshülle wird dagegen auch im entwickelten Feld an Facettenzellen verletzt (Diagonallücke) — M-B1 klemmt dort nach Warmlauf
+9 918-mal und entfernt Impuls im Umfang 0,11 σ (Cd) / 0,13 σ (Cz): innerhalb des Budgets, aber nicht kostenlos. (3) [300] = [270] = 0 →
+Arm M-T entfällt planmäßig. (4) M-CB1 ≈ M-C (Positivität dominiert die Kraftänderung). Kraftdifferenzen bleiben Einzelrealisierungen
+(σ_diff ≈ 0,036–0,045). Wanduhr je eine Messung.
