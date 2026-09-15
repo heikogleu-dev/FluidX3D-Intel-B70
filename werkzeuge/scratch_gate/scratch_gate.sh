@@ -65,13 +65,13 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 "$T/gen" on  on  on  on  on  off "$T/e1p1rsu.cl" >/dev/null
 # ★ 15.09.2026 RHO_RAND-ARME (C2b): Produktionspunkt ELIBB an, PTRT an, u16 an, RHO_RAND statt SPARSAM --
 # einmal mit 2-Byte-rho (die Produktion) und einmal mit float-rho.
-"$T/gen" on  on  on  off on  on  "$T/e1p1rsuR.cl" >/dev/null
-"$T/gen" on  on  off off on  on  "$T/e1p1suR.cl" >/dev/null
+"$T/gen" on  on  on  off on  on  "$T/e1p1ruR.cl" >/dev/null
+"$T/gen" on  on  off off on  on  "$T/e1p1uR.cl" >/dev/null
 
 rc=0
 neu_bekannt=""
 for dev in 0x7d67 0xe223; do
-  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1rsuR e1p1suR; do
+  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR; do
     ausgabe=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" ALLE || true)
     # ★ 11.09.2026: BAUFEHLER IST NICHT SCRATCH. Vorher fiel ein gescheiterter Bau in beide
     # Gates, weil die Zeile dann schlicht kein "private_size=0" enthielt -- das Gate meldete

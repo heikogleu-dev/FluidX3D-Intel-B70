@@ -4397,7 +4397,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	const uxx n = plane_cell_index(gid, plane_axis, origin_x, origin_y, origin_z, extent_a, extent_b);
 	if(n>=(uxx)def_N) { out[o]=1.0f; out[o+1ul]=0.0f; out[o+2ul]=0.0f; out[o+3ul]=0.0f; return; }
 )+"#ifdef RHO_RAND"+R(
-	{ const uxx rr_ = rr_idx(n); out[o+0ul] = rr_<(uxx)def_RR_N ? load_rho(rho, rr_) : NAN; } // ★ C2b: innen gibt es kein rho mehr -- NaN-Marker, der Host nimmt rho aus rho_ausgabe_ebene
+	out[o+0ul] = as_float(0x7FC00000u); // ★ C2b/C2c: Spalte 0 ist unter RHO_RAND INSGESAMT ungueltig (auch R1-Fluidzellen x<Nx-2 tragen nur die Saat) -- NaN-Wort (Hausmuster schale_extract; ein NAN-Makro darf unter -cl-finite-math-only weggefaltet werden), der Host nimmt rho aus rho_ausgabe_ebene
 )+"#else"+R(
 	out[o+0ul] = load_rho(rho, n);
 )+"#endif"+R( // RHO_RAND
@@ -4475,7 +4475,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	out[o+1ul] = rho_roh;
 	out[o+2ul] = klasse;
 )+"#ifdef RHO_RAND"+R(
-	{ const uxx rr_ = rr_idx(n); out[o+3ul] = rr_<(uxx)def_RR_N ? load_rho(rho, rr_) : NAN; }
+	out[o+3ul] = as_float(0x7FC00000u); // ★ C2c: Pruefkernel unter RHO_RAND host-seitig gesperrt; heutiger Pufferwert existiert nicht mehr
 )+"#else"+R(
 	out[o+3ul] = load_rho(rho, n);
 )+"#endif"+R( // RHO_RAND

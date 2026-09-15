@@ -373,7 +373,7 @@ public:
 	// (kipp26 10.620 = ein Drittel, Kugel 2.892 = 21,5 %, 4 mm 504.225) bekommen zum ersten Mal
 	// ueberhaupt eine Wandbehandlung, weil die Sperre J.n = 0 bei J || c nur den SOLVE betraf.
 	// 0 = aus (bitgleich zum Vorstand) | 1 = Gleichgewichts-nu_t (1+kappa*y+) | 2 = gemessenes nu_t aus fac_wfd
-	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 221 (216 reserviert RHO_RAND C2, 217/218 rho_rek_ebene, 219/220 rho_ausgabe_ebene, 15.09.; 212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift, 215 = dessen Besuchszaehler; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
+	static uint s_fac_rdiag; // ★ 07.09.2026 Rueckfall-Diagnose (CFD_FAC_RDIAG): Slots 136..154, bitneutral. NAECHSTER FREIER SLOT IST 221 (216 RHO_RAND R1-Zugriff ausserhalb (Soll 0), 217/218 rho_rek_ebene, 219/220 rho_ausgabe_ebene, 15.09.; 212/213 = u-Huellenwaechter, 214 = Betragstor im Kopplungs-Lift, 215 = dessen Besuchszaehler; berichtigt 12.09., die Legende in lbm.cpp ist die fuehrende) (204..207 rho/u-SPARSAM und 210/211 rho-2-Byte-Bereichswaechter, beide 12.09. -- die Legende an der Allokation in lbm.cpp fuehrt; 188..198 NUT_SKAL-Diskriminator, 199..203 P-TRT seit 10.09. abends: 199 Block besucht, 200 Geistanteil vorhanden, 201 Abzug ungleich null -- diese drei SAETTIGEN bei 4 mm nach 800 Schritten und koennen dabei sogar WICKELN; 202/203 sind die ueber n%1024 ausgeduennte Zweitzaehlung, die nicht saettigt, und 203 prueft zusaetzlich, ob der Abzug die FP16S-Speicherrundung ueberlebt. DER SCHARFE TEST IST 203 GEGEN 202, NICHT 201 GEGEN 200) (Puffer seit 08.09. 224 statt 160; 126/127 SISM, 160-167 van-Driest-D^2-Histogramm als Zeitintegral, 168 VD-Wirkpfad, 169 VD ohne Besuch, 170-185 VD-Letzt-Stichprobe in zwei Baenken) -- die Legende an der Allokation in lbm.cpp (grep "rho_clamp_hits = Memory") ist die fuehrende Fassung
 	static uint s_fac_uw;
 	static bool s_fac_uw_sn; // A/B: Normalnullung wieder einschalten -- misst den Preis von J.n = 0
 	static uint s_fac_masse_alle; // 0 aus | 1 Kompensation ueber ALLE 19 Links | 2 NUR auf f_0 (VERWORFEN 04.09.: Bulk-Mode, f_0<=0) | 3 ARM X: Injektion wie 1, Rueckfall-Entscheid im Schatten wie ALPHA2 // CFD_FAC_MASSE_ALLE (04.09.2026): alpha-Kompensation ueber ALLE 19 Links statt nur ueber die Wandlinks -- hebt das ALPHA2-Downdate auf, OHNE die zellweise Massenerhaltung aufzugeben
@@ -383,7 +383,7 @@ public:
 	static uint s_einlass_eq_n; static float s_einlass_eq_u; // ★ EINLASS_EQ (V1-Port apply_inlet_velocity): Spalten x=1..N post-stream auf u-Equilibrium (lokales rho); 0 = aus. Read-once wie BODEN_EQ.
 	static uint s_u_takt; // ★ TODO 2 Schritt 3 (CFD_U_SPARSAM): 0 = aus, sonst ratio (u voll am letzten Substep jedes Grobschritts)
 	static uint s_rho_takt; // ★ TODO 2 Schritt 1 (CFD_RHO_SPARSAM): Sample-Kadenz in FEINEN Schritten; 0 = aus (dann ist der Geraetecode zeichengleich zu vorher)
-	static uint s_rho_rand; // ★ 15.09.2026 RHO_RAND (CFD_RHO_RAND, RHO_RAND-PLAN.md): 0 = aus, 1 = rho nur in der Domaenen-Randschale R1. NUR NAHFELD; das Setup nullt die Statik vor dem Fernfeld-Bau
+	static uint s_rho_rand; // ★ 15.09.2026 RHO_RAND (CFD_RHO_RAND, RHO_RAND-PLAN.md): 0 = aus, 1 = rho nur in der Domaenen-Randschale R1. fahrzeug_dd NUR Nahfeld (Statik vor dem Fernfeld-Bau genullt) und Kugel-Pruefstand
 	static uint s_fac_alpha;
 	static bool s_fac_elibb;
 	static uint s_sgs_fdwand;  // ★ 02.09. SGS-GEISTERMODEN-FIX (CFD_SGS_FDWAND=1): w an Facettenzellen aus |S|_FD des u-Felds (FD-Kernel, ein Schritt versetzt) statt aus dem Pi-Tensor, den das Wandmodell kontaminiert (B66/B69)
@@ -884,6 +884,7 @@ public:
 		Memory_Container<rhoxx> c;
 		LBM* lbm_ = nullptr; bool rand = false;
 		std::vector<float> ebene; uint ebene_achse = 3u, ebene_pos = 0u; ulong ebene_t = ~0ull;
+		ulong r1_t = ~0ull; // Zeitschritt des letzten R1-Hostspiegel-Reads (Pruefpass C2c NIEDRIG 3)
 		float get_rand(const ulong n); // lbm.cpp
 	public:
 		ulong n_cache = 0ull, n_r1 = 0ull; // Zugriffe im RAND-Betrieb (Bericht berichte_rho_rand)
@@ -891,13 +892,12 @@ public:
 		inline Rho_Feld(LBM* lbm, Memory<rhoxx>** buffers, const string& name) : c(lbm, buffers, name), lbm_(lbm) {}
 		inline Rho_Feld& operator=(Memory_Container<rhoxx>&& m) noexcept { c = std::move(m); return *this; }
 		void binde_rand(LBM* l); // lbm.cpp
-		inline bool ist_rand() const { return rand; }
 		inline void setze_ebene(const uint achse, const uint pos, const ulong t, std::vector<float>& w) { ebene.swap(w); ebene_achse = achse; ebene_pos = pos; ebene_t = t; }
 		inline float get(const ulong n) { return rand ? get_rand(n) : rho_unpack(c[n]); } // Dichte in Gitter-Einheiten
 		inline void set(const ulong n, const float r) { if(rand) print_error("RHO_RAND: Rho_Feld::set ist gesperrt -- der Host packt keine Nachkollisionssumme (lbm.hpp, rho_unpack/rho_pack)."); c[n] = rho_pack(r); }
-		inline void read_from_device() { c.read_from_device(); } // RAND: liest den R1-Puffer (Memory liest seine eigene Laenge)
+		void read_from_device(); // lbm.cpp -- RAND: liest den R1-Puffer (Memory liest seine eigene Laenge) und stempelt r1_t
 		inline void write_to_device() { c.write_to_device(); }
-		inline const ulong length() const { return c.length(); }
+		inline const ulong length() const { if(rand) print_error("RHO_RAND: Rho_Feld::length() ist unter RAND ohne Bedeutung (Puffer = R1)."); return c.length(); }
 	};
 
 	// ★ TODO 2 Schritt 4 (12.09.2026) -- u liegt NICHT mehr als Memory_Container offen.
@@ -1027,6 +1027,7 @@ public:
 	void rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const bool zaehlen, std::vector<float>& out); // ★ 15.09. RHO_RAND C2a: Ausgabe-rho (Nachkollisionssumme), t_aus = get_t()-1
 	void rho_schicht_in_host(const uint z, const bool zaehlen); // ★ 15.09. RHO_RAND C2c: z-Schicht der Ausgabe in den rho-Cache (VTK)
 	ulong rho_aus_gezaehlt_zellen = 0ull, rho_aus_gezaehlt_e = 0ull, rho_aus_ist_219 = 0ull, rho_aus_ist_220 = 0ull; // ★ C2c: Ist=Soll der gezaehlten Ausgabeaufrufe (Slots 219/220)
+	ulong rho_aus_rr_verglichen = 0ull, rho_aus_rr_abw = 0ull; // ★ C2c: Geraete-rr_idx gegen Host-rr_idx_host an TYPE_E der gezaehlten Ebene (Soll: verglichen > 0, Abweichungen 0)
 	void lese_yslice_in_host(const uint y); // ★ Slice-Ebenen-Read 2026-08-26: (rho,u,flags) EINER y-Ebene per Device-Gather in die Host-Arrays streuen (Transportweg-Optimierung, wertgleich)
 	void drive_boundary_from_coarse(const PlaneSpec& fine_plane, const std::vector<float>& coarse_face, const uint coarse_a, const uint coarse_b, const uint ratio); // kubischer Lift in die TYPE_E-Randzellen
 	// ★ P9c N2F-SCHALE (Heiko): near->far-Schalen-Rueckkopplung. Reihenfolge: alloc_schale() auf

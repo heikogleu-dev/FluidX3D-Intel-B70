@@ -587,6 +587,7 @@ void LBM_Domain::allocate(Device& device) {
 	rho_rand_on = s_rho_rand>0u;
 	rr_N = rho_rand_on ? r1_anzahl((uint)get_Nx(), (uint)get_Ny(), (uint)get_Nz()) : 0ull;
 	if(rho_rand_on) { // Konstruktor-Sperren, setup-unabhaengig
+		if(Dx*Dy*Dz>1u) print_error("RHO_RAND: die Domaene ist Teil einer Mehrdomaenen-Zerlegung -- der Halo-Transfer liest rho am Domaenenschnitt mit vollen Indizes.");
 		if(get_Nx()<5u||get_Ny()<5u||get_Nz()<5u) print_error("RHO_RAND: eine Gitterkante < 5 -- die Randschalen-Packung (rr_idx) ist dort nicht definiert.");
 		if(s_fac_apg!=0.0f) print_error("RHO_RAND x APG: APG liest rho an Facettennachbarn im Inneren, dort gibt es unter RHO_RAND keinen Puffer.");
 #if defined(SURFACE) || defined(GRAPHICS)
@@ -628,7 +629,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [168] VD Wirkpfad (= Summe 160..167) | [169] VD Facettenzelle ohne tw-Besuch | [170..185] VD Letzt-Stichprobe: zwei Baenke
 	// [186] SGS-BAND Wirkpfad (Bandzelle behandelt) | [187] SGS-BAND Klemme (Sbar >= |S|, nu_t = 0). NAECHSTER FREIER SLOT: 204 (188..198 NUT_SKAL, 199..203 P-TRT; Puffer 224 seit 08.09.) [BERICHTIGT 10.09. nachts -- hier stand 188].
 	// a 8 Eimer, Bank (t/100)&1 wird gezaehlt, die andere im selben Slot genullt -- nach dem Lauf traegt Bank (L/100)&1 genau den
-	// letzten Slot L. NAECHSTER FREIER SLOT: 221 (216 reserviert fuer RHO_RAND C2, 217/218 = rho_rek_ebene Besuche/TYPE_E, 219/220 = rho_ausgabe_ebene Besuche/TYPE_E nur im gezaehlten Aufruf, 15.09.; 204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift (Invariantenzusicherung, konstruktiv unerreichbar: Klemme 0,57735 x Lift-Gewichte 1,5625 = 0,9021 < 1,0), Soll 0; 215 = Besuche des Lift-Schreibpfads, ohne die die Null in 214 nichts beweist. 216..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden (HISTORISCH -- seit 15.09. traegt 217 die Besuche von rho_rek_ebene, 216 ist fuer C2 reserviert): der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
+	// letzten Slot L. NAECHSTER FREIER SLOT: 221 (216 = RHO_RAND R1-Zugriff ausserhalb der Schale, ungegatet, Soll 0, 217/218 = rho_rek_ebene Besuche/TYPE_E, 219/220 = rho_ausgabe_ebene Besuche/TYPE_E nur im gezaehlten Aufruf, 15.09.; 204..207 = rho/u-SPARSAM, 12.09.; 208/209 BEWUSST FREI GELASSEN als Luecke; 210 = rho ausserhalb 0,25..4,0 an der TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt den Fall, dass ein Kernel den 2-Byte-rho-Puffer als float liest; 211 = Besuche derselben Stelle an EINEM Schritt, Soll > 0, sonst hat 210 keine Abdeckung. 212 = |u| >= 1,0 oder nicht-endlich an derselben TYPE_E-Lesestelle, UNGEGATET, Soll 0 -- faengt bei u NICHT die Typverwechslung (das kann nur der Typ-Zensus), sondern die SAETTIGUNG des Halbworts ab |u| = 1,99902; 213 = Besuche dazu an EINEM Schritt, Soll > 0; 214 = Betragstor im Kopplungs-Lift (Invariantenzusicherung, konstruktiv unerreichbar: Klemme 0,57735 x Lift-Gewichte 1,5625 = 0,9021 < 1,0), Soll 0; 215 = Besuche des Lift-Schreibpfads, ohne die die Null in 214 nichts beweist. 216..217 waren am 12.09. kurzzeitig rho-Quantisierungs-Dekaden (HISTORISCH -- seit 15.09. traegt 217 die Besuche von rho_rek_ebene, 216 ist fuer C2 reserviert): der Rueckleser im schreibenden Kernel wurde vom Geraeteuebersetzer wegoptimiert, siehe die Begruendung an store_rho in kernel.cpp; Puffer 224). [BERICHTIGT 10.09. nachts -- hier stand 186 bei Puffer 192, eine dritte, dritte-Groesse-Fassung; die Legende widersprach sich an drei Stellen] Alle VD-Slots nur unter #ifdef SGS_VANDRIEST (Kontrollarm bitgleich).
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -2838,7 +2839,7 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 	}
 	if(LBM_Domain::s_rho_rand>0u&&Dx*Dy*Dz==1u) { // ★ 15.09. RHO_RAND C2c: rho nur R1 + Papierkorb, dazu der Ausgabepuffer (groesste Ebene)
 		bytes_bekannt -= N_dom*(ulong)sizeof(rhoxx);
-		bytes_bekannt += (r1_anzahl(Nx, Ny, Nz)+1ull)*(ulong)sizeof(rhoxx) + 4ull*std::max((ulong)Nx*(ulong)Nz, (ulong)Nx*(ulong)Ny);
+		bytes_bekannt += (r1_anzahl(Nx, Ny, Nz)+1ull)*(ulong)sizeof(rhoxx) + 4ull*std::max({(ulong)Nx*(ulong)Nz, (ulong)Nx*(ulong)Ny, (ulong)Ny*(ulong)Nz}); // dieselbe Formel wie der Lazy-Alloc in rho_ausgabe_ebene
 	}
 	uint memory_required = (uint)(bytes_bekannt/1048576ull); // in MB
 	// D1: RESERVE. ★ Pruefagent A-1: die Pruefung sieht `device_info.memory`, also den
@@ -3442,7 +3443,10 @@ void LBM::rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const boo
 	dom->rho_aus.read_from_device(0ull, n_plane);
 	out.resize(n_plane);
 	for(ulong i=0ull; i<n_plane; i++) out[i] = dom->rho_aus[i];
-	if(zaehlen) { // ★ C2c: Ist aus den Slots, Soll aus den Geraete-Flags derselben Ebene (TYPE_E ohne TYPE_S-Bit)
+	if(zaehlen&&dom->rho_rand_on) { // ★ C2c: Ist aus den Slots, Soll aus den Geraete-Flags derselben Ebene (TYPE_E ohne TYPE_S-Bit).
+		// NUR unter RHO_RAND (Pruefpass C2c, H1): der Pruefarm ohne RHO_RAND zaehlt selbst und ruft auch z-Ebenen (Nx*Ny), die
+		// slice_flags (coupling_max_plane_cells) nicht fasst -- sonst schriebe extract_plane_flags ueber das Pufferende.
+		if(dom->coupling_max_plane_cells<n_plane) { print_error("rho_ausgabe_ebene: gezaehlter Aufruf fuer "+to_string(n_plane)+" Zellen, slice_flags fasst nur "+to_string(dom->coupling_max_plane_cells)+"."); return; }
 		dom->rho_clamp_hits.read_from_device();
 		rho_aus_ist_219 += (ulong)(dom->rho_clamp_hits[219]-h219_0); rho_aus_ist_220 += (ulong)(dom->rho_clamp_hits[220]-h220_0);
 		dom->kernel_extract_plane_flags.set_ranges(n_plane);
@@ -3450,8 +3454,19 @@ void LBM::rho_ausgabe_ebene(const PlaneSpec& plane, const ulong t_aus, const boo
 		dom->kernel_extract_plane_flags.enqueue_run();
 		dom->finish_queue();
 		dom->slice_flags.read_from_device(0ull, n_plane);
-		ulong ne = 0ull; for(ulong i=0ull; i<n_plane; i++) if((dom->slice_flags[i]&(TYPE_S|TYPE_E))==TYPE_E) ne++; // TYPE_BO gibt es nur auf dem Geraet (0x03 = TYPE_S|TYPE_E)
+		ulong ne = 0ull; for(ulong i=0ull; i<n_plane; i++) if((dom->slice_flags[i]&(TYPE_S|TYPE_E))==TYPE_E) ne++; // reines TYPE_E (TYPE_MS = TYPE_S|TYPE_E faellt heraus)
 		rho_aus_gezaehlt_zellen += n_plane; rho_aus_gezaehlt_e += ne;
+		// Pruefpass C2c NIEDRIG 5: Geraete-rr_idx gegen Host-rr_idx_host EXAKT -- die Ausgabe liest an TYPE_E load_rho(rho, rr_idx(n)),
+		// der Host dekodiert das R1-Wort an rr_idx_host(n). Gleiches Wort -> gleicher float (Skalierung 2^-15 exakt).
+		dom->rho.read_from_device();
+		for(ulong i=0ull; i<n_plane; i++) {
+			if((dom->slice_flags[i]&(TYPE_S|TYPE_E))!=TYPE_E) continue;
+			const ulong a = i%(ulong)plane.extent_a, b = i/(ulong)plane.extent_a;
+			const ulong n = plane.axis==0u ? (ulong)plane.origin.x+(a+b*(ulong)Ny)*(ulong)Nx : (plane.axis==1u ? a+((ulong)plane.origin.y+b*(ulong)Ny)*(ulong)Nx : a+(b+(ulong)plane.origin.z*(ulong)Ny)*(ulong)Nx);
+			const ulong rr = rr_idx_host(n, Nx, Ny, Nz);
+			rho_aus_rr_verglichen++;
+			if(rr>=dom->rr_N||as_uint(out[i])!=as_uint(rho_unpack(dom->rho[rr]))) rho_aus_rr_abw++;
+		}
 	}
 }
 
@@ -3487,20 +3502,29 @@ void LBM::Rho_Feld::binde_rand(LBM* l) {
 	lbm_ = l; rand = true;
 	if(l->get_D()!=1u) print_error("RHO_RAND: Rho_Feld nur fuer eine Domaene gebaut.");
 }
+void LBM::Rho_Feld::read_from_device() {
+	c.read_from_device();
+	if(rand) r1_t = lbm_->get_t();
+}
 float LBM::Rho_Feld::get_rand(const ulong n) {
 	const uint Nx = lbm_->get_Nx(), Ny = lbm_->get_Ny(), Nz = lbm_->get_Nz();
 	const ulong NxNy = (ulong)Nx*(ulong)Ny;
 	const uint x = (uint)(n%(ulong)Nx), y = (uint)((n/(ulong)Nx)%(ulong)Ny), z = (uint)(n/NxNy);
-	if(ebene_t==lbm_->get_t()) { // Cache nur fuer den Zeitschritt, zu dem er entstand (C2-Plan Falle 5)
-		if(ebene_achse==1u&&y==ebene_pos) { n_cache++; return ebene[(size_t)((ulong)x+(ulong)z*(ulong)Nx)]; }
-		if(ebene_achse==2u&&z==ebene_pos) { n_cache++; return ebene[(size_t)((ulong)x+(ulong)y*(ulong)Nx)]; }
+	const bool auf_ebene = (ebene_achse==1u&&y==ebene_pos)||(ebene_achse==2u&&z==ebene_pos);
+	if(auf_ebene&&ebene_t==lbm_->get_t()) { // Cache nur fuer den Zeitschritt, zu dem er entstand (C2-Plan Falle 5)
+		n_cache++;
+		return ebene_achse==1u ? ebene[(size_t)((ulong)x+(ulong)z*(ulong)Nx)] : ebene[(size_t)((ulong)x+(ulong)y*(ulong)Nx)];
 	}
 	LBM_Domain* d = lbm_->lbm_domain[0];
 	const ulong rr = rr_idx_host(n, Nx, Ny, Nz);
 	const bool gepflegt = rr<d->rr_N&&(((lbm_->flags[n]&(TYPE_S|TYPE_E))==TYPE_E)||x+2u>=Nx);
-	if(!gepflegt) print_error("RHO_RAND: Hostzugriff auf rho an ("+to_string(x)+","+to_string(y)+","+to_string(z)+") -- weder in der aktuellen Ausgabe-Ebene noch in der gepflegten Randschale (TYPE_E oder x >= Nx-2). Host-Zugriffssperre.");
+	if(!gepflegt) {
+		if(auf_ebene) print_error("RHO_RAND: Hostzugriff auf rho an ("+to_string(x)+","+to_string(y)+","+to_string(z)+") -- die Ausgabe-Ebene ist VERALTET (t="+to_string(ebene_t)+", jetzt "+to_string(lbm_->get_t())+"). Host-Zugriffssperre.");
+		print_error("RHO_RAND: Hostzugriff auf rho an ("+to_string(x)+","+to_string(y)+","+to_string(z)+") -- weder in der aktuellen Ausgabe-Ebene noch in der gepflegten Randschale (TYPE_E oder x >= Nx-2). Host-Zugriffssperre.");
+	}
+	if(r1_t!=lbm_->get_t()) print_error("RHO_RAND: Hostzugriff auf R1 an ("+to_string(x)+","+to_string(y)+","+to_string(z)+") -- der R1-Hostspiegel ist VERALTET (gelesen bei t="+to_string(r1_t)+", jetzt "+to_string(lbm_->get_t())+"). Vorher rho.read_from_device().");
 	n_r1++;
-	return rho_unpack(d->rho[rr]);
+	return rho_unpack(d->rho[rr]); // Speicherwort (an TYPE_E der gelesene Randwert; an x >= Nx-2 das von stream_collide geschriebene rhon, NICHT die Nachkollisionssumme)
 }
 void LBM::rho_schicht_in_host(const uint z, const bool zaehlen) {
 	PlaneSpec plane; plane.origin = uint3(0u, 0u, z); plane.extent_a = Nx; plane.extent_b = Ny; plane.axis = 2u;
