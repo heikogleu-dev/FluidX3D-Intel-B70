@@ -504,9 +504,10 @@ void ulat_skal_setzen(const double s) {
 	// Trailer hat er beim ersten Anlauf den halben Ausdruck gefressen.)
 	if(fabs(s-ulat_skal())>1e-6*fmax(1.0, fabs(s))) print_error("Schrittskalierung Ist != Soll: aus der Umgebung "+to_string((float)ulat_skal(),7u)+", aus dem gefahrenen u_lat "+to_string((float)s,7u)+". Die Schritt-Schalter waeren gegen eine andere Gittergeschwindigkeit umgerechnet als gerechnet wird.");
 }
+// Z2a: die Huelle 2,1 (Slot 210, u-Wickelschranke in setup.cpp klemm_lesen) haengt NICHT an diesen Makros, sondern am TYPE_E-Bereichswaechter.
+static_assert(RHO_CLAMP_MIN==0.5f&&RHO_CLAMP_MAX==1.5f, "Z2a: die hergeleiteten RHO_CLAMP-Grenzen muessen bitgleich 0,5f/1,5f sein (Kontrollarm).");
 // Der Zaehltakt ist ein SCHRITT-Schalter und skaliert deshalb mit. Ohne das laege die
 // Wirkpfad-Zaehlung bei geaendertem u_lat an einer anderen physikalischen Zeit als in der Vorgabe.
-static_assert(RHO_CLAMP_MIN==0.5f&&RHO_CLAMP_MAX==1.5f, "Z2a: die hergeleiteten RHO_CLAMP-Grenzen muessen bitgleich 0,5f/1,5f sein (Kontrollarm).");
 ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEHL_TAKT", 100u))*ulat_skal()); static const ulong t = (ulong)(r<1ll ? 1ll : r); return t; }
 // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md): CFD_KLEMM_BILANZ = Messinstrument der beiden Zustandsklemmen (Vorgabe 1 = an,
 // 0 = aus -- nur fuer den Wanduhr-A/B). CFD_KLEMM_HAKEN = Negativ-/Positivtests, NUR Testarme (aendern die Physik):
@@ -2031,7 +2032,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define def_dimensions "+to_string(dimensions)+"u" // number spatial dimensions (2D or 3D)
 	"\n	#define def_transfers "+to_string(transfers)+"u" // number of DDFs that are transferred between multiple domains
 
-	+(klemm_haken_env()==2u ? "\n	#define def_c 0.05000000f" : "\n	#define def_c 0.57735027f") // lattice speed of sound c = 1/sqrt(3)*dt; ★ Klemmen-Haken 2 (nur Testarme): u-Klemme auf 0,05
+	+(klemm_haken_env()==2u ? "\n	#define def_c 0.05000000f" : "\n	#define def_c 0.57735027f") // lattice speed of sound c = 1/sqrt(3)*dt; ★ Klemmen-Haken 2 (nur Testarme): u-Klemme auf 0,05. Z2a: dieselbe c_s wie RHO_KLEMM_CS2 (defines.hpp) -- u_max = c_s ist die Grenze der Konsistenzhuelle, aus der RHO_CLAMP_MIN/MAX folgen
 	+	"\n	#define def_w " +to_string(1.0f/get_tau())+"f" // relaxation rate w = dt/tau = dt/(nu/c^2+dt/2) = 1/(3*nu+1/2)
 #if defined(D2Q9)
 	"\n	#define def_w0 (1.0f/2.25f)" // center (0)
