@@ -258,3 +258,17 @@ Läufe kl_s0b_dd8_an_b70 / _aus_b70 (dbec4ce) und kl_s0c_dd8_b70 (b470bab), Zeil
   aus den 1872 Anlauf-u-Treffern. σ(cd_rest, Block-SEM 4) = 0,02574. Fernfeld nach Warmlauf −77,2 ppm je Schritt. Wickelwächter still.
 - **Einordnung nach Übergabe §1.2:** |ΔCd_entfernt| ≪ σ → Stufe 1 ist bei 8 mm Hygiene, nicht Rang 1. Die Dichteklemme ist ein
   **Boden-Befund** (bewegter Boden / BODEN_EQ-Band), kein Wandmodell-Befund. u-Klemme nach Warmlauf wirkungslos (bei 4 mm offen).
+
+## Nachtrag S0c/S0d-Abnahme nach dem Neustart (15.09.2026 abends)
+
+- **S0d-Pfad** (boden_eq-Buchung 266–268) an der Kugel mit CFD_BODEN_EQ=2 + Haken 1 belegt: CPU 28 156 Treffer, iGPU und B70 (16 mm)
+  je 94 680 / 40 964 nach Warmlauf, gleicher Hash. einlass_eq (nur Fernfeld), schale_blend (269), Lift-Tor (270): strukturgleich, NICHT
+  positiv getestet (Fahrzeugfall mit Haken nur auf der CPU möglich, dort zu langsam bzw. Geometriegrenzen bei 16 mm).
+- **S0c-Prüfpass 2: freigegeben**, Auflage M3 (quantitative Einzelschritt-Probe) erfüllt, Kugel 40 mm CPU, genau 1 Schritt (kl_m3_*):
+  - H2: u-Treffer K1/K2 = 28 620 / 346 464, Σq(|dj_x|) = 46 120 361 / 280 992 600 → K2 im Mittel q = 811,0 je Treffer; analytisch
+    q = w·ρ·|u_c−u_roh|·S = 1,99999·1·0,025·16384 = 819 (u_roh = u_lat = 0,075, ρ = 1) → −1,0 % (Zellen nahe der Kugel mit u_roh < u_lat);
+    alle 374 972 Treffer in der Dekade 10⁻²…10⁻¹ (|Δu| = 0,025) ✓. K1 (MS) 1611,5 je Treffer — bewegte Wand, u_roh ≠ u_lat.
+  - H1: ρ-Treffer K1/K2 = 28 620 / 341 180, Σq unten 916 275 / 11 411 405, oben 794 / 126 762 → K2 ≈ 33,4 je Treffer gegen analytisch
+    q = round(w·(1,001f−1)·S) = round(32,77) = 33 bei ρ_roh = 1; Dekaden 369 102 in [10⁻⁴;10⁻³), 416 in [10⁻³;10⁻²), 282 in [10⁻²;10⁻¹):
+    ρ_roh liegt im ersten Schritt nicht exakt bei 1, die 698 Treffer höherer Dekaden tragen den Überschuss. Systematische Rundung +0,7 %
+    (q = 33 statt 32,77) ist im Soll berücksichtigt.

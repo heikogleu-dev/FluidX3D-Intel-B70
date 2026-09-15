@@ -83,6 +83,11 @@ physikalisch sinnvoll setzen“; alles an 8 mm; danach Block-Audit-Schleife. **E
 | Fernfeld (1262 Schritte) | 1 807 | −0,3849 | 5,68·10⁻³ = 0,22σ | 0,461 | 6,81·10⁻³ = 0,26σ | 0 |
 | Summe | | | 0,23σ | | 0,50σ | |
 
+**Messung Z2c (d53248a), 8 mm B70 300 ms Standardzeile, kl_z2c_dd8_b70:** forces und cd_facetten bitgleich zu rr_c2d_dd8_b_b70.
+Urteil nach Warmlauf: Nah 0,0063σ netto (0,2265σ brutto, 5148 Schritte), Fern 0,2164σ (0,2592σ, 1287), Nah+Fern **0,2227σ netto**
+(0,4858σ brutto) → eingehalten, k(4) = 1,0110, σ_cd = 0,025740, σ_cz = 0,023666, Kappung 0. ΔCd_j = ΔCz_j = 0. Rechnung oben (0,23σ/0,50σ)
+bestätigt. Kosmetik: CSV schreibt ΔCd_j als „-0“.
+
 ## 3 Verhalten bei Überschreitung
 - In berichte_klemmbilanz nur print_warning + `klemm_budget_verletzt`; Gesamturteil `klemm_budget_gesamt(nah, fern)`;
   klemm_bilanz_abschluss meldet am Fallende EINEN print_error für beide Flags.
