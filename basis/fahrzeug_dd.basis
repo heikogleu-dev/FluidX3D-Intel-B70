@@ -3,6 +3,7 @@
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
 # --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---
+# NACHGEZOGEN (basis_aus_lauf.py --nachziehen, 2026-09-16, Heiko-Entscheid 16.09. 14:58: Abstaende/Masse bleiben physikalisch fest, Zeiten folgen der Aufloesung): Einheiten CFD_BODEN_EQ_ABSTAND modus->zellen_fein; CFD_N2F_BAND_N zellen_grob->zellen_grob_laenge; CFD_N2F_BAND_PLATEAU modus->zellen_grob_laenge; CFD_N2F_BAND_WANDFREI modus->zellen_grob_laenge; ergaenzt CFD_SGS_SISM_AB 15000, CFD_SGS_SISM_T 5000, CFD_SGS_SISM 1, CFD_FAR_LX 12.2720, CFD_PERF_AB 0.1. schritte_fein heisst ab jetzt WERT BLEIBT (env_schritte rechnet im Lauf um, Waechter prueft den Rohwert) -- die Absaetze vom 12.09. und 07.09. ('2500 bei 8 mm') sind damit ueberholt.
 # EINHEIT GEAENDERT (12.09.2026, Pruefbefund B5 zum u_lat-Schalter): CFD_SLICE_NEAR_STEPS stand als
 #   "zellen_fein" und wurde damit nur mit dx_ref/dx umgerechnet. Der Schalter zaehlt aber FEINE
 #   ZEITSCHRITTE, und die haengen an dt = u_lat*dx/si_u, also an BEIDEN Groessen. Solange u_lat eine
@@ -91,7 +92,7 @@
 #     dx_ref/dx -> 2500 bei 8 mm (dt_f = 2e-5 s). Einheit zellen_fein bewusst, weil dt_f proportional dx.
 #     Der Diff-Schnitt ist im Kadenz-Modus per Default AUS (Heiko 26.08.), CFD_DIFF_SCHNITT=1 reaktiviert ihn.
 CFD_BODEN_EQ 2 modus
-CFD_BODEN_EQ_ABSTAND 2 modus
+CFD_BODEN_EQ_ABSTAND 2 zellen_fein
 CFD_BODEN_EQ_DOWN 1 modus
 CFD_CASE fahrzeug_dd modus
 CFD_DX 4 phys
@@ -105,25 +106,30 @@ CFD_FAC_ELIBB 1 modus
 CFD_FAC_NACHBAR 1 modus
 CFD_FAC_SATGATE 1 modus
 CFD_FAC_UTKORR 1.5 modus
-CFD_F_LISTE 1 modus
+CFD_FAR_LX 12.2720 phys
 CFD_FERN_BODEN_EQ 2 modus
 CFD_FERN_BODEN_EQ_DOWN 1 modus
 CFD_FERN_EINLASS_EQ 2 modus
+CFD_F_LISTE 1 modus
 CFD_KOPPLUNG_GLATT 1 modus
 CFD_KRAFT_ZBAND 4 zellen_fein
 CFD_N2F_BAND 1 modus
-CFD_N2F_BAND_N 8 zellen_grob
-CFD_N2F_BAND_PLATEAU 2 modus
+CFD_N2F_BAND_N 8 zellen_grob_laenge
+CFD_N2F_BAND_PLATEAU 2 zellen_grob_laenge
 CFD_N2F_BAND_PROFIL 2 modus
 CFD_N2F_BAND_WAKE 1 modus
 CFD_N2F_BAND_WAKE_ABSTAND 32 zellen_grob_laenge
 CFD_N2F_BAND_WAKE_START_X 311 index_grob
-CFD_N2F_BAND_WANDFREI 2 modus
+CFD_N2F_BAND_WANDFREI 2 zellen_grob_laenge
 CFD_N2F_SCHALE 0.5 modus
 CFD_NEAR_LY 2.6400 phys
 CFD_NEAR_LZ 1.8560 phys
 CFD_NEAR_VOR_MM 96 phys
+CFD_PERF_AB 0.1 phys
 CFD_SGS_FDWAND 1 modus
+CFD_SGS_SISM 1 modus
+CFD_SGS_SISM_AB 15000 schritte_fein
+CFD_SGS_SISM_T 5000 schritte_fein
 CFD_SLICE_NEAR_STEPS 5000 schritte_fein
 CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.501 phys
