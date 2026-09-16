@@ -63,7 +63,7 @@ while IFS= read -r zeile; do
 	fi
 	if { echo " $env_teil " | grep -Eq '[[:space:]]CFD_(KLEMM|POSITIV)_HAKEN=\+?0*[1-9]' || [ "$geerbt_haken" = "1" ]; } && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel ' \
 	   && ! { echo " $env_teil " | grep -q ' CFD_DEV_FINE=0 ' && echo " $env_teil " | grep -q ' CFD_DEV_COARSE=0 '; }; then
-		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.; Ausloeser: $( [ \"$geerbt_haken\" = 1 ] && echo GEERBTE UMGEBUNG || echo Zeilenmuster ))" | tee -a "$Q"
+		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.; Ausloeser: $([ "$geerbt_haken" = 1 ] && echo "GEERBTE UMGEBUNG" || echo "Zeilenmuster"))" | tee -a "$Q"
 		continue
 	fi
 	if [ "${CFD_QUEUE_DEV:-2}" = "1" ] && command -v journalctl >/dev/null 2>&1; then

@@ -1373,7 +1373,7 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 }
 
 bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueber alle Domaenen; print_error erst in klemm_bilanz_abschluss() am FALLENDE (Pruefpass S0b MITTEL 1: print_error = exit)
-// ★ Audit-Nachpruefung 16.09.2026, Befund H1 (vollstaendig): in berichte_dichteklemme standen NEUN print_error. Jeder davon ist exit(1)
+// ★ Audit-Nachpruefung 16.09.2026, Befund H1 (vollstaendig): in berichte_dichteklemme standen ZEHN print_error (im ersten Anlauf als "neun" gezaehlt, Pruefbefund N-1). Jeder davon ist exit(1)
 // und riss alles hinter sich mit -- Fernfeld-Bericht, dichteklemme_fazit, POSITIV-BILANZ und den ganzen KLEMM-BUDGET-Block. Belegt an
 // logs/kl_a3_dd8_t_b70.log (u-SPARSAM) und logs/kl_a5_dd8_*.log (rho-SPARSAM, der Zwilling, den der erste Fix noch stehen liess).
 // Jetzt sammelt dk_befund() sie alle; geworfen wird EINMAL am Fallende in klemm_bilanz_abschluss. Der Befund bleibt hart (rc 1),
@@ -1547,7 +1547,7 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 		const double dcd = -Fx_N/qA, dcz = -Fz_N/qA;
 		print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+", "+to_string(n)+" Schritte, "+to_string(ph==0u ? K.fenster : K.fenster_nach)+" Fenster): rho-Treffer "+to_string(hr,0u)+", u-Treffer "+to_string(hu,0u));
 		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Durchflusses u_lat*Ny*Nz (Groessenbezug; das Nahfeld hat keinen Einlass); Rundungsschranke "+to_string((su(a,236u,6u)+a[266])/(2.0*S),4u)); // Pruefpass 3 NIEDRIG B: ungegatete Dekaden + EQ, wie rund_cd
-		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+((K.schale_modus==0u&&a[269]>0.0) ? " (EQ-Arm: NICHT massenerhaltend -- f_eq(rho_c) springt auf den geklemmten Wert, dieses drho wird NICHT gebucht; Audit 16.09.2026, Befund A-N1)" : " (massenerhaltend, nur gezaehlt)")+"; Lift-rho-Tor "+to_string(a[270],0u));
+		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+((K.schale_modus!=0u) ? " (massenerhaltend, nur gezaehlt)" : (a[269]>0.0 ? " (EQ-Arm: NICHT massenerhaltend -- f_eq(rho_c) springt auf den geklemmten Wert, dieses drho wird NICHT gebucht; Audit 16.09.2026, Befund A-N1)" : " (EQ-Arm, hat hier nie gegriffen -- er waere an dieser Stelle nicht massenerhaltend; Pruefbefund N-7)"))+"; Lift-rho-Tor "+to_string(a[270],0u));
 		if(a[269]>0.0&&K.schale_modus==0u) print_warning(string("  KLEMM-BILANZ ")+wo+": schale_blend-Klemme griff "+to_string(a[269],0u)+" mal im EQ-Arm (CFD_N2F_SCHALE_FNEQ=0) -- dieser Arm ist dort NICHT massenerhaltend, die Masse fehlt in der Bilanz. Das Massenurteil dieses Laufs ist damit eine UNTERGRENZE (Audit 16.09.2026, Befund A-N1).");
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
 		if(ph==1u) { // ★ Z2c: Budget-Kennwerte (Masse inkl. BODEN/EINLASS_EQ, S0d)
@@ -1662,20 +1662,21 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				const bool h134_ = klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u;
 				const float tlo_ = klemm_haken_env()==5u ? 1.0f-1.0f/32768.0f : 1.0f-1.5625f*(RHO_CLAMP_MAX-1.0f);
 				const float thi_ = klemm_haken_env()==5u ? 1.0f+1.0f/32768.0f : 1.0f+1.5625f*(RHO_CLAMP_MAX-1.0f);
-				const float glo_ = tor_huelle_env()>0u ? tlo_-16.0f/32768.0f : ((rho_huelle_env()>0u&&!h134_) ? 20.0f/32768.0f : 0.5f);
-				const float ghi_ = tor_huelle_env()>0u ? thi_+16.0f/32768.0f : ((rho_huelle_env()>0u&&!h134_) ? 1.0f+65504.0f/32768.0f : 2.0f);
+				const float glo_ = tor_huelle_env()>0u ? tlo_-16.0f/32768.0f : ((rho_huelle_aktiv()) ? 20.0f/32768.0f : 0.5f);
+				const float ghi_ = tor_huelle_env()>0u ? thi_+16.0f/32768.0f : ((rho_huelle_aktiv()) ? 1.0f+65504.0f/32768.0f : 2.0f);
 				const ulong slo_ = (ulong)(glo_*16384.0f+0.5f), shi_ = (ulong)(ghi_*16384.0f+0.5f);
 				// ★ Nachpruefung 16.09. (M3): der Waechterspiegel [304]/[305] haengt NICHT am Lift, sondern am Besuchszaehler [211] --
 				// er belegt die zweite Haelfte von CFD_TOR_HUELLE (die Huelle des Waechters 210, +-32/32768 statt +-16/32768 am Tor).
 				{ const float wlo_ = tor_huelle_env()>0u ? tlo_-32.0f/32768.0f : (rho_huelle_aktiv() ? 0.0f : 0.4f);
 				  const float whi_ = tor_huelle_env()>0u ? thi_+32.0f/32768.0f : (rho_huelle_aktiv() ? 3.0f : 2.1f);
 				  const ulong wl_ = (ulong)(wlo_*16384.0f+0.5f), wh_ = (ulong)(whi_*16384.0f+0.5f);
-				  if(v[211]>0ull) {
+				  if(L.get_D()!=1u) print_info(string("  KLEMM-HUELLEN ")+wo+": D = "+to_string(L.get_D())+" > 1 -- die Konstantenspiegel [301]/[302]/[304]/[305] werden ueber die Domaenen SUMMIERT und sind hier darum nicht auswertbar (Pruefbefund N-6, 16.09.2026); die Zaehler daneben bleiben gueltig.");
+				  else if(v[211]>0ull) {
 					print_info(string("  KLEMM-HUELLEN ")+wo+": Waechterspiegel [304]/[305] = "+to_string(v[304])+"/"+to_string(v[305])+" (Soll "+to_string(wl_)+"/"+to_string(wh_)+", entspricht "+to_string(wlo_,6u)+"/"+to_string(whi_,6u)+") bei "+to_string(v[211])+" Besuchen.");
 					if(v[304]+1ull<wl_||v[304]>wl_+1ull||v[305]+1ull<wh_||v[305]>wh_+1ull) hv_ += " Waechterspiegel [304]/[305] = "+to_string(v[304])+"/"+to_string(v[305])+" != Soll "+to_string(wl_)+"/"+to_string(wh_)+": der Kernel rechnet mit einer ANDEREN Waechterhuelle als der Host annimmt;";
 				  } else if(tor_huelle_env()>0u) print_warning(string("  KLEMM-HUELLEN ")+wo+": [211] = 0 -- der Waechterspiegel [304]/[305] konnte nicht feuern, die Waechterhuelle bleibt UNBELEGT.");
 				}
-				if(v[215]>0ull) { // nur in Domaenen mit Lift (das Fernfeld hat keinen); ohne Besuch kann der Spiegel nicht geschrieben worden sein
+				if(L.get_D()==1u&&v[215]>0ull) { // nur in Domaenen mit Lift (das Fernfeld hat keinen); ohne Besuch kann der Spiegel nicht geschrieben worden sein
 					print_info(string("  KLEMM-HUELLEN ")+wo+": Torspiegel [301]/[302] = "+to_string(v[301])+"/"+to_string(v[302])+" (Soll "+to_string(slo_)+"/"+to_string(shi_)+", Festkomma S = 16384, entspricht "+to_string(glo_,6u)+"/"+to_string(ghi_,6u)+") -- Wirkpfadbeleg der uebersetzten Torgrenzen.");
 					if(v[301]==0ull&&v[302]==0ull) hv_ += " Torspiegel [301]/[302] = 0 trotz "+to_string(v[215])+" Lift-Besuchen -- der Spiegel liegt nicht auf dem ausgefuehrten Pfad (Emission oder Kernelzweig fehlt);";
 					else if(v[301]+1ull<slo_||v[301]>slo_+1ull||v[302]+1ull<shi_||v[302]>shi_+1ull) hv_ += " Torspiegel [301]/[302] = "+to_string(v[301])+"/"+to_string(v[302])+" != Soll "+to_string(slo_)+"/"+to_string(shi_)+" (Toleranz 1 Festkommaschritt = 1/16384; sie deckt allein die 6-stellige Stringifizierung von RHO_CLAMP_MAX-1 in der Emission, hoechstens ~0,013 Schritte -- alles Groessere ist eine echte Abweichung, Nachpruefung 16.09. N4): der Kernel rechnet mit ANDEREN Torgrenzen als der Host annimmt;";
