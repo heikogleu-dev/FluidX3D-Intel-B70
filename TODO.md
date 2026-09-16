@@ -96,7 +96,7 @@ wählen, dass Nx durch 16 teilbar ist. Offen: dieselbe Leiter auf der B70 (`CFD_
 | **1** | **`CFD_T_WARMUP` 0,201 → 0,29** | **15,6 min UND +1,3 % Genauigkeit** | beseitigt den +1,34-%-Bias auf cd_druck | **eine Variable** |
 | **2** | **Die sieben Zugriffe: rho/u nur schreiben, wo gelesen wird** | **−6,5 bis −9,5 % Wanduhr** | **bitgleich beweisbar** | hoch |
 | **3** | **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** (Anwärmphase ist 39 %) | — | 200–300 Zeilen |
-| 4 | `u_lat` erneut, HINTER Punkt 1 | −24 % Wanduhr | dann erst deutbar | Schalter liegt fertig |
+| 4 | ~~`u_lat` erneut, HINTER Punkt 1~~ **ERLEDIGT: 8 Schritte je Zelle sind Standard seit p4_register (12./13.09.)** | −24 % Wanduhr (46,1 min Zeitschleife statt 90) | Reproduzierbarkeit auf dieser Sprosse offen (Abschnitt 3, zurückgestellt) | — |
 
 **Zu 1, und es ist heute mehr als ein billiger Posten:** das Messfenster beginnt mitten im
 Einschwingen. SISM wird bei 150 ms scharf, die Mittelung startet bei 201 ms, der Vorgang braucht
@@ -115,7 +115,10 @@ Feld entschieden: `FP16S(rho−1)`, **nicht** int16 für u — das kippt Gates a
 
 > **Stand 15.09.:** Punkt 2 der Tabelle („sieben Zugriffe“) ist weitgehend umgesetzt — RHO_SPARSAM, U_SPARSAM, RHO_FP16, U_FP16 und
 > RHO_RAND (Nahfeld, seit 15.09. Standard) stehen in der Produktionszeile. `CFD_T_WARMUP` steht dort weiter auf 0,2 (Punkt 1 offen),
-> Prüfpunkt/Neustart ungebaut, `u_lat` geparkt.
+> Prüfpunkt/Neustart ungebaut.
+> **BERICHTIGT 16.09. (Heiko):** `u_lat` ist NICHT geparkt — **8 Schritte je Zelle (`CFD_SCHRITTE_PRO_ZELLE=8`, u_lat 0,125) SIND der
+> Standard**, Bezug `p4_register` (48,9 min). Der Absatz „u_lat ist gemessen und GEPARKT" oben ist der Stand vom 12.09. und historisch.
+> Am 16.09. hat mich dieser Absatz einen 4-mm-Lauf gekostet (`p4_pu` mit 0,075 gestartet, nach 22 min abgebrochen).
 
 ### Durchsatz-Audit Nahfeldkernel: warum 69 % statt 85 % Spitze (Auftrag Heiko 15.09.2026, geprüft, NICHT gemessen)
 
