@@ -94,3 +94,21 @@ mit 7500 nie mit `CFD_BASIS=aus` fahren; jede dd-Zeile braucht jetzt `CFD_FAR_LX
 - **Auswertung morgen früh:** `fenster_50ms.py p375_b p375_d` und `p375_d p375_e` (cd_rest/cz_rest je 50 ms), `membran_y0.py p375_d`, Laufzeit/VRAM
   (`export/p375_dv_vram.csv`), Prüfagent-Bericht zum Versatz (lief 20:32 parallel; bei HOCH: Läufe bewerten, ggf. wiederholen).
 - **Entscheide für Heiko:** Versatz in die Basis (Standard)? T_WARMUP a/b/c? Danach Performance-Restliste (X messen → B2, D1/D2, C1, Prüfpunkt-Plan).
+
+
+## 7 · Endstand 21:55
+
+**`p375_e` (3,75 mm + SGS-Band Lagen 2+3 + Y-Versatz, U_SPARSAM=0) gegen `p375_b`:** Cd_rest −0,020 ± 0,006 (−4 %, letztes Fenster, alle sechs negativ);
+Cz_rest +0,028 ± 0,016 (WENIGER Abtrieb, 1,8 σ, 5/6 Fenster) — nicht Richtung OF13. cd_reib +9 %. Laufzeit 3857 s (+4,4 %), VRAM-Min 2877 MiB,
+Band-Wirkpfad Ist=Soll (5 898 954 Bandzellen × 51). Membran weg. Beide Änderungen zusammen (Heikos Auftrag) → keine Zuordnung Band/Versatz.
+**Y-Versatz (TODO 4c):** gebaut, Prüfagent (keine Logikfehler), Textfixes gebaut (d9a5dbf), Gegenprobe `yv_mit2_igpu` Membran weg. Default 0; neue dd-Zeilen
+tragen `CFD_Y_VERSATZ=1`. **Wichtig:** `p4_register` (4 mm) ist um ein ulp zufällig membranfrei → der Nachmittagsvergleich 3,75 ↔ 4 mm (Cd_rest −6,4 %) war
+durch das Blech verunreinigt; sauber erst mit Versatz auf 3,75 mm ohne Band gegen p4_register — **nur nach Heikos Go** (Regel: kein eigener Bezugsarm).
+**Abtriebslücke (Heiko 21:30, „Auflösung heilt das nicht"):** Stand README — Cz 74,6 % von OF13, Dachlinie löst zu früh ab (3,47–3,61 m gegen 3,66 m, 8 mm),
+SISM an der Wandzelle schließt 29 %, Rest −0,25; unverbrauchte Hebel: globale Massenbilanz am Sättigungsgate, Flächenbilanz der Ein-Link-Zellen (flache
+Flächen), D3Q27 an Wandzellen (derselbe Mechanismus). **Vorschlag morgen früh, ohne GPU:** `diff_of13_zonen.py`/`of13_kraft_zband.py`/`abl_dach` auf `p375_e`
+und `p375_b` — die Lücke zonenweise und der Ablöseort bei 3,75 mm.
+**Entscheide für Heiko:** Versatz in die Basis; Versatz-Lauf ohne Band gegen p4_register; Band bei 3,75 mm verwerfen; T_WARMUP a/b/c.
+**Eigene Fehler heute (Protokoll):** zweimal eigenmächtiger Bezugsarm (`p4_pu` 09:52, `p375_d` 20:34) — Regel „ein Auftrag = ein Lauf" im Gedächtnis
+verschärft; Summenbildung cd_rest+Reibung (falsche Abtriebsaussage); Edit-Skript mit ungeschriebener setup.cpp; `//`-Kommentar fraß Einzeiler.
+Queue leer, keine Prozesse, alles committet (HEAD d0a27ed).
