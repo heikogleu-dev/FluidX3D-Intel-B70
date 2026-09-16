@@ -10,9 +10,18 @@ Die EINHEIT je Schalter entscheidet, wie der Waechter bei anderer Aufloesung umr
   phys        Meter/Sekunden/Millimeter/dimensionslos -- bleibt gleich
   zellen_fein skaliert mit dx_ref/dx  (Feingitter-Zellen)
   zellen_grob bleibt gleich           (Grobzellen; Codedoktrin setup.cpp:3798-3801)
+  zellen_grob_laenge  gleiche WELTlaenge: skaliert mit dx_ref/dx (dx_c = ratio*dx); Heiko 16.09.2026:
+              Abstaende/Masse bleiben physikalisch fest
   index_grob  absoluter Grobzell-Index -- skaliert, Ergebnis oft uneindeutig
+  schritte_fein  Zeitschritte, WERT BLEIBT: auf dx_ref und u_lat 0,075 definiert; env_schritte rechnet im
+              Lauf laut um (u_lat seit 12.09., dx seit 16.09.2026), der Waechter prueft den ROHEN Wert --
+              ein von Hand umgerechneter Wert (7500 bei 8 mm) faellt damit als ABWEICHEND auf
   modus       Schaltzahl/Flag -- bleibt gleich
   ausgabe     beruehrt die Loesung nicht -- ungeprueft
+
+Modus --nachziehen (16.09.2026): basis_aus_lauf.py --nachziehen <ziel.basis> [NAME=WERT ...]
+  setzt die Einheitenspalte JEDER Datenzeile aus EINHEIT neu (Werte unangetastet), haengt genannte
+  Schalter an (Fehler, wenn schon vorhanden) und vermerkt das unter der Begruendungsmarke.
 """
 import sys, os, re
 EINHEIT = {
@@ -20,19 +29,22 @@ EINHEIT = {
  "CFD_NEAR_LX":"phys", "CFD_NEAR_LY":"phys", "CFD_NEAR_LZ":"phys",
  "CFD_SPONGE_N":"zellen_grob_laenge",   # Sonderfall: gleiche WELTlaenge, siehe Waechter
  "CFD_KRAFT_ZBAND":"zellen_fein",
- "CFD_N2F_BAND_N":"zellen_grob",
+ "CFD_N2F_BAND_N":"zellen_grob_laenge",   # ★ 16.09.2026 Heiko: Banddicke bleibt eine LAENGE (war zellen_grob = Anzahl bleibt)
  "CFD_N2F_BAND_WAKE_ABSTAND":"zellen_grob_laenge",
  "CFD_N2F_BAND_WAKE_START_X":"index_grob",
- "CFD_BODEN_EQ":"modus","CFD_BODEN_EQ_DOWN":"modus","CFD_BODEN_EQ_ABSTAND":"modus",
+ "CFD_BODEN_EQ":"modus","CFD_BODEN_EQ_DOWN":"modus","CFD_BODEN_EQ_ABSTAND":"zellen_fein",  # ★ 16.09.: Chebyshev-Abstand in Feinzellen = Laenge
  "CFD_FERN_BODEN_EQ":"modus","CFD_FERN_BODEN_EQ_DOWN":"modus","CFD_FERN_EINLASS_EQ":"modus",
  "CFD_FACETTEN":"modus","CFD_FAC_SATGATE":"modus","CFD_FAC_ALPHA":"modus",
  "CFD_SGS_FDWAND":"modus","CFD_FAC_NACHBAR":"modus",  # ★ 03.09.2026 in die Basis aufgenommen (Heiko-Entscheid)
  "CFD_KOPPLUNG_GLATT":"modus","CFD_N2F_SCHALE":"modus","CFD_N2F_BAND":"modus",
- "CFD_N2F_BAND_PROFIL":"modus","CFD_N2F_BAND_PLATEAU":"modus","CFD_N2F_BAND_WANDFREI":"modus",
+ "CFD_N2F_BAND_PROFIL":"modus","CFD_N2F_BAND_PLATEAU":"zellen_grob_laenge","CFD_N2F_BAND_WANDFREI":"zellen_grob_laenge",  # ★ 16.09.: Lagen = Laengen
  "CFD_N2F_BAND_WAKE":"modus","CFD_FAC_UTKORR":"modus","CFD_FAC_ELIBB":"modus",
  "CFD_FACETTEN_YWMIN":"modus","CFD_FAC_CD_EVERY":"ausgabe","CFD_VTK_ENDE":"ausgabe",
  "CFD_VTK_DT":"ausgabe","CFD_SLICE_DT":"ausgabe","CFD_RUN_NAME":"ausgabe",
  "CFD_CASE":"modus",
+ # ★ 16.09.2026 (TODO 4a): schrittbasierte Schalter und die bisher ungefuehrten Laengen/Zeiten
+ "CFD_SLICE_NEAR_STEPS":"schritte_fein","CFD_SGS_SISM_AB":"schritte_fein","CFD_SGS_SISM_T":"schritte_fein",
+ "CFD_SGS_SISM":"modus","CFD_FAR_LX":"phys","CFD_PERF_AB":"phys",
 }
 # ★ KORREKTUREN AN DER QUELLE (Heiko 28.08.): der Baseline-Lauf traegt CFD_SLICE_DT=0 und
 # schreibt damit GAR KEINE Slices -- ein Defekt, den ich selbst eingebaut hatte und der sich
@@ -55,7 +67,40 @@ AUSSCHLUSS = {
     "CFD_FELD_HASH",         # Bitanker
     "CFD_DUMP_CL",           # Kernelquelltext-Dump
 }
-if len(sys.argv)<3: sys.exit("Aufruf: basis_aus_lauf.py <LAUF.txt> <ziel.basis>")
+BEGRUENDUNGSMARKE = "# --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---"
+if len(sys.argv)>=3 and sys.argv[1]=="--nachziehen":
+    # ★ 16.09.2026 (PLAN-DX-UMRECHNUNG §D): Einheiten aus EINHEIT neu setzen, Werte NICHT anfassen, genannte
+    # Schalter ergaenzen. KEINE Neuerzeugung aus einem Lauf -- Heiko: kein neuer Bezug, basis/ bleibt.
+    ziel=sys.argv[2]; neu=dict(a.split("=",1) for a in sys.argv[3:])
+    zeilen=open(ziel).read().splitlines()
+    kopf=[]; daten={}; kommentare=[]
+    for z in zeilen:
+        if z.startswith("#"): (kommentare if BEGRUENDUNGSMARKE in kopf else kopf).append(z); continue
+        f=z.split()
+        if len(f)>=3: daten[f[0]]=(f[1],f[2])
+    if BEGRUENDUNGSMARKE not in kopf: sys.exit("Basis ohne Begruendungsmarke -- nicht nachziehbar.")
+    geaendert=[]
+    for k,(v,e) in list(daten.items()):
+        e2=EINHEIT.get(k)
+        if e2 is None: print(f"  WARNUNG: {k} nicht in EINHEIT -- Einheit '{e}' bleibt", file=sys.stderr); continue
+        if e2!=e: geaendert.append(f"{k} {e}->{e2}"); daten[k]=(v,e2)
+    for k,v in neu.items():
+        if k in daten: sys.exit(f"{k} steht schon in der Basis ({daten[k][0]}) -- nichts angehaengt.")
+        if k not in EINHEIT: sys.exit(f"{k} hat keine Einheit in EINHEIT -- erst dort eintragen.")
+        daten[k]=(v,EINHEIT[k])
+    import datetime
+    vermerk=("# NACHGEZOGEN (basis_aus_lauf.py --nachziehen, "+datetime.date.today().isoformat()+", Heiko-Entscheid 16.09. 14:58: Abstaende/Masse bleiben "
+             "physikalisch fest, Zeiten folgen der Aufloesung): Einheiten "+("; ".join(geaendert) if geaendert else "unveraendert")+
+             ("; ergaenzt "+", ".join(f"{k} {v}" for k,v in neu.items()) if neu else "")+
+             ". schritte_fein heisst ab jetzt WERT BLEIBT (env_schritte rechnet im Lauf um, Waechter prueft den Rohwert) -- die Absaetze vom 12.09. und 07.09. ('2500 bei 8 mm') sind damit ueberholt.")
+    with open(ziel,"w") as f:
+        for z in kopf: f.write(z+"\n")
+        f.write(vermerk+"\n")
+        for z in kommentare: f.write(z+"\n")
+        for k in sorted(daten): f.write(f"{k} {daten[k][0]} {daten[k][1]}\n")
+    print(f"nachgezogen: {ziel} -- {len(geaendert)} Einheiten geaendert ({', '.join(geaendert)}), {len(neu)} ergaenzt ({', '.join(neu)})")
+    sys.exit(0)
+if len(sys.argv)<3: sys.exit("Aufruf: basis_aus_lauf.py <LAUF.txt> <ziel.basis>  |  basis_aus_lauf.py --nachziehen <ziel.basis> [NAME=WERT ...]")
 s=open(sys.argv[1]).read()
 m=re.search(r'Umgebung.*?\n(.*?)(\n\n|\Z)', s, re.S)
 env=dict(re.findall(r'(CFD_[A-Z_0-9]+)=([^\s]+)', m.group(1) if m else s))
@@ -66,7 +111,6 @@ unbekannt=[k for k in env if k not in EINHEIT and k not in AUSSCHLUSS]
 # so ist, welcher Heiko-Entscheid dahinter steht, welche Messung ihn traegt) sind das Gedaechtnis
 # dieser Datei. Beim ersten Lauf dieses Werkzeugs gegen die bestehende Basis waeren 29 solche Zeilen
 # spurlos verschwunden. Deshalb: alles ab der Marke unten wird aus der Zieldatei UEBERNOMMEN.
-BEGRUENDUNGSMARKE = "# --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---"
 uebernommen = []
 if os.path.exists(sys.argv[2]):
     alt_zeilen = open(sys.argv[2]).read().splitlines()
