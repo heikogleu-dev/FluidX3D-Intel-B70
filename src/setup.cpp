@@ -156,7 +156,7 @@ static void u_lat_zeitwaechter(const float u_lat, const float dt_f, const float 
 	// ★ Pruefbefund B4: der Waechter sieht nur GESETZTE Schalter. Ein ungesetzter faellt auf seinen
 	// Code-Default zurueck (CFD_SLICE_NEAR_STEPS auf 5000), und der traegt dieselbe 50-ms-Annahme.
 	print_warning("  Schrittbasierte Schalter folgen u_lat (seit 12.09.2026) UND dx (seit 16.09.2026) AUTOMATISCH (env_schritte), gesetzte wie "
-		"ungesetzte -- der Code-Default wird mitskaliert, weil auch er fuer u_lat = "+to_string(U_LAT_VORGABE,5u)+" gewaehlt ist "
+		"ungesetzte -- der Code-Default wird mitskaliert, weil auch er fuer u_lat = "+to_string(U_LAT_VORGABE,5u)+" und dx = 4 mm gewaehlt ist "
 		"(in diesem Lauf "+to_string((ulong)n_gesetzt)+" der geprueften Namen aus der Umgebung). NICHT mitskaliert und richtig so: "
 		"CFD_FAC_CD_EVERY ist ein Vielfaches der Abtastkadenz und damit dimensionslos. Ein Schalter auf 0 bleibt 0 -- aus ist aus.");
 }
@@ -6503,6 +6503,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 		const string ist(ist_c);
 		// Wertvergleich, nicht Stringvergleich -- sonst schlaegt "8" gegen "08" oder "1.5" gegen "1.50" an.
 		const bool gleich = fabs(atof(ist.c_str())-atof(soll.c_str()))<1e-9 || ist==soll;
+		if(gleich&&!hinweis.empty()) print_info("BASIS Rundungswahl akzeptiert: "+b.name+" = "+ist+hinweis+" -- Ist trifft llround(Soll); Diskretisierungsgrenze, kein Einheitenfehler (16.09.)."); // ★ Pruefagent MITTEL 1: Ansage-Doktrin
 		if(gleich) continue;
 		auto it=erlaubt.find(b.name);
 		if(it!=erlaubt.end()&&(fabs(atof(it->second.c_str())-atof(ist.c_str()))<1e-9||it->second==ist)) continue;
@@ -6523,7 +6524,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 			const string nm=ev.substr(0,g);
 			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME") continue;
 			print_warning("BASIS ZUSAETZLICH: "+nm+"="+ev.substr(g+1)+" -- steht nicht in der Referenz, wird also NICHT geprueft.");
-			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. schritte_fein wird seit 16.09. von env_schritte umgerechnet, der Waechter prueft den Referenzwert. Alt: Die Einheit 'schritte_fein' rechnet die Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
+			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. schritte_fein wird seit 16.09. von env_schritte umgerechnet, der Waechter prueft den Referenzwert (4-mm-Wert in der Zeile). Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
 			if(nm=="CFD_RATIO") print_error("CFD_RATIO ist gesetzt, steht aber nicht in der Referenz -- die Umrechnung zellen_grob/index_grob haengt an unveraendertem ratio (dx_c = dx_f*ratio). Referenz erneuern oder Schalter entfernen.");
 			extra++;
 		}

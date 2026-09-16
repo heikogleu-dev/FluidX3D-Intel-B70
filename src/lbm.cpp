@@ -568,7 +568,7 @@ static double dx_skal_aus_umgebung() {
 static double g_dx_skal = 0.0; // 0 = noch nicht gebildet
 double dx_skal() { if(g_dx_skal==0.0) g_dx_skal = dx_skal_aus_umgebung(); return g_dx_skal; }
 void dx_skal_setzen(const double s) {
-	if(!(s>0.0)) print_error("dx_skal_setzen("+to_string((float)s,7u)+"): die Skalierung muss positiv sein.");
+	if(!std::isfinite(s)||!(s>0.0)) print_error("dx_skal_setzen("+to_string((float)s,7u)+"): die Skalierung muss endlich und positiv sein (CFD_DX = 0 gaebe inf)."); // ★ Pruefagent NIEDRIG
 	if(fabs(s-dx_skal())>1e-6*fmax(1.0, fabs(s))) print_error("dx-Schrittskalierung Ist != Soll: aus der Umgebung "+to_string((float)dx_skal(),7u)+", aus dem gefahrenen dx "+to_string((float)s,7u)+". Die Schritt-Schalter waeren gegen eine andere Sprosse umgerechnet als gerechnet wird.");
 }
 double schritt_skal() { return ulat_skal()*dx_skal(); }
