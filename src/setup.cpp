@@ -6724,12 +6724,27 @@ static void main_setup_fahrzeug_dd() {
 
 	// ---------------------------------------------------------------- Netze platzieren
 	// Zweimal gelesen, weil jede Domaene ihre eigenen Gitterkoordinaten hat.
+	// ★ 16.09.2026 Y-HALBZELLEN-VERSATZ (Heiko 20:27, TODO 4c) -- der "nie-wieder-Fix" des alten Baums (FluidX3D/src/setup.cpp:1534-1537),
+	// der in v2 fehlte (OFFENE-PUNKTE B5, Entwarnung durch Messung widerlegt): faellt die Symmetrieebene der STL (y = 0) auf eine FEINE
+	// ZELLMITTE, voxelisiert der Koerper beidseits der Mittelebene eine Ein-Zellen-Membran (p375_b: dy = +-1 mit 82,2 % Materialdicke 1
+	// gegen 2,0 % im Fahrzeugmittel; 8 mm 10.09.: 58,2 %). Das ist auf JEDER Sprosse der Fall, weil fNy = (cey-1)*ratio+1 ungerade ist.
+	// Abhilfe: das Fahrzeug um eine halbe feine Zelle in +y versetzen, damit y = 0 auf eine Zellflaeche faellt -- fein UND grob derselbe
+	// physische Versatz (Alignment der Koerper zueinander bleibt). CFD_Y_VERSATZ: 0 = wie bisher (bitgleich zur Historie), 1 = Versatz.
+	const uint  y_versatz_modus = env_u("CFD_Y_VERSATZ", 0u);
+	const float yctr_f          = (0.0f-near_y0)/dx_f;                 // y = 0 in feinen Zellen ab dem Nahfeld-Ursprung
+	const bool  y_auf_zellmitte = fabs(yctr_f-roundf(yctr_f))<1e-3f;
+	const float y_versatz       = (y_versatz_modus>0u) ? 0.5f*dx_f : 0.0f; // Meter
+	if(y_versatz_modus>1u) print_error("CFD_Y_VERSATZ kennt nur 0 (aus) und 1 (halbe feine Zelle in +y).");
+	print_info(string("Fahrzeug-Mittelebene: y = 0 liegt bei feinem Zellindex ")+to_string(yctr_f,3u)+(y_auf_zellmitte ? " = ZELLMITTE (Membran-Artefakt ohne Versatz)" : " = Zellflaeche")
+		+"; CFD_Y_VERSATZ = "+to_string(y_versatz_modus)+(y_versatz_modus>0u ? " -> Koerper um "+to_string(y_versatz*1000.0f,3u)+" mm nach +y versetzt, Mittelebene jetzt bei Index "+to_string(yctr_f+0.5f,3u)+" (fein) bzw. "+to_string((y_versatz-far_y0)/dx_c,3u)+" (grob)" : " -> kein Versatz"));
+	if(y_versatz_modus>0u&&!y_auf_zellmitte) print_warning("CFD_Y_VERSATZ=1, aber y = 0 liegt schon auf einer Zellflaeche -- der Versatz legte die Mittelebene ERST auf eine Zellmitte (Artefakt statt Abhilfe).");
+	if(y_versatz_modus==0u&&y_auf_zellmitte) print_warning("Mittelebene auf Zellmitte OHNE Versatz: Ein-Zellen-Membran beidseits y = 0 zu erwarten (facetten_histogramme.csv, solid_dicke 1 bei dy = +-1). CFD_Y_VERSATZ=1 setzen (16.09.).");
 	auto place = [&](Mesh* m, const float dx, const float ox, const float oy, const float oz) {
 		const float3 bb0 = m->get_bounding_box_size();
 		m->scale((si_length/dx)/bb0.x);
 		const float3 bb = m->get_bounding_box_size(), ctr = m->get_bounding_box_center();
 		m->translate(float3((veh_x0-ox)/dx + 0.5f*bb.x - ctr.x,   // Nase auf Weltposition
-		                    (0.0f  -oy)/dx               - ctr.y, // Mittelebene auf y = 0
+		                    (y_versatz-oy)/dx            - ctr.y, // Mittelebene auf y = 0 (+ Halbzellen-Versatz, s. o.)
 		                    (veh_z0-oz)/dx + 0.5f*bb.z - ctr.z)); // Unterkante auf die Fahrbahn
 	};
 	Mesh* veh_f = read_stl(get_exe_path()+"../scenes/vehicle.stl"); place(veh_f, dx_f, near_x0, near_y0, near_z0);
