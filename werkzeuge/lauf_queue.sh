@@ -61,7 +61,7 @@ while IFS= read -r zeile; do
 	if ! echo " $env_teil " | grep -q '[[:space:]]CFD_POSITIV_HAKEN='; then
 		[ -n "${CFD_POSITIV_HAKEN:-}" ] && [ "${CFD_POSITIV_HAKEN:-0}" != "0" ] && geerbt_haken=1
 	fi
-	if { echo " $env_teil " | grep -Eq '[[:space:]]CFD_(KLEMM|POSITIV)_HAKEN=\+?0*[1-9]' || [ "$geerbt_haken" = "1" ]; } && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel ' \
+	if { echo " $env_teil " | grep -Eq '[[:space:]]CFD_(KLEMM|POSITIV|FAC_APG)_HAKEN=\+?0*[1-9]' || [ "$geerbt_haken" = "1" ]; } && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel ' \
 	   && ! { echo " $env_teil " | grep -q ' CFD_DEV_FINE=0 ' && echo " $env_teil " | grep -q ' CFD_DEV_COARSE=0 '; }; then
 		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.; Ausloeser: $([ "$geerbt_haken" = 1 ] && echo "GEERBTE UMGEBUNG" || echo "Zeilenmuster"))" | tee -a "$Q"
 		continue

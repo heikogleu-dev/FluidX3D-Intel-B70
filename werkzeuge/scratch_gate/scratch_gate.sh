@@ -85,6 +85,10 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 "$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8nahp1h3.cl" pos1h3  >/dev/null
 # ★ 15.09.2026 Klemmen Z2d: Betragsklemme (U_BETRAG) allein und mit Positiv-Modus 2 (Arm M-CB1)
 "$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8nahub.cl"    u       >/dev/null
+# ★ 16.09.2026 APG-Umbau (PLAN-APG-2026-09-16.md): Vorkernel fac_nachbar_ab mit DDF-Lesen + neuer APG-Zweig -- eigener Scratch-/Spill-Arm,
+# einmal mit dem Konstantgradient-Haken (anderer Zweig im Vorkernel). Nur Nahfeld: dort sind die Facetten.
+"$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8naha.cl"     a       >/dev/null
+"$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8nahA.cl"     A       >/dev/null
 "$T/gen" datei "$HIER/defs_prod8_fern.txt" "$T/prod8fernub.cl"   u       >/dev/null
 "$T/gen" datei "$HIER/defs_prod8_nah.txt"  "$T/prod8nahp2ub.cl"  pos2u   >/dev/null
 # ★ 15.09.2026 Klemmen Z2e/Z2f: Bildhuellen-Tor (Arm M-T) und numerische Huelle (Arm M-CB1B2 = pos2 + u + r)
@@ -95,7 +99,7 @@ g++ -O1 "$HIER/gen_main.cpp" "$T/kernel.o" -o "$T/gen"
 rc=0
 neu_bekannt=""
 for dev in 0x7d67 0xe223; do
-  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR prod8nah prod8fern prod8nahh3 prod8nahp1 prod8nahp2 prod8fernp2 prod8fernp1 prod8nahp2fh1 prod8nahp1h3 prod8nahub prod8fernub prod8nahp2ub prod8naht prod8nahp2ubr prod8fernp2ubr; do
+  for arm in e1p1 e1p0 e0p1 e0p0 e1p1r e1p0r e0p1r e0p0r e1p1s e1p1rs e1p1su e1p1rsu e1p1ruR e1p1uR prod8nah prod8fern prod8nahh3 prod8nahp1 prod8nahp2 prod8fernp2 prod8fernp1 prod8nahp2fh1 prod8nahp1h3 prod8nahub prod8fernub prod8nahp2ub prod8naht prod8nahp2ubr prod8fernp2ubr prod8naha prod8nahA; do
     ausgabe=$("$HIER/igc_offline.sh" "$T/$arm.cl" "$dev" ALLE || true)
     # ★ 11.09.2026: BAUFEHLER IST NICHT SCRATCH. Vorher fiel ein gescheiterter Bau in beide
     # Gates, weil die Zeile dann schlicht kein "private_size=0" enthielt -- das Gate meldete

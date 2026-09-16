@@ -159,7 +159,16 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(f_nur_solid_an()) print_info("F-NUR-SOLID aktiv (Default): stream_collide liest F nicht -- F ist an Nicht-Solid-Zellen konstant 0 (F-Waechter prueft das bei initialize()). CFD_F_NUR_SOLID=0 stellt den Upstream-Read her.");
 	else print_warning("CFD_F_NUR_SOLID=0: stream_collide liest F an jeder Fluidzelle (Upstream-Pfad, 12 B/Zelle/Schritt in der F-BBox) -- nur fuer A/B-Kontrollarme gedacht.");
 #endif
-	if(s_fac_elibb&&s_fac_apg!=0.0f) print_error("CFD_FAC_ELIBB mit APG ist nicht gebaut -- Messarm rein halten.");
+	// ★ 16.09.2026 (PLAN-APG-2026-09-16.md §C, Entscheid E2): die ELIBB x APG-Sperre war eine reine Policy-Sperre aus der Messarm-Zeit
+	// (25.08.), keine Wechselwirkung im Code -- die Blende aendert fhn VOR der Abtastung, APG nur das tw-Ziel. ELIBB=1 steht in jeder
+	// Produktionszeile, ohne Aufheben gaebe es keinen APG-A/B. ELIBB=2 (PUR) steigt vor dem Wandmodell aus -> APG waere ein stiller No-Op.
+	s_fac_apg_haken = env_u("CFD_FAC_APG_HAKEN", 0u);
+	if(s_fac_apg_haken>2u) print_error("CFD_FAC_APG_HAKEN kennt nur 0 (aus), 1 (grad-rho-Statistik) und 2 (Konstantgradient).");
+	if(s_fac_apg==0.0f&&s_fac_apg_haken>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin).");
+	if(s_fac_apg!=0.0f&&s_fac_nachbar==0u) print_error("CFD_FAC_APG braucht CFD_FAC_NACHBAR=1: dp/ds kommt seit 16.09. aus dem Vorkernel fac_nachbar_ab (grad rho in fac_nb[2..4]) und die Korrektur gilt an der Abtasthoehe y_ab.");
+	if(s_fac_elibb_pur&&s_fac_apg!=0.0f) print_error("CFD_FAC_ELIBB=2 (PUR) mit APG: der Pur-Arm steigt vor dem Wandmodell aus, APG waere ein stiller No-Op.");
+	if(s_fac_elibb&&s_fac_apg!=0.0f) print_info("ELIBB=1 + APG (seit 16.09. zugelassen): die Blende wirkt vor der Abtastung, APG auf das tw-Ziel; das eigene rhon ist post-Blende, die Vorkernel-Nachbarn nicht -- bei q != 0,5 kleiner Versatz in grad rho (Delta-m-Waechter Slot 4 beziffert ihn).");
+	if(s_fac_apg_haken==2u) print_warning("CFD_FAC_APG_HAKEN=2: TESTARM -- der Vorkernel schreibt grad rho = (1e-3, 0, 0) an jeder Facette; die Physik dieses Laufs ist entwertet.");
 	if(s_fac_utkorr!=1.0f) print_info("ABTASTPUNKT-MESSARM aktiv: CFD_FAC_UTKORR = "+to_string(s_fac_utkorr,3u)+" auf dem Wandmodell-Eingang (Theorie-Soll 3/2; Ansage-Doktrin).");
 	if(s_fac_kappa!=0.4f) print_info("Grazing-Guard geaendert: CFD_FAC_KAPPA = "+to_string(s_fac_kappa,2u)+" (Default 0,4).");
 	if(s_fac_qdiag!=0u) print_warning("CFD_FAC_QDIAG = "+to_string((ulong)s_fac_qdiag)+" -- DIAGNOSEARM (2 = nur q<0,5, 3 = nur q>0,5; Arm 1 ist seit K1' ohne Funktion). Kein Messarm fuer Abnahmen.");
@@ -217,7 +226,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_fac_ema>0.0f&&s_fac_ema<5e-7f) print_error("CFD_FAC_EMA > 0 aber unter der Emissionsquantisierung (to_string 6 Stellen) -- der Filter froere still auf dem Warmstart ein.");
 	if(s_fac_pema>0.0f&&s_fac_pema<5e-7f) print_error("CFD_FAC_PEMA > 0 aber unter der Emissionsquantisierung -- der Filter froere still ein.");
 	if(s_fac_apg!=0.0f&&fabs(s_fac_apg)<5e-7f) print_error("CFD_FAC_APG zu klein fuer die 6-Stellen-Emission -- wuerde still zu 0.000000 (No-Op-Arm)."); // Gross-Audit N
-	if(s_fac_apg!=0.0f) print_warning("CFD_FAC_APG liest rho der Nachbarzellen im SELBEN stream_collide-Launch -- Laeufe sind NICHT bitreproduzierbar (dieselbe Fehlerklasse wie der NACHBAR-Befund B72, 03.09.; vor einem APG-A/B nach dem fac_nb-Muster auslagern).");
+	// ★ 16.09.2026: die Warnung "NICHT bitreproduzierbar" entfaellt -- grad rho kommt aus dem Vorkernel fac_nachbar_ab (eigener Launch nach stream_collide, In-Order-Queue).
 	if(s_fac_pema>0.0f&&s_fac_nachbar>0u) print_error("PEMA + NACHBAR: die gefilterte Kette (kernel.cpp, utb_wm = utb*def_fac_utkorr) rechnet twe aus dem eigenen gefilterten u mit yw -- die Nachbarabtastung waere dort WIRKUNGSLOS, Slot 72 zaehlte trotzdem (Pruefagent 03.09.). Kombination gesperrt.");
 	// ★ 12.09.2026 (Audit-Schleife, Pruefer B): APG bildet rho-DIFFERENZEN zwischen Nachbarzellen,
 	// Groessenordnung 1e-6..1e-5. Mit rho als FP16S(rho-1) ist der Quantisierungsfehler je Summand
@@ -227,7 +236,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Die Sperre steht HIER und nicht im Setup: s_fac_apg wird in drei Setups gesetzt (fahrzeug_dd,
 	// kanal, kugel), eine setup-lokale Sperre haette zwei davon offen gelassen. Genau dafuer wurde
 	// die APG+PEMA-Sperre darunter schon einmal hierher verlegt (Tiefen-Audit A1-B3).
-	if(sizeof(rhoxx)<4u&&s_fac_apg!=0.0f) print_error("RHO_FP16 und CFD_FAC_APG schliessen sich aus: der APG-Zweig bildet rho-DIFFERENZEN zwischen Nachbarzellen (1e-6..1e-5), und der Quantisierungsfehler je Summand ist |rho-1|*2^-11 -- bei |rho-1| = 1e-3 also 4,9e-7 und damit so gross wie das Signal. Entweder werkzeuge/rho_format.sh FP32 oder CFD_FAC_APG=0.");
+	// ★ 16.09.2026: die RHO_FP16 x APG-Sperre entfaellt -- rho je Nachbar wird im Vorkernel aus den DDFs gebildet (FP32-Summe), nicht aus dem Halbwort-Puffer gelesen.
 	if(s_fac_apg!=0.0f&&s_fac_pema>0.0f) print_error("APG + PEMA: die gefilterte Kette verwirft die APG-Korrektur still -- Kombination gesperrt (Tiefen-Audit A1-B3: Sperre jetzt IM Konstruktor, setup-unabhaengig)."); 
 	if(getenv("CFD_SPALDING_IT")&&env_u("CFD_SPALDING_IT",3u)==0u) print_warning("CFD_SPALDING_IT=0 wird auf 1 GEKLEMMT (min 1; Default ohne Env ist 3) -- Gross-Audit N16.");
 	if(env_u("CFD_SPALDING_IT", 0u)>0u&&!s_wandfunktion&&!s_facetten) print_warning("CFD_SPALDING_IT wirkt nur mit CFD_WANDFUNKTION oder CFD_FACETTEN -- hier WIRKUNGSLOS (Audit R3).");
@@ -344,7 +353,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 		uint n_float=0u, n_t=0u;
 		for(size_t i=opencl_c_code.find(muster); i!=string::npos; i=opencl_c_code.find(muster, i+1ull)) n_float++;
 		for(size_t i=opencl_c_code.find(muster_t); i!=string::npos; i=opencl_c_code.find(muster_t, i+1ull)) n_t++;
-		if(n_float!=18u||n_t!=15u) print_error("rho-Typ-Zensus im OpenCL-Quelltext: "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
+		if(n_float!=18u||n_t!=14u) print_error("rho-Typ-Zensus im OpenCL-Quelltext (Soll rhoxx 14 seit 16.09.: der rho-Parameter von apply_facette_imem entfaellt, APG liest grad rho aus fac_nb; davor 15): "+to_string(n_float)+" x \"global float* rho\" (Soll 18, alle in SURFACE/GRAPHICS) und "
 			+to_string(n_t)+" x \"global rhoxx* rho\" (Soll 15; 13 -> 14 -> 15 am 15.09.: rho_rek_ebene, rho_ausgabe_ebene, RHO_RAND C1/C2a). Ein rho-Kernel ist nicht auf rhoxx umgestellt oder es ist einer dazugekommen -- bei 2-Byte-rho waere das ein stiller Faktor-1e38-Fehler, kein Absturz.");
 	}
 	{ // ★ TODO 2 Schritt 4 (12.09.2026) -- derselbe Zensus fuer u, und er braucht ein SCHAERFERES Muster.
@@ -641,6 +650,7 @@ bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefu
 // Budget EXAKT erreichen kann": LSQ erreicht es prinzipiell nie exakt, das Gate laesst sie trotzdem
 // durch. Braucht einen eigenen Messarm mit eigener Begruendung, nicht den Rang eines Defaults.
 float LBM_Domain::s_fac_apg = 0.0f;
+uint LBM_Domain::s_fac_apg_haken = 0u; // ★ 16.09.2026 CFD_FAC_APG_HAKEN (gelesen im Konstruktor)
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
 float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bitidentisch
@@ -670,7 +680,7 @@ void LBM_Domain::allocate(Device& device) {
 	if(rho_rand_on) { // Konstruktor-Sperren, setup-unabhaengig
 		if(Dx*Dy*Dz>1u) print_error("RHO_RAND: die Domaene ist Teil einer Mehrdomaenen-Zerlegung -- der Halo-Transfer liest rho am Domaenenschnitt mit vollen Indizes.");
 		if(get_Nx()<5u||get_Ny()<5u||get_Nz()<5u) print_error("RHO_RAND: eine Gitterkante < 5 -- die Randschalen-Packung (rr_idx) ist dort nicht definiert.");
-		if(s_fac_apg!=0.0f) print_error("RHO_RAND x APG: APG liest rho an Facettennachbarn im Inneren, dort gibt es unter RHO_RAND keinen Puffer.");
+		// ★ 16.09.2026: RHO_RAND x APG-Sperre entfaellt (Vorkernel liest DDFs).
 #if defined(SURFACE) || defined(GRAPHICS)
 		print_error("RHO_RAND x SURFACE/GRAPHICS: deren rho-Leser greifen auf das volle Feld zu.");
 #endif
@@ -716,7 +726,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [0,5;0,75) [0,75;0,95) [0,95;1] (s = 1 durch Rundung moeglich, Modus 2 wendet dann nichts an) | [285] nach load_f negativ (Nicht-E) | [286] Kandidat und rho-Klemme | [287] Kandidat und u-Klemme | [288] H1-Zellen im Eimer [0,25;0,5)
 	// | [289] Nachladeprobe t == zaehl_takt+3 | [290] Haken: Selbstpruefung Sum(f**-f*), Sum c(f**-f*) ueber Toleranz | [291] TYPE_E-Kandidaten (f_eq_i + w_i < tau_i) | [292]/[293] Sum-q (1-s), Sum-q Sum|df_i|
 	// (Festkomma, wickeln ABSICHTLICH mod 2^32) | [294] Kappung zu 293. Klemmen Z2b: [295] u-Komponentenhuelle |u_a| >= c_s vor der Klemme (Soll = [28] unter der Komponentenklemme)
-	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [298]/[299] (nur CFD_RHO_HUELLE) rho unter/ueber der Konsistenzhuelle 0,5/1,5 | [300] Lift-rho ausserhalb der GESCHLOSSENEN Bildhuelle [0,21875; 1,78125], Soll 0 (Haken 5: > 0). Audit 16.09.2026 (B1): [301]/[302] KONSTANTENSPIEGEL der uebersetzten Torgrenzen def_tor_gate_lo/hi als Festkomma (S = def_klemm_s), Ist=Soll gegen die Host-Rechnung -- der Wirkpfadbeleg fuer CFD_TOR_HUELLE, das sonst nur eine Null vorzuweisen hatte. [303] (nur CFD_POSITIV_FACETTE) K0-Facettenzelle WIRKLICH begrenzt, Stichprobe wie [273] -- Wirkpfadbeleg des Schalters (Befund B3; [273] allein zaehlt in beiden Stellungen gleich). [304]/[305] KONSTANTENSPIEGEL der uebersetzten Waechterhuelle def_w210_lo/hi (Befund M3, zweite Haelfte von CFD_TOR_HUELLE), ein Schritt je Zaehltakt. NAECHSTER FREIER SLOT: 306 (Puffer hits_n = 320). DIESE LEGENDE IST DIE EINZIGE QUELLE DER SLOTVERGABE.
+	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [298]/[299] (nur CFD_RHO_HUELLE) rho unter/ueber der Konsistenzhuelle 0,5/1,5 | [300] Lift-rho ausserhalb der GESCHLOSSENEN Bildhuelle [0,21875; 1,78125], Soll 0 (Haken 5: > 0). Audit 16.09.2026 (B1): [301]/[302] KONSTANTENSPIEGEL der uebersetzten Torgrenzen def_tor_gate_lo/hi als Festkomma (S = def_klemm_s), Ist=Soll gegen die Host-Rechnung -- der Wirkpfadbeleg fuer CFD_TOR_HUELLE, das sonst nur eine Null vorzuweisen hatte. [303] (nur CFD_POSITIV_FACETTE) K0-Facettenzelle WIRKLICH begrenzt, Stichprobe wie [273] -- Wirkpfadbeleg des Schalters (Befund B3; [273] allein zaehlt in beiden Stellungen gleich). [304]/[305] KONSTANTENSPIEGEL der uebersetzten Waechterhuelle def_w210_lo/hi (Befund M3, zweite Haelfte von CFD_TOR_HUELLE), ein Schritt je Zaehltakt. APG 16.09.2026 (PLAN-APG-2026-09-16.md §A5, alle nur an Zaehlschritten, saettigend): [306] Vorkernel-Besuche (Soll = [7]) | [307] entartet (eine Achse ohne Fluidnachbar) | [308] APG-Zweig besucht (Soll = [7]-[9]) | [309]/[310] Klemme unten 0 / oben 2*tw (Summe = [19]) | [311]/[312] dp/ds > 0 (APG) / < 0 (FPG) | [313..316] Autoritaet |kappa*y_ab*dp/ds|/tw in <0,1 / 0,1-0,5 / 0,5-1 / >=1. NAECHSTER FREIER SLOT: 317 (Puffer hits_n = 320). DIESE LEGENDE IST DIE EINZIGE QUELLE DER SLOTVERGABE.
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -1460,7 +1470,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		                      + 4ull*aktiv              // fac_tau_n
 		                      + (fac_elibb_on ? 18ull*aktiv : 0ull)  // fac_q
 		                      + (fac_kdiag_on ? 64ull*aktiv : 0ull)  // fac_kd (Klassen-Diagnostik, 16 float seit 05.09. -- Vorschaetzung MUSS mitziehen, sonst ist der VRAM-Waechter um 16 B/Facette blind)
-		                      + (nachbar_on ? 8ull*aktiv : 0ull)     // fac_nb (deterministische Nachbarabtastung, 2 float)
+		                      + (nachbar_on ? (s_fac_apg!=0.0f?20ull:8ull)*aktiv : 0ull)     // fac_nb (deterministische Nachbarabtastung, 2 float; unter APG 5 float -- Vorschaetzung MUSS mitziehen, KDIAG-Lehre)
 		                      + (sgs_gdiag>0u ? 36ull*aktiv : 0ull)  // gd_zellen (4 B seit 08.09.) + fac_gd (32 B) der g-Diagnose
 		                      + (sgs_fdwand>0u ? (sgs_gdiag>0u?4ull:8ull)*aktiv : 0ull)  // fac_wfd (4 B) + gd_zellen (4 B seit 08.09.), falls nicht schon von gdiag gebaut
 		                      + (sgs_sism>0u ? 24ull*aktiv : 0ull);   // ★ 07.09. fac_sb (6 float) der SISM-EMA -- Vorschaetzung MUSS mitziehen (KDIAG-Lehre: sonst ist der VRAM-Waechter um 24 B/Facette blind)
@@ -1651,8 +1661,9 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		if(!device.info.uses_ram) gd_zellen.delete_host_buffer();
 	}
 	if(nachbar_on) { // ★ 03.09. DETERMINISTISCHE NACHBARABTASTUNG: Puffer bauen, Kernel binden, stream_collide-Rebind (fac_wfd-Muster, B70-bewiesen)
-		fac_nb = Memory<float>(device, 2ull*aktiv);
-		for(ulong q=0ull;q<aktiv;q++) { fac_nb[2ull*q]=-1.0f; fac_nb[2ull*q+1ull]=0.0f; } // Init = "kein Wert" -> Eigenzelle (zaehlt als Slot 73); enqueue_initialize fuellt vor dem ersten Schritt
+		const ulong nbs = (s_fac_apg!=0.0f) ? 5ull : 2ull; // ★ 16.09. Stride = def_nb_stride der Emission (2, unter APG 5: grad rho in [2..4])
+		fac_nb = Memory<float>(device, nbs*aktiv);
+		for(ulong q=0ull;q<aktiv;q++) { fac_nb[nbs*q]=-1.0f; fac_nb[nbs*q+1ull]=0.0f; for(ulong g=2ull; g<nbs; g++) fac_nb[nbs*q+g]=0.0f; } // Init = "kein Wert" -> Eigenzelle (zaehlt als Slot 73), grad rho 0; enqueue_initialize fuellt vor dem ersten Schritt
 		fac_nb.write_to_device();
 		// ★ 11.09.2026 HOST-SPIEGEL FREIGEBEN (VRAM-Audit). Dieser Puffer wird EINMAL gefuellt,
 		// hochgeladen und danach host-seitig nie wieder angefasst -- weder per read_from_device()
@@ -1661,8 +1672,13 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
 		// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
 		// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
-		if(!device.info.uses_ram) fac_nb.delete_host_buffer();
+		if(!device.info.uses_ram&&s_fac_apg_haken==0u) fac_nb.delete_host_buffer(); // ★ 16.09.: unter CFD_FAC_APG_HAKEN bleibt der Host-Spiegel -- der Bericht liest grad rho zurueck
 		kernel_fac_nachbar = Kernel(device, aktiv, "fac_nachbar_ab", u, flags, fac_geo, gd_zellen, (uint)aktiv, fac_nb);
+		if(s_fac_apg!=0.0f) { // ★ 16.09. APG-Vorkernel: eigener Kernel (Gate-Befund Spill), liest die DDFs, schreibt grad rho nach fac_nb[2..4]; t (Position 5) wird je Schritt nachgesetzt
+			kernel_fac_apg = Kernel(device, aktiv, "fac_apg_ab", flags, gd_zellen, (uint)aktiv, fac_nb, fi, t, rho_clamp_hits);
+			if(sparse_on) kernel_fac_apg.add_parameters(tile_slot);
+			print_info("APG-VORKERNEL fac_apg_ab gebunden (16.09.): grad rho aus den DDFs der 6 Achsnachbarn je Facette, "+to_string((float)(12ull*aktiv)/1048576.0f,1u)+" MB in fac_nb[2..4], Launch je Schritt nach fac_nachbar_ab.");
+		}
 		if(sparse_on) kernel_fac_nachbar.add_parameters(tile_slot); // B-7-Lehre: TS_P haengt an SPARSE_TILES
 		{ const uint nbix=fac_param_pos+4u+(fac_ema_on?1u:0u)+(fac_pema_on?1u:0u)+(diagz_gebaut?1u:0u)+(fac_elibb_on?1u:0u)+(fac_kdiag_on?1u:0u);
 		  kernel_stream_collide.set_parameters(nbix, fac_nb); } // Rebind NACH dem Neubau (Platzhalter-Lektion wie fac_wfd)
@@ -1766,7 +1782,7 @@ void LBM_Domain::finalize_sparse_tiles() {
 
 void LBM_Domain::enqueue_initialize() { // call kernel_initialize
 	kernel_initialize.enqueue_run();
-	if(nachbar_on&&fac_N>0ull) kernel_fac_nachbar.enqueue_run(); // ★ 03.09. (Pruefagent Pass 2: der Platzhalter hat Laenge 2, length>1 schuetzt hier NICHT -- fac_N wird nur in alloc_facetten_domain gesetzt): Nachbarwerte schon fuer den ERSTEN Schritt (sonst zaehlte t=0 an allen Facetten als Slot 73)
+	if(nachbar_on&&fac_N>0ull) { kernel_fac_nachbar.enqueue_run(); if(s_fac_apg!=0.0f) { kernel_fac_apg.set_parameters(5u, t); kernel_fac_apg.enqueue_run(); } } // ★ 16.09. APG: t (Position 7) je Schritt -- der Vorkernel liest load_f(t+1), das rho des naechsten Schritts. // ★ 03.09. (Pruefagent Pass 2: der Platzhalter hat Laenge 2, length>1 schuetzt hier NICHT -- fac_N wird nur in alloc_facetten_domain gesetzt): Nachbarwerte schon fuer den ERSTEN Schritt (sonst zaehlte t=0 an allen Facetten als Slot 73)
 }
 void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to perform one LBM time step
 	// ★ Invarianten-Waechter (Pruefagent Rang-1-Remat, NIEDRIG-3): der Remat-Block im Kernel
@@ -1792,7 +1808,7 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz, felder_voll_h).enqueue_run();
 	if(fdwand_on&&fac_N>0ull) { if(sism_on) kernel_sgs_fdwand.set_parameters(5u, t); kernel_sgs_fdwand.enqueue_run(); }
 	if(band_on&&band_N>0ull) { if(sism_on) kernel_sgs_band.set_parameters(5u, t); kernel_sgs_band.enqueue_run(); } // ★ 08.09. SGS-BAND: zweiter Launch desselben Kernels ueber die Bandzellen, dieselbe In-Order-Queue -> derselbe Determinismus wie Lage 1 // ★ Audit-Befund 11 (07.09.): Waechter auf fac_N statt fac_wfd.length()>1 -- bei GENAU EINER aktiven Facette ist die Laenge 1 und der FD-Kernel wurde still uebersprungen (Platzhalter und Einzelfacette nicht unterscheidbar; dieselbe Falle wie fac_nb 03.09.). fac_N wird nur in alloc_facetten_domain gesetzt. // ★ 07.09. SISM: t je Schritt nachfuehren (Muster sgs_gdiag/boden_eq), Position 5 = erstes SGS_SISM-Argument; der FD-Kernel sieht dasselbe t wie der eben gerechnete Schritt (increment_time_step folgt erst danach)
-	if(nachbar_on&&fac_N>0ull) kernel_fac_nachbar.enqueue_run(); // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
+	if(nachbar_on&&fac_N>0ull) { kernel_fac_nachbar.enqueue_run(); if(s_fac_apg!=0.0f) { kernel_fac_apg.set_parameters(5u, t); kernel_fac_apg.enqueue_run(); } } // ★ 16.09. APG: t (Position 7) je Schritt -- der Vorkernel liest load_f(t+1), das rho des naechsten Schritts. // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;
@@ -2320,6 +2336,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_masse_alle==3u) ? (string)"\n	#define FACETTEN_MASSE_X" : (string)"") // ★ ARM X: Modus-1-Injektion, aber Rueckfall-Entscheid im SCHATTEN wie ALPHA2 -- X gegen Basis = (B) rein, Modus 1 gegen X = (A) rein
 	+((s_facetten&&s_fac_imem&&s_fac_messnur>0u) ? (string)"\n	#define FACETTEN_MESSNUR" : (string)"") // ★ 30.08. BB-Physik, nur messen
 	+((s_facetten&&s_fac_imem&&s_fac_nachbar>0u) ? (string)"\n	#define FACETTEN_NACHBAR" : (string)"") // ★ 30.08. Eingang aus der zweiten Fluidzelle
+	+(string)"\n	#define def_nb_stride "+string(s_fac_apg!=0.0f ? "5ul" : "2ul") // ★ 16.09. fac_nb: 2 float je Facette, unter APG 5 (grad rho in [2..4]) -- UNBEDINGT emittiert: fac_nachbar_ab steht in JEDER Domaene im Quelltext (Gate-Befund 16.09.: ohne NACHBAR undeclared identifier, das haette das Fernfeld im dd-Fall gekillt); Host-Allokation MUSS mitziehen
+	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f&&s_fac_apg_haken==2u) ? (string)"\n	#define FACETTEN_APG_HAKEN" : (string)"") // ★ 16.09. Testhaken: Konstantgradient im Vorkernel
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik
 	+((s_rho_takt>0u&&s_smbox[3]>0u) ? (string)"\n	#define RHO_SMBOX" : (string)"") // ★ TODO 2: im Fernfeld deckt die rho-Maske auch die Entnahmeebenen ab
 	+((s_u_takt>0u) ? (string)"\n	#define U_SPARSAM" : (string)"") // ★ TODO 2 Schritt 3: gattert die u-Schreibstelle; ohne das Define ist der Geraetecode dort zeichengleich zu vorher

@@ -1372,6 +1372,39 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 	// Kein write_to_device() noetig: LBM::initialize() laedt rho, u und flags beim ersten run() hoch.
 }
 
+// ★ 16.09.2026 APG-BERICHT (PLAN-APG-2026-09-16.md §A5/§E): Zaehler 306..316 des umgebauten APG-Pfads, Ist=Soll, Haken.
+// Befunde werden GESAMMELT (apg_verletzt) und in klemm_bilanz_abschluss geworfen -- ein print_error hier wuerde den restlichen
+// Bericht mitreissen (Lehre H1 vom 16.09.).
+bool apg_verletzt = false;
+static void berichte_apg(LBM& L, const char* wo) {
+	if(LBM_Domain::s_fac_apg==0.0f) return;
+	LBM_Domain* d = L.lbm_domain[0];
+	if(!d->nachbar_on||d->fac_N==0ull) { print_warning(string("APG ")+wo+": kein Facetten-/Nachbarpfad in dieser Domaene -- CFD_FAC_APG ist hier wirkungslos (Wirkpfad 0, kein Befund)."); return; }
+	d->finish_queue(); d->rho_clamp_hits.read_from_device();
+	ulong v[320]; for(uint k=0u; k<320u; k++) v[k] = (ulong)d->rho_clamp_hits[k];
+	const ulong soll308 = v[7]>=v[9] ? v[7]-v[9] : 0ull;
+	print_info(string("APG ")+wo+" (kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+", Vorkernel fac_nachbar_ab, grad rho aus 6 Achsnachbarn): Vorkernel-Besuche [306] "+to_string(v[306])+" (Soll [7] = "+to_string(v[7])+"), entartet [307] "+to_string(v[307])+", APG-Zweig besucht [308] "+to_string(v[308])+" (Soll [7]-[9] = "+to_string(soll308)+"), dp/ds > 0 (APG) [311] "+to_string(v[311])+" / < 0 (FPG) [312] "+to_string(v[312])+", Klemme unten [309] "+to_string(v[309])+" / oben [310] "+to_string(v[310])+" (Slot 19 beide "+to_string(v[19])+").");
+	const ulong hs = v[313]+v[314]+v[315]+v[316];
+	if(hs>0ull) print_info(string("APG ")+wo+" Autoritaet |kappa*y_ab*dp/ds|/tw: <0,1 "+to_string(100.0*(double)v[313]/(double)hs,1u)+" % | 0,1-0,5 "+to_string(100.0*(double)v[314]/(double)hs,1u)+" % | 0,5-1 "+to_string(100.0*(double)v[315]/(double)hs,1u)+" % | >=1 "+to_string(100.0*(double)v[316]/(double)hs,1u)+" % (n = "+to_string(hs)+"; liegt die Korrektur ueberwiegend in der Klemme, ist kappa nicht deutbar -- Augustlehre).");
+	string verl;
+	if(v[306]==0ull) verl += " Vorkernel-Besuche [306] = 0 (der APG-Vorkernel lief nie);";
+	else if(v[306]!=v[7]) verl += " [306] "+to_string(v[306])+" != [7] "+to_string(v[7])+" (Vorkernel- und Facettenbesuche muessen an Zaehlschritten uebereinstimmen);";
+	if(v[308]!=soll308) verl += " [308] "+to_string(v[308])+" != [7]-[9] "+to_string(soll308)+" (jeder Facettenbesuch mit u_t > 1e-6 muss den APG-Zweig durchlaufen);";
+	if(v[308]>0ull&&v[311]+v[312]==0ull) verl += " dp/ds war an jedem Besuch exakt 0 -- Gradient kommt nicht an (Stride/Emission?);";
+	if(v[309]+v[310]!=v[19]) verl += " [309]+[310] "+to_string(v[309]+v[310])+" != [19] "+to_string(v[19])+" (die getrennten Klemmzaehler muessen den alten Sammelzaehler ergeben);";
+	if(LBM_Domain::s_fac_apg_haken>0u) { // Haken 1: Statistik, Haken 2: Konstantgradient bitgenau
+		d->fac_nb.read_from_device();
+		const ulong N = d->fac_N; ulong n0=0ull, nkonst=0ull; double sum=0.0, mx=0.0;
+		for(ulong f=0ull; f<N; f++) { const float gx=d->fac_nb[5ull*f+2ull], gy=d->fac_nb[5ull*f+3ull], gz=d->fac_nb[5ull*f+4ull];
+			const double g=sqrt((double)gx*gx+(double)gy*gy+(double)gz*gz); sum+=g; if(g>mx) mx=g; if(g<1e-9) n0++;
+			if(gx==1.0e-3f&&gy==0.0f&&gz==0.0f) nkonst++; }
+		print_info(string("APG ")+wo+" HAKEN "+to_string(LBM_Domain::s_fac_apg_haken)+": |grad rho| ueber "+to_string(N)+" Facetten -- Mittel "+to_string((float)(N>0ull?sum/(double)N:0.0),9u)+", Maximum "+to_string((float)mx,9u)+", exakt 0: "+to_string(n0)+", Konstantgradient (1e-3,0,0): "+to_string(nkonst)+".");
+		if(LBM_Domain::s_fac_apg_haken==2u&&nkonst!=N) verl += " HAKEN 2: nur "+to_string(nkonst)+" von "+to_string(N)+" Facetten tragen den Konstantgradienten bitgenau;";
+		if(LBM_Domain::s_fac_apg_haken==2u&&v[308]>0ull&&v[311]+v[312]==0ull) verl += " HAKEN 2: Konstantgradient gesetzt, aber dp/ds an jedem Besuch 0 -- der Durchstich fac_nb -> dp/ds ist unterbrochen;";
+		if(LBM_Domain::s_fac_apg_haken==1u&&N>0ull&&n0==N) verl += " HAKEN 1: grad rho an ALLEN Facetten exakt 0 -- der Vorkernel schreibt nichts (Stride/Bindung?);";
+	}
+	if(!verl.empty()) { print_warning(string("APG ")+wo+": ABNAHME VERLETZT --"+verl+" Abbruch am Fallende."); apg_verletzt = true; }
+}
 bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueber alle Domaenen; print_error erst in klemm_bilanz_abschluss() am FALLENDE (Pruefpass S0b MITTEL 1: print_error = exit)
 // ★ Audit-Nachpruefung 16.09.2026, Befund H1 (vollstaendig): in berichte_dichteklemme standen ZEHN print_error (im ersten Anlauf als "neun" gezaehlt, Pruefbefund N-1). Jeder davon ist exit(1)
 // und riss alles hinter sich mit -- Fernfeld-Bericht, dichteklemme_fazit, POSITIV-BILANZ und den ganzen KLEMM-BUDGET-Block. Belegt an
@@ -1382,6 +1415,7 @@ bool dk_verletzt = false; string dk_grund = "";
 void dk_befund(const string& t) { print_warning(t+" ABBRUCH AM FALLENDE (gesammelt, damit der restliche Klemmenbericht noch erscheint)."); dk_verletzt = true; dk_grund += (dk_grund.empty() ? "" : " | ")+t; }
 bool klemm_budget_verletzt = false; // ★ 15.09.2026 Klemmen Z2c (KLEMMEN-STUFE2-PLAN.md §2.4/§3): Budget gerissen -- Abbruch ebenfalls erst am Fallende
 void klemm_bilanz_abschluss(const char* fall) {
+	if(apg_verletzt) print_error(string("APG (")+fall+"): Abnahme des umgebauten APG-Pfads verletzt (Zeilen \"APG ... ABNAHME VERLETZT\" oben). Der Bericht ist vollstaendig, der Abbruch folgt erst hier.");
 	if(dk_verletzt) print_error(string("DICHTEKLEMME-BERICHT (")+fall+"): "+dk_grund+" -- Wirkpfad-/Huellenwaechter verletzt (Iron Rule: Schalter ohne feuernden Zaehler). Der Klemmenbericht oben ist VOLLSTAENDIG; der Abbruch folgt erst hier (Audit 16.09.2026, Befund H1).");
 	if(klemm_bilanz_verletzt||klemm_budget_verletzt) print_error(string("KLEMM-BILANZ (")+fall+"): "+string(klemm_bilanz_verletzt ? "Abnahme des Klemmen-Messinstruments verletzt" : "")+string(klemm_bilanz_verletzt&&klemm_budget_verletzt ? " UND " : "")+string(klemm_budget_verletzt ? "Klemm-Budget gerissen (KLEMM-BUDGET-Zeilen)" : "")+" -- siehe Bericht.");
 }
@@ -4555,6 +4589,7 @@ void main_setup_kanal() {
 		for(ulong i=0ull; i<3ull*lbm.get_N(); i++) { uint b; const float v=(i<lbm.get_N())?lbm.u.x[i%lbm.get_N()]:((i<2ull*lbm.get_N())?lbm.u.y[i%lbm.get_N()]:lbm.u.z[i%lbm.get_N()]); memcpy(&b,&v,4u); h^=(ulong)b; h*=1099511628211ull; }
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
+	berichte_apg(lbm, "Kanal");
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h, Ub_ziel); dichteklemme_fazit(h); }
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) { // Wirkpfad-Nachweis: Zaehler auslesen
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
@@ -5143,7 +5178,7 @@ static void lese_rho_rand_einzelgitter(const string& fall) {
 	if(rr_>1u) print_error("CFD_RHO_RAND kennt nur 0 (aus) und 1 (rho nur in der Randschale R1).");
 	LBM_Domain::s_rho_rand = rr_;
 	if(rr_==0u) { if(env_u("CFD_RHO_RAND_TESTHAKEN", 0u)>0u) print_warning("CFD_RHO_RAND_TESTHAKEN ist gesetzt, CFD_RHO_RAND aber 0 -- wirkungslos."); return; }
-	if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus ("+fall+").");
+	// ★ 16.09.2026: Sperre RHO_RAND x APG entfaellt -- APG liest seit dem Vorkernel-Umbau keinen rho-Puffer (PLAN-APG-2026-09-16.md §B).
 	if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0 ("+fall+"): der Voll-Read-Slicepfad liest den ganzen rho-Puffer.");
 	if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1 ("+fall+"): der Pruefarm vergleicht gegen den vollen rho-Puffer.");
 	if(env_u("CFD_RHO_REK_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_RHO_REK_PRUEF=1 ("+fall+"): das Pruefinstrument braucht den vollen rho-Puffer.");
@@ -5870,6 +5905,7 @@ void main_setup_kugel() {
 		}
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
+	berichte_apg(lbm, "Gitter");
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h, kb_kugel.init&&klemm_budget_modus()>0u); }
 	{ const KlemmUrteil ku_ = berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u), "sigma(Cd der Kugel aus object_force, Block-SEM 4)");
 	  if(kb_kugel.init) klemm_budget_bewerten("Gitter", ku_, block_sem(cd_w, 4u), block_sem(cz_w, 4u), out_dir+"klemm_budget.csv", true); } // ★ Z2c // ★ 15.09.2026 Klemmen S0c (Pruefpass S0c N4: Kugel hat kein cd_rest)
@@ -6276,6 +6312,7 @@ static void main_setup_fahrzeug() {
 	const bool stat_ok = cd.size()>=16u; // ★ Audit 2/3: Dichteklemme lief hinter dem _exit nie bei Kurzlaeufen
 	if(!stat_ok) print_warning("Zu wenige Samples -- Cd-Statistik entfaellt, Dichteklemme laeuft trotzdem.");
 	print_info("---------------------------------------------------------------");
+	berichte_apg(lbm, "Gitter");
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h); }
 	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
@@ -6777,7 +6814,7 @@ static void main_setup_fahrzeug_dd() {
 	    // Maske nicht ab. Der Takt ist die Sample-Kadenz in FEINEN Schritten.
 	    const uint rs_ = env_u("CFD_RHO_SPARSAM", 0u);
 	    LBM_Domain::s_rho_takt = (rs_>0u) ? max(1u, env_schritte("CFD_SAMPLE_EVERY", 25u))*ratio : 0u;
-	    if(rs_>0u&&env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_SPARSAM und CFD_FAC_APG schliessen sich aus: der APG-Zweig liest rho an bis zu 18 FACETTENNACHBARN (kernel.cpp, rho[j[ia]]), und die liegen ausserhalb der Auslassschicht. Die Maske waere keine Obermenge mehr und der Wandmodell-Eingang bekaeme lautlos veraltete Werte.");
+	    // ★ 16.09.2026: Sperre RHO_SPARSAM x APG entfaellt -- der APG-Zweig liest kein rho mehr (Vorkernel fac_nachbar_ab, PLAN-APG-2026-09-16.md §B).
 	    const uint us_ = env_u("CFD_U_SPARSAM", 0u);
 	    LBM_Domain::s_u_takt = (us_>0u) ? ratio : 0u;
 	    if(us_>0u&&env_u("CFD_SGS_BAND", 0u)>0u) print_error("CFD_U_SPARSAM und CFD_SGS_BAND schliessen sich aus: das Band liest u an den Lagen 2..8 von der Wand, also bis zu 8 Zellen ausserhalb der Facettenzelle. Die Maske dilatiert die F-BBox nur um 2 und waere keine Obermenge mehr.");
@@ -6802,7 +6839,7 @@ static void main_setup_fahrzeug_dd() {
 	        LBM_Domain::s_rho_takt = 0u;
 	        print_info("CFD_RHO_RAND ersetzt CFD_RHO_SPARSAM im NAHFELD (rho-Takt dort 0); das FERNFELD behaelt seine rho-Schreibmaske (Entscheidung Heiko 15.09.).");
 	      }
-	      if(env_f("CFD_FAC_APG", 0.0f)!=0.0f) print_error("CFD_RHO_RAND und CFD_FAC_APG schliessen sich aus: APG liest rho an den 18 Nachbarn jeder Facettenzelle im Inneren, dort gibt es unter RHO_RAND keinen Puffer. Die APG-Lesemenge zaehlt der C0-Zensus; der APG-Weg (Region oder DDFs) ist eine eigene Entscheidung."+rr_aus_);
+	      // ★ 16.09.2026: Sperre RHO_RAND x APG (dd) entfaellt -- Vorkernel liest die DDFs, nicht den rho-Puffer.
 	      if(env_u("CFD_SLICE_GPU", 1u)==0u) print_error("CFD_RHO_RAND mit CFD_SLICE_GPU=0: der Voll-Read-Slicepfad liest den ganzen rho-Puffer vom Geraet, den es unter RHO_RAND nicht mehr gibt. Den Ebenen-Gather (CFD_SLICE_GPU=1) benutzen."+rr_aus_);
 	      if(env_u("CFD_SLICE_PRUEF", 0u)>0u) print_error("CFD_RHO_RAND mit CFD_SLICE_PRUEF=1: der Pruefarm vergleicht gegen den vollen rho-Puffer. Unter RHO_RAND gehoert dieser Vergleich in den eigenen Pruefmodus (Plan C3), der noch nicht gebaut ist."+rr_aus_);
 #ifndef UPDATE_FIELDS
@@ -9416,6 +9453,7 @@ static void main_setup_fahrzeug_dd() {
 		if(nm>0u) print_info("Fernfeld-Fahrzeugkraft Fx (Mittel ab Warmlauf): "+to_string((float)(m/(double)nm),1u)+" N ueber "+to_string(nm)+" Samples (Zeitreihe: Spalte Fx_far_N in forces.csv)"
 			+(env_u("CFD_FERN_FACETTEN",0u)>0u?string(" -- ACHTUNG P8: PHANTOMBEHAFTET (object_force an facettenbehandelten Links des Fernfelds), nur als Arm-DIFFERENZ werten."):string("")));
 	}
+	berichte_apg(lbm_f, "Nahfeld");
 	{ ulong h=0ull; berichte_dichteklemme(lbm_f, "Nahfeld", h, u_lat); berichte_dichteklemme(lbm_c, "Fernfeld", h, u_lat); dichteklemme_fazit(h, kb_nah.init&&klemm_budget_modus()>0u); }
 	{ // ★ 15.09.2026 Klemmen S0c: Restfenster seit dem letzten Sample lesen, dann Bericht (sigma aus ber_cd = cd_rest-Reihe nach Warmlauf)
 	  klemm_lesen(lbm_f, kb_nah, t_si_letzt, t_si_letzt>=(double)t_warmup, out_dir+"klemmen_nah.csv", "Nahfeld"); klemm_lesen(lbm_c, kb_fern, t_si_letzt, t_si_letzt>=(double)t_warmup, out_dir+"klemmen_fern.csv", "Fernfeld");
@@ -9969,6 +10007,7 @@ static void main_setup_fernfeld() {
 		print_info("EINLASS_EQ-Wirkpfad: "+to_string(eq)+" Spalten-Resets (t%100-Stichprobe).");
 		if(eq==0ull) print_error("CFD_FERN_EINLASS_EQ gesetzt, aber Wirkpfad NULL -- lautloser No-Op.");
 	}
+	berichte_apg(lbm, "Fernfeld-Diagnose");
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Fernfeld-Diagnose", h, u_lat); dichteklemme_fazit(h); }
 	print_info("CSV: "+out_dir+"rauschen.csv");
 	klemm_bilanz_abschluss("main_setup_fernfeld"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende

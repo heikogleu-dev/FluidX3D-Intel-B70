@@ -2006,9 +2006,6 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_DIAGZ"+R(
                         , global float* fac_diag // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds) der Diagnose-Facette
 )+"#endif"+R( // FACETTEN_DIAGZ
-)+"#ifdef FACETTEN_APG"+R(
-                        , const global rhoxx* rho // APG: tangentialer Druckgradient aus Nachbar-rho (p = rho/3)
-)+"#endif"+R( // FACETTEN_APG
 )+"#ifdef FACETTEN_ELIBB"+R(
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
 )+"#endif"+R( // FACETTEN_ELIBB
@@ -2073,9 +2070,9 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	bool nachbar_ab = false; // ★ 03.09. (Planungsagent-Auflage): true NUR bei angewandter Nachbarabtastung -- UTKORR ist die 3/2-BB-Deflation der EIGENEN Zelle (P1 ~ -u/3) und darf den Nachbarwert nicht skalieren; ohne FACETTEN_NACHBAR konstant false (bitgleich)
 )+"#ifdef FACETTEN_NACHBAR"+R(
 	{ // ★ 03.09. deterministisch: Werte aus dem Kernel fac_nachbar_ab des Vorschritts -- kein u-Zugriff im selben Launch mehr
-		const float utb = fac_nb[2ul*(ulong)fid];
+		const float utb = fac_nb[def_nb_stride*(ulong)fid]; // def_nb_stride: 2, unter FACETTEN_APG 5 (grad rho in [2..4])
 		if(utb>1e-6f) {
-			ut_ab = utb; nachbar_ab = true; yw_ab = fac_nb[2ul*(ulong)fid+1ul]; // Wandabstand der Abtastzelle
+			ut_ab = utb; nachbar_ab = true; yw_ab = fac_nb[def_nb_stride*(ulong)fid+1ul]; // Wandabstand der Abtastzelle
 			// ★ 03.09. SAETTIGUNG wie Slot 76: am 4-mm-Fahrzeug laeuft dieser Zaehler auf 3,13 M Facetten x ~501
 			// Stichproben = 1,57e9 = 37 % des uint-Bereichs (Luft nur Faktor 2,7). Ohne Schutz wickelte er bei
 			// laengerem T_END oder feinerem Gitter STILL und der Report meldete eine falsche Prozentzahl.
@@ -2126,29 +2123,29 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	float t2x=ny*t1z-nz*t1y, t2y=nz*t1x-nx*t1z, t2z=nx*t1y-ny*t1x;
 )+"#ifdef FACETTEN_APG"+R(
 	float fac_dpds=0.0f;
-	{ // ★ APG (Plan 2026-08-18): duenne-GS-Impulsbilanz tau(y_w) = tau_w + y_w*dp/ds -- Ziel
-		// tw_apg = tw - kappa*y_w*dp_ds. dp_ds als 1-Parameter-LS-DIFFERENZFORM ueber die
-		// FLUID-Nachbarn (Rohform ergaebe am wandgestutzten Stencil einen Scheingradienten bei
-		// uniformem rho). rho[j] traegt je Scheduling t-1 oder t (UPDATE_FIELDS schreibt nach
-		// diesem Block) -- fuer einen Gradienten dokumentiert akzeptabel.
-		float num=0.0f, den=0.0f;
-		for(uint ia=1u; ia<def_velocity_set; ia++) {
-			// ★ Pruefer-Befund HOCH (270cd99): j[opposite(ia)] ist der Nachbar bei n MINUS c_ia --
-			// der Gradient war GESPIEGELT (tw stieg im APG statt zu sinken). j[ia] = Nachbar bei +c_ia.
-			if((flags[j[ia]]&TYPE_BO)==TYPE_S) continue; // nur Fluid/TYPE_E-Nachbarn (gueltiges rho)
-			const float ct1a = c(ia)*t1x+c(def_velocity_set+ia)*t1y+c(2u*def_velocity_set+ia)*t1z;
-			const float wia = w(ia);
-			num = fma(wia*ct1a, load_rho(rho, j[ia])-rhon, num);
-			den = fma(wia, ct1a*ct1a, den);
+	{ // ★ APG, UMGEBAUT 16.09.2026 (PLAN-APG-2026-09-16.md §A/§B). Duennschicht-Impulsbilanz tau(y) = tau_w + y*dp/ds, aufgeloest an
+		// der ABTASTHOEHE y_ab -- Befund A1: Spalding tastet seit NACHBAR (03.09.) an y_ab ab, die Korrektur nahm y_w der eigenen
+		// Zelle (bis Faktor 3 zu klein); ohne NACHBAR ist yw_ab == yw (bitgleich zum alten Zweig). dp/ds = (grad rho . t1)/3 mit
+		// grad rho aus dem Vorkernel fac_nachbar_ab (deterministisch, aus den DDFs; Befunde A2/A3). KEIN rho-Zugriff mehr in
+		// diesem Kernel. kappa = def_fac_apg: herleitbar ist 1, 0,5 ist ein deklarierter Interim (Befund A7).
+		const ulong nbb = def_nb_stride*(ulong)fid;
+		const float gx=fac_nb[nbb+2ul], gy=fac_nb[nbb+3ul], gz=fac_nb[nbb+4ul];
+		fac_dpds = (gx*t1x+gy*t1y+gz*t1z)*(1.0f/3.0f); // p = rho*c_s^2 = rho/3
+		const float korr = def_fac_apg*yw_ab*fac_dpds;
+		const bool zt = (t%def_zaehl_takt==0ul);
+		if(zt) { // Diagnostik (Iron Rule 3): Zwischenergebnisse zaehlbar, nicht nur die Endkraft
+			if(hits[308]<0xF0000000u) atomic_inc(&hits[308]);                       // APG-Zweig besucht, Soll = [7]-[9]
+			if(fac_dpds>0.0f) { if(hits[311]<0xF0000000u) atomic_inc(&hits[311]); } // dp/ds > 0: Gegendruck (APG)
+			else if(fac_dpds<0.0f) { if(hits[312]<0xF0000000u) atomic_inc(&hits[312]); } // dp/ds < 0: FPG
+			if(tw>0.0f) { const float r_ = fabs(korr)/tw; const uint hb_ = r_<0.1f ? 313u : (r_<0.5f ? 314u : (r_<1.0f ? 315u : 316u)); // Autoritaet |kappa*y*dp/ds|/tw
+				if(hits[hb_]<0xF0000000u) atomic_inc(&hits[hb_]); }
 		}
-		fac_dpds = (den>=1e-6f) ? num/(3.0f*den) : 0.0f; // Entartung (alles solid): Korrektur exakt 0
-		float tw1 = fma(-def_fac_apg*yw, fac_dpds, tw);
-		// ★ Lauf-4-Befund (Fahrzeug): |Korrektur| >> tw an Staupunkt/Heck -- 46 % 0-Klemmen, y+ x10,
-		// +0,085 Cd Reibungsstrafe. RELATIVE Kappung (Planer-Reserve): Ziel bleibt in [0, 2*tw].
-		if(tw1<0.0f) { tw1=0.0f; if(t%def_zaehl_takt==0ul) atomic_inc(&hits[19]); } // Slot 19: beide APG-Klemmen (unten 0 / oben 2*tw)
-		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(t%def_zaehl_takt==0ul) atomic_inc(&hits[19]); }
+		float tw1 = tw-korr;
+		// RELATIVE Kappung [0, 2*tw] (Lauf-4-Befund: 46 % 0-Klemmen). Slot 19 = beide Klemmen zusammen (alt, Bericht), 309/310 getrennt (neu).
+		if(tw1<0.0f) { tw1=0.0f; if(zt) { atomic_inc(&hits[19]); if(hits[309]<0xF0000000u) atomic_inc(&hits[309]); } }
+		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(zt) { atomic_inc(&hits[19]); if(hits[310]<0xF0000000u) atomic_inc(&hits[310]); } }
 		tw = tw1;
-		if(tw*faca>0.5f*rhon*ut&&t%def_zaehl_takt==0ul) atomic_inc(&hits[8]); // Tiefen-Audit A1-B2: Klemme der NACH-APG-Kette zaehlen (Kopf zaehlte die verworfene Vor-APG-Kette)
+		if(tw*faca>0.5f*rhon*ut&&zt) atomic_inc(&hits[8]); // Tiefen-Audit A1-B2: Klemme der NACH-APG-Kette zaehlen (Kopf zaehlte die verworfene Vor-APG-Kette)
 		twe = fmin(tw*faca, 0.5f*rhon*ut);
 	}
 )+"#endif"+R( // FACETTEN_APG
@@ -3041,9 +3038,6 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_DIAGZ"+R(
 		, fac_diag
 )+"#endif"+R( // FACETTEN_DIAGZ
-)+"#ifdef FACETTEN_APG"+R(
-		, rho
-)+"#endif"+R( // FACETTEN_APG
 )+"#ifdef FACETTEN_ELIBB"+R(
 		, fac_q
 )+"#endif"+R( // FACETTEN_ELIBB
@@ -5513,8 +5507,15 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 )+"#endif"+R( // SGS_SISM
 } // sgs_fdwand()
 
+)+"#ifdef FACETTEN_APG"+R(
+float apg_rho_zelle(const uxx nb, const global fpxx* fi, const ulong tt TS_P) { // ★ 16.09.2026 APG: rho EINER Zelle aus den DDFs, Muster rho_rek_ebene (load_f + calculate_rho_u, MIT RHO_CLAMP wie gespeichert). Private Arrays nur mit Konstantindizes (in neighbors/load_f/calculate_rho_u) -- scratch-frei wie dort.
+	uxx jj[def_velocity_set]; float fh[def_velocity_set]; float rr, ux_, uy_, uz_;
+	neighbors(nb, jj); load_f(nb, fh, fi, jj, tt TS_A); calculate_rho_u(fh, &rr, &ux_, &uy_, &uz_);
+	return rr;
+}
+)+"#endif"+R( // FACETTEN_APG
 )+R(kernel void fac_nachbar_ab(const global velxx* u, const global uchar* flags, const global float* fac_geo,
-	const global uint* gd_zellen, const uint gd_N, global float* fac_nb TS_P) {
+	const global uint* gd_zellen, const uint gd_N, global float* fac_nb TS_P) { // ★ 16.09.: unveraendert bis auf def_nb_stride -- der APG-Gradient steht im EIGENEN Kernel fac_apg_ab (Gate-Befund: gemeinsam spillte er 1280 B auf der B70)
 	// ★★ DETERMINISTISCHE NACHBARABTASTUNG (CFD_FAC_NACHBAR, 03.09.2026). Der Direktzugriff u[nb] in
 	// apply_facette_imem lief im Kernel stream_collide, der u im selben Launch schreibt -- gemessen NICHT
 	// bitreproduzierbar (xu_det_mit_a/b: cf 0,00073682648 gegen 0,00073630592; ohne NACHBAR bitgleich).
@@ -5557,8 +5558,51 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		utb = (ut2>1e-6f) ? ut2 : 0.0f;
 		ywb = yw + (bcx*nx+bcy*ny+bcz*nz); // war c(ib)... -- siehe Scratch-Fix oben
 	}
-	fac_nb[2ul*(ulong)gid] = utb; fac_nb[2ul*(ulong)gid+1ul] = ywb;
+	fac_nb[def_nb_stride*(ulong)gid] = utb; fac_nb[def_nb_stride*(ulong)gid+1ul] = ywb; // def_nb_stride = 2 (5 unter FACETTEN_APG), JIT-Emission lbm.cpp
 } // fac_nachbar_ab()
+)+"#ifdef FACETTEN_APG"+R(
+kernel void fac_apg_ab(const global uchar* flags, const global uint* gd_zellen, const uint gd_N, global float* fac_nb,
+	const global fpxx* fi, const ulong t, global uint* rho_clamp_hits TS_P) { // ★ 16.09.2026 APG-VORKERNEL (eigener Kernel: Gate-Befund, im gemeinsamen Kernel spillte der Gradient 1280 B auf der B70)
+	const uint gid = get_global_id(0);
+	if(gid>=gd_N) return;
+	const uxx n = (uxx)gd_zellen[gid];
+	uxx j[def_velocity_set]; neighbors(n, j);
+	{ // ★ 16.09.2026 APG, DETERMINISTISCHES NACHBAR-RHO (PLAN-APG-2026-09-16.md §B, billigste Form nach Heikos Vorgabe):
+	  // grad(rho) an der Facettenzelle aus den DDFs der SECHS ACHSNACHBARN -- zentrale Differenz; einseitig, wo ein Nachbar
+	  // Solid ist; 0 auf einer Achse, auf der beide fehlen ([307]). KEIN rho-Puffer wird gelesen: RHO_RAND, RHO_SPARSAM und
+	  // RHO_FP16 bleiben unberuehrt, die alten Sperren entfallen. rho je Zelle wie in rho_rek_ebene: load_f(t+1) +
+	  // calculate_rho_u = das rho, das stream_collide(t+1) dort selbst bilden wird (MIT RHO_CLAMP, wie gespeichert) --
+	  // synchron zum rhon der Facette im naechsten Schritt statt des alten t-1/t-Gemischs (Befund A3, bitreproduzierbar).
+	  // TYPE_S wird uebersprungen (kein rho); TYPE_E/TYPE_MS tragen gueltiges rho (Befund A4). Verkehr: 7 Zellen x
+	  // (19 x 2 B + 1 B) je Facette und Schritt = 273 B/Facette (Rechnung; Cache-Wiederverwendung ungemessen).
+	  // Achsen-Erkennung ueber c(ia), NICHT ueber die Indexordnung: ein Achslink hat |cx|+|cy|+|cz| = 1. Beitrag eines
+	  // Nachbarn e mit Dichte rho_e zur Ableitung entlang +Achse: (rho_e - rho_0) * (e . Achse); beide vorhanden ->
+	  // Mittel = zentrale Differenz (rho_+ - rho_-)/2, einer -> einseitig. Keine laufzeitindizierten privaten Arrays
+	  // ausser j[]/jj[] in der ia-Schleife (Muster der Schleife oben, Scratch-Gate-belegt).
+	  // SCRATCH-LEHRE (11.09., Gate-Befund 16.09. private=7296): eine ia-Schleife mit Funktionsaufrufen (neighbors/load_f) wird
+	  // NICHT ausgerollt, j[ia] wird zum Laufzeitindex und das private Array speicherheimisch. Darum SECHS ausgeschriebene
+	  // Bloecke mit LITERALEN Linkindizes 1..6 -- die Achsenerkennung ueber c(ia) faltet der Compiler bei Literalen weg.
+	  const float r0 = apg_rho_zelle(n, fi, t+1ul TS_A);
+	  float sx=0.0f, sy=0.0f, sz=0.0f, kx=0.0f, ky=0.0f, kz=0.0f; // Summen und Nachbarzahl je Achse
+	  if(fabs(c(1u))+fabs(c(def_velocity_set+1u))+fabs(c(2u*def_velocity_set+1u))==1.0f&&(flags[j[1]]&TYPE_BO)!=TYPE_S) { const float d_=apg_rho_zelle(j[1], fi, t+1ul TS_A)-r0; sx=fma(d_,c(1u),sx); sy=fma(d_,c(def_velocity_set+1u),sy); sz=fma(d_,c(2u*def_velocity_set+1u),sz); kx+=fabs(c(1u)); ky+=fabs(c(def_velocity_set+1u)); kz+=fabs(c(2u*def_velocity_set+1u)); }
+	  if(fabs(c(2u))+fabs(c(def_velocity_set+2u))+fabs(c(2u*def_velocity_set+2u))==1.0f&&(flags[j[2]]&TYPE_BO)!=TYPE_S) { const float d_=apg_rho_zelle(j[2], fi, t+1ul TS_A)-r0; sx=fma(d_,c(2u),sx); sy=fma(d_,c(def_velocity_set+2u),sy); sz=fma(d_,c(2u*def_velocity_set+2u),sz); kx+=fabs(c(2u)); ky+=fabs(c(def_velocity_set+2u)); kz+=fabs(c(2u*def_velocity_set+2u)); }
+	  if(fabs(c(3u))+fabs(c(def_velocity_set+3u))+fabs(c(2u*def_velocity_set+3u))==1.0f&&(flags[j[3]]&TYPE_BO)!=TYPE_S) { const float d_=apg_rho_zelle(j[3], fi, t+1ul TS_A)-r0; sx=fma(d_,c(3u),sx); sy=fma(d_,c(def_velocity_set+3u),sy); sz=fma(d_,c(2u*def_velocity_set+3u),sz); kx+=fabs(c(3u)); ky+=fabs(c(def_velocity_set+3u)); kz+=fabs(c(2u*def_velocity_set+3u)); }
+	  if(fabs(c(4u))+fabs(c(def_velocity_set+4u))+fabs(c(2u*def_velocity_set+4u))==1.0f&&(flags[j[4]]&TYPE_BO)!=TYPE_S) { const float d_=apg_rho_zelle(j[4], fi, t+1ul TS_A)-r0; sx=fma(d_,c(4u),sx); sy=fma(d_,c(def_velocity_set+4u),sy); sz=fma(d_,c(2u*def_velocity_set+4u),sz); kx+=fabs(c(4u)); ky+=fabs(c(def_velocity_set+4u)); kz+=fabs(c(2u*def_velocity_set+4u)); }
+	  if(fabs(c(5u))+fabs(c(def_velocity_set+5u))+fabs(c(2u*def_velocity_set+5u))==1.0f&&(flags[j[5]]&TYPE_BO)!=TYPE_S) { const float d_=apg_rho_zelle(j[5], fi, t+1ul TS_A)-r0; sx=fma(d_,c(5u),sx); sy=fma(d_,c(def_velocity_set+5u),sy); sz=fma(d_,c(2u*def_velocity_set+5u),sz); kx+=fabs(c(5u)); ky+=fabs(c(def_velocity_set+5u)); kz+=fabs(c(2u*def_velocity_set+5u)); }
+	  if(fabs(c(6u))+fabs(c(def_velocity_set+6u))+fabs(c(2u*def_velocity_set+6u))==1.0f&&(flags[j[6]]&TYPE_BO)!=TYPE_S) { const float d_=apg_rho_zelle(j[6], fi, t+1ul TS_A)-r0; sx=fma(d_,c(6u),sx); sy=fma(d_,c(def_velocity_set+6u),sy); sz=fma(d_,c(2u*def_velocity_set+6u),sz); kx+=fabs(c(6u)); ky+=fabs(c(def_velocity_set+6u)); kz+=fabs(c(2u*def_velocity_set+6u)); }
+	  float gx = (kx>0.0f) ? sx/kx : 0.0f, gy = (ky>0.0f) ? sy/ky : 0.0f, gz = (kz>0.0f) ? sz/kz : 0.0f;
+	  if(t%def_zaehl_takt==0ul) { // Zaehler nur an Zaehlschritten (Absturzlehre 15.09.: nichts Atomares im Immerpfad)
+		if(rho_clamp_hits[306]<0xF0000000u) atomic_inc(&rho_clamp_hits[306]); // Vorkernel-Besuche (Soll = [7])
+		if((kx==0.0f||ky==0.0f||kz==0.0f)&&rho_clamp_hits[307]<0xF0000000u) atomic_inc(&rho_clamp_hits[307]); // entartet: eine Achse ohne Fluidnachbarn
+	  }
+)+"#ifdef FACETTEN_APG_HAKEN"+R(
+	  gx = 1.0e-3f; gy = 0.0f; gz = 0.0f; // ★ TESTHAKEN CFD_FAC_APG_HAKEN=2: Konstantgradient -> Host prueft fac_nb bitgenau und den Durchstich bis dp/ds
+)+"#endif"+R( // FACETTEN_APG_HAKEN
+	  fac_nb[def_nb_stride*(ulong)gid+2ul] = gx; fac_nb[def_nb_stride*(ulong)gid+3ul] = gy; fac_nb[def_nb_stride*(ulong)gid+4ul] = gz;
+	}
+} // fac_apg_ab()
+)+"#endif"+R( // FACETTEN_APG
+
 )+R(kernel void object_torque(const global float* F, const global uint* f_maske, const global uchar* flags, const uchar flag_marker, const float cx, const float cy, const float cz, volatile global float* object_sum) {
 	const uxx n = get_global_id(0); // n = x+(y+z*Ny)*Nx
 	const uint lid = get_local_id(0); // local memory reduction of cl_workgroup_size:1
