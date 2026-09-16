@@ -766,7 +766,7 @@ measurements in [`TODO.md`](TODO.md) (appendix; formerly PERFORMANCE.md).
 
 ## The validated production configuration
 
-**Current standard (2026-09-11), as run in the baseline `p4dt_deteps`:**
+**Current standard (2026-09-11), as run in the baseline `p4dt_deteps`** — the table below is the state of 2026-09-11; the clamp block added on 2026-09-15/16 is documented in its own section underneath, and `TODO.md` is the leading list:
 
 | Switch | Value | Why |
 |---|---|---|
@@ -800,6 +800,26 @@ hard error in this project):
   displacement census, block-SEM statistics, timed VTK field dumps + end dump, stop-file
   graceful shutdown, a GuC-engine-reset watchdog on the kernel journal, and a locked run queue
   with process census before and after every series.
+
+### Conserving clamps (the `CFD_KLEMM_*` / `CFD_POSITIV` block, added 2026-09-15/16)
+
+The audit loop of 2026-09-16 found that **none** of the eight switches of this block was documented here, although two of
+them are production defaults and one of those can fail a run. Corrected:
+
+| Switch | Default | What it does to a production run |
+|---|---|---|
+| `CFD_KLEMM_BILANZ` | **1 (on)** | the clamp measuring instrument: per-window counters, mass/momentum booking, the `KLEMM-BILANZ` / `KLEMM-HUELLEN` report and `klemmen_*.csv`. Bit-neutral — forces are identical with and without (verified 2026-09-16 on 8 mm, `kl_m5_bilanz*`). Its cost is **below run-to-run scatter**: 132.6 s / 5454 MLUPs with it against 137.5 s / 5262 MLUPs without, i.e. the arm carrying the instrument was the faster one. |
+| `CFD_KLEMM_BUDGET` | **2 (error)** | judges the momentum and mass the clamps removed against `k(4)·σ(cd_rest)`. **At 2 a breached budget ends the run with rc 1 at case end.** 1 = warning only, 0 = do not judge. |
+| `CFD_POSITIV` | 0 | 1 = measure the positivity limiter, 2 = apply it (projection form, mass and momentum conserved for every s). At 8 mm it removes 98 % (near) / 100 % (far) of negatively charged populations. |
+| `CFD_U_KLEMME` | 0 | 1 = clamp \|u\|² ≤ c_s² as a magnitude instead of per component. |
+| `CFD_RHO_HUELLE` | 0 | 1 = widen the density clamp to the half-word hull. **Not neutral:** at 8 mm it shifts `cd_druck_rest` by −0.189 (systematic, 50 of 50 samples) while its own budget books only 1/23 of that, and it lets ρ leave the consistency hull 0.5/1.5 about 5.07 M times. Screening switch, not for production. |
+| `CFD_TOR_HUELLE` | 0 | 1 = narrow the lift-ρ gate and watcher 210 to the image hull. Only meaningful in coupled cases; its action path is proven by the constant mirrors `[301]/[302]` and `[304]/[305]`. |
+| `CFD_KLEMM_HAKEN`, `CFD_POSITIV_HAKEN`, `CFD_POSITIV_FACETTE` | 0 | test hooks only — they change the physics and are refused on a GPU outside the sphere case (crash lock since 2026-09-15). |
+
+**Status of the standard:** `CFD_POSITIV=2` + `CFD_U_KLEMME=1` are the chosen candidates (numerical hygiene gained, budget
+held, no measurable cost), but the production line has **not yet been run with them** — do not read this table as a
+validated physics result. What is *not* shown is that Cd becomes more accurate: the force differences of the stage-1 arms
+were 1.7 σ single realizations, and a valid reference (OpenFOAM 13 / literature) has not been run against this block.
 
 Reproduce: the exact env line ships in `logs/f4_vollumfang_serie.txt` and — like every run — a
 full copy of the sources plus commit hash lands in `export/<run>/code/` (`LAUF.txt`).

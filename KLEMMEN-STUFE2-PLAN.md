@@ -65,7 +65,7 @@ physikalisch sinnvoll setzen“; alles an 8 mm; danach Block-Audit-Schleife. **E
 - Λ = 1,25 hergeleitet (Lebesgue-Konstante 4-Punkt-Lagrange, kernel.cpp:4442-4460), Λ² = 1,5625.
 - CFD_TOR_HUELLE=1: Bildhülle 1 ± Λ²·½ = (0,21875; 1,78125) → Tor wird Invariante (Soll 0). Heute verwirft (0,5; 2,0) legale Werte
   in (0,219; 0,5]. Unter B2 kein Bild (1 − 1,5625·(1−6·10⁻⁴) < 0) → Tor = numerische Hülle, darf greifen (Slot 270).
-- Slot 210: Schreiberhülle ± eine RHO_FP16-ULP. S0c-Wickelschranke 2,1 übernimmt das Hüllenmaximum.
+- Slot 210: Schreiberhülle ± **32**/32768 (Tor: ±**16**/32768 — die größte RHO_FP16-ULP unter 2^15 ist 16, der Wächter liegt bewusst eine Stufe weiter außen als das Tor). **BERICHTIGT 16.09.2026** (Audit-Befund C-N5): hier stand „± eine RHO_FP16-ULP", die gebauten Werte stehen in `src/lbm.cpp` bei der Emission von `def_w210_*`/`def_tor_gate_*`. S0c-Wickelschranke 2,1 übernimmt das Hüllenmaximum. Beide Grenzen sind seit 16.09. durch Konstantenspiegel belegt: [301]/[302] für das Tor, [304]/[305] für den Wächter (Ist=Soll gegen eine unabhängige Host-Rechnung).
 - Slots 212/214 (1,0) nicht umstellen (Wächterschwelle zwischen zwei hergeleiteten Grenzen).
 
 ### 2.4 Klemm-Budget
@@ -88,8 +88,36 @@ Urteil nach Warmlauf: Nah 0,0063σ netto (0,2265σ brutto, 5148 Schritte), Fern 
 (0,4858σ brutto) → eingehalten, k(4) = 1,0110, σ_cd = 0,025740, σ_cz = 0,023666, Kappung 0. ΔCd_j = ΔCz_j = 0. Rechnung oben (0,23σ/0,50σ)
 bestätigt. Kosmetik: CSV schreibt ΔCd_j als „-0“.
 
+### 2.5 GEMESSEN 16.09.2026: das Budget ist KEINE Schranke für die Kraftwirkung
+
+Arm **M-CB1B2** gegen **M-CB1** (8 mm, B70, eine Variable `CFD_RHO_HUELLE=1`; die Basis wurde auf dem aktuellen Binary
+wiederholt und ist bitgleich zu ihrem Vorlauf, `kl_z2m_dd8_cb1r_b70` == `kl_z2m_dd8_cb1_b70` in `forces.csv` und
+`cd_facetten.csv`):
+
+| Größe | M-CB1 | M-CB1B2 |
+|---|---|---|
+| ρ-Treffer Nah / Fern (ganzer Lauf) | 3 283 945 / 27 605 | 1 274 183 / **0** |
+| u-Treffer Nah (K0..K4) | 31 745 (alle K0) | **330 190** (31 548 / **298 642** K1 = bewegter Boden) |
+| Konsistenzhülle 0,5/1,5 verlassen [298]/[299] | — (dort ist sie die Klemme) | **3 060 608 / 2 010 451** (nur gezählt) |
+| `cd_druck_rest` nach Warmlauf (50 Samples) | 0,4418 | 0,2525 |
+| Klemm-Budget Nah+Fern | 0,1423 σ → eingehalten | 0,3170 σ → eingehalten |
+
+**Die Kraftdifferenz ist systematisch, nicht Realisierungsstreuung:** −0,1894 ± 0,0231, in **0 von 50** Samples mit
+umgekehrtem Vorzeichen, Blockmittel je 20 ms zwischen −0,175 und −0,219; in `forces.csv` sind die Arme schon **ab dem
+ersten Sample** (t = 0,002 s, +0,2977) getrennt. Eine chaotische Auseinanderentwicklung begänne bei ~0 und wüchse.
+Eine zweite Realisierung je Arm war dafür **nicht nötig**; die Rückfrage aus dem Plan entfällt für diese Frage.
+Der Plan selbst nennt 0,073 (2 Arme, 2 σ) als Auflösungsgrenze — gemessen ist das 2,6-fache.
+
+**Daraus die Konsequenz für §2.4:** das KLEMM-BUDGET bucht |dCd_j| + |dCd_m| = 0,0084 und urteilt „eingehalten", während
+die gemessene Verschiebung **0,1894** beträgt — rund das **23-fache**. Der Grund ist der oben belegte Mechanismus: die
+Klemme entfernt nicht nur direkt Impuls, sie **verlagert den Zustand** (die u-Klemme am bewegten Boden feuert 10,4-mal
+so oft), und diese indirekte Wirkung kann das Budget konstruktiv nicht sehen. **Ein „Budget eingehalten" darf daher NIE
+als „die Klemme ist kraftneutral" gelesen werden.** Feldprüfung dazu (`werkzeuge/feldscan.py`, ganzes Nahfeld 300 ms,
+nur Fluidzellen): |u|max an der bewegten Wand 93,11 → 231,03 m/s, Zellen über 100 m/s 4 → 27. Die 231 m/s sind die
+Klemmgrenze selbst (0,57735·30/0,075 = 230,94 m/s, `src/setup.cpp`), die Zellen sitzen also AUF dem Anschlag.
+
 ## 3 Verhalten bei Überschreitung
-- In berichte_klemmbilanz nur print_warning + `klemm_budget_verletzt`; Gesamturteil `klemm_budget_gesamt(nah, fern)`;
+- In berichte_klemmbilanz nur print_warning + `klemm_budget_verletzt`; Gesamturteil **inline in `setup.cpp`** aus den beiden `KlemmUrteil`-Werten (die im Plan genannte Funktion `klemm_budget_gesamt(nah, fern)` wurde nie gebaut — berichtigt 16.09.2026, Audit-Befund C-N5);
   klemm_bilanz_abschluss meldet am Fallende EINEN print_error für beide Flags.
 - CFD_KLEMM_BUDGET: 0 = nicht bewerten, 1 = Warnung, 2 = Fehler (Vorgabe).
 - „Nicht prüfbar“ → Warnung: σ < 0 (< 2B Samples), keine Schritte nach Warmlauf, mehrdeutig > 0. Kappung > 0: Summen Untergrenzen;
@@ -108,8 +136,8 @@ bestätigt. Kosmetik: CSV schreibt ΔCd_j als „-0“.
 
 | Slot | Inhalt | Soll |
 |---|---|---|
-| 295 | \|u_α\| ≥ def_c (Komponentenhülle), beide Arme, kl-Bit 8 | A: [28] = [295] |
-| 296 | u² ≥ def_u2max (Betragshülle), kl-Bit 16 | B1: [28] = [296]; [296] ≥ [295] |
+| 295 | \|u_α\| ≥ def_c (Komponentenhülle), beide Arme — **eigenständiger Zähler, KEIN kl-Bit** (berichtigt 16.09.) | A: [28] = [295] |
+| 296 | u² ≥ def_u2max (Betragshülle) — **eigenständiger Zähler, KEIN kl-Bit** (berichtigt 16.09.) | B1: [28] = [296]; [296] ≥ [295] |
 | 297 | 296 ∧ ¬295 (Diagonallücke) | [296] = [295] + [297] |
 | 298/299 | ρ_roh außerhalb Konsistenzhülle unten/oben (nur RHO_HUELLE) | – |
 | 300 | Lift-ρ außerhalb Bildhülle (zählt) | A: [300] = 0 ∧ [270] = 0 → Arm T logisch bitgleich |
@@ -122,7 +150,7 @@ U_KLEMME) · M-CB1B2 (+ RHO_HUELLE: Sicherung oder Reparatur?).
 **Haken** (Absturzsperre: Kugel ≤ 16 mm auf GPU oder CPU; nur neue Werte von CFD_KLEMM_HAKEN): Budget an der Kugel mit kleinem
 T_WARMUP (≥ 8 Samples) — (a) ohne Haken „eingehalten, 0 Treffer“; (b) H1 Massenbudget verletzt, genau ein print_error am Fallende;
 (c) H2 Impulsbudget verletzt; (d) T_WARMUP ≥ T_END „nicht prüfbar“, rc 0; (e) H1 + BUDGET=1 nur Warnung. Z2b/Z2d: Kugel H2 →
-[28] = [295] bzw. [296]. Z2e: Kugel hat keinen Lift → dd-Test auf der CPU mit H1 ([300] > 0). Z2f: H1 übersteuert beide Hüllen.
+[28] = [295] bzw. [296]. Z2e: **WIDERLEGT** — der hier vorgeschlagene dd-Test auf der CPU mit H1 hätte nie feuern können (H1 hält rho im Band 1,001/1,002 und bleibt damit IM Bild der Bildhülle; Prüfbefund Z2b, 15.09.). Ersatz ist `CFD_KLEMM_HAKEN=5`, der die Bildhülle künstlich auf 1 ± 1/32768 verengt (Physik unverändert, Soll [300] > 0 in Domänen mit Lift-Besuchen [215] > 0). Z2f: H1 übersteuert beide Hüllen — und emittiert RHO_HUELLE GAR NICHT, [298]/[299] existieren dann nicht (Befund B2/C-M1).
 
 ## 5 Spill und Kosten (Rechnung)
 Z2b Immerpfad: u² (3 Mul, 2 Add, 1 Vergleich, 2 OR), keine Speicherzugriffe; Z2d ersetzt 6 min/max + 6 Vergleiche durch denselben
