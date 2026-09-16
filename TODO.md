@@ -10,22 +10,46 @@ mit Commit. Eine Variable je Lauf; 4-mm- und Produktionsläufe nur nach Heikos G
 
 ---
 
-## 0 · Morgen zuerst (Heiko, 15.09.2026 spät)
+## 0 · ERLEDIGT am 16.09.2026 (war „morgen zuerst" vom 15.09.)
+
+| # | Punkt | Ergebnis | Beleg |
+|---|---|---|---|
+| 1 | Volle Audit-Korrektur-Schleife über den Klemmen-Block | **Abgeschlossen.** 4 Prüfdurchgänge, 3 Fix-Runden, ~45 Befunde (2 HOCH aus Durchgang 1, 2 weitere HOCH, die ich beim Fixen selbst eingebaut hatte). Letzter Prüfer: kein HOCH, kein MITTEL. Physik unverändert: 6 bitgleiche Kugel-Hashes, 8 mm bitgleich, Gate 58 Arme × 39 Kernel rc 0 | `37e33dd`, `68b051f`, `e23e8fd`; `logs/gate_a7_16-09.log`, `logs/kl_a8_ku_*`, Tagesprotokoll 16.09. |
+| 2 | B70-Gegenprobe nach CAT-Error, dann M-CB1B2 | **Sauber.** Gegenprobe bitgleich zu gestern, kein CAT-Error. M-CB1B2 gefahren, Basis auf aktuellem Binary wiederholt (bitgleich) — eine Variable | `logs/kl_gp_*`, `logs/kl_z2m_b2b.txt` |
+| 3 | Klemmen: was geht in den Standard? | **Entschieden (Heiko 16.09.):** `CFD_POSITIV=2` + `CFD_U_KLEMME=1` in den Standard, `CFD_RHO_HUELLE` bleibt 0. **Offen:** die Basisdateien tragen es noch nicht | `KLEMMEN-STUFE2-PLAN.md` §2.5, `logs/kl_std.txt` |
+
+**Der Befund, der die Reihenfolge darunter geändert hat:** beide Klemmen-Arme verschieben die Kräfte **systematisch**,
+nicht als Realisierungsstreuung — der neue Standard um −0,061 in `cd_druck_rest` (0 von 50 Samples mit anderem
+Vorzeichen), `RHO_HUELLE` um −0,189. Das KLEMM-BUDGET bucht davon nur 1/15 bzw. 1/23: **es ist keine Schranke für die
+Kraftwirkung**, weil es die Verlagerung des Zustands (u-Klemme am bewegten Boden ×10,4) konstruktiv nicht sieht.
+Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 σ" widerlegt (Herleitung: §2.5 des Plans).
+
+## 1 · Reihenfolge (Heiko, 16.09.2026)
 
 | # | Punkt | Stand | nächster Schritt |
 |---|---|---|---|
-| **1** | **Volle Audit-Korrektur-Schleife über den Klemmen-Block Stufe 0–2** (Iron Rule 3) | Gebaut und je Commit geprüft: S0a–S0d, Z2a–Z2f, P1a–P1d (Commits 1760eaa … 2569c07). Letzter Prüfbericht Z2e/Z2f eingearbeitet; dessen Nachprüfung steht noch aus. Pläne: `KLEMMEN-STUFE0-PLAN.md`, `KLEMMEN-STUFE1-PLAN.md`, `KLEMMEN-STUFE2-PLAN.md` | Drei unabhängige Prüfer (jede Funktion / Host- und Pipeline-Zusammenspiel / Zusammenspiel und toter Code), Befunde beheben, erneut prüfen bis sauber; danach Gate + Kugel-Leiter CPU → iGPU → B70 |
-| **2** | **B70-Gegenprobe nach CAT-Error, dann Arm M-CB1B2** | 15.09. 22:49:19 `xe 0000:04:00.0 Engine memory CAT error, class=bcs` am Übergang `kl_z2ef_ku16_t_b70` → `r_b70`; `r_b70` brauchte 62 s statt 3 s, Ergebnis und Hash in Ordnung. Ursache offen (Queue kennt das Muster, „2x belegt“). Arm M-CB1B2 (`logs/kl_z2m_b2.txt`) wurde vor dem Start gestoppt | Harmloser 16-mm-Kugellauf auf der B70 + `journalctl -k`; sauber → M-CB1B2 fahren (POSITIV=2 + U_KLEMME=1 + RHO_HUELLE=1 gegen M-CB1); wieder CAT → B70 für Hakenläufe sperren, Treiberstand prüfen |
+| **1** | **iGPU-Leistungsleiter** — Pflicht vor 3,75 mm | offen; absolute Grobschrittzeit ungemessen | Timer um den Fernfeldschritt (`CFD_QUEUE_DEV=2`) |
+| **2** | **4-mm-Referenz NEU, mit erhaltender Klemme** | Muss ohnehin neu: die Klemme verschiebt die Kräfte systematisch (Punkt 0). Fällt mit dem offenen Reproduzierbarkeits-Punkt zusammen (`p4_u125` ≠ `p4_u125b`, Abschnitt 3) | Produktionszeile auf `CFD_POSITIV=2 CFD_U_KLEMME=1` umstellen, dann 4-mm-Lauf gegen `p4_neu`. **Braucht Heikos Go** |
+| **3** | **APG-Plan prüfen und nachschärfen** | erst wenn 2 steht; Plan ist von vor dem Klemmen-Befund | Planungsagent gegen den neuen Stand; dabei die offene SISM-Frage mitbehandeln (siehe Verzahnung unten) |
+| **4** | **APG/Mozaffari-Linie fahren** (Todo 2) | geparkt; ELIBB × APG, deterministisches Nachbar-ρ; Serienzeilen brauchen `CFD_RHO_RAND=0` | 8-mm-A/B κ 0,5 gegen 0 mit `CFD_VTK_DT=0.025` |
+| 5 | **3,75 mm / 15 m** | rechnerisch machbar seit 12.09. (Anhang 1g); 3,5 mm fehlen ~3,8 GB | nach 1 |
+| 6 | **Gemischter Satz D3Q19/D3Q27 nur an Wandzellen** | Idee mit Gate, NICHT begonnen; „44 %"-Ausgangszahl ohne Quelle im Bestand | erst nach 4; Stufe 1 Zensus (8 mm, KDIAG) + Flächen-Gate |
+| 7 | **Referenzabgleich OpenFOAM 13 für die Klemmen-Kraftverschiebung** (neu 16.09.) | die Verschiebung ist gemessen, aber unbewertet — der eigene Vorgängerstand taugt laut Iron Rule nicht als Maßstab | braucht kein GPU-Budget, kann parallel laufen |
 
-## 1 · Reihenfolge danach
+### Die Verzahnung von APG, SISM und D3Q27 (im Code nachgelesen, 16.09.)
 
-| # | Punkt | Stand | nächster Schritt | Quelle |
-|---|---|---|---|---|
-| 3 | **Klemmen: was geht in den Standard?** | 8 mm: Begrenzer wirkt (negativ geladene Populationen −98 %/−100 %), Budget überall eingehalten, Kraftdifferenzen Einzelrealisierungen (Δcd_rest −0,061 ≈ 1,7 σ_diff); Betragsklemme greift nach Warmlauf an Facetten (0,11 σ Impuls) | Nach Audit und M-CB1B2 Entscheidungsvorlage für Heiko; eine zweite Realisierung je Arm nur mit Rückfrage | `KLEMMEN-STUFE1-PLAN.md`, `KLEMMEN-STUFE2-PLAN.md` (Messabschnitte) |
-| 4 | **APG/Mozaffari-Linie reaktivieren** (Todo 2) | geparkt; ELIBB × APG, deterministisches Nachbar-ρ; Serienzeilen brauchen `CFD_RHO_RAND=0` | 8-mm-A/B κ 0,5 gegen 0 mit `CFD_VTK_DT=0.025` | Wissensspeicher-Todo, `UEBERGABE-2026-09-14.md` |
-| 5 | **iGPU-Leistungsleiter** — PFLICHT vor 3,75 mm | offen; absolute Grobschrittzeit ungemessen | zuerst Timer um den Fernfeldschritt (`CFD_QUEUE_DEV=2`) | Anhang „Der Deckel“ |
-| 6 | **3,75 mm / 15 m** | rechnerisch machbar seit 12.09. (Anhang 1g); 3,5 mm fehlen ~3,8 GB | nach 5 | Anhang 1g |
-| 7 | **Gemischter Satz D3Q19/D3Q27 nur an Wandzellen** (Heiko 15.09. spät) | Idee mit Gate, NICHT begonnen; Prüfnotiz: „44 %“-Ausgangszahl ohne Quelle, Ein-Link-Fläche schon bedient (07.09.), rekonstruierte Eckpopulationen transportieren keinen Impuls | **erst nach Punkt 4 (APG)**: Stufe 1 Zensus (8 mm, eigener Lauf mit KDIAG) + Flächen-Gate | `PLAN-D3Q27-WANDZELLEN.md` |
+Alle drei greifen an derselben Zelllage an, über **eine Rückkopplung mit einem Schritt Verzögerung**:
+`sgs_fdwand` (kernel.cpp:5439) nimmt **u** und liefert `fac_wfd` = w je Facettenzelle aus |S|_FD; `stream_collide`
+liest dieses `fac_wfd` **des Vorschritts** (kernel.cpp:2983). APG nimmt das Nachbar-ρ (kernel.cpp:2010) und ändert
+darüber das Wandmodell-Ziel, also die Wandschubspannung und damit u an derselben Zelle. D3Q27 an Wandzellen ändert
+den Linksatz und damit den Impulsübertrag — wieder u an derselben Zelle. Seit dem 16.09. hängt die u-Betragsklemme
+mit drin: sie greift genau an Facetten und am bewegten Boden.
+
+**Folgen:** (1) die Wirkungen addieren sich **nicht**, ein kombinierter Arm ist nicht die Summe der Einzelarme —
+zusätzlich zu „eine Variable je Lauf" braucht die Serie eine FESTE Bezugszeile über alle Arme. (2) APG wird *durch
+SISM hindurch* gemessen; SISM senkt ν_t in Lage 1 um 85,2 % (kernel.cpp:3497) und ist Teil der Übertragungsfunktion.
+(3) Die im Code stehende offene Frage „ist der SISM-Kraftgewinn Modellphysik oder nur die fehlende Wanddämpfung?"
+wird schwerer beantwortbar, sobald APG obendrauf liegt — sie gehört ins Nachschärfen von Punkt 3.
 
 ## 2 · Performance — offen
 
@@ -42,6 +66,21 @@ ersten vier Fenstern und ist im letzten verschwunden (−0,004 ± 0,017); das Fe
 zwischen den Armen **nicht unterscheidbar** (RMS 2,84 m/s gegen 2,93 m/s, die ein Arm gegen sich
 selbst 50 ms später hat). Damit ist das Einschwingen der einzige verbleibende Verdächtige — und
 genau deshalb rückt `CFD_T_WARMUP` auf Platz 1.
+
+### Durchsatz-Audit Nahfeldkernel — die sechs Prüfpunkte einzeln (nachgetragen 16.09., Heiko: „die sehe ich in der Todo nicht")
+
+Sie standen bisher nur als Fließtext weiter unten in diesem Abschnitt und tauchten in der geordneten Liste nicht auf.
+Reihenfolge wie geplant „billig zuerst": E1 → B1 (beide ohne GPU) → A2 → D1 → C1.
+
+| Nr | Was | GPU? | Stand |
+|---|---|---|---|
+| A1/A1b | `stream_collide` ist auf der B70 SIMD16 — Upstream ebenfalls | offline | **erledigt** 15.09.: die SIMD-Breite erklärt die Lücke NICHT |
+| E1 | asm-Statistik von `stream_collide` (Arm `prod8nah`) auf Nachrichtenbreite und -zahl auszählen | nein | offen |
+| B1 | Facettenzellen je SIMD-Block zählen (lineare Indexreihenfolge n, Blöcke zu 16) — Wanddivergenz beziffern | nein | offen |
+| A2 | `auto-large-GRF` als Occupancy-A/B, 8 mm, Wanduhr, bitgleich prüfen | ja, 1 A/B | offen |
+| D1/D2 | Zeitnahme um den `boden_eq`-Enqueue je Grobschritt; danach die 3D-Range als eigene Variable | ja | offen |
+| C1 | GB/s bei 8 mm gegen 4 mm an WORTGLEICHER Zeile — nur ein Unterschied je Zelle trüge die Cache-These | ja | offen |
+| A3 | `sub_group_size(32)` erzwingen — **Kerneländerung, braucht Freigabe** | ja | zurückgestellt nach A1b |
 
 ### Die Reihenfolge
 
