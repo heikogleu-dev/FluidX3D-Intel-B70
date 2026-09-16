@@ -8,6 +8,11 @@ bin/
 temp/
 export/
 logs/
+# ★ AUSNAHME mit Regel (Audit-Schleife 16.09.2026, Befund C-M7): die LAUFZEILEN logs/*.txt gehoeren ins Repo, die Logs nicht.
+# Die Plaene zitieren Laufzeilen als Beleg ("kl_s0c_dd8_b70", "kl_z2c_dd8_b70"); liegen sie nur lokal, ist der Beleg nicht
+# reproduzierbar. Bis zum 16.09. waren 20 von 57 kl_*.txt eingecheckt und 37 nicht -- ohne erkennbare Regel.
+# REGEL: jede Serien-/Laufzeilendatei mit "git add -f logs/<name>.txt" mitnehmen, sobald sie in einem Plan oder
+# Tagesprotokoll zitiert wird. Ausgaben (*.log, *.queue.log, queue_status.txt, export/) bleiben ausgeschlossen.
 
 # Interne Arbeits-Markdowns (Heiko 27.08.: gehoeren in den Wissensspeicher, nicht auf GitHub) -- bleiben lokal, nie wieder tracken:
 /AUDIT-BEFUNDE.md

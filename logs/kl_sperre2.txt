@@ -1,0 +1,2 @@
+# Test Queue-Luecke: dd-Haken ohne DEV-Zwang auf Geraet 0 -> VERWEIGERT
+CFD_CASE=fahrzeug_dd CFD_DX=16 CFD_KLEMM_HAKEN=1 :: kl_sperre2_dd_cpu
