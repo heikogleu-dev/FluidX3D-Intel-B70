@@ -46,6 +46,7 @@ EINHEIT = {
  "CFD_SLICE_NEAR_STEPS":"schritte_fein","CFD_SGS_SISM_AB":"schritte_fein","CFD_SGS_SISM_T":"schritte_fein",
  "CFD_SGS_SISM":"modus","CFD_FAR_LX":"phys","CFD_PERF_AB":"phys",
  "CFD_FACETTEN_KANTE_KOH":"modus","CFD_FACETTEN_NORMQUELLE":"modus","CFD_FACETTEN_YWKLEMME":"modus","CFD_F_LISTE":"modus",  # ★ 16.09. (Pruefagent): standen in der Basis, aber nicht hier
+ "CFD_Y_VERSATZ":"modus",  # ★ 16.09. 21:55 Heiko: Y-Halbzellen-Versatz ist Standard (1); Bitgleich-Regressionen deklarieren 0
 }
 # ★ KORREKTUREN AN DER QUELLE (Heiko 28.08.): der Baseline-Lauf traegt CFD_SLICE_DT=0 und
 # schreibt damit GAR KEINE Slices -- ein Defekt, den ich selbst eingebaut hatte und der sich
