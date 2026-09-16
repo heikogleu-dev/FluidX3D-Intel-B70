@@ -24,6 +24,18 @@ Vorzeichen), `RHO_HUELLE` um −0,189. Das KLEMM-BUDGET bucht davon nur 1/15 bzw
 Kraftwirkung**, weil es die Verlagerung des Zustands (u-Klemme am bewegten Boden ×10,4) konstruktiv nicht sieht.
 Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 σ" widerlegt (Herleitung: §2.5 des Plans).
 
+## 0a · MORGEN ZUERST (Heiko 16.09.2026 22:05) — kein Bau, zuerst Auswertung und Zensus
+
+| # | Punkt | Was genau | Kosten |
+|---|---|---|---|
+| 1 | **Abtriebslücke lokalisieren** (Heiko 21:30: „Auflösung heilt das nicht — wo verlieren wir am Dach den Abtrieb?") | `diff_of13_zonen.py`, `of13_kraft_zband.py`, `of13_diff_kennzahlen.py` und `abl_dach` auf `p375_e` und `p375_b` gegen OF13: die −0,33 Cz zonenweise (Dach, Heckscheibe, Unterboden, Diffusor) und der Ablöseort bei 3,75 mm gegen 3,66 m (8 mm: 3,47–3,61 m) | ohne GPU |
+| 2 | **D3Q27 Stufe 1 = Zensus mit Flächen-Gate** (PLAN-D3Q27-WANDZELLEN.md Teil B, Prüfnotiz Teil A) | Wie viele Rückfallzellen kämen mit den 8 Eckrichtungen auf ≥ 3 Links, getrennt nach gekippt/achsparallel (WANDMODELL.md: 78 % des Rückfalls sind gekippte 4-/5-Link-Zellen) und mit Flächenbilanz gegen A_wahr (Ein-Link-Klasse ist flächenredundant, Überschuss 1,2537). Datenbasis `facetten_klassen.csv` braucht `CFD_FAC_KDIAG=1` → **ein 8-mm-Lauf mit KDIAG** (nach Go), 4 mm zur Bestätigung | 1 Lauf 8 mm (~4 min) + Auswertung |
+| 3 | **Entscheid D3Q27-Band/Block** (Heikos Variante 15.09.) auf Basis von 1 + 2 | Plan-Einschätzung: reine Wandzellen-Variante vermutlich tot (rekonstruierte Eckpopulationen streamen nicht in D3Q19-Nachbarn), Band mit echter Eckadvektion tragfähig, Kosten je Banddicke ungerechnet; SISM-Band getrennt messen, nie zusammen (Verzahnung) | Bauprojekt, nur nach Go |
+| 4 | **Offene Entscheide** | (a) 4-mm-Bezug MIT Versatz gegen `p4_register` (nur nach Go — „kein eigener Bezugsarm"); (b) SGS-Band bei 3,75 mm verwerfen (Cz nicht Richtung OF13); (c) T_WARMUP a/b/c (Punkt 1 Abschnitt 2) | — |
+| 5 | Performance-Rest (Abschnitt 4b) | X messen (Facettenpfad-Kosten → B2), D1/D2, C1, Remesh-Gatter, Prüfpunkt-Plan | nach 1–3 |
+
+**Stand der Standards seit 16.09.:** `CFD_POSITIV=2`, `CFD_U_KLEMME=1`, `CFD_Y_VERSATZ=1` (Basis), Schrittschalter auf allen Sprossen als 4-mm-Werte (dx-Umrechnung automatisch), jede dd-Zeile trägt `CFD_FAR_LX`. APG geparkt (`CFD_FAC_APG=0`). Bezug bleibt `p4_register` (ohne Versatz — Neuerzeugung nur nach Go).
+
 ## 1 · Reihenfolge (Heiko, 16.09.2026)
 
 | # | Punkt | Stand | nächster Schritt |

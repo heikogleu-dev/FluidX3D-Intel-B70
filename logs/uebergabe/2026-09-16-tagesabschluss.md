@@ -112,3 +112,14 @@ und `p375_b` — die Lücke zonenweise und der Ablöseort bei 3,75 mm.
 **Eigene Fehler heute (Protokoll):** zweimal eigenmächtiger Bezugsarm (`p4_pu` 09:52, `p375_d` 20:34) — Regel „ein Auftrag = ein Lauf" im Gedächtnis
 verschärft; Summenbildung cd_rest+Reibung (falsche Abtriebsaussage); Edit-Skript mit ungeschriebener setup.cpp; `//`-Kommentar fraß Einzeiler.
 Queue leer, keine Prozesse, alles committet (HEAD d0a27ed).
+
+
+## 8 · Tagesabschluss 22:10 — Morgen zuerst (Heiko 22:05), Details TODO.md §0a
+1. **Abtriebslücke lokalisieren** — `diff_of13_zonen.py` / `of13_kraft_zband.py` / `abl_dach` auf `p375_e`, `p375_b` gegen OF13 (ohne GPU).
+2. **D3Q27 Stufe 1 = Zensus mit Flächen-Gate** (PLAN-D3Q27-WANDZELLEN.md): Rückfallzellen mit 8 Eckrichtungen auf ≥ 3 Links, getrennt gekippt/achsparallel
+   (WANDMODELL.md BERICHTIGT 09.09.: 78 % des Rückfalls sind GEKIPPTE 4-/5-Link-Zellen, nicht das Gate), Flächenbilanz gegen A_wahr. Braucht einen 8-mm-Lauf
+   mit `CFD_FAC_KDIAG=1` — nur nach Go.
+3. Dann Entscheid D3Q27-Band/Block (reine Wandzellen-Variante laut Plan vermutlich tot; SISM-Band getrennt, nie zusammen).
+4. Offene Entscheide: 4-mm-Bezug mit Versatz (nur nach Go), SGS-Band bei 3,75 mm verwerfen, T_WARMUP a/b/c.
+**Standards seit 16.09.:** POSITIV=2, U_KLEMME=1, **Y_VERSATZ=1 (Basis, 22:05 wirklich nachgezogen)**, Schrittschalter = 4-mm-Werte auf allen Sprossen,
+FAR_LX in jeder dd-Zeile. Bezug bleibt p4_register (ohne Versatz). Kein Lauf offen, Queue leer, alles committet.
