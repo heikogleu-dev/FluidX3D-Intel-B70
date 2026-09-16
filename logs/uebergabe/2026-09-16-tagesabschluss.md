@@ -1,6 +1,8 @@
 # Übergabe 16.09.2026 — Tagesabschluss
 
-**Stand bei Übergabe:** Klemmen-Block und APG-Linie abgeschlossen; der 4-mm-Voll-Lauf mit APG (`p4_apg1`) läuft seit 13:11 auf der B70.
+**Stand bei Übergabe:** Klemmen-Block und APG-Linie abgeschlossen — der 4-mm-Voll-Lauf `p4_apg1` ist um 14:15 durchgelaufen (rc 0) und
+bestätigt den 8-mm-Befund: **APG bewegt die Kräfte auch bei 4 mm nicht** (cd_druck_rest −0,0022 ± 0,0011, 150/300, 41 Vorzeichenwechsel;
+Autorität ≥ 1 in 96,8 %; +17,0 % Wanduhr). **Empfehlung: endgültig parken** — Entscheid Heiko. Details PLAN-APG-2026-09-16.md §I.
 Führende Liste bleibt `TODO.md`. Commits heute: 37e33dd … 0cfe6ac (Klemmen-Audit, APG-Bau, APG-Messung, Rückfragen).
 
 ## 1 · Was heute entschieden und belegt wurde
@@ -21,7 +23,12 @@ Führende Liste bleibt `TODO.md`. Commits heute: 37e33dd … 0cfe6ac (Klemmen-Au
 Laufzeit-Erwartung über 47,9 min (Rechnung, nicht Messung: der 8-mm-Einbruch von 17,6 % fällt bei 4 mm relativ kleiner aus, weil die
 Facettenzahl mit 1/dx² wächst, die Zellzahl aber mit 1/dx³).
 
-**Auswertung, wenn der Lauf steht:**
+**Ergebnis (14:15):** keine Kraftwirkung gegen `p4_pu8` noch gegen `p4_register`; einzige systematische Wirkung cz_reib +0,0007 (300/300)
+= +0,96 % der Reibung. Wirkpfad belegt ([306]=[7]=159 588 435). Kosten 47,9 → 56,0 min, +55 MB VRAM, freier B70-VRAM im Minimum 8119 MiB.
+**VRAM-Einordnung:** 81 % des Nahfeldbedarfs sind die DDFs; 3,75 mm passt (+4,9 GB), 3,5 mm nicht (−3,3 GB), D3Q27 voll wären +7,9 GB —
+APG mit +55 MB ist nicht der Treiber. Deshalb VRAM/Performance vor D3Q27 (Heiko 16.09.).
+
+**Auswertungsrezept (für künftige APG-/Wandmodell-Arme):**
 1. `python3 werkzeuge/zeitreihe_ab.py p4_pu8 p4_apg1 cd_druck_rest cz_druck_rest cd_reib cz_reib` — Vorzeichenkonstanz entscheidet über
    Wirkung gegen Rauschen (am S1-Paar validiert: +0,564 ± 0,003, 50/50, 0 Wechsel).
 2. Zähler im Log: `[306]` = `[7]` (Vorkernel- gegen Facettenbesuche), `[308]` = `[7]−[9]`, `[309]+[310]` = `[19]`. Alle drei müssen stimmen,
