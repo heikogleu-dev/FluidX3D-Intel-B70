@@ -5,6 +5,10 @@ ueber Zeitfenster gemittelt wird und nicht ueber Sample-Paare. Aufruf: fenster_5
 import sys, csv, io, statistics as st
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
 spalten = [a.split('=',1)[1] for a in sys.argv[1:] if a.startswith('--spalte=')] or ['cd_druck_rest','cz_druck_rest','cd_reib','cz_reib']
+# ★ 16.09.2026: cd_druck_rest/cz_druck_rest SIND cd_rest/cz_rest des eingebauten [BERICHT]
+# (setup.cpp:9103/9106, cd_bericht.csv: (FK.px-FK.pbx)/qA) -- gegengeprueft an sechs Fenstern,
+# Abweichung <= 0,0014. Die Reibung ist darin NICHT enthalten und darf NICHT hinzuaddiert werden:
+# cd_reib ist ein Fenstermittel seit Warmup und streut kaum, eine Summe taeuscht Signifikanz vor.
 def lies(n):
     d = {}
     with open(f"export/{n}/cd_facetten.csv") as f:
