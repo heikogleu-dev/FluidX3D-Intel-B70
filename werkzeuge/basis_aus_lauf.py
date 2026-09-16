@@ -19,7 +19,7 @@ Die EINHEIT je Schalter entscheidet, wie der Waechter bei anderer Aufloesung umr
   modus       Schaltzahl/Flag -- bleibt gleich
   ausgabe     beruehrt die Loesung nicht -- ungeprueft
 
-Modus --nachziehen (16.09.2026): basis_aus_lauf.py --nachziehen <ziel.basis> [NAME=WERT ...]
+Modus --nachziehen (16.09.2026): basis_aus_lauf.py --nachziehen <ziel.basis> [--grund=TEXT] [NAME=WERT ...]
   setzt die Einheitenspalte JEDER Datenzeile aus EINHEIT neu (Werte unangetastet), haengt genannte
   Schalter an (Fehler, wenn schon vorhanden) und vermerkt das unter der Begruendungsmarke.
 """
@@ -45,6 +45,7 @@ EINHEIT = {
  # ★ 16.09.2026 (TODO 4a): schrittbasierte Schalter und die bisher ungefuehrten Laengen/Zeiten
  "CFD_SLICE_NEAR_STEPS":"schritte_fein","CFD_SGS_SISM_AB":"schritte_fein","CFD_SGS_SISM_T":"schritte_fein",
  "CFD_SGS_SISM":"modus","CFD_FAR_LX":"phys","CFD_PERF_AB":"phys",
+ "CFD_FACETTEN_KANTE_KOH":"modus","CFD_FACETTEN_NORMQUELLE":"modus","CFD_FACETTEN_YWKLEMME":"modus","CFD_F_LISTE":"modus",  # ★ 16.09. (Pruefagent): standen in der Basis, aber nicht hier
 }
 # ★ KORREKTUREN AN DER QUELLE (Heiko 28.08.): der Baseline-Lauf traegt CFD_SLICE_DT=0 und
 # schreibt damit GAR KEINE Slices -- ein Defekt, den ich selbst eingebaut hatte und der sich
@@ -71,7 +72,11 @@ BEGRUENDUNGSMARKE = "# --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---
 if len(sys.argv)>=3 and sys.argv[1]=="--nachziehen":
     # ★ 16.09.2026 (PLAN-DX-UMRECHNUNG §D): Einheiten aus EINHEIT neu setzen, Werte NICHT anfassen, genannte
     # Schalter ergaenzen. KEINE Neuerzeugung aus einem Lauf -- Heiko: kein neuer Bezug, basis/ bleibt.
-    ziel=sys.argv[2]; neu=dict(a.split("=",1) for a in sys.argv[3:])
+    ziel=sys.argv[2]; grund="(kein Grund angegeben)"; neu={}
+    for a in sys.argv[3:]:
+        if a.startswith("--grund="): grund=a.split("=",1)[1]; continue
+        if "=" not in a: sys.exit(f"Argument '{a}' ist kein NAME=WERT (oder --grund=TEXT).")
+        k,v=a.split("=",1); neu[k]=v
     zeilen=open(ziel).read().splitlines()
     kopf=[]; daten={}; kommentare=[]
     for z in zeilen:
@@ -89,10 +94,8 @@ if len(sys.argv)>=3 and sys.argv[1]=="--nachziehen":
         if k not in EINHEIT: sys.exit(f"{k} hat keine Einheit in EINHEIT -- erst dort eintragen.")
         daten[k]=(v,EINHEIT[k])
     import datetime
-    vermerk=("# NACHGEZOGEN (basis_aus_lauf.py --nachziehen, "+datetime.date.today().isoformat()+", Heiko-Entscheid 16.09. 14:58: Abstaende/Masse bleiben "
-             "physikalisch fest, Zeiten folgen der Aufloesung): Einheiten "+("; ".join(geaendert) if geaendert else "unveraendert")+
-             ("; ergaenzt "+", ".join(f"{k} {v}" for k,v in neu.items()) if neu else "")+
-             ". schritte_fein heisst ab jetzt WERT BLEIBT (env_schritte rechnet im Lauf um, Waechter prueft den Rohwert) -- die Absaetze vom 12.09. und 07.09. ('2500 bei 8 mm') sind damit ueberholt.")
+    vermerk=("# NACHGEZOGEN (basis_aus_lauf.py --nachziehen, "+datetime.date.today().isoformat()+", Grund: "+grund+"): Einheiten "
+             +("; ".join(geaendert) if geaendert else "unveraendert")+("; ergaenzt "+", ".join(f"{k} {v}" for k,v in neu.items()) if neu else "")+".")
     with open(ziel,"w") as f:
         for z in kopf: f.write(z+"\n")
         f.write(vermerk+"\n")

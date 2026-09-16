@@ -5,7 +5,7 @@
 # (16.09.2026: env_schritte rechnet im Lauf um, die Zeile traegt den 4-mm-Wert). Nicht-eindeutige
 # Rundungen werden auf stderr gemeldet und gehoeren in CFD_BASIS_ABWEICHUNG.
 # Anlass 28.08.2026: eine von Hand rekonstruierte 8-mm-Zeile kostete einen Messvormittag.
-import sys, os
+import sys, os, math
 dx=float(sys.argv[1]); pfad=os.path.join(os.path.dirname(os.path.abspath(__file__)),"..","basis","fahrzeug_dd.basis")
 dx_ref=None; teile=[]
 for z in open(pfad):
@@ -19,7 +19,8 @@ for z in open(pfad):
     if einheit=="schritte_fein": pass  # ★ 16.09.2026: Wert bleibt, env_schritte rechnet im Lauf um (u_lat x dx)
     elif einheit in ("zellen_fein","zellen_grob_laenge","index_grob"):
         roh=float(wert)*dx_ref/dx
-        if abs(roh-round(roh))>1e-9: print(f"NICHT EINDEUTIG: {name} {wert} x {dx_ref/dx:g} = {roh} -> {round(roh)} (deklarieren!)", file=sys.stderr)
-        wert=str(int(round(roh)))
+        ll=int(math.floor(roh+0.5))  # ★ 16.09.: llround (half away from zero) wie setup.cpp, NICHT round() (half-to-even: 0,5 -> 0)
+        if abs(roh-ll)>1e-9: print(f"NICHT EINDEUTIG: {name} {wert} x {dx_ref/dx:g} = {roh} -> {ll} (deklarieren!)", file=sys.stderr)
+        wert=str(ll)
     teile.append(f"{name}={wert}")
 print(" ".join(teile))

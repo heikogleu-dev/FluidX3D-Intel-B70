@@ -35,6 +35,8 @@ tr -d '\000' < "$CL" > "$WORK/quelle.cl"
 # --- Schritt 2: Build-Optionen — exakt die des FluidX3D-v2-Treiber-Builds --------------
 # Quelle: igc2/OCL_asm35d6996934529552_options.txt (vom NEO-Treiber beim g15-Lauf gedumpt).
 OPTS='-cl-std=CL3.0 -cl-finite-math-only -cl-no-signed-zeros -cl-mad-enable -cl-intel-greater-than-4GB-buffer-required -w'
+# ★ 16.09.2026 (Pruefagent MITTEL): dieselbe Umgebungs-Durchreiche wie opencl.hpp (CFD_OCL_OPTIONS), sonst Gate != Runtime, sobald der Messarm gesetzt ist.
+if [ -n "${CFD_OCL_OPTIONS:-}" ]; then OPTS="$OPTS $CFD_OCL_OPTIONS"; echo "CFD_OCL_OPTIONS angehaengt: $CFD_OCL_OPTIONS"; fi
 
 # --- Schritt 3: Offline-Compile mit IGC-Shader-Dump (rechnet NICHTS auf der GPU) -------
 # NEOReadDebugKeys=1 schaltet die Debug-Keys frei, IGC_ShaderDumpEnable=1 schreibt
