@@ -2921,7 +2921,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 }
 )+R(void klemm_summe(global uint* hits, const uint slot, const float a) { // Festkomma-Summand q = round(a*S) mit a >= 0; wickelt ABSICHTLICH mod 2^32 (Host bildet Fensterdifferenzen)
 	float b = a;
-	if(b>16.0f) { b = 16.0f; if(hits[265]<0xF0000000u) atomic_inc(&hits[265]); } // Kappung, Soll 0 -- sonst sind die Summen Untergrenzen
+	if(!(b<=16.0f)) { b = 16.0f; if(hits[265]<0xF0000000u) atomic_inc(&hits[265]); } // Kappung, Soll 0 -- sonst sind die Summen Untergrenzen. ★ Audit 16.09.2026 (Befund A-N6): NEGIERTER Vergleich, damit NaN in die Kappung faellt -- "b>16" ist fuer NaN falsch, und convert_uint_sat(NaN) liefert 0: der Summand waere still verschwunden, waehrend klemm_dekade(NaN) in Eimer 5 zaehlt.
 	atomic_add((volatile global uint*)&hits[slot], convert_uint_sat(fma(b, def_klemm_s, 0.5f)));
 }
 )+R(float klemm_rho_roh(const float* f) { // rho VOR der Dichteklemme, Summenreihenfolge wie calculate_rho_u
@@ -2945,7 +2945,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 }
 )+R(void pos_summe(global uint* hits, const uint slot, const float a) { // ★ P1c: Festkomma-Summand wie klemm_summe, eigene Kappung Slot 294 (Stufe 0 behaelt 265)
 	float b = a;
-	if(b>16.0f) { b = 16.0f; if(hits[294]<0xF0000000u) atomic_inc(&hits[294]); }
+	if(!(b<=16.0f)) { b = 16.0f; if(hits[294]<0xF0000000u) atomic_inc(&hits[294]); } // ★ Audit 16.09.2026 (A-N6): NaN faellt in die Kappung, siehe klemm_summe
 	atomic_add((volatile global uint*)&hits[slot], convert_uint_sat(fma(b, def_klemm_s, 0.5f)));
 }
 )+"#endif"+R( // POSITIV
@@ -4002,6 +4002,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifndef POSITIV_FACETTE"+R(
 				pan_ = pan_&&pkl_!=0u;
 )+"#endif"+R( // POSITIV_FACETTE
+)+"#ifdef POSITIV_FACETTE"+R(
+				// ★ Audit-Schleife 16.09.2026, Befund B3: CFD_POSITIV_FACETTE aenderte nur die Bedingung oben und hatte KEINEN eigenen Zaehler --
+				// [273] zaehlt K0-Kandidaten in BEIDEN Stellungen gleich, der Schalter war also nicht vom Nicht-Schalter unterscheidbar.
+				// Slot 303 zaehlt genau das, was der Schalter zusaetzlich zulaesst: eine K0-Zelle (Facette), die WIRKLICH begrenzt wird.
+				// Soll unter CFD_POSITIV_FACETTE=1: > 0, sobald [273] > 0 (K0-Kandidaten in der Stichprobe vorhanden).
+				// GATTERUNG wie [273]/[280]: NUR an Zaehlschritten und Stichprobenzellen (pz_). Ein ungegateter Zaehler im Immerpfad hat am
+				// 15.09. die B70 lahmgelegt (device wedged) -- der Zaehler ist ein Wirkpfadbeleg, kein Mengenmass.
+				if(pz_&&pan_&&pkl_==0u&&rho_clamp_hits[303]<0xF0000000u) atomic_inc(&rho_clamp_hits[303]);
+)+"#endif"+R( // POSITIV_FACETTE
 				if(pan_) {
 					const float pq_ = 1.0f-ps_;
 					float pab_ = 0.0f; // Summe |d_i| (Wirkungsgroesse)
@@ -4327,7 +4336,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(rho_local<=RHO_CLAMP_MIN||rho_local>=RHO_CLAMP_MAX) { // ★ 15.09.2026 Klemmen S0d (KLEMMEN-STUFE0-PLAN.md §1 Punkt 2): Faktor 1, weil f hier durch f_eq(rho_c) ERSETZT wird
 		const float dq_ = fabs(rho_local-klemm_rho_roh(fhn));
 		if(diag[266]<0xF0000000u) atomic_inc(&diag[266]);
-		if(dq_>2.0f&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0
+		if(!(dq_<=2.0f)&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0 -- ★ Audit 16.09.2026 (A-N6): negiert, damit NaN gezaehlt wird
 		atomic_add(&diag[rho_local<=RHO_CLAMP_MIN ? 267u : 268u], convert_uint_sat(fma(fmin(dq_, 2.0f), def_klemm_s, 0.5f)));
 	}
 )+"#endif"+R( // KLEMM_BILANZ
@@ -4366,7 +4375,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(rho_local<=RHO_CLAMP_MIN||rho_local>=RHO_CLAMP_MAX) { // ★ 15.09.2026 Klemmen S0d (KLEMMEN-STUFE0-PLAN.md §1 Punkt 2): Faktor 1, weil f hier durch f_eq(rho_c) ERSETZT wird
 		const float dq_ = fabs(rho_local-klemm_rho_roh(fhn));
 		if(diag[266]<0xF0000000u) atomic_inc(&diag[266]);
-		if(dq_>2.0f&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0
+		if(!(dq_<=2.0f)&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0 -- ★ Audit 16.09.2026 (A-N6): negiert, damit NaN gezaehlt wird
 		atomic_add(&diag[rho_local<=RHO_CLAMP_MIN ? 267u : 268u], convert_uint_sat(fma(fmin(dq_, 2.0f), def_klemm_s, 0.5f)));
 	}
 )+"#endif"+R( // KLEMM_BILANZ
@@ -4879,6 +4888,15 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// (0,21875; 1,78125). Lambda = 1,25 je Achse (Summe |w| der Lagrange-4-Punkt-/3-Punkt-Gewichte = 1 + t(1-t), Pruefbefund Z2b N2), Huelle GESCHLOSSEN (Randwerte legal, N1), Eingang geklemmt -> Soll 0; das Tor darunter verwirft heute
 	// auch legale Werte in (0,219; 0,5].
 	if((v[0]<def_tor_lo||v[0]>def_tor_hi)&&hits[300]<0xF0000000u) atomic_inc(&hits[300]);
+	// ★ Audit-Schleife 16.09.2026, Befund B1 (HOCH): KONSTANTENSPIEGEL fuer das Tor. CFD_TOR_HUELLE verengte Tor und Waechter,
+	// ohne dass ein einziger Zaehler belegte, dass die Verengung UEBERSETZT wurde -- sein einziges Soll war eine Null ([270] = 0),
+	// und der einzige Positivtest (Haken 5) ist mit TOR_HUELLE per print_error verboten. Ein Schalter ohne feuernden Wirkpfad ist
+	// in diesem Projekt ein harter Fehler. Hier schreibt der Kernel die uebersetzten Torgrenzen als Festkomma zurueck, der Host
+	// vergleicht sie mit seiner eigenen Rechnung (Ist=Soll statt Nullbeweis; Soll [215] > 0 => [301] > 0).
+	// KEIN atomic: alle Threads schreiben denselben konstanten Wert, das Rennen ist wirkungslos. Gelesen wird auf dem HOST --
+	// der Store kann also nicht wegoptimiert werden (Lehre "Rueckleser im Kernel misst nichts", 12.09.2026).
+	hits[301] = (uint)fma(def_tor_gate_lo, def_klemm_s, 0.5f);
+	hits[302] = (uint)fma(def_tor_gate_hi, def_klemm_s, 0.5f);
 )+"#endif"+R( // KLEMM_BILANZ
 	// Unplausibles NICHT durchreichen: lieber den vorigen Randwert stehen lassen als das Nahfeld vergiften.
 	// ★ Z2e/Z2f: Torgrenzen emittiert -- Vorgabe (0,5; 2,0) wie bisher, CFD_TOR_HUELLE=1 die Bildhuelle (Tor wird Invariante, Soll [270] = 0),
@@ -4898,13 +4916,14 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	// auch voxelize_mesh (schreibt ein hostgegebenes u_set) und insert_rho_u_flags (uebernimmt
 	// Halowerte einer Nachbardomaene). Er ist der einzige, der einen WERT AUSRECHNET statt einen
 	// durchzureichen, und deshalb der einzige, der ueberschwingen kann. Die kubische Interpolation
-	// kann ueberschwingen; der Eingang ist zwar selbst geklemmt, aber Catmull-Rom traegt Gewichte
+	// kann ueberschwingen; der Eingang ist zwar selbst geklemmt, aber die Lagrange-Interpolation traegt Gewichte
 	// ausserhalb [0,1]. Unter U_FP16 wuerde ein Wert ab |u| = 1,99902 still nach +-inf saettigen.
 	// Schwelle 1,0 wie am Huellenwaechter Slot 212, Wirkpfad-Zaehler Slot 214, Soll 0 -- und weil er
 	// 0 ist, bleibt der FP32-Arm bitgleich: das Tor greift nie, es beweist nur, dass es nie greift.
 	// ★ BERICHTIGT 12.09. abends (Pruefer B, HOCH): dieses Tor kann konstruktiv NIE greifen, und das
 	// gehoert hierhin statt "Soll 0". Der Eingang ist auf +-def_c = 0,57735 geklemmt, und die
-	// Catmull-Rom-Gewichte tragen je Achse hoechstens 1,25 in der Summe der Betraege, im 2D-Produkt
+	// Die Lagrange-Gewichte (4-/3-Punkt, NICHT Catmull-Rom -- Textkorrektur 3ee1542 hier nachgezogen, Audit 16.09.2026 Befund C-N4)
+	// tragen je Achse hoechstens 1,25 in der Summe der Betraege, im 2D-Produkt
 	// also 1,5625. Damit ist |v| <= 1,5625*0,57735 = 0,9021 < 1,0. Es ist eine INVARIANTENZUSICHERUNG,
 	// kein Messinstrument: sie feuert erst, wenn jemand die Klemme oder die Lift-Gewichte aendert.
 	// Slot 215 ist der Besuchszaehler dazu -- ohne ihn beweist die Null in 214 nichts, genau wie bei
@@ -5012,7 +5031,11 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	float fhn[def_velocity_set]; load_f(nn, fhn, fi, j, t TS_A);
 	float rho_l, uxm, uym, uzm; calculate_rho_u(fhn, &rho_l, &uxm, &uym, &uzm);
 )+"#if defined(KLEMM_BILANZ)&&defined(RHO_CLAMP)"+R(
-	if((rho_l<=RHO_CLAMP_MIN||rho_l>=RHO_CLAMP_MAX)&&diag[269]<0xF0000000u) atomic_inc(&diag[269]); // ★ 15.09.2026 Klemmen S0d: Klemme in schale_blend (FNEQ-Arm massenerhaltend, nur gezaehlt)
+	if((rho_l<=RHO_CLAMP_MIN||rho_l>=RHO_CLAMP_MAX)&&diag[269]<0xF0000000u) atomic_inc(&diag[269]); // ★ 15.09.2026 Klemmen S0d: Klemme in schale_blend, nur gezaehlt.
+	// ★ BERICHTIGT Audit-Schleife 16.09.2026 (Befund A-N1): "massenerhaltend" gilt fuer ZWEI der drei Arme. FNEQ (Modus 1) speichert
+	// f_eq(rho_c,u_blend) + f_true - f_eq(rho_c,u_lok) -> Summe = rho_roh, rho_c kuerzt sich heraus; IDENT (Modus 2) speichert f_true.
+	// Der EQ-Arm (Modus 0, CFD_N2F_SCHALE_FNEQ=0, seit 22.08. nicht mehr Standard) speichert dagegen f_eq(rho_c): die Zellmasse springt
+	// auf den GEKLEMMTEN Wert, und dieses drho wird nirgends gebucht ([267]/[268] gibt es nur in boden_eq/einlass_eq). Der Host warnt dort.
 )+"#endif"+R( // KLEMM_BILANZ
 	// ★★ XL-B8, hier TRAGEND (anders als in boden_eq/einlass_eq, die u verwerfen durften):
 	// post-stream-load liest die Esoteric-Pull-Paare VERTAUSCHT -- calculate_rho_u liefert damit

@@ -47,7 +47,15 @@ while IFS= read -r zeile; do
 	# LUECKE geschlossen 15.09. abends: gekoppelte Faelle waehlen ihre Geraete SELBST (CFD_DEV_FINE/CFD_DEV_COARSE, sonst B70+iGPU) --
 	# CFD_QUEUE_DEV=0 zwingt sie NICHT auf die CPU (belegt: kl_s0d_dd16_h1_cpu, von der Code-Sperre gefangen). Erlaubt ist ein Haken
 	# ausserhalb der Kugel darum nur mit CFD_DEV_FINE=0 UND CFD_DEV_COARSE=0 in der Zeile.
-	if echo " $env_teil " | grep -Eq ' CFD_(KLEMM|POSITIV)_HAKEN=[1-9]' && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel ' \
+	# ★ Audit-Schleife 16.09.2026, Befund B7: das Muster war '=[1-9]' und traf damit WEDER "=01" NOCH "=+1" -- atoi() im Host liefert in
+	# beiden Faellen 1, der Haken war also AKTIV, waehrend die Queue die Zeile durchliess (nachgestellt am 16.09.). Anker waren zudem
+	# Leerzeichen, ein TAB zwischen zwei Zuweisungen haette sie umgangen. Jetzt: optionales '+' und fuehrende Nullen, [[:space:]] als Anker.
+	# Zusaetzlich die GEERBTE Umgebung pruefen: 'env $env_teil' erbt exportierte Variablen, ein 'export CFD_KLEMM_HAKEN=1' in der Startschale
+	# war fuer die Queue unsichtbar. Die Code-Sperre in lbm.cpp faengt den gefaehrlichen Rest weiterhin vor dem Geraetebau ab.
+	geerbt_haken=0
+	[ -n "${CFD_KLEMM_HAKEN:-}" ] && [ "${CFD_KLEMM_HAKEN:-0}" != "0" ] && geerbt_haken=1
+	[ -n "${CFD_POSITIV_HAKEN:-}" ] && [ "${CFD_POSITIV_HAKEN:-0}" != "0" ] && geerbt_haken=1
+	if { echo " $env_teil " | grep -Eq '[[:space:]]CFD_(KLEMM|POSITIV)_HAKEN=\+?0*[1-9]' || [ "$geerbt_haken" = "1" ]; } && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel ' \
 	   && ! { echo " $env_teil " | grep -q ' CFD_DEV_FINE=0 ' && echo " $env_teil " | grep -q ' CFD_DEV_COARSE=0 '; }; then
 		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.)" | tee -a "$Q"
 		continue

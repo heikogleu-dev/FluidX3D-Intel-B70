@@ -1384,16 +1384,27 @@ void klemm_bilanz_abschluss(const char* fall) {
 // w_max = 2 (SRT, w < 2), rho_max = 2,1 (Huelle des TYPE_E-Bereichswaechters), Oberkante der Kappungseimer = 16 (Kappung).
 // Die Trefferzaehler (saettigend) werden ebenso differenziert; Phase "nach Warmlauf" = Fenster, deren Leseschritt t_si >= t_warmup.
 struct KlemmBilanz {
-	bool init = false; uint alt[LBM_Domain::hits_n]; double ges[LBM_Domain::hits_n], nach[LBM_Domain::hits_n]; // ★ P1a: 288 -> hits_n (320)
+	bool init = false, aus_gemeldet = false; uint alt[LBM_Domain::hits_n]; double ges[LBM_Domain::hits_n], nach[LBM_Domain::hits_n]; // ★ P1a: 288 -> hits_n (320)
 	ulong fenster = 0ull, fenster_nach = 0ull, mehrdeutig = 0ull, t_start = 0ull, t_warm = 0ull, t_ende = 0ull; bool warm = false; // Pruefpass S0c M1: t_ende = get_t() des VORIGEN Lesens bis zum Update
 	std::ofstream csv;
-	std::ofstream csv_pos; uint pos_modus = 0u; ulong pos_zellen = 0ull, pos_mehrdeutig = 0ull; // ★ P1d: Positiv-Messarm je Fenster (Stichprobenzellen je Zaehlschritt, Wickelwaechter 292/293)
+	std::ofstream csv_pos; uint pos_modus = 0u, pos_haken = 0u, schale_modus = 0u; // ★ Audit 16.09.2026 (C-M2/A-N2): pos_haken ist die Konstruktionszeit-Kopie -- [290] wird NUR unter POSITIV_HAKEN1 geschrieben, der Bericht darf ihn sonst nicht als "0" ausgeben
+	 ulong pos_zellen = 0ull, pos_mehrdeutig = 0ull; // ★ P1d: Positiv-Messarm je Fenster (Stichprobenzellen je Zaehlschritt, Wickelwaechter 292/293)
 };
 static uint klemm_budget_modus() { const uint m = env_u("CFD_KLEMM_BUDGET", 2u); if(m>2u) print_error("CFD_KLEMM_BUDGET kennt nur 0 (nicht bewerten), 1 (nur Warnung), 2 (Fehler am Fallende, Vorgabe)."); return m; } // ★ Z2c Pruefpass NIEDRIG 3: beim Startstand geprueft
 static bool klemm_summenslot(const uint k) { return (k>=226u&&k<=235u)||(k>=247u&&k<=256u)||k==263u||k==264u||k==267u||k==268u||k==292u||k==293u; } // ★ P1a: 292/293 Stufe-1-Summen
 static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool nach_warmup, const string& csv_pfad, const char* wo) {
 	LBM_Domain* d = L.lbm_domain[0];
-	if(!d->klemm_bilanz_on||L.get_D()!=1u) return;
+	if(!d->klemm_bilanz_on||L.get_D()!=1u) {
+		// ★ Audit-Schleife 16.09.2026, Befunde B9/B10: hier wurde WORTLOS zurueckgekehrt. Folge (1) B10: bei CFD_KLEMM_BILANZ=0 oder D > 1
+		// fehlten KLEMM-BILANZ, KLEMM-HUELLEN, POSITIV-BILANZ und ALLE KLEMM-BUDGET-Zeilen, ohne eine einzige Zeile im Log -- nicht
+		// unterscheidbar von "alles in Ordnung". Folge (2) B9: die Wertpruefung von CFD_KLEMM_BUDGET sitzt in klemm_budget_modus(), das
+		// hinter diesem return nie gerufen wurde -- CFD_KLEMM_BUDGET=7 wurde still ignoriert.
+		(void)klemm_budget_modus(); // validiert den Wert auch ohne Instrument (bricht bei > 2 ab)
+		if(!K.aus_gemeldet) { K.aus_gemeldet = true;
+			print_info(string("KLEMM-INSTRUMENT ")+wo+" AUS ("+(!d->klemm_bilanz_on ? "CFD_KLEMM_BILANZ=0" : "D = "+to_string(L.get_D())+" > 1, Block-Tiling")+") -- keine KLEMM-BILANZ, keine Huellen-, Positiv- und Budgetzeilen in diesem Lauf. Die Klemmen selbst wirken weiter, sie werden nur nicht gemessen.");
+		}
+		return;
+	}
 	d->finish_queue(); d->rho_clamp_hits.read_from_device();
 	if(!K.init) {
 		for(uint k=0u; k<LBM_Domain::hits_n; k++) { K.alt[k] = d->rho_clamp_hits[k]; K.ges[k] = 0.0; K.nach[k] = 0.0; }
@@ -1401,7 +1412,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 		K.csv.open(csv_pfad); K.csv.precision(10);
 		K.csv << "# Klemmen Stufe 0 (KLEMMEN-STUFE0-PLAN.md), "<<wo<<": je Fenster (Sample-Takt) die Differenzen. Masse in Gittereinheiten (rho*Zelle), Impuls in Gittereinheiten; Festkomma S = 16384 bereits herausgerechnet.\n";
 		K.csv << "t_si,t_lat,nach_warmup,rho_K0,rho_K1,rho_K2,rho_K3,rho_K4,u_K0,u_K1,u_K2,u_K3,u_K4,m_zu,m_ab,jx_plus,jx_minus,jz_plus,jz_minus,kappung,mehrdeutig\n";
-		K.pos_modus = d->positiv_modus;
+		K.pos_modus = d->positiv_modus; K.pos_haken = d->positiv_haken; K.schale_modus = d->schale_modus;
 		if(K.pos_modus>0u) { // ★ 15.09.2026 Klemmen Stufe 1 P1d: Positiv-Messarm je Fenster
 			const ulong sub_ = (ulong)positiv_stichprobe((unsigned long long)d->get_N(), d->get_Nx(), d->get_Ny()); K.pos_zellen = (d->get_N()+sub_-1ull)/sub_;
 			string pp_ = csv_pfad; const size_t pk_ = pp_.rfind("klemmen"); if(pk_!=string::npos) pp_.replace(pk_, 7, "positiv"); else pp_ += ".positiv.csv";
@@ -1416,7 +1427,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 	for(uint k=0u; k<LBM_Domain::hits_n; k++) dlt[k] = d->rho_clamp_hits[k]-K.alt[k]; // uint-Arithmetik: mod 2^32
 	const double S = 16384.0, ob[6] = {1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1, 1.0, 16.0};
 	double B_r = 0.0, B_u = 0.0;
-	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*(rho_huelle_env()>0u ? 3.0 : 2.1)*ob[b]*S+1.0); } // ★ Z2f: rho_max = numerische Huelle 2,99902
+	for(uint b=0u; b<6u; b++) { B_r += (double)dlt[236u+b]*(2.0*ob[b]*S+1.0); B_u += (double)dlt[257u+b]*(2.0*(rho_huelle_aktiv() ? 3.0 : 2.1)*ob[b]*S+1.0); } // ★ Z2f: rho_max = numerische Huelle 2,99902
 	B_r = fmax(B_r, (double)dlt[266]*(2.0*S+1.0)); // ★ S0d: BODEN/EINLASS_EQ-Summen 267/268, Faktor 1, Kappe 2
 	const double grenze = klemm_haken_env()==4u ? 65536.0 : 4294967296.0; // Haken 4: Schranke kuenstlich 2^16 -> die Warnung MUSS feuern
 	bool satt_dek = d->rho_clamp_hits[266]>=0xF0000000u; for(uint b=0u; b<6u; b++) if(d->rho_clamp_hits[236u+b]>=0xF0000000u||d->rho_clamp_hits[257u+b]>=0xF0000000u) satt_dek = true; // Pruefpass S0c-2 N-c: auch 266 (Schranke der S0d-Summen) // Pruefpass S0c N2: gesaettigte Dekade -> Differenz 0 -> Schranke unterschaetzt
@@ -1442,7 +1453,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 			K.csv_pos << t_si << "," << L.get_t() << "," << (nach_warmup?1:0) << "," << zf_(L.get_t())-zf_(t_vorher_) << "," << dlt[272] << "," << dlt[278] << "," << dlt[279];
 			for(uint k=0u; k<5u; k++) K.csv_pos << "," << dlt[273u+k];
 			for(uint k=0u; k<5u; k++) K.csv_pos << "," << dlt[280u+k];
-			K.csv_pos << "," << dlt[286] << "," << dlt[287] << "," << dlt[291] << "," << dlt[285] << "," << (double)dlt[292]/S << "," << (double)dlt[293]/S << "," << dlt[294] << "," << dlt[290] << "," << (pmd_?1:0) << "," << (pmd3_?1:0) << "\n" << std::flush;
+			K.csv_pos << "," << dlt[286] << "," << dlt[287] << "," << dlt[291] << "," << dlt[285] << "," << (double)dlt[292]/S << "," << (double)dlt[293]/S << "," << dlt[294] << "," << ((K.pos_haken==1u||K.pos_haken==3u) ? to_string(dlt[290]) : string("")) << "," << (pmd_?1:0) << "," << (pmd3_?1:0) << "\n" << std::flush;
 		}
 	}
 }
@@ -1451,7 +1462,7 @@ static void klemm_lesen(LBM& L, KlemmBilanz& K, const double t_si, const bool na
 // Die Masse wird auf den Durchfluss u_lat*Ny*Nz (rho = 1) je Schritt bezogen (Groessenbezug; das Nahfeld hat keinen Einlass). n_Schritte = Schritte DIESER Domaene.
 // ★ 15.09.2026 Klemmen Z2c: Budget-Kennwerte der Phase "nach Warmlauf" je Domaene (Plan §2.4). dcd_m = Massenaequivalent ueber den
 // Impulsfluss bei u_inf (Lagally, deklariertes Interim "netto bei u_inf"; Ablösebedingung: brutto reisst, netto nicht).
-struct KlemmUrteil { bool pruefbar = false, kappung = false; ulong n = 0ull; double dcd_j = 0.0, dcz_j = 0.0, dcd_m = 0.0, dcd_m_brutto = 0.0, q_netto = 0.0, q_brutto = 0.0, rund_cd = 0.0, rund_cz = 0.0; string grund; }; // rund_* = Worst-Case-Rundungsschranke des Festkommas (Treffer/(2S)) als Cd/Cz (Z2c Pruefpass NIEDRIG 5)
+struct KlemmUrteil { bool pruefbar = false, kappung = false; ulong n = 0ull; double dcd_j = 0.0, dcz_j = 0.0, dcd_m = 0.0, dcd_m_brutto = 0.0, q_netto = 0.0, q_brutto = 0.0, rund_cd_j = 0.0, rund_cd_m = 0.0, rund_cd = 0.0, rund_cz = 0.0; string grund; }; // rund_* = Worst-Case-Rundungsschranke des Festkommas (Treffer/(2S)) als Cd/Cz (Z2c Pruefpass NIEDRIG 5)
 // k(B) = sqrt((1+r)^2 - 1), r = sqrt(1-c4^2)/c4, c4(B) = sqrt(2/(B-1))*Gamma(B/2)/Gamma((B-1)/2): die Klemme darf die Gesamtunsicherheit
 // sqrt(sigma^2+b^2) nicht staerker verschieben, als sigma-Dach selbst unsicher ist. k(4) = 1,011, k(8) = 0,786, k(16) = 0,634. Kein Handwert.
 static double klemm_budget_k(const uint B) {
@@ -1476,6 +1487,10 @@ static void klemm_budget_bewerten(const char* wo, const KlemmUrteil& U, const do
 			// Pruefpass 2 NIEDRIG 4: auch der Riss wird gegen die Worst-Case-Rundung gestellt (Fehler-Flag bleibt -- konservativ)
 			const bool cd_r = !cd_ok&&fmax(0.0, lhs-U.rund_cd)<=k*sig_cd, cz_r = !cz_ok&&fmax(0.0, fabs(U.dcz_j)-U.rund_cz)<=k*sig_cz;
 			if(cd_r||cz_r) urteil += " (Riss liegt innerhalb der Worst-Case-Rundung: "+string(cd_r ? "Cd "+to_string(U.rund_cd/sig_cd,3u)+" sigma" : "")+string(cd_r&&cz_r ? ", " : "")+string(cz_r ? "Cz "+to_string(U.rund_cz/sig_cz,3u)+" sigma" : "")+" -- nicht sicher"+string(cd_r&&!cz_r&&!cz_ok ? "; Cz-Riss sicher" : "")+string(cz_r&&!cd_r&&!cd_ok ? "; Cd-Riss sicher" : "")+")"; // Pruefpass 3 NIEDRIG A
+			// ★ Audit-Schleife 16.09.2026, Befund A-N5: die Zuordnung JE GROESSE benennen. Vorher stand nur die Summe da, und der Fall
+			// "der Massenterm allein liegt unter seiner eigenen Rundungsschranke" (Haken 1: |dCd_m| 1,017 gegen rund_cd_m) blieb unsichtbar.
+			if(cd_r&&fabs(U.dcd_m)<=U.rund_cd_m) urteil += " [davon der MASSENTERM |dCd_m| = "+to_string(fabs(U.dcd_m),6u)+" unter seiner eigenen Rundungsschranke "+to_string(U.rund_cd_m,6u)+" -- dieser Anteil ist Rauschen des Messgeraets, kein gemessener Effekt]";
+			if(cd_r&&fabs(U.dcd_j)<=U.rund_cd_j) urteil += " [davon der IMPULSTERM |dCd_j| = "+to_string(fabs(U.dcd_j),6u)+" unter seiner eigenen Rundungsschranke "+to_string(U.rund_cd_j,6u)+"]";
 			if(modus==2u) klemm_budget_verletzt = true;
 		} else {
 			if(U.kappung) urteil += " (Summen gekappt: brutto nur Untergrenze, netto unsicher -- Urteil unsicher)";
@@ -1493,12 +1508,12 @@ static void klemm_budget_bewerten(const char* wo, const KlemmUrteil& U, const do
 	else print_info(txt);
 	std::ofstream c(csv_pfad, neu ? std::ios::trunc : std::ios::app); c.precision(8);
 	if(neu) c << "# Klemm-Budget (KLEMMEN-STUFE2-PLAN.md §2.4): |dCd_j|+|dCd_m| <= k(B)*sigma_cd, |dCz_j| <= k(B)*sigma_cz, B = " << B << ", k = " << k << "; nur Phase nach Warmlauf; dCd_m = Massenaequivalent bei u_inf (Interim); Q = Gitter-Masse je Schritt der Domaene, SENKE POSITIV (wie dCd_m; Plan §2.4 schrieb Quelle +); netto = |innen| + |BODEN/EINLASS_EQ| mit Vorzeichen des Gesamtnettos; Zeile Nah+Fern: Q leer (Fein- und Grobschritte nicht addierbar), n = Nahfeldschritte\n"
-		<< "bereich,n_schritte,Q_netto,Q_brutto,dCd_j,dCz_j,dCd_m_netto,dCd_m_brutto,rund_cd,rund_cz,sigma_cd,sigma_cz,B,k,kappung,urteil\n"; // Q = Gitter-Masse je Schritt (Senke +)
+		<< "bereich,n_schritte,Q_netto,Q_brutto,dCd_j,dCz_j,dCd_m_netto,dCd_m_brutto,rund_cd,rund_cd_j,rund_cd_m,rund_cz,sigma_cd,sigma_cz,B,k,kappung,urteil\n"; // Q = Gitter-Masse je Schritt (Senke +)
 	string urteil_csv = urteil; for(char& ch : urteil_csv) if(ch==',') ch = ';'; // Z2c Pruefpass NIEDRIG 2: kein Spaltenversatz
 	const bool q_leer = string(wo)=="Nah+Fern";
 	c << wo << "," << U.n << ",";
 	if(q_leer) c << ",,"; else c << U.q_netto+0.0 << "," << U.q_brutto+0.0 << ",";
-	c << U.dcd_j+0.0 << "," << U.dcz_j+0.0 << "," << U.dcd_m+0.0 << "," << U.dcd_m_brutto+0.0 << "," << U.rund_cd << "," << U.rund_cz << "," << sig_cd << "," << sig_cz << "," << B << "," << k << "," << (U.kappung?1:0) << "," << urteil_csv << "\n"; // +0.0: keine "-0"
+	c << U.dcd_j+0.0 << "," << U.dcz_j+0.0 << "," << U.dcd_m+0.0 << "," << U.dcd_m_brutto+0.0 << "," << U.rund_cd << "," << U.rund_cd_j << "," << U.rund_cd_m << "," << U.rund_cz << "," << sig_cd << "," << sig_cz << "," << B << "," << k << "," << (U.kappung?1:0) << "," << urteil_csv << "\n"; // +0.0: keine "-0"
 }
 static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u, const double qA, const float u_lat, const uint Ny, const uint Nz, const double sigma_cdrest, const char* sigma_name = "sigma(cd_rest, Block-SEM 4)") {
 	KlemmUrteil U;
@@ -1519,7 +1534,8 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 		const double dcd = -Fx_N/qA, dcz = -Fz_N/qA;
 		print_info(string("  KLEMM-BILANZ ")+wo+" ("+pn+", "+to_string(n)+" Schritte, "+to_string(ph==0u ? K.fenster : K.fenster_nach)+" Fenster): rho-Treffer "+to_string(hr,0u)+", u-Treffer "+to_string(hu,0u));
 		print_info(string("    Masse: zugefuehrt ")+to_string(m_zu,4u)+", entfernt "+to_string(m_ab,4u)+", netto "+to_string(m_netto,4u)+" (Gitter-Masse); je Schritt "+to_string(m_netto/(double)n,6u)+" = "+to_string(1.0e6*m_netto/(double)n/mdot,3u)+" ppm des Durchflusses u_lat*Ny*Nz (Groessenbezug; das Nahfeld hat keinen Einlass); Rundungsschranke "+to_string((su(a,236u,6u)+a[266])/(2.0*S),4u)); // Pruefpass 3 NIEDRIG B: ungegatete Dekaden + EQ, wie rund_cd
-		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+" (massenerhaltend, nur gezaehlt); Lift-rho-Tor "+to_string(a[270],0u));
+		print_info(string("    Nebenstellen: BODEN/EINLASS_EQ-Klemme ")+to_string(a[266],0u)+" Treffer, Masse zugefuehrt "+to_string(eq_zu,4u)+", entfernt "+to_string(eq_ab,4u)+", netto "+to_string(eq_zu-eq_ab,4u)+" ("+to_string(1.0e6*(eq_zu-eq_ab)/(double)n/mdot,3u)+" ppm); schale_blend-Klemme "+to_string(a[269],0u)+(K.schale_modus==0u ? " (EQ-Arm: NICHT massenerhaltend -- f_eq(rho_c) springt auf den geklemmten Wert, dieses drho wird NICHT gebucht; Audit 16.09.2026, Befund A-N1)" : " (massenerhaltend, nur gezaehlt)")+"; Lift-rho-Tor "+to_string(a[270],0u));
+		if(a[269]>0.0&&K.schale_modus==0u) print_warning(string("  KLEMM-BILANZ ")+wo+": schale_blend-Klemme griff "+to_string(a[269],0u)+" mal im EQ-Arm (CFD_N2F_SCHALE_FNEQ=0) -- dieser Arm ist dort NICHT massenerhaltend, die Masse fehlt in der Bilanz. Das Massenurteil dieses Laufs ist damit eine UNTERGRENZE (Audit 16.09.2026, Befund A-N1).");
 		print_info(string("    Impuls: dj_x netto ")+to_string(jx,4u)+", dj_z netto "+to_string(jz,4u)+" (Gitter) -> dCd_aeq "+to_string(dcd,6u)+", dCz_aeq "+to_string(dcz,6u)+" (Groessenvergleich, keine Koerperkraft; Rundungsschranke "+to_string(hu/(2.0*S),4u)+")");
 		if(ph==1u) { // ★ Z2c: Budget-Kennwerte (Masse inkl. BODEN/EINLASS_EQ, S0d)
 			// Z2c Pruefpass 2 (MITTEL): Innen- und BODEN/EINLASS_EQ-Nettomasse NICHT mit Vorzeichen verrechnen -- gegenlaeufige Anteile
@@ -1532,7 +1548,12 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 			U.dcd_m = -Qn_vz*(double)u.si_F((float)((double)u_lat*Qn_betrag))/qA; U.dcd_m_brutto = fabs((double)u.si_F((float)((double)u_lat*Qb))/qA);
 			U.q_netto = -Qn_vz*Qn_betrag; U.q_brutto = Qb; // Senke positiv wie dCd_m (m_netto > 0 = zugefuehrt = Quelle); ACHTUNG Plan §2.4 schreibt Q_netto mit Quelle +
 			const double hr_ex = su(a,236u,6u), hu_ex = su(a,257u,6u); // Pruefpass 2 NIEDRIG 2: ungegatete Dekadensummen statt Klassenzaehler (KLEMM_HAKEN3 gatet 221+kk)
-			U.rund_cd = fabs((double)u.si_F((float)(hu_ex/(2.0*S)/(double)n)))/qA+fabs((double)u.si_F((float)((double)u_lat*(hr_ex+a[266])/(2.0*S)/(double)n)))/qA; // Worst-Case je Buchung 1/(2S)
+			// ★ Audit-Schleife 16.09.2026, Befund A-N5: die Rundungsschranke wird GETRENNT je Groesse gefuehrt. Vorher stand hier EINE Zahl
+			// fuer Impuls und Masse zusammen; der Fall "der Massenterm allein liegt unter seiner EIGENEN Rundungsschranke" (Haken 1: |dCd_m|
+			// 1,017 gegen rund_cd 1,128) liess sich damit nicht benennen. rund_cd bleibt die Summe -- die Urteilslogik aendert sich NICHT.
+			U.rund_cd_j = fabs((double)u.si_F((float)(hu_ex/(2.0*S)/(double)n)))/qA;
+			U.rund_cd_m = fabs((double)u.si_F((float)((double)u_lat*(hr_ex+a[266])/(2.0*S)/(double)n)))/qA;
+			U.rund_cd = U.rund_cd_j+U.rund_cd_m; // Worst-Case je Buchung 1/(2S)
 			U.rund_cz = fabs((double)u.si_F((float)(hu_ex/(2.0*S)/(double)n)))/qA;
 			U.kappung = a[265]>0.0; U.pruefbar = K.mehrdeutig==0ull; if(!U.pruefbar) U.grund = "Wickelwaechter MEHRDEUTIG in mindestens einem Fenster, auch im Warmlauf (konservativ, Z2c Pruefpass NIEDRIG 6)";
 			string kl = "    Klassen K0..K4 (Facette/MS/F-BBox/Randschale/Rest) nach Warmlauf -- rho-Treffer ";
@@ -1557,7 +1578,7 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 			for(uint k=0u; k<5u; k++) { kl_ += (k?"/":"")+to_string(a[273u+k], 0u); ei_ += (k?"/":"")+to_string(a[280u+k], 0u); }
 			print_info(string("  POSITIV-BILANZ ")+wo+" ("+string(ph==0u ? "ganzer Lauf" : "nach Warmlauf")+", "+to_string(zs_, 0u)+" Zaehlschritte x "+to_string(K.pos_zellen)+" Stichprobenzellen): Kandidaten "+to_string(kand_, 0u)+" = "+to_string(ppm_, 3u)+" ppm der Stichprobenzellschritte (inkl. Solid), machtlos "+to_string(a[278], 0u)+" ("+proz_(a[278])+", f_eq negativ "+to_string(a[279], 0u)+"), begrenzbar K0..K4 = "+kl_+", s-Eimer = "+ei_);
 			print_info(string("    Koinzidenz Dichteklemme ")+to_string(a[286], 0u)+" ("+proz_(a[286])+"), u-Klemme "+to_string(a[287], 0u)+" ("+proz_(a[287])+"); TYPE_E-Kandidaten "+to_string(a[291], 0u)+"; negativ geladen "+to_string(a[285], 0u)
-				+(K.pos_modus==2u ? "; angewandt: Summe (1-s) "+to_string(a[292]/16384.0, 4u)+", Summe |df| "+to_string(a[293]/16384.0, 6u)+", Kappung "+to_string(a[294], 0u)+", Selbstpruefung [290] "+to_string(a[290], 0u) : string("")));
+				+(K.pos_modus==2u ? "; angewandt: Summe (1-s) "+to_string(a[292]/16384.0, 4u)+", Summe |df| "+to_string(a[293]/16384.0, 6u)+", Kappung "+to_string(a[294], 0u)+((K.pos_haken==1u||K.pos_haken==3u) ? ", Selbstpruefung [290] "+to_string(a[290], 0u) : string(", Selbstpruefung [290] nicht instrumentiert (nur unter CFD_POSITIV_HAKEN 1/3 gebaut)")) : string("")));
 		}
 		if(K.pos_mehrdeutig>0ull) print_warning(string("  POSITIV-BILANZ ")+wo+": "+to_string(K.pos_mehrdeutig)+" Fenster mit moeglicher Wicklung der Summe (1-s) -- Summe unsicher.");
 	}
@@ -1595,6 +1616,14 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		  if(d0->fbx0==0u&&d0->fby0==0u&&d0->fbz0==0u&&d0->fbnx==d0->get_Nx()&&d0->fbny==d0->get_Ny()&&d0->fbnz==d0->get_Nz()) print_info(string("  KLEMM-BILANZ ")+wo+": F-BBox = ganze Domaene -> K2 umfasst alles ausser Facette/MS (auch TYPE_E und Randschale); K3/K4 sind hier baulich leer."); }
 		if(satt_r) print_info(string("  KLEMM-BILANZ ")+wo+": rho-Seite GESAETTIGT -- deren Ist=Soll ist nicht pruefbar (keine Beanstandung).");
 		if(satt_u) print_info(string("  KLEMM-BILANZ ")+wo+": u-Seite GESAETTIGT -- deren Ist=Soll ist nicht pruefbar (keine Beanstandung).");
+		if(klemm_haken_env()==3u&&r01+v[28]>0ull) { // ★ Audit-Schleife 16.09.2026, Befund C-M3: Haken 3 hatte als EINZIGER Testhaken keinen
+			// "Negativtest feuert nicht"-Waechter -- er verliess sich darauf, dass die Ist=Soll-Pruefung unten anspringt. Genau die wird aber bei
+			// gesaettigter rho-Seite uebersprungen, und dann besteht der Negativtest STUMM. Haken 4 (oben) und POSITIV_HAKEN 3 (unten) haben den
+			// Waechter laengst; hier fehlte er. Symmetrisch ergaenzt, gesaettigte Seite ausdruecklich als "nicht pruefbar" statt "bestanden".
+			if(satt_r) print_warning(string("  KLEMM-BILANZ ")+wo+": HAKEN 3 gesetzt, aber die rho-Seite ist GESAETTIGT -- die Klassenluecke ist hier NICHT PRUEFBAR (kein Freispruch). Lauf kuerzen oder Zaehltakt ausduennen.");
+			else if(rk==r01&&rd==r01) { print_warning(string("  KLEMM-BILANZ ")+wo+": HAKEN 3 gesetzt, aber die Klassensumme "+to_string(rk)+" stimmt mit [0]+[1] = "+to_string(r01)+" ueberein -- die eingebaute Klassenluecke (n%7) beanstandet NICHTS, der Negativtest feuert nicht. Abbruch am Fallende.");
+				klemm_bilanz_verletzt = true; }
+		}
 		if((!satt_r&&(rk!=r01||rd!=r01))||(!satt_u&&(uk!=v[28]||ud!=v[28]))) {
 			print_warning(string("  KLEMM-BILANZ ")+wo+": ABNAHME VERLETZT -- Klassen "+to_string(rk)+" / Dekaden "+to_string(rd)+" gegen [0]+[1] = "+to_string(r01)+", u-Klassen "+to_string(uk)+" / u-Dekaden "+to_string(ud)+" gegen [28] = "+to_string(v[28])+". Der Abbruch folgt am Fallende.");
 			klemm_bilanz_verletzt = true;
@@ -1603,7 +1632,7 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 		if(r01+v[28]==0ull) print_info(string("  KLEMM-BILANZ ")+wo+": 0 Klemmtreffer -- der Buchungspfad lief nicht; das Instrument ist hier ungeprueft (Testhaken CFD_KLEMM_HAKEN=1/2).");
 		{ // ★ 15.09.2026 Klemmen Z2b (KLEMMEN-STUFE2-PLAN.md §4): Huellenzaehler
 			const bool satt_h = v[28]>=4026531840ull||v[295]>=4026531840ull||v[296]>=4026531840ull||v[297]>=4026531840ull;
-			print_info(string("  KLEMM-HUELLEN ")+wo+(rho_huelle_env()>0u ? ": [RHO_HUELLE] Konsistenzhuelle unten/oben verlassen [298]/[299] = "+to_string(v[298])+"/"+to_string(v[299])+" (nur gezaehlt), " : string(": "))+(tor_huelle_env()>0u ? string("[TOR_HUELLE] ") : string(""))+"u-Komponentenhuelle [295] "+to_string(v[295])+(L.lbm_domain[0]->u_klemme>0u ? string(", Betragshuelle [296] ")+to_string(v[296])+" (Soll [28] = "+to_string(v[28])+", CFD_U_KLEMME=1)," : " (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+",")+" davon Diagonalluecke [297] "+to_string(v[297])+" (Betragshuelle verletzt, Komponentenhuelle nicht), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+(klemm_haken_env()==5u ? " (Haken 5: Soll > 0 in Domaenen mit Lift-Besuchen [215] = "+to_string(v[215])+"; Tor [270] "+to_string(v[270])+")" : " (Soll 0; Tor [270] "+to_string(v[270])+")"));
+			print_info(string("  KLEMM-HUELLEN ")+wo+(rho_huelle_aktiv() ? ": [RHO_HUELLE] Konsistenzhuelle unten/oben verlassen [298]/[299] = "+to_string(v[298])+"/"+to_string(v[299])+" (nur gezaehlt), " : (rho_huelle_env()>0u ? string(": [RHO_HUELLE durch CFD_KLEMM_HAKEN 1/3/4 UEBERSTEUERT -- RHO_HUELLE ist nicht emittiert, [298]/[299] existieren in diesem Bau NICHT und werden darum nicht gedruckt (Audit 16.09.2026, Befund B2/C-M1)], ") : string(": ")))+(tor_huelle_env()>0u ? string("[TOR_HUELLE] ") : string(""))+"u-Komponentenhuelle [295] "+to_string(v[295])+(L.lbm_domain[0]->u_klemme>0u ? string(", Betragshuelle [296] ")+to_string(v[296])+" (Soll [28] = "+to_string(v[28])+", CFD_U_KLEMME=1)," : " (Soll [28] = "+to_string(v[28])+"), Betragshuelle [296] "+to_string(v[296])+",")+" davon Diagonalluecke [297] "+to_string(v[297])+" (Betragshuelle verletzt, Komponentenhuelle nicht), Lift-rho ausserhalb der Bildhuelle [300] "+to_string(v[300])+(klemm_haken_env()==5u ? " (Haken 5: Soll > 0 in Domaenen mit Lift-Besuchen [215] = "+to_string(v[215])+"; Tor [270] "+to_string(v[270])+")" : " (Soll 0; Tor [270] "+to_string(v[270])+")"));
 			string hv_;
 			if(!satt_h) {
 				const bool betrag_ = L.lbm_domain[0]->u_klemme>0u; // ★ Z2d: unter der Betragsklemme zaehlt [28] die Betragshuelle
@@ -1611,8 +1640,24 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				if(betrag_&&v[296]!=v[28]) hv_ += " [296] "+to_string(v[296])+" != [28] "+to_string(v[28])+" (Betragshuelle muss unter CFD_U_KLEMME=1 genau die Klemmtreffer zaehlen);";
 				if(v[297]>v[296]||v[296]-v[297]!=v[295]) hv_ += " [296] - [297] = "+to_string((ulong)(v[296]>=v[297] ? v[296]-v[297] : 0ull))+" != [295] "+to_string(v[295])+" (Komponentenhuelle muss in der Betragshuelle liegen; Rundung/Kontraktion oder NaN?);";
 			}
-			if(klemm_haken_env()==5u&&rho_huelle_env()>0u&&v[298]+v[299]==0ull) hv_ += " Haken 5 unter RHO_HUELLE: Soll [298]+[299] > 0, Ist 0 (Positivtest der Konsistenzhuellen-Zaehler);";
+			if(klemm_haken_env()==5u&&rho_huelle_aktiv()&&v[298]+v[299]==0ull) hv_ += " Haken 5 unter RHO_HUELLE: Soll [298]+[299] > 0, Ist 0 (Positivtest der Konsistenzhuellen-Zaehler);";
 			if(klemm_haken_env()==5u&&v[215]>0ull&&(v[300]==0ull||v[270]!=0ull)) hv_ += " Haken 5: Soll [300] > 0 und [270] = 0, Ist "+to_string(v[300])+"/"+to_string(v[270])+" (Positivtest des Lift-Zaehlers);";
+			{ // ★ Audit-Schleife 16.09.2026, Befund B1 (HOCH): KONSTANTENSPIEGEL des Tors. CFD_TOR_HUELLE hatte als einzige Abnahme eine
+			  // Null ([270] = 0) -- nicht unterscheidbar von einem Lauf, in dem die Emission gar nicht griff. Der Kernel schreibt die
+			  // UEBERSETZTEN Torgrenzen nach [301]/[302] zurueck; hier steht die UNABHAENGIGE Host-Rechnung derselben Grenzen (Zwilling zur
+			  // Emission lbm.cpp, absichtlich getrennt gerechnet -- stimmen sie ueberein, ist der Wirkpfad belegt).
+				const bool h134_ = klemm_haken_env()==1u||klemm_haken_env()==3u||klemm_haken_env()==4u;
+				const float tlo_ = klemm_haken_env()==5u ? 1.0f-1.0f/32768.0f : 1.0f-1.5625f*(RHO_CLAMP_MAX-1.0f);
+				const float thi_ = klemm_haken_env()==5u ? 1.0f+1.0f/32768.0f : 1.0f+1.5625f*(RHO_CLAMP_MAX-1.0f);
+				const float glo_ = tor_huelle_env()>0u ? tlo_-16.0f/32768.0f : ((rho_huelle_env()>0u&&!h134_) ? 20.0f/32768.0f : 0.5f);
+				const float ghi_ = tor_huelle_env()>0u ? thi_+16.0f/32768.0f : ((rho_huelle_env()>0u&&!h134_) ? 1.0f+65504.0f/32768.0f : 2.0f);
+				const ulong slo_ = (ulong)(glo_*16384.0f+0.5f), shi_ = (ulong)(ghi_*16384.0f+0.5f);
+				if(v[215]>0ull) { // nur in Domaenen mit Lift (das Fernfeld hat keinen); ohne Besuch kann der Spiegel nicht geschrieben worden sein
+					print_info(string("  KLEMM-HUELLEN ")+wo+": Torspiegel [301]/[302] = "+to_string(v[301])+"/"+to_string(v[302])+" (Soll "+to_string(slo_)+"/"+to_string(shi_)+", Festkomma S = 16384, entspricht "+to_string(glo_,6u)+"/"+to_string(ghi_,6u)+") -- Wirkpfadbeleg der uebersetzten Torgrenzen.");
+					if(v[301]==0ull&&v[302]==0ull) hv_ += " Torspiegel [301]/[302] = 0 trotz "+to_string(v[215])+" Lift-Besuchen -- der Spiegel liegt nicht auf dem ausgefuehrten Pfad (Emission oder Kernelzweig fehlt);";
+					else if(v[301]+1ull<slo_||v[301]>slo_+1ull||v[302]+1ull<shi_||v[302]>shi_+1ull) hv_ += " Torspiegel [301]/[302] = "+to_string(v[301])+"/"+to_string(v[302])+" != Soll "+to_string(slo_)+"/"+to_string(shi_)+" (Toleranz 1 Festkommaschritt): der Kernel rechnet mit ANDEREN Torgrenzen als der Host annimmt;";
+				} else if(tor_huelle_env()>0u) print_warning(string("  KLEMM-HUELLEN ")+wo+": CFD_TOR_HUELLE=1, aber [215] = 0 -- diese Domaene hat keinen Lift, der Schalter ist hier wirkungslos und UNBELEGT (der Torspiegel [301]/[302] kann nicht feuern).");
+			}
 			if(tor_huelle_env()>0u&&v[270]!=0ull) hv_ += " TOR_HUELLE: das Lift-Tor griff "+to_string(v[270])+" mal -- die Bildhuelle ist dann keine Invariante (Soll 0);";
 			if(klemm_haken_env()!=5u&&tor_huelle_env()==0u&&rho_huelle_env()==0u&&v[300]!=0ull) print_warning(string("  KLEMM-HUELLEN ")+wo+": Lift-rho ausserhalb der Bildhuelle [300] = "+to_string(v[300])+" -- der Eingang des Lifts verlaesst die Klemmhuelle (Plan §2.3: dann Arm M-T fahren).");
 			if(!hv_.empty()) { print_warning(string("  KLEMM-HUELLEN ")+wo+": ABNAHME VERLETZT --"+hv_+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }
@@ -1659,7 +1704,6 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				print_info(string("  POSITIV ")+wo+": angewandt (Stichprobe) -- Summe (1-s) "+to_string((double)v[292]/S, 4u)+", Summe |df| "+to_string((double)v[293]/S, 6u)+" (Festkomma, mod 2^32; Fensterdifferenzen im KLEMM-Leser), Kappung [294] "+to_string(v[294])+(hk==1u||hk==3u ? ", Selbstpruefung [290] "+to_string(v[290])+" (Soll 0)" : string("")));
 				if((hk==1u||hk==3u)&&v[290]!=0ull) verl += " Selbstpruefung: "+to_string(v[290])+" angewandte Zellen verletzen Masse/Impuls ueber der Toleranz;";
 				const bool facette_ = L.lbm_domain[0]->positiv_facette>0u; // Konstruktionszeit-Kopie
-				const ulong erlaubt_ = facette_ ? kl5 : kl5-v[273];
 				// No-Op-Waechter (Pruefbefund P1c N1/N2): Zellen in Eimer 0..3 haben s < 0,95; hoechstens v[273] davon sind K0. Ohne FACETTE traegt
 				// jede uebrige Zelle >= 0,05 S - 0,5 zur Summe (1-s) bei -- exakte Untergrenze, auch mit K0. Nur pruefbar, solange die Summe nicht wickeln kann.
 				ulong e03_ = 0ull; for(uint k=0u; k<4u; k++) e03_ += v[280u+k];
@@ -1669,7 +1713,13 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 				if(!wickelfrei_) print_info(string("  POSITIV ")+wo+": Summe (1-s) kann gewickelt sein ("+to_string(ei5)+" begrenzte Stichprobenzellen) -- No-Op-Untergrenze nicht pruefbar.");
 				if(v[294]!=0ull) print_warning(string("  POSITIV ")+wo+": Kappung [294] = "+to_string(v[294])+" -- mindestens eine Zelle mit (1-s) oder Summe |df| > 16; die Summen sind UNTERGRENZEN (Soll 0, Pruefbefund P1c N3).");
 				if(facette_&&v[273]==0ull) print_warning(string("  POSITIV ")+wo+": CFD_POSITIV_FACETTE=1, aber keine K0-Zelle in der Stichprobe -- der Schalter war hier wirkungslos (Ansage-Doktrin, Pruefbefund P1c N4).");
-				(void)erlaubt_;
+				// ★ Audit-Schleife 16.09.2026, Befund B3: WIRKPFADBELEG des Schalters. [273] zaehlt K0-Kandidaten in beiden Stellungen gleich --
+				// erst [303] (nur unter POSITIV_FACETTE gebaut) zeigt, dass eine K0-Zelle wirklich begrenzt WURDE. Soll: [273] > 0 => [303] > 0.
+				if(facette_&&L.lbm_domain[0]->positiv_modus==2u&&v[273]>0ull) {
+					print_info(string("  POSITIV ")+wo+": CFD_POSITIV_FACETTE=1 Wirkpfad [303] = "+to_string(v[303])+" begrenzte K0-Zellen (Stichprobe) bei "+to_string(v[273])+" K0-Kandidaten.");
+					if(v[303]==0ull) verl += " CFD_POSITIV_FACETTE=1, aber [303] = 0 bei "+to_string(v[273])+" K0-Kandidaten: keine einzige Facettenzelle wurde begrenzt -- der Schalter ist ein stiller No-Op;";
+				}
+				if(!facette_&&v[303]!=0ull) verl += " [303] = "+to_string(v[303])+" ohne CFD_POSITIV_FACETTE -- der Zaehler darf ohne den Schalter nicht gebaut sein;";
 			}
 			if(hk==3u&&verl.find("Klassen")==string::npos) verl += " Haken 3 gesetzt, aber die Klassen-Abnahme beanstandet nichts -- der Negativtest feuert nicht;";
 			if(!verl.empty()) { print_warning(string("  POSITIV ")+wo+": ABNAHME VERLETZT --"+verl+(hk==3u ? " (Haken 3 erwartet genau die Klassen-Beanstandung.)" : "")+" Abbruch am Fallende."); klemm_bilanz_verletzt = true; }
@@ -1941,8 +1991,12 @@ void berichte_dichteklemme(LBM& L, const char* wo, ulong& summe, const float u_l
 // nur dann verweist das Fazit darauf; sonst bleibt die Warnung. Kanal, Fahrzeug-Einzelgitter und Fernfeld-Diagnose bewerten kein Budget.
 void dichteklemme_fazit(const ulong summe, const bool budget_folgt=false) {
 #ifdef RHO_CLAMP
-	if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben. (Der Zaehler ist saettigend, nicht gegatet: eine Null ist wieder eine echte Aussage.)");
-	else if(budget_folgt) print_info("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen. Ob das ein Ergebnis entwertet, bewertet seit Z2c das KLEMM-BUDGET weiter unten (entfernte Masse und Impuls gegen k(4)*sigma), nicht die Trefferzahl."); // ★ Z2c
+	// ★ Audit-Schleife 16.09.2026, Befund B6: unter CFD_RHO_HUELLE zaehlen [0]/[1] gegen die NUMERISCHE Huelle (20/32768; 2,999), nicht
+	// gegen 0,5/1,5. Eine Null heisst dort NICHT "das Feld ist physikalisch geblieben" -- rho kann die Konsistenzhuelle beliebig oft
+	// verlassen haben, gezaehlt in [298]/[299] (am 16.09. gemessen: 3 060 608 / 2 010 451 im 8-mm-Arm M-CB1B2). Der alte Satz war dort falsch.
+	if(summe==0ull&&rho_huelle_aktiv()) print_info("  NULL Treffer an der NUMERISCHEN Huelle (CFD_RHO_HUELLE) -- das sagt NICHTS darueber, ob rho im physikalischen Bereich 0,5/1,5 geblieben ist. Diese Frage beantworten allein die Konsistenzhuellen-Zaehler [298]/[299] in der Zeile KLEMM-HUELLEN.");
+	else if(summe==0ull) print_info("  NULL Treffer -- die Klemme hat nie gegriffen, das Feld ist physikalisch geblieben. (Der Zaehler ist saettigend, nicht gegatet: eine Null ist wieder eine echte Aussage.)");
+	else if(budget_folgt) print_info(string("Die Dichte-Klemme hat ")+(rho_huelle_aktiv() ? "an der NUMERISCHEN Huelle (CFD_RHO_HUELLE, NICHT 0,5/1,5 -- dafuer [298]/[299]) " : "")+to_string(summe)+" mal gegriffen. Ob das ein Ergebnis entwertet, bewertet seit Z2c das KLEMM-BUDGET weiter unten (entfernte Masse und Impuls gegen k(4)*sigma), nicht die Trefferzahl."); // ★ Z2c
 	else print_warning("Die Dichte-Klemme hat "+to_string(summe)+" mal gegriffen: rho hat den physikalischen Bereich verlassen. Dieser Lauf rechnete stellenweise auf einem GEKLEMMTEN Feld und ist kein belastbares Ergebnis -- die Ursache liegt im Betriebspunkt (fehlende Volumenviskositaet bei w gegen 2), nicht in der Klemme.");
 #else
 	(void)summe;
@@ -5740,11 +5794,6 @@ void main_setup_kugel() {
 	}
 
 	// ---------------------------------------------------------------- Auswertung
-	if(slice_dt>0.0f) { // ★ 07.09.2026 Wirkpfad der Slice-Uhr (Muster dd-Fall S3): ein Schalter ohne feuernden Zaehler ist ein harter Fehler
-		const ulong kad_soll = ts.empty() ? 0ull : (ulong)floor(ts.back()/(double)slice_dt)+1ull;
-		if(kad_punkt==0ull) print_error("[Kugel] SLICE-AUSGABE (CFD_SLICE_DT) aktiv, aber KEIN Slice-Punkt gefeuert -- stiller No-Op.");
-		else print_info("[Kugel] Slices geschrieben: "+to_string(kad_punkt)+" (Soll ~"+to_string(kad_soll)+" bei CFD_SLICE_DT = "+to_string(slice_dt,3u)+" s).");
-	}
 	std::vector<double> cd_w, cz_w;
 	for(size_t i=0u; i<ts.size(); i++) if(ts[i]>=(double)t_warmup) {
 		cd_w.push_back(fx[i]/((double)q_inf*(double)A_nom));
@@ -5794,6 +5843,14 @@ void main_setup_kugel() {
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h, kb_kugel.init&&klemm_budget_modus()>0u); }
 	{ const KlemmUrteil ku_ = berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u), "sigma(Cd der Kugel aus object_force, Block-SEM 4)");
 	  if(kb_kugel.init) klemm_budget_bewerten("Gitter", ku_, block_sem(cd_w, 4u), block_sem(cz_w, 4u), out_dir+"klemm_budget.csv", true); } // ★ Z2c // ★ 15.09.2026 Klemmen S0c (Pruefpass S0c N4: Kugel hat kein cd_rest)
+	// ★ Audit-Schleife 16.09.2026, Befund B5: dieser Waechter stand VOR dem Klemmenbericht und endet auf print_error -> exit(1);
+	// ein Slice-Fehlalarm haette den ganzen Klemmenblock des Kugelfalls verschluckt. Reihenfolge wie im Kanal- und dd-Fall:
+	// erst berichten, dann die Wirkpfad-Waechter (cd_w/cz_w werden oben gebraucht, darum wandert der Waechter, nicht der Bericht).
+	if(slice_dt>0.0f) { // ★ 07.09.2026 Wirkpfad der Slice-Uhr (Muster dd-Fall S3): ein Schalter ohne feuernden Zaehler ist ein harter Fehler
+		const ulong kad_soll = ts.empty() ? 0ull : (ulong)floor(ts.back()/(double)slice_dt)+1ull;
+		if(kad_punkt==0ull) print_error("[Kugel] SLICE-AUSGABE (CFD_SLICE_DT) aktiv, aber KEIN Slice-Punkt gefeuert -- stiller No-Op.");
+		else print_info("[Kugel] Slices geschrieben: "+to_string(kad_punkt)+" (Soll ~"+to_string(kad_soll)+" bei CFD_SLICE_DT = "+to_string(slice_dt,3u)+" s).");
+	}
 	if(stat_ok) {
 	double mcd=0.0, mcz=0.0;
 	for(size_t i=0u; i<cd_w.size(); i++) { mcd+=cd_w[i]; mcz+=cz_w[i]; }
@@ -9246,24 +9303,6 @@ static void main_setup_fahrzeug_dd() {
 		schreibe_vtk_feld(lbm_c, cNx, cNy, cNz, far_x0, far_y0, 0.0f, dx_c, si_u/u_lat, vtk_stride, out_dir+"feld_fern_"+ms+"ms.vtk");
 		}
 	}
-	// Wirkpfad-Nachweis: ein Schalter ohne feuernden Zaehler ist ein harter Fehler (Iron Rule).
-	if(vtk_dt>0.0f||vtk_ende||(slice_ns>0ull&&vtk_jede>0u)) {
-		if(g_vtk_dateien==0ull) print_error("CFD_VTK_ENDE/CFD_VTK_DT/CFD_VTK_JEDE war gesetzt, es wurde aber KEINE einzige VTK-Datei geschrieben -- stiller No-Op.");
-		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben (Rotation loescht nachtraeglich, der Zaehler zaehlt GESCHRIEBENE).");
-	}
-	if(slice_ns==0ull&&slice_dt>0.0f) { // ★ S3 (Diff-Pruefung H3): Wirkpfad der LEGACY-Uhr -- vorher hatte der Produktionspfad (CFD_SLICE_DT) keinen Zaehler
-		const ulong kad_soll_dt=(ulong)floor((double)t_si_letzt/(double)slice_dt)+1ull;
-		if(kad_punkt==0ull&&kad_soll_dt>0ull) print_error("SLICE-AUSGABE (CFD_SLICE_DT) aktiv, aber KEIN Slice-Punkt gefeuert -- stiller No-Op.");
-		else print_info("[SLICES] Legacy-Uhr Wirkpfad: "+to_string(kad_punkt)+" Slices (Soll ~"+to_string(kad_soll_dt)+").");
-	}
-	if(slice_ns>0ull) { // Wirkpfad der Near-Step-Kadenz (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler)
-		// ★ Pruefagent M1 (27.08.): Soll auf den LETZTEN GESAMPELTEN Punkt beziehen -- Kadenzpunkte
-		// feuern nur an Sample-Punkten; sonst falsch-exit(1) bei krummem slice_ns + Ende vor dem
-		// naechsten Sample-Punkt (gueltiger Kurzlauf verlor die komplette Auswertung).
-		const ulong kad_soll = ((n_outer_ist/(ulong)sample_every)*(ulong)sample_every*(ulong)ratio)/slice_ns;
-		if(kad_punkt==0ull&&kad_soll>0ull) print_error("SLICE-KADENZ war aktiv (CFD_SLICE_NEAR_STEPS="+to_string(slice_ns)+"), aber KEIN Kadenzpunkt gefeuert -- stiller No-Op.");
-		else print_info("[KADENZ] Wirkpfad: "+to_string(kad_punkt)+" Kadenzpunkte (Soll "+to_string(kad_soll)+").");
-	}
 	if(stop_angefordert) print_info("[STOPP] Lauf regulaer beendet bei t = "+to_string((float)t_si_letzt,4u)+" s statt der geplanten "
 		+to_string((float)n_outer*dt_c,4u)+" s. Alle Ausgaben sind vollstaendig; die Mittelwerte unten beziehen sich auf das VERKUERZTE Fenster.");
 	if(n_acc>0ull) print_info("Mittlere Zeit je grobem Schritt: "+to_string((float)(t_acc/(double)n_acc),4u)+" s ("+to_string(ratio)+" feine Schritte inklusive)");
@@ -9336,9 +9375,31 @@ static void main_setup_fahrzeug_dd() {
 	    klemm_budget_bewerten("Fernfeld", uf_, sig_, sgz_, out_dir+"klemm_budget.csv", false);
 	    KlemmUrteil ug_; ug_.pruefbar = un_.pruefbar&&uf_.pruefbar; ug_.grund = un_.pruefbar ? uf_.grund : un_.grund; ug_.kappung = un_.kappung||uf_.kappung; ug_.n = un_.n;
 	    ug_.dcd_j = fabs(un_.dcd_j)+fabs(uf_.dcd_j); ug_.dcz_j = fabs(un_.dcz_j)+fabs(uf_.dcz_j); ug_.dcd_m = fabs(un_.dcd_m)+fabs(uf_.dcd_m); ug_.dcd_m_brutto = un_.dcd_m_brutto+uf_.dcd_m_brutto; // Z2c Pruefpass M2: Summe der BETRAEGE (ungünstigster Fall, gegenlaeufige Domaenen heben sich nicht auf)
-	    ug_.rund_cd = un_.rund_cd+uf_.rund_cd; ug_.rund_cz = un_.rund_cz+uf_.rund_cz;
+	    ug_.rund_cd = un_.rund_cd+uf_.rund_cd; ug_.rund_cd_j = un_.rund_cd_j+uf_.rund_cd_j; ug_.rund_cd_m = un_.rund_cd_m+uf_.rund_cd_m; ug_.rund_cz = un_.rund_cz+uf_.rund_cz;
 	    klemm_budget_bewerten("Nah+Fern", ug_, sig_, sgz_, out_dir+"klemm_budget.csv", false);
 	  } }
+	// ★ Audit-Schleife 16.09.2026, Befund B5: DIESE DREI WAECHTER STANDEN VOR DEM KLEMMENBERICHT. Sie enden auf print_error -> exit(1)
+	// (utilities.hpp), also riss ein Slice-/VTK-Fehlalarm den GESAMTEN Klemmenblock mit: KLEMM-BILANZ, KLEMM-HUELLEN, POSITIV, KLEMM-BUDGET,
+	// die Restfenster der CSVs und das Abschlussurteil. Im Kanalfall stand der Bericht schon richtig VOR den Waechtern. Reihenfolge jetzt
+	// ueberall gleich: erst messen und berichten, dann die Wirkpfad-Waechter.
+	// Wirkpfad-Nachweis: ein Schalter ohne feuernden Zaehler ist ein harter Fehler (Iron Rule).
+	if(vtk_dt>0.0f||vtk_ende||(slice_ns>0ull&&vtk_jede>0u)) {
+		if(g_vtk_dateien==0ull) print_error("CFD_VTK_ENDE/CFD_VTK_DT/CFD_VTK_JEDE war gesetzt, es wurde aber KEINE einzige VTK-Datei geschrieben -- stiller No-Op.");
+		else print_info("[VTK] Wirkpfad: "+to_string(g_vtk_dateien)+" Dateien, "+to_string((float)g_vtk_bytes/1073741824.0f,2u)+" GB Feld-Daten geschrieben (Rotation loescht nachtraeglich, der Zaehler zaehlt GESCHRIEBENE).");
+	}
+	if(slice_ns==0ull&&slice_dt>0.0f) { // ★ S3 (Diff-Pruefung H3): Wirkpfad der LEGACY-Uhr -- vorher hatte der Produktionspfad (CFD_SLICE_DT) keinen Zaehler
+		const ulong kad_soll_dt=(ulong)floor((double)t_si_letzt/(double)slice_dt)+1ull;
+		if(kad_punkt==0ull&&kad_soll_dt>0ull) print_error("SLICE-AUSGABE (CFD_SLICE_DT) aktiv, aber KEIN Slice-Punkt gefeuert -- stiller No-Op.");
+		else print_info("[SLICES] Legacy-Uhr Wirkpfad: "+to_string(kad_punkt)+" Slices (Soll ~"+to_string(kad_soll_dt)+").");
+	}
+	if(slice_ns>0ull) { // Wirkpfad der Near-Step-Kadenz (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler)
+		// ★ Pruefagent M1 (27.08.): Soll auf den LETZTEN GESAMPELTEN Punkt beziehen -- Kadenzpunkte
+		// feuern nur an Sample-Punkten; sonst falsch-exit(1) bei krummem slice_ns + Ende vor dem
+		// naechsten Sample-Punkt (gueltiger Kurzlauf verlor die komplette Auswertung).
+		const ulong kad_soll = ((n_outer_ist/(ulong)sample_every)*(ulong)sample_every*(ulong)ratio)/slice_ns;
+		if(kad_punkt==0ull&&kad_soll>0ull) print_error("SLICE-KADENZ war aktiv (CFD_SLICE_NEAR_STEPS="+to_string(slice_ns)+"), aber KEIN Kadenzpunkt gefeuert -- stiller No-Op.");
+		else print_info("[KADENZ] Wirkpfad: "+to_string(kad_punkt)+" Kadenzpunkte (Soll "+to_string(kad_soll)+").");
+	}
 	if(stat_ok) {
 	// ★ 03.09.2026 INSTRUMENTEN-ETIKETT (Befund B79). Diese Zeilen stammen aus object_force, also aus
 	// dem Impulsaustausch an den Koerperzellen. Sobald die Facettenkette laeuft, traegt dieser Pfad
