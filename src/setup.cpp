@@ -6089,6 +6089,7 @@ static void main_setup_fahrzeug() {
 	const float A_ref     = 1.85f;     // Projekt-Konvention; die STL misst 1.8597 (0.5 % groesser)
 	const float dx        = 0.001f*env_f("CFD_DX", 4.0f);
 	dx_skal_setzen((double)DX_SCHRITT_VORGABE_MM/(double)env_f("CFD_DX", 4.0f)); // ★ 16.09. TODO 4a: Ist=Soll (mm-Wert, dieselbe Rundung wie lbm.cpp)
+	if(env_u("CFD_Y_VERSATZ",0u)>0u) print_warning("CFD_Y_VERSATZ wird im Einzelgitter-Fahrzeug NICHT angewandt (nur fahrzeug_dd, Ansage-Doktrin).");
 	const float u_lat     = u_lat_schalter("fahrzeug");
 	const float dt        = u_lat*dx/si_u;
 	const float nu_lat    = si_nu*dt/(dx*dx);
@@ -6727,19 +6728,25 @@ static void main_setup_fahrzeug_dd() {
 	// Zweimal gelesen, weil jede Domaene ihre eigenen Gitterkoordinaten hat.
 	// ★ 16.09.2026 Y-HALBZELLEN-VERSATZ (Heiko 20:27, TODO 4c) -- der "nie-wieder-Fix" des alten Baums (FluidX3D/src/setup.cpp:1534-1537),
 	// der in v2 fehlte (OFFENE-PUNKTE B5, Entwarnung durch Messung widerlegt): faellt die Symmetrieebene der STL (y = 0) auf eine FEINE
-	// ZELLMITTE, voxelisiert der Koerper beidseits der Mittelebene eine Ein-Zellen-Membran (p375_b: dy = +-1 mit 82,2 % Materialdicke 1
-	// gegen 2,0 % im Fahrzeugmittel; 8 mm 10.09.: 58,2 %). Das ist auf JEDER Sprosse der Fall, weil fNy = (cey-1)*ratio+1 ungerade ist.
+	// ZELLMITTE, voxelisiert der Koerper beidseits der Mittelebene ein Ein-Zellen-BLECH (Pruefagent 16.09.: Strahl-PARITAETSINVERSION --
+	// die Seam-Kanten der STL liegen exakt auf der Strahlgeraden, Zeile y=0 wird Solid, wo die Nachbarn Fluid sind, auch im offenen
+	// Motorraum/Radhaus; p375_b: dy = +-1 mit 82,2 % Materialdicke 1 gegen 0,3 % in den Nachbarzeilen; 8 mm 73,3 %). y = 0 liegt bei
+	// geradem ratio IMMER auf Index (cey-1)*ratio/2 = Zellmitte -- aber ob die Strahlen die Naht TREFFEN, entscheidet das letzte float-Bit:
+	// 4 mm (p4_register) ist mit yctr_f = 330,00003 zufaellig membranfrei, 8 und 3,75 mm (166,0 / 354,0) nicht. Gemessen, nicht Gesetz.
 	// Abhilfe: das Fahrzeug um eine halbe feine Zelle in +y versetzen, damit y = 0 auf eine Zellflaeche faellt -- fein UND grob derselbe
 	// physische Versatz (Alignment der Koerper zueinander bleibt). CFD_Y_VERSATZ: 0 = wie bisher (bitgleich zur Historie), 1 = Versatz.
 	const uint  y_versatz_modus = env_u("CFD_Y_VERSATZ", 0u);
 	const float yctr_f          = (0.0f-near_y0)/dx_f;                 // y = 0 in feinen Zellen ab dem Nahfeld-Ursprung
 	const bool  y_auf_zellmitte = fabs(yctr_f-roundf(yctr_f))<1e-3f;
-	const float y_versatz       = (y_versatz_modus>0u) ? 0.5f*dx_f : 0.0f; // Meter
+	const float y_versatz       = (y_versatz_modus>0u&&y_auf_zellmitte) ? 0.5f*dx_f : 0.0f; // Meter; idempotent wie im alten Baum (floor+0,5): nie ein Versatz AUF eine Zellmitte (Pruefagent N2)
+	const float yctr_c          = (0.0f-far_y0)/dx_c;                  // dieselbe Frage fuers Grobgitter (Pruefagent N1: cNy ungerade bei dx 4,5/7 mm)
+	const bool  y_auf_zellmitte_c = fabs(yctr_c-roundf(yctr_c))<1e-3f;
 	if(y_versatz_modus>1u) print_error("CFD_Y_VERSATZ kennt nur 0 (aus) und 1 (halbe feine Zelle in +y).");
-	print_info(string("Fahrzeug-Mittelebene: y = 0 liegt bei feinem Zellindex ")+to_string(yctr_f,3u)+(y_auf_zellmitte ? " = ZELLMITTE (Membran-Artefakt ohne Versatz)" : " = Zellflaeche")
+	print_info(string("Fahrzeug-Mittelebene: y = 0 liegt bei feinem Zellindex ")+to_string(yctr_f,3u)+(y_auf_zellmitte ? " = ZELLMITTE (Blech-Artefakt moeglich; gemessen bei 8 und 3,75 mm, 4 mm zufaellig frei)" : " = Zellflaeche")+", grob "+to_string(yctr_c,3u)+(y_auf_zellmitte_c ? " = ZELLMITTE" : " = Zellflaeche")
 		+"; CFD_Y_VERSATZ = "+to_string(y_versatz_modus)+(y_versatz_modus>0u ? " -> Koerper um "+to_string(y_versatz*1000.0f,3u)+" mm nach +y versetzt, Mittelebene jetzt bei Index "+to_string(yctr_f+0.5f,3u)+" (fein) bzw. "+to_string((y_versatz-far_y0)/dx_c,3u)+" (grob)" : " -> kein Versatz"));
-	if(y_versatz_modus>0u&&!y_auf_zellmitte) print_warning("CFD_Y_VERSATZ=1, aber y = 0 liegt schon auf einer Zellflaeche -- der Versatz legte die Mittelebene ERST auf eine Zellmitte (Artefakt statt Abhilfe).");
-	if(y_versatz_modus==0u&&y_auf_zellmitte) print_warning("Mittelebene auf Zellmitte OHNE Versatz: Ein-Zellen-Membran beidseits y = 0 zu erwarten (facetten_histogramme.csv, solid_dicke 1 bei dy = +-1). CFD_Y_VERSATZ=1 setzen (16.09.).");
+	if(y_versatz_modus>0u&&!y_auf_zellmitte) print_warning("CFD_Y_VERSATZ=1, aber y = 0 liegt schon auf einer Zellflaeche -- KEIN Versatz angewandt (idempotent), sonst laege die Mittelebene erst auf einer Zellmitte.");
+	if(y_versatz_modus==0u&&y_auf_zellmitte) print_warning("Mittelebene auf feiner Zellmitte OHNE Versatz: Ein-Zellen-Blech beidseits y = 0 MOEGLICH (8 und 3,75 mm gemessen, 4 mm zufaellig frei) -- nach dem Lauf werkzeuge/membran_y0.py pruefen oder CFD_Y_VERSATZ=1 setzen (16.09.).");
+	if(y_auf_zellmitte_c) print_warning("GROBE Mittelebene liegt auf einer Zellmitte (cNy ungerade) -- der Versatz um 0,5 feine Zellen verschiebt sie nur um 1/ratio; das Fernfeld-Blech waere separat zu pruefen (Pruefagent N1).");
 	auto place = [&](Mesh* m, const float dx, const float ox, const float oy, const float oz) {
 		const float3 bb0 = m->get_bounding_box_size();
 		m->scale((si_length/dx)/bb0.x);
@@ -9878,6 +9885,7 @@ static void main_setup_fernfeld() {
 	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
 	const float dx_f  = 0.001f*fmax(0.1f, env_f("CFD_DX", 4.0f));
 	dx_skal_setzen((double)DX_SCHRITT_VORGABE_MM/(double)env_f("CFD_DX", 4.0f)); // ★ 16.09. TODO 4a: Ist=Soll fuer fernfeld
+	if(env_u("CFD_Y_VERSATZ",0u)>0u) print_warning("CFD_Y_VERSATZ wird im Fernfeld-Fall NICHT angewandt (nur fahrzeug_dd, Ansage-Doktrin).");
 	const float dx    = dx_f*(float)ratio;                 // Zellweite des Fernfelds
 	const float dt    = u_lat*dx/si_u;
 	const float nu_faktor = env_f("CFD_FERN_NU", 1.0f);    // Weg 2 aus EINLASS-AUSLASS.md

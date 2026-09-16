@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Mittelebenen-Membran messen (16.09.2026): Anteil der Wandzellen mit Materialdicke 1 je y-Zeile um y = 0,
 aus export/<lauf>/facetten_histogramme.csv (Spalte n = linearer Index, solid_dicke) und dem Lauflog (Gitter, y-Ursprung).
-Ohne Versatz: dy = +-1 mit ~60-80 % (Membran); Ziel mit CFD_Y_VERSATZ=1: alle Zeilen auf Fahrzeugmittel. Exit 0 = Membran weg (max < 10 %)."""
+Ohne Versatz: dy = +-1 mit ~55-82 % (Blech; 8 mm 73 %, 3,75 mm 82 %; 4 mm/p4_register zufaellig frei, 1 ulp); Massstab sind die
+NACHBARZEILEN (0,3-1,1 %), nicht das Gesamtmittel. Exit 0 = weg (max < 10 % in jc-2..jc+2). Aus dem Repo-Wurzelverzeichnis aufrufen."""
 import sys, re, csv, collections
 lauf = sys.argv[1]
 log = open(f"logs/{lauf}.log", errors="ignore").read()
@@ -22,7 +23,7 @@ print(f"{lauf}: y = 0 bei feinem Index {j0:.3f}; Wandzellen {tot[0]}, Dicke 1 ge
 print("  Zeile  Wandzellen  Dicke-1  Anteil")
 for j in range(jc - 3, jc + 4):
     a, b = rows[j]; sh = 100 * b / a if a else 0.0
-    if abs(j - jc) <= 1: mx = max(mx, sh)
+    if abs(j - jc) <= 2: mx = max(mx, sh)  # mit Versatz liegen die Nachbarzeilen bei jc und jc+1 (Pruefagent N5)
     print(f"  {j:5d}  {a:9d}  {b:7d}  {sh:5.1f} %")
 print("Membran:", "WEG" if mx < 10.0 else "VORHANDEN", f"(max {mx:.1f} % in den Zeilen um y = 0)")
 sys.exit(0 if mx < 10.0 else 1)
