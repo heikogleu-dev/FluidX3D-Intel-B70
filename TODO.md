@@ -28,7 +28,7 @@ Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 
 
 | # | Punkt | Stand | nächster Schritt |
 |---|---|---|---|
-| **1** | **iGPU-Leistungsleiter** — Pflicht vor 3,75 mm | offen; absolute Grobschrittzeit ungemessen | Timer um den Fernfeldschritt (`CFD_QUEUE_DEV=2`) |
+| **1** | **iGPU-Leistungsleiter** — Pflicht vor 3,75 mm | **ERLEDIGT 16.09.** (a) absolute Fernfeldzeit gekoppelt: 8 mm iGPU 48,7 ms / B70 12,5 ms, **4 mm iGPU 338 ms von 413,6 ms Grobschritt = 81,7 %**, Reserve ~76 ms; (b) Skalierungsleiter 203,5 → 397,4 Mio: **+28,7 % gegen B24** (709 gegen 551 MLUPs), kein Einbruch, Nx%16-Effekt 5,0 % (bekannte Regel, jetzt beziffert). Kopplungskernel +18 % über der reinen Gitterzeit, Skalierung davon ungemessen | **Folge (Heiko):** Nx als Vielfaches von 16 für BEIDE Karten einplanen; B70-Leiter mit `CFD_QUEUE_DEV=1` offen |
 | **2** | **4-mm-Referenz NEU, mit erhaltender Klemme** | Muss ohnehin neu: die Klemme verschiebt die Kräfte systematisch (Punkt 0). Fällt mit dem offenen Reproduzierbarkeits-Punkt zusammen (`p4_u125` ≠ `p4_u125b`, Abschnitt 3) | Produktionszeile auf `CFD_POSITIV=2 CFD_U_KLEMME=1` umstellen, dann 4-mm-Lauf gegen `p4_neu`. **Braucht Heikos Go** |
 | **3** | **APG-Plan prüfen und nachschärfen** | erst wenn 2 steht; Plan ist von vor dem Klemmen-Befund | Planungsagent gegen den neuen Stand; dabei die offene SISM-Frage mitbehandeln (siehe Verzahnung unten) |
 | **4** | **APG/Mozaffari-Linie fahren** (Todo 2) | geparkt; ELIBB × APG, deterministisches Nachbar-ρ; Serienzeilen brauchen `CFD_RHO_RAND=0` | 8-mm-A/B κ 0,5 gegen 0 mit `CFD_VTK_DT=0.025` |
@@ -81,6 +81,13 @@ Reihenfolge wie geplant „billig zuerst": E1 → B1 (beide ohne GPU) → A2 →
 | D1/D2 | Zeitnahme um den `boden_eq`-Enqueue je Grobschritt; danach die 3D-Range als eigene Variable | ja | offen |
 | C1 | GB/s bei 8 mm gegen 4 mm an WORTGLEICHER Zeile — nur ein Unterschied je Zelle trüge die Cache-These | ja | offen |
 | A3 | `sub_group_size(32)` erzwingen — **Kerneländerung, braucht Freigabe** | ja | zurückgestellt nach A1b |
+
+### Ausrichtungsregel Nx % 16 == 0 — für beide Karten (Heiko 16.09.)
+
+Bekannt für die iGPU, mit der Leiter vom 16.09. am heutigen Stand beziffert: 5,0 % Durchsatz (706–709 gegen 662–692 MLUPs,
+ohne Überlapp, `logs/li_igpu_skala.txt`). Heiko: grundsätzlich auch für die B70 einplanen — `stream_collide` ist dort laut
+Befund A1 ebenfalls SIMD16, auch wenn der Einbruch dort bisher weniger sichtbar war. Für 3,75 mm: Nah- UND Fernfeld-Box so
+wählen, dass Nx durch 16 teilbar ist. Offen: dieselbe Leiter auf der B70 (`CFD_QUEUE_DEV=1`), um den Effekt dort zu beziffern.
 
 ### Die Reihenfolge
 
