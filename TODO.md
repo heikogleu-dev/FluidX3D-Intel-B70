@@ -98,7 +98,7 @@ wählen, dass Nx durch 16 teilbar ist. Offen: dieselbe Leiter auf der B70 (`CFD_
 
 | # | Hebel | Gewinn | Physik | Aufwand |
 |---|---|---|---|---|
-| **1** | **`CFD_T_WARMUP` 0,201 → 0,29** | **15,6 min UND +1,3 % Genauigkeit** | beseitigt den +1,34-%-Bias auf cd_druck | **eine Variable** |
+| **1** | **`CFD_T_WARMUP` 0,201 → 0,29** | ~~15,6 min UND~~ **+1,3 % Genauigkeit** — **NACHGEPRÜFT 16.09.:** die „15,6 min" stehen in PERFORMANCE-ROHBEFUNDE-2026-09-11.md:1172 und GITTERGESCHWINDIGKEIT.md:150 ohne Herleitung; bei gleichem `CFD_T_END` spart ein späterer Messbeginn KEINE Wanduhr. Real: entweder 89 ms weniger Messfenster (300 → 211 ms, gleiche Laufzeit) oder `T_END` 0,59 für 300 ms Fenster = +89 ms ≈ +8,5 min bei 4 mm (Rechnung aus 47,9 min/501 ms) | beseitigt den +1,34-%-Bias auf cd_druck (Messfenster beginnt mitten im SISM-Einschwingen, Nahfeld vor Messbeginn nicht einmal durchspült: 0,225 s gegen 0,201 s) | **eine Variable — Entscheid Heiko:** (a) 0,29/0,501 (kürzeres Fenster, gratis), (b) 0,29/0,59 (+8,5 min, volles Fenster), (c) bleibt. Empfehlung (b) für Absolutaussagen gegen OF13, (a) reicht für gepaarte A/Bs nicht (Fehlerbalken wachsen um √(300/211) = 1,19) |
 | **2** | **Die sieben Zugriffe: rho/u nur schreiben, wo gelesen wird** | **−6,5 bis −9,5 % Wanduhr** | **bitgleich beweisbar** | hoch |
 | **3** | **Prüfpunkt/Neustart** | **17–34 min je Folgelauf** (Anwärmphase ist 39 %) | — | 200–300 Zeilen |
 | 4 | ~~`u_lat` erneut, HINTER Punkt 1~~ **ERLEDIGT: 8 Schritte je Zelle sind Standard seit p4_register (12./13.09.)** | −24 % Wanduhr (46,1 min Zeitschleife statt 90) | Reproduzierbarkeit auf dieser Sprosse offen (Abschnitt 3, zurückgestellt) | — |
