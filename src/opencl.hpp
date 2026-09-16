@@ -315,11 +315,16 @@ public:
 		cl_source.push_back({ kernel_code.c_str(), kernel_code.length() });
 		this->cl_program = cl::Program(info.cl_context, cl_source);
 		const string build_options = "-cl-std=CL"+info.opencl_c_version+" -cl-finite-math-only -cl-no-signed-zeros -cl-mad-enable"+(info.patch_intel_gpu_above_4gb ? " -cl-intel-greater-than-4GB-buffer-required" : "");
+		// ★ 16.09.2026 A2 (TODO Durchsatz-Audit): zusaetzliche Build-Optionen aus der Umgebung, z. B. CFD_OCL_OPTIONS="-cl-intel-enable-auto-large-GRF-mode"
+		// (offline belegt: stream_collide dann SIMD32/256 GRF statt SIMD16/128 auf der B70, kein Spill). Reiner Messarm; Ansage-Doktrin: wird laut gemeldet.
+		const char* ocl_extra = getenv("CFD_OCL_OPTIONS");
+		const string build_options_eff = build_options+(ocl_extra&&ocl_extra[0] ? string(" ")+ocl_extra : string(""));
+		if(ocl_extra&&ocl_extra[0]) print_warning("CFD_OCL_OPTIONS = \""+string(ocl_extra)+"\" -- MESSARM: zusaetzliche OpenCL-Build-Optionen fuer "+info.name+" (Registerallokation/SIMD-Breite koennen sich aendern; Bitgleichheit ist zu PRUEFEN, nicht anzunehmen).");
 #ifndef LOG
-		int error = cl_program.build({ info.cl_device }, (build_options+" -w").c_str()); // compile OpenCL C code, disable warnings
+		int error = cl_program.build({ info.cl_device }, (build_options_eff+" -w").c_str()); // compile OpenCL C code, disable warnings
 		if(error) print_warning(cl_program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(info.cl_device)); // print build log
 #else // LOG, generate logfile for OpenCL code compilation
-		int error = cl_program.build({ info.cl_device }, build_options.c_str()); // compile OpenCL C code
+		int error = cl_program.build({ info.cl_device }, build_options_eff.c_str()); // compile OpenCL C code
 		const string log = cl_program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(info.cl_device);
 		write_file("bin/kernel.log", log); // save build log
 		if((uint)log.length()>2u) print_warning(log); // print build log
