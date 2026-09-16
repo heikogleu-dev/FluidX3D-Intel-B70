@@ -80,9 +80,9 @@ Reihenfolge wie geplant „billig zuerst": E1 → B1 (beide ohne GPU) → A2 →
 | Nr | Was | GPU? | Stand |
 |---|---|---|---|
 | A1/A1b | `stream_collide` ist auf der B70 SIMD16 — Upstream ebenfalls | offline | **erledigt** 15.09.: die SIMD-Breite erklärt die Lücke NICHT |
-| E1 | asm-Statistik von `stream_collide` (Arm `prod8nah`) auf Nachrichtenbreite und -zahl auszählen | nein | offen |
+| E1 | asm-Statistik von `stream_collide` (Arm `prod8nah`) auf Nachrichtenbreite und -zahl auszählen | nein | **erledigt 16.09.** 332 LSC-Ops statisch: 79 d16-Nachrichten (32 B = halbe Cache-Zeile je SIMD16-Nachricht), 91 Byte-Lasten (flags), 80 gegatete Atomics; SIMD16/128 GRF, spill 0. Protokoll 17:45 |
 | B1 | Facettenzellen je SIMD-Block zählen (lineare Indexreihenfolge n, Blöcke zu 16) — Wanddivergenz beziffern | nein | offen |
-| A2 | `auto-large-GRF` als Occupancy-A/B, 8 mm, Wanduhr, bitgleich prüfen | ja, 1 A/B | offen |
+| A2 | `auto-large-GRF` als Occupancy-A/B, 8 mm, Wanduhr, bitgleich prüfen | ja, 1 A/B | **läuft 16.09. 17:42** (`logs/a2_grf.txt`, Schalter `CFD_OCL_OPTIONS`); offline: SIMD16/128 → SIMD32/256 GRF, spill 0 |
 | D1/D2 | Zeitnahme um den `boden_eq`-Enqueue je Grobschritt; danach die 3D-Range als eigene Variable | ja | offen |
 | C1 | GB/s bei 8 mm gegen 4 mm an WORTGLEICHER Zeile — nur ein Unterschied je Zelle trüge die Cache-These | ja | offen |
 | A3 | `sub_group_size(32)` erzwingen — **Kerneländerung, braucht Freigabe** | ja | zurückgestellt nach A1b |
