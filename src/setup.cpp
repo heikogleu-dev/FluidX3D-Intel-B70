@@ -8489,6 +8489,15 @@ static void main_setup_fahrzeug_dd() {
 	//  Deshalb wird hier gemessen, nicht schaetzt.
 	auto t_now = []() { return std::chrono::steady_clock::now(); };
 	double ph_kopplung=0.0, ph_fein=0.0, ph_grob=0.0, ph_kraft=0.0, ph_schnitt=0.0; // Sekunden, seit dem letzten Bericht
+	// ★ 16.09.2026 iGPU-LEISTUNGSLEITER (TODO.md Punkt 1). ph_grob misst nur den UEBERHANG: der grobe Schritt laeuft
+	// asynchron (run_async) hinter den feinen Schritten, gemessen wird, was nach ihnen noch uebrig ist. Fuer die Frage
+	// "traegt die iGPU das Fernfeld bei 3,75 mm?" braucht es die ABSOLUTE Grobschrittzeit. CFD_TIMER_FERN=1 holt den
+	// groben Schritt darum SOFORT nach dem Start ein und misst ihn isoliert.
+	// PREIS, ausdruecklich angesagt: das serialisiert grob und fein. Die WANDUHR dieses Arms ist damit KEIN
+	// Leistungsmass und nicht mit anderen Armen vergleichbar -- nur die isolierte Fernfeldzeit ist die Messung.
+	const uint timer_fern = env_u("CFD_TIMER_FERN", 0u); // Konstruktionszeit-Kopie
+	if(timer_fern>1u) print_error("CFD_TIMER_FERN kennt nur 0 (aus) und 1 (Fernfeldschritt isoliert messen).");
+	double tf_summe = 0.0, tf_min = 1.0e30, tf_max = 0.0; ulong tf_n = 0ull;
 	ulong ph_n = 0ull;
 	auto wall_begin = t_now();
 	double t_phys_begin = 0.0;
@@ -8519,6 +8528,11 @@ static void main_setup_fahrzeug_dd() {
 		outer_clock.start();
 		const auto _t0 = t_now();
 		lbm_c.run_async(1u);
+		if(timer_fern>0u) { // ★ iGPU-Leistungsleiter: sofort einholen -> die Zeit ist der GANZE grobe Schritt, nicht sein Ueberhang
+			lbm_c.finish();
+			const double tf_ = std::chrono::duration<double>(t_now()-_t0).count();
+			tf_summe += tf_; tf_n++; if(tf_<tf_min) tf_min = tf_; if(tf_>tf_max) tf_max = tf_;
+		}
 		// ★ KOPPLUNG-GLATT (Diagnose-Verdikt A): 1-2-1-Binomialfilter ueber die im VORIGEN Outer
 		// extrahierten face[p]-Hostpuffer, ZWISCHEN Extraktion und Lift. Bewusst HIER und nicht direkt
 		// nach dem Extract am Outer-Ende: (1) VOR dem BODENBAND-Block darunter -- dessen fmax-Anhebung
@@ -9335,6 +9349,15 @@ static void main_setup_fahrzeug_dd() {
 	}
 	if(stop_angefordert) print_info("[STOPP] Lauf regulaer beendet bei t = "+to_string((float)t_si_letzt,4u)+" s statt der geplanten "
 		+to_string((float)n_outer*dt_c,4u)+" s. Alle Ausgaben sind vollstaendig; die Mittelwerte unten beziehen sich auf das VERKUERZTE Fenster.");
+	// ★ 16.09.2026 iGPU-Leistungsleiter: Bericht + Wirkpfadwaechter (Iron Rule: ein Schalter ohne feuernden Zaehler ist ein harter Fehler)
+	if(timer_fern>0u) {
+		if(tf_n==0ull) print_error("CFD_TIMER_FERN=1 gesetzt, aber KEIN Fernfeldschritt gemessen (tf_n = 0) -- lautloser No-Op.");
+		else {
+			const double mit_ = tf_summe/(double)tf_n;
+			print_info("[FERNFELD-ZEIT] absolute Grobschrittzeit, isoliert gemessen (CFD_TIMER_FERN=1): Mittel "+to_string((float)(mit_*1e3),2u)+" ms ueber "+to_string(tf_n)+" Schritte, Minimum "+to_string((float)(tf_min*1e3),2u)+" ms, Maximum "+to_string((float)(tf_max*1e3),2u)+" ms; Summe "+to_string((float)tf_summe,2u)+" s.");
+			print_warning("[FERNFELD-ZEIT] Dieser Arm SERIALISIERT grob und fein (finish direkt nach run_async). Seine Wanduhr, seine MLUPs und sein Durchsatz sind damit KEIN Leistungsmass und nicht mit anderen Armen vergleichbar -- vergleichbar ist allein die Zeile darueber.");
+		}
+	}
 	if(n_acc>0ull) print_info("Mittlere Zeit je grobem Schritt: "+to_string((float)(t_acc/(double)n_acc),4u)+" s ("+to_string(ratio)+" feine Schritte inklusive)");
 
 	// ---------------------------------------------------------------- Auswertung
