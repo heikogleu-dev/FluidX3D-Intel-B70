@@ -22,8 +22,10 @@ extern char** environ;
 // ist dt = 0,075*0,004/30 = 1,00000e-5 s GENAU. 0,075 ist der Wert, der den Zeitschritt der
 // Produktionssprosse auf runde 10 us legt. NUR DESWEGEN entsprechen die Schalter, die in
 // SCHRITTEN zaehlen, runden Millisekunden: CFD_SGS_SISM_AB 15000 = 150 ms, CFD_SGS_SISM_T
-// 5000 = 50 ms, CFD_SLICE_NEAR_STEPS 5000 = 50 ms (auf der 8-mm-Sprosse von Hand halbiert,
-// weil dt dort 20 us ist -- siehe logs/opt_8mm_serie.txt).
+// 5000 = 50 ms, CFD_SLICE_NEAR_STEPS 5000 = 50 ms. ★ Seit dem 16.09.2026 rechnet env_schritte AUCH auf
+// die Sprosse um (dx-Faktor DX_SCHRITT_VORGABE_MM/dx, lbm.hpp; Heiko 14:58 "Zeiten folgen der Aufloesung");
+// Serienzeilen tragen auf ALLEN Sprossen die 4-mm-Werte. Bis dahin wurden sie auf 8 mm von Hand halbiert
+// (logs/opt_8mm_serie.txt, 7500/2500/2500) -- solche Altzeilen faengt der Basis-Waechter (schritte_fein = Wert bleibt).
 //
 // WER u_lat AENDERT, VERSCHIEBT DIESE ZEITEN MIT, und zwar lautlos: bei u_lat = 0,100 wuerde
 // SISM erst bei 200 ms scharf, also ERST AM MESSBEGINN (CFD_T_WARMUP 0,201). Der Zeitwaechter
@@ -71,10 +73,14 @@ static float u_lat_schalter(const char* wo) {
 	if(u!=vorgabe) print_warning("SCHRITT-SCHALTER WERDEN AUTOMATISCH UMGERECHNET, Faktor "+to_string((float)((double)vorgabe/(double)u),5u)
 		+" ("+to_string(1.0f/u,3u)+" statt "+to_string(1.0f/vorgabe,3u)+" Schritte je Zelle). Jeder betroffene Schalter meldet unten seinen alten und neuen Wert. "
 		"Bis zum 12.09.2026 geschah das NICHT und musste von Hand nachgezogen werden.");
+	// ★ 16.09.2026 (TODO 4a): dieselbe Ansage fuer die Sprosse -- der dx-Faktor ist umgebungsrein (lbm.cpp) und wird im Fall per dx_skal_setzen geprueft.
+	if(dx_skal()!=1.0) print_warning("SCHRITT-SCHALTER WERDEN AUF DIE SPROSSE UMGERECHNET, dx-Faktor "+to_string((float)dx_skal(),5u)
+		+" (Referenz "+to_string(DX_SCHRITT_VORGABE_MM,2u)+" mm, dt = u_lat*dx/si_u); Gesamtfaktor mit u_lat "+to_string((float)schritt_skal(),5u)
+		+". Serienzeilen tragen seit dem 16.09.2026 auf ALLEN Sprossen die 4-mm-Werte -- ein von Hand halbierter 8-mm-Wert wuerde DOPPELT umgerechnet; der Basis-Waechter faengt das (schritte_fein = Wert bleibt).");
 	// Der Zaehltakt skaliert in lbm.cpp mit und wird hier ANGESAGT -- sonst waere er der einzige
 	// Schritt-Schalter, dessen Umrechnung nirgends im Log steht.
 	print_info("Zaehltakt (Wirkpfad-Diagnostik): "+to_string(zaehl_takt())+" feine Schritte"
-		+(ulat_skal()!=1.0 ? string(" (aus ")+to_string((ulong)max(1u, env_u("CFD_ZAEHL_TAKT", 100u)))+" umgerechnet)" : string(" (Vorgabe)")));
+		+(schritt_skal()!=1.0 ? string(" (aus ")+to_string((ulong)max(1u, env_u("CFD_ZAEHL_TAKT", 100u)))+" umgerechnet)" : string(" (Vorgabe)")));
 	return u;
 }
 
@@ -90,7 +96,7 @@ static float u_lat_schalter(const char* wo) {
 // skaliert, einmal ueber die Kadenz und einmal hier.
 static uint env_schritte(const char* name, const uint vorgabe) {
 	const uint roh = env_u(name, vorgabe);
-	const double sk = ulat_skal();
+	const double sk = schritt_skal(); // ★ 16.09.: u_lat x dx
 	// ★ NULL IST "AUS" UND BLEIBT "AUS". Ohne diese Zeile machte die Klemme auf >= 1 aus einem
 	// abgeschalteten Schalter einen, der ab Schritt 1 scharf ist -- beim ersten Selbsttest sofort
 	// aufgefallen (CFD_SGS_DIAG_AB 0 -> 1 und CFD_SGS_VD_AB 0 -> 1). Genau die Klasse Fehler, die
@@ -101,8 +107,8 @@ static uint env_schritte(const char* name, const uint vorgabe) {
 	static std::set<string> gemeldet; // je Name EINMAL, sonst flutet es das Log
 	if(gemeldet.insert(string(name)).second) {
 		print_warning(string("SCHRITT-SCHALTER UMGERECHNET: ")+name+" = "+to_string((ulong)roh)+" -> "+to_string((ulong)neu)
-			+(getenv(name)==nullptr ? " (Code-Default, war fuer u_lat = 0,075 gewaehlt)" : " (aus der Umgebung)")
-			+", Faktor "+to_string((float)sk,5u)+" -- dieselbe physikalische Zeit bei der gefahrenen Gittergeschwindigkeit.");
+			+(getenv(name)==nullptr ? " (Code-Default, fuer u_lat = 0,075 und dx = 4 mm gewaehlt)" : " (aus der Umgebung)")
+			+", Faktor "+to_string((float)sk,5u)+" (u_lat "+to_string((float)ulat_skal(),5u)+" x dx "+to_string((float)dx_skal(),5u)+") -- dieselbe physikalische Zeit auf dieser Sprosse und Gittergeschwindigkeit.");
 		if(neu_roh<1ll) print_warning(string("  ")+name+" waere auf 0 gefallen und ist auf 1 geklemmt -- die physikalische Zeit stimmt dann NICHT mehr.");
 	}
 	return neu;
@@ -120,8 +126,9 @@ struct UlatSchritt { const char* name; bool grob; };
 
 static void u_lat_zeitwaechter(const float u_lat, const float dt_f, const float dt_c,
                                const UlatSchritt* liste, const uint n_liste, const char* wo) {
-	if(u_lat==U_LAT_VORGABE||!(dt_f>0.0f)||!(dt_c>0.0f)) return;
-	const double skal = (double)U_LAT_VORGABE/(double)u_lat; // dt(Vorgabe) / dt(hier), sprossenunabhaengig
+	(void)u_lat; // ★ 16.09.: der Faktor kommt aus schritt_skal() (u_lat x dx); u_lat bleibt nur fuer die Signatur
+	if(schritt_skal()==1.0||!(dt_f>0.0f)||!(dt_c>0.0f)) return;
+	const double skal = schritt_skal(); // dt(Referenz 4 mm, u_lat 0,075) / dt(hier)
 	uint n_gesetzt = 0u;
 	for(uint i=0u; i<n_liste; i++) {
 		const char* nm = liste[i].name;
@@ -148,7 +155,7 @@ static void u_lat_zeitwaechter(const float u_lat, const float dt_f, const float 
 	}
 	// ★ Pruefbefund B4: der Waechter sieht nur GESETZTE Schalter. Ein ungesetzter faellt auf seinen
 	// Code-Default zurueck (CFD_SLICE_NEAR_STEPS auf 5000), und der traegt dieselbe 50-ms-Annahme.
-	print_warning("  Schrittbasierte Schalter folgen u_lat seit dem 12.09.2026 AUTOMATISCH (env_schritte), gesetzte wie "
+	print_warning("  Schrittbasierte Schalter folgen u_lat (seit 12.09.2026) UND dx (seit 16.09.2026) AUTOMATISCH (env_schritte), gesetzte wie "
 		"ungesetzte -- der Code-Default wird mitskaliert, weil auch er fuer u_lat = "+to_string(U_LAT_VORGABE,5u)+" gewaehlt ist "
 		"(in diesem Lauf "+to_string((ulong)n_gesetzt)+" der geprueften Namen aus der Umgebung). NICHT mitskaliert und richtig so: "
 		"CFD_FAC_CD_EVERY ist ein Vielfaches der Abtastkadenz und damit dimensionslos. Ein Schalter auf 0 bleibt 0 -- aus ist aus.");
@@ -4353,6 +4360,7 @@ void main_setup_kanal() {
 	if(env_u("CFD_SPONGE_N",0u)>0u)      print_warning("CFD_SPONGE_N wird im Kanal NICHT angewandt (periodisch, kein Rand zu daempfen).");
 	if(env_u("CFD_PO_HART",0u)>0u||getenv("CFD_PO_SIGMA")!=nullptr) print_warning("CFD_PO_HART/CFD_PO_SIGMA wirken nur mit Druck-Auslass -- der Kanal hat keinen."); // R2-Nachpruefer: env_u statt getenv-Falle
 	if(env_on("CFD_SPARSE_TILES"))       print_warning("CFD_SPARSE_TILES wird im Kanal NICHT angewandt.");
+	dx_skal_setzen(1.0); // ★ 16.09.: Kanal liest kein CFD_DX, seine Schrittwerte (T aus T_ett) sind nicht auf 4 mm definiert
 	LBM_Domain::s_sponge_n = 0u; LBM_Domain::s_sponge_a = 3000.0f; LBM_Domain::s_sponge_wmin = 0.5f; LBM_Domain::s_sgs_wandfrei = env_u("CFD_SGS_WANDFREI", 0u)>0u; LBM_Domain::s_sgs_guo = env_u("CFD_SGS_GUO", 1u)>0u; LBM_Domain::s_sgs_diag = env_u("CFD_SGS_DIAG", 0u)>0u; LBM_Domain::s_sgs_diag_ab = (ulong)env_schritte("CFD_SGS_DIAG_AB", 0u);
 	// ★ Wandfunktions-Bounce-Back: CFD_WANDFUNKTION=1 voll, =2 nur Free-Slip-Tausch (Zwischenarm).
 	{ const uint wf = env_u("CFD_WANDFUNKTION", 0u); LBM_Domain::s_wandfunktion = wf>0u; LBM_Domain::s_wf_tau = (wf==2u) ? 0.0f : 1.0f;
@@ -5492,6 +5500,7 @@ void main_setup_kugel() {
 	const float si_nu  = env_f("CFD_KUGEL_NU", 1.48e-5f);
 	const float D      = 0.450f;                         // Kugeldurchmesser [m]
 	const float dx     = 0.001f*env_f("CFD_KUGEL_DX", 12.0f);
+	dx_skal_setzen(1.0); print_info("Kugel: Schritt-Schalter werden NICHT auf CFD_KUGEL_DX umgerechnet -- ihre Werte sind je Zeile fuer die gefahrene Sprosse gewaehlt (spz_*: 15000/2500 bei 40 mm), nicht auf 4 mm definiert. Die u_lat-Umrechnung bleibt."); // ★ 16.09. TODO 4a
 	const float si_zc  = env_f("CFD_KUGEL_ZC", 0.300f);  // Kugelmittelpunkt ueber Boden [m]
 	const float u_lat  = u_lat_schalter("kugel");
 	const float dt     = u_lat*dx/si_u;
@@ -6079,6 +6088,7 @@ static void main_setup_fahrzeug() {
 	const float si_length = 4.4364f;   // Fahrzeuglaenge laut STL-Konvention des Projekts
 	const float A_ref     = 1.85f;     // Projekt-Konvention; die STL misst 1.8597 (0.5 % groesser)
 	const float dx        = 0.001f*env_f("CFD_DX", 4.0f);
+	dx_skal_setzen((double)DX_SCHRITT_VORGABE_MM/(double)env_f("CFD_DX", 4.0f)); // ★ 16.09. TODO 4a: Ist=Soll (mm-Wert, dieselbe Rundung wie lbm.cpp)
 	const float u_lat     = u_lat_schalter("fahrzeug");
 	const float dt        = u_lat*dx/si_u;
 	const float nu_lat    = si_nu*dt/(dx*dx);
@@ -6401,7 +6411,7 @@ static void main_setup_fahrzeug() {
 
 extern char** environ; // ★ H3: fuer die Gegenrichtung (im Lauf gesetzt, in der Referenz unbekannt)
 struct BasisZeile { string name, wert, einheit; };
-static void pruefe_basis(const string& basisdatei, const float dx_lauf, const float u_lat_lauf) {
+static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★ 16.09.: u_lat_lauf entfaellt -- schritte_fein ist "Wert bleibt", env_schritte rechnet im Lauf um
 	// ★ Pruefbefund B5 (12.09.2026): die Einheit 'zellen_fein' rechnet NUR mit dx_ref/dx_lauf um.
 	// Fuer echte Zellzahlen ist das richtig. CFD_SLICE_NEAR_STEPS ist aber KEINE Zellzahl, sondern
 	// eine SCHRITTZAHL, und die haengt an dt = u_lat*dx/si_u, also an BEIDEN Groessen. Solange u_lat
@@ -6409,6 +6419,9 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf, const fl
 	// richtig kompensierten Arm den physikalisch FALSCHEN Wert und brach mit print_error ab -- und im
 	// unkompensierten Arm entwarnte er. Neue Einheit 'schritte_fein': dx UND u_lat. Bei der Vorgabe
 	// ist der Faktor exakt 1,0, alle bestehenden Serienzeilen bleiben also unberuehrt.
+	// ★ 16.09.2026 (TODO 4a, Heiko 14:58): der Absatz oben ist HISTORIE. schritte_fein heisst jetzt WERT BLEIBT -- die Serienzeile traegt auf
+	// jeder Sprosse den 4-mm-Wert, env_schritte rechnet ihn im Lauf laut um (u_lat x dx), und dieser Waechter prueft den ROHEN Wert. Genau so
+	// faellt eine alte, von Hand halbierte 8-mm-Zeile (7500) als ABWEICHEND auf, statt still doppelt umgerechnet zu werden.
 	if(getenv("CFD_BASIS")!=nullptr&&string(getenv("CFD_BASIS"))=="aus") {
 		print_warning("BASIS-WAECHTER ABGESCHALTET (CFD_BASIS=aus) -- dieser Lauf ist NICHT gegen die Baseline geprueft. Der Notausgang ist absichtlich laut.");
 		return;
@@ -6427,7 +6440,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf, const fl
 		std::istringstream is(zeile); BasisZeile b; if(!(is>>b.name>>b.wert>>b.einheit)) continue; B.push_back(b);
 	}
 	if(dx_ref<=0.0f) { print_error("BASIS-WAECHTER: kein 'dx_ref:' im Kopf von "+basisdatei+" -- Umrechnung unmoeglich."); return; }
-	if(!(u_lat_lauf>0.0f)) { print_error("BASIS-WAECHTER: CFD_U_LAT = "+to_string(u_lat_lauf,7u)+" ist nicht positiv -- die Umrechnung der Einheit 'schritte_fein' waere undefiniert (B5)."); return; }
+	if(fabs(dx_ref-DX_SCHRITT_VORGABE_MM)>1e-6f) { print_error("BASIS-WAECHTER: dx_ref "+to_string(dx_ref,2u)+" != DX_SCHRITT_VORGABE_MM "+to_string(DX_SCHRITT_VORGABE_MM,2u)+" -- die schritte_fein-Werte der Basis waeren auf einer anderen Sprosse definiert als env_schritte annimmt."); return; } // ★ 16.09.
 	if(!(dx_lauf>0.0f)) { print_error("BASIS-WAECHTER: CFD_DX = "+to_string(dx_lauf,4u)+" ist nicht positiv -- die Umrechnung waere undefiniert (M5)."); return; }
 	const double skal = (double)dx_ref/(double)dx_lauf; // Feingitter-Zellen: kleineres dx -> mehr Zellen
 	// Deklarierte Abweichungen, Format CFD_A=1,CFD_B=2 -- OHNE Leerzeichen: der Serienlaeufer
@@ -6470,11 +6483,10 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf, const fl
 		//   modus       Schalterstellung/Zaehlwert ohne Laengenbezug
 		//   zellen_grob ANZAHL grober Zellen -- die Anzahl bleibt, ihre Laenge waechst mit dx_c
 		//               (dx_c = dx_f*ratio); wer eine feste LAENGE will, nimmt zellen_grob_laenge.
-		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob"||b.einheit=="schritte_fein") {
-			//   schritte_fein  FEINE ZEITSCHRITTE -- skaliert mit dx UND mit 1/u_lat, weil
-			//                  dt = u_lat*dx/si_u. Der u_lat-Faktor ist bei der Vorgabe exakt 1,0.
-			const double u_fak = (b.einheit=="schritte_fein") ? ((double)U_LAT_VORGABE/(double)u_lat_lauf) : 1.0;
-			const double roh = atof(b.wert.c_str())*skal*u_fak;
+		//   schritte_fein  WERT BLEIBT (16.09.2026): auf dx_ref und U_LAT_VORGABE definiert, env_schritte rechnet im Lauf
+		//                  LAUT um; hier wird der ROHE Wert geprueft -- 7500 bei 8 mm faellt als ABWEICHEND auf (Doppelumrechnung).
+		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob") {
+			const double roh = atof(b.wert.c_str())*skal;
 			const long unten=(long)floor(roh), oben=(long)ceil(roh);
 			soll = to_string((ulong)llround(roh));
 			if(unten!=oben) hinweis = " (nicht eindeutig: "+to_string((ulong)unten)+" oder "+to_string((ulong)oben)+" -- Wahl deklarieren)";
@@ -6511,7 +6523,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf, const fl
 			const string nm=ev.substr(0,g);
 			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME") continue;
 			print_warning("BASIS ZUSAETZLICH: "+nm+"="+ev.substr(g+1)+" -- steht nicht in der Referenz, wird also NICHT geprueft.");
-			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. Die Einheit 'schritte_fein' rechnet die Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
+			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. schritte_fein wird seit 16.09. von env_schritte umgerechnet, der Waechter prueft den Referenzwert. Alt: Die Einheit 'schritte_fein' rechnet die Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
 			if(nm=="CFD_RATIO") print_error("CFD_RATIO ist gesetzt, steht aber nicht in der Referenz -- die Umrechnung zellen_grob/index_grob haengt an unveraendertem ratio (dx_c = dx_f*ratio). Referenz erneuern oder Schalter entfernen.");
 			extra++;
 		}
@@ -6543,7 +6555,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf, const fl
 }
 
 static void main_setup_fahrzeug_dd() {
-	pruefe_basis(get_exe_path()+"../basis/fahrzeug_dd.basis", env_f("CFD_DX", 4.0f), env_f("CFD_U_LAT", U_LAT_VORGABE)); // ★ VOR jedem teuren Schritt; u_lat wird hier NUR gelesen (die Ansage macht u_lat_schalter weiter unten, sonst stuende sie doppelt)
+	pruefe_basis(get_exe_path()+"../basis/fahrzeug_dd.basis", env_f("CFD_DX", 4.0f)); // ★ VOR jedem teuren Schritt; u_lat wird hier NUR gelesen (die Ansage macht u_lat_schalter weiter unten, sonst stuende sie doppelt)
 	// ★ Audit J 29.08.: der Slice-Riegel stand erst NACH baue_facetten und dem ELIBB-Remesh --
 	// bei 4 mm also nach ueber zehn Minuten Aufbau. Die Entscheidung haengt aber nur an zwei
 	// getenv, also faellt sie hier. Entscheidungstabelle wortgleich zur Stelle weiter unten.
@@ -6582,6 +6594,7 @@ static void main_setup_fahrzeug_dd() {
 	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
 	// ★ dx = 0 waere eine Division durch null in dt_f und nu_lat, ohne Meldung. Untergrenze 0,1 mm.
 	const float dx_f  = 0.001f*fmax(0.1f, env_f("CFD_DX", 4.0f));
+	dx_skal_setzen((double)DX_SCHRITT_VORGABE_MM/(double)env_f("CFD_DX", 4.0f)); // ★ 16.09. TODO 4a: Ist=Soll fuer fahrzeug_dd (env_schritte lief oben schon umgebungsrein)
 	const float dx_c  = dx_f*(float)ratio;
 	const float dt_f  = u_lat*dx_f/si_u;
 	const float dt_c  = (float)ratio*dt_f;
@@ -9848,6 +9861,7 @@ static void main_setup_fernfeld() {
 	const float si_nu = env_f("CFD_NU", 1.51e-5f);
 	const uint  ratio = max(2u, env_u("CFD_RATIO", 4u));
 	const float dx_f  = 0.001f*fmax(0.1f, env_f("CFD_DX", 4.0f));
+	dx_skal_setzen((double)DX_SCHRITT_VORGABE_MM/(double)env_f("CFD_DX", 4.0f)); // ★ 16.09. TODO 4a: Ist=Soll fuer fernfeld
 	const float dx    = dx_f*(float)ratio;                 // Zellweite des Fernfelds
 	const float dt    = u_lat*dx/si_u;
 	const float nu_faktor = env_f("CFD_FERN_NU", 1.0f);    // Weg 2 aus EINLASS-AUSLASS.md

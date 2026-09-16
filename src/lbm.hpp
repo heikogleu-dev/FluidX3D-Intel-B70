@@ -198,6 +198,14 @@ uint positiv_haken_periode(); // kernel.cpp: Periode P der Haken-1-Zellen (Kerne
 // dt_c = ratio*dt_f und ratio unberuehrt bleibt.
 double ulat_skal();                     // 1.0, solange u_lat auf der Vorgabe steht
 void   ulat_skal_setzen(const double s); // genau einmal, aus u_lat_schalter, VOR dem ersten Leser
+// ★ 16.09.2026 (TODO 4a, Heiko 14:58 "Zeiten folgen der Aufloesung"): Schritt-Schalter folgen dx UND u_lat, weil dt = u_lat*dx/si_u.
+// Referenzsprosse der schrittbasierten Schalter ist 4 mm (setup.cpp Kopfkommentar: dt = 1e-5 s bei 4 mm, u_lat 0,075, si_u 30).
+// Nur die drei CFD_DX-Faelle (fahrzeug, fahrzeug_dd, fernfeld) sind auf 4 mm definiert; Kugel (CFD_KUGEL_DX, eigene Schrittwerte je Zeile),
+// Kanal (T aus T_ett) und facetten_test bekommen exakt 1,0. Umgebungsrein wie ulat_skal, weil fahrzeug_dd env_schritte VOR dem dx-Leser ruft.
+#define DX_SCHRITT_VORGABE_MM 4.0f
+double dx_skal();                      // DX_SCHRITT_VORGABE_MM/CFD_DX in den drei CFD_DX-Faellen, sonst exakt 1.0
+void   dx_skal_setzen(const double s); // Ist=Soll aus dem Fall, wie ulat_skal_setzen
+double schritt_skal();                 // = ulat_skal()*dx_skal(): DER Faktor fuer env_schritte und zaehl_takt
 
 class LBM_Domain {
 private:

@@ -557,11 +557,26 @@ void ulat_skal_setzen(const double s) {
 	// Trailer hat er beim ersten Anlauf den halben Ausdruck gefressen.)
 	if(fabs(s-ulat_skal())>1e-6*fmax(1.0, fabs(s))) print_error("Schrittskalierung Ist != Soll: aus der Umgebung "+to_string((float)ulat_skal(),7u)+", aus dem gefahrenen u_lat "+to_string((float)s,7u)+". Die Schritt-Schalter waeren gegen eine andere Gittergeschwindigkeit umgerechnet als gerechnet wird.");
 }
+// ★ 16.09.2026 (TODO 4a): dx-Faktor der Schritt-Schalter, umgebungsrein (CFD_CASE + CFD_DX), Muster ulat_skal.
+static double dx_skal_aus_umgebung() {
+	const char* c = getenv("CFD_CASE");
+	const bool dx_fall = c!=nullptr&&(string(c)=="fahrzeug_dd"||string(c)=="fahrzeug"||string(c)=="fernfeld"); // die drei CFD_DX-Leser in setup.cpp
+	if(!dx_fall) return 1.0; // kugel: CFD_KUGEL_DX mit eigenen Schrittwerten je Zeile; kanal: T aus T_ett; facetten_test: kein Leser
+	float dx = 4.0f; if(const char* v = getenv("CFD_DX")) { const float x = (float)atof(v); if(x>0.0f) dx = x; } // dieselbe float-Rundung wie env_f
+	return (double)DX_SCHRITT_VORGABE_MM/(double)dx;
+}
+static double g_dx_skal = 0.0; // 0 = noch nicht gebildet
+double dx_skal() { if(g_dx_skal==0.0) g_dx_skal = dx_skal_aus_umgebung(); return g_dx_skal; }
+void dx_skal_setzen(const double s) {
+	if(!(s>0.0)) print_error("dx_skal_setzen("+to_string((float)s,7u)+"): die Skalierung muss positiv sein.");
+	if(fabs(s-dx_skal())>1e-6*fmax(1.0, fabs(s))) print_error("dx-Schrittskalierung Ist != Soll: aus der Umgebung "+to_string((float)dx_skal(),7u)+", aus dem gefahrenen dx "+to_string((float)s,7u)+". Die Schritt-Schalter waeren gegen eine andere Sprosse umgerechnet als gerechnet wird.");
+}
+double schritt_skal() { return ulat_skal()*dx_skal(); }
 // Z2a: die Huelle 2,1 (Slot 210, u-Wickelschranke in setup.cpp klemm_lesen) haengt NICHT an diesen Makros, sondern am TYPE_E-Bereichswaechter.
 static_assert(RHO_CLAMP_MIN==0.5f&&RHO_CLAMP_MAX==1.5f, "Z2a: die hergeleiteten RHO_CLAMP-Grenzen muessen bitgleich 0,5f/1,5f sein (Kontrollarm).");
 // Der Zaehltakt ist ein SCHRITT-Schalter und skaliert deshalb mit. Ohne das laege die
 // Wirkpfad-Zaehlung bei geaendertem u_lat an einer anderen physikalischen Zeit als in der Vorgabe.
-ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEHL_TAKT", 100u))*ulat_skal()); static const ulong t = (ulong)(r<1ll ? 1ll : r); return t; }
+ulong zaehl_takt() { const long long r = llround((double)max(1u, env_u("CFD_ZAEHL_TAKT", 100u))*schritt_skal()); /* ★ 16.09.: u_lat x dx, EIN Faktor fuer jeden Schritt-Schalter */ static const ulong t = (ulong)(r<1ll ? 1ll : r); return t; }
 // ★ 15.09.2026 Klemmen S0b (KLEMMEN-STUFE0-PLAN.md): CFD_KLEMM_BILANZ = Messinstrument der beiden Zustandsklemmen (Vorgabe 1 = an,
 // 0 = aus -- nur fuer den Wanduhr-A/B). CFD_KLEMM_HAKEN = Negativ-/Positivtests, NUR Testarme (aendern die Physik):
 // 1 = RHO_CLAMP auf 1,001/1,002 (Treffer fast ueberall), 2 = def_c = 0,05 (u-Klemme fast ueberall), 3 = wie 1 und
