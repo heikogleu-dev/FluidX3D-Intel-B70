@@ -61,3 +61,23 @@ Danach 3,75 mm / 15 m, dann D3Q27, dann OpenFOAM-13-Abgleich.
   bedeutungslos (rc 0!). Konsequenz: jede Datei erst am Ende schreiben ODER danach je Datei einen Anker prüfen.
 - **Die Queue-Absturzsperre** fasst `CFD_FAC_APG_HAKEN` als Atomik-Haken; der dd-Beleg musste ohne Haken laufen.
 - Historische Absätze in TODO.md sind gefährlich: der „u_lat geparkt"-Absatz vom 12.09. hat 22 min GPU gekostet (`p4_pu` mit 0,075).
+
+
+## 5 · Nachtrag 20:00 — selbständige Performance-/VRAM-Runde (Heiko 17:35: „mache selbständig weiter")
+
+| Punkt | Ergebnis | Beleg |
+|---|---|---|
+| B70-Leiter | Nx%16 +2,9 % (mit Überlapp), keine Sättigung bis 397 Mio Zellen; Nahfeld konstruktiv nie ausrichtbar | `logs/lb_b70_skala.txt`, Protokoll 17:45 |
+| A2 auto-large-GRF | bitgleich, **+3,9 % langsamer** → verworfen; `CFD_OCL_OPTIONS` als Messarm | `logs/a2_grf.txt`, 17:50 |
+| E1 | `stream_collide` SIMD16/128 GRF, 79 d16-Nachrichten (halbe Cache-Zeile), 91 Byte-Lasten | 17:45 |
+| B1 | Facettenzellen 1,10 % der Zellen = 4,22 % der SIMD16-Blöcke (×3,84); die 0,67 % vom 26.08. waren ein Zellanteil | `werkzeuge/b1_divergenz.py`, 17:50 |
+| T_WARMUP | „15,6 min" nirgends hergeleitet; Entscheid a/b/c in TODO Punkt 1 | 18:1x |
+| **dx-Umrechnung (4a)** | gebaut, Prüfagent sauber (kein offenes HOCH), F1/F2/F4 bestanden, F3 läuft | PLAN-DX-UMRECHNUNG-2026-09-16.md, 18:00–19:55 |
+| `p375_b` | = p375_a-Befund (kein Fenster signifikant) — Vorbehalt vom 14:36 aufgelöst | 19:55 |
+
+**Kein neuer VRAM-/Performance-Hebel.** Offen: Prüfpunkt/Neustart (einziger zweistelliger Zeitposten), „X messen" (→ B2), D1/D2, C1, Remesh-Gatter, „u nur wo gelesen".
+**Läuft/steht an:** `p4_pu8_dx` (F3, bitgleich zu p4_pu8, bis ~20:05) → `p375_c` (3,75 mm + SGS-Band Lagen 2+3, Heiko 19:50, bis ~21:15).
+**Nach der Queue (kein `make` vorher):** Fix-Skript für vier Prüfagent-Texte/Guards anwenden (`scratchpad/fix_nach_queue.py`: Rundungsansage,
+`isfinite` in `dx_skal_setzen`, zwei Meldungen), bauen, Kugel-CPU-Runde, committen.
+**Regel neu:** Serienzeilen tragen auf ALLEN Sprossen die 4-mm-Schrittwerte (15000/5000/5000, ZAEHL_TAKT 200, SAMPLE_EVERY 50); alte 8-mm-Dateien
+mit 7500 nie mit `CFD_BASIS=aus` fahren; jede dd-Zeile braucht jetzt `CFD_FAR_LX` (Basis führt ihn); 3,75-mm-Läufe mit `CFD_QUEUE_HANG_S≥600`.
