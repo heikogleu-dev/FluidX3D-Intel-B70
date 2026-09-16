@@ -143,7 +143,7 @@ static void u_lat_zeitwaechter(const float u_lat, const float dt_f, const float 
 		// erledigt -- umgerechnet wird automatisch, und zwar VOR dieser Stelle. Die Meldung nennt
 		// jetzt nur noch die Tatsache: welche Zeit hinter dem gesetzten Wert steht.
 		print_warning("SCHRITT-SCHALTER IN ZEIT ("+string(nm)+" = "+string(v)+", "+string(wo)+"): der gesetzte Wert steht fuer "
-			+to_string((float)(schritte*dt/skal*1e3),2u)+" ms bei der Vorgabe-Gittergeschwindigkeit. Automatisch umgerechnet wirkt er zur"
+			+to_string((float)(schritte*dt*skal*1e3),2u)+" ms auf der Referenz (dx 4 mm, u_lat 0,075). Automatisch umgerechnet wirkt er zur" // ★ 16.09. B0.1: war /skal (416,67 statt 150,00 ms in p4_pu8.log:88)
 			" gleichen Zeit; env_schritte meldet oben den alten und den neuen Wert.");
 	}
 	// ★ Pruefbefund B4: der Waechter sieht nur GESETZTE Schalter. Ein ungesetzter faellt auf seinen
