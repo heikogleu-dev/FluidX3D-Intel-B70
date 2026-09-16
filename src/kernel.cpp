@@ -5509,9 +5509,13 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 
 )+"#ifdef FACETTEN_APG"+R(
 float apg_rho_zelle(const uxx nb, const global fpxx* fi, const ulong tt TS_P) { // ★ 16.09.2026 APG: rho EINER Zelle aus den DDFs, Muster rho_rek_ebene (load_f + calculate_rho_u, MIT RHO_CLAMP wie gespeichert). Private Arrays nur mit Konstantindizes (in neighbors/load_f/calculate_rho_u) -- scratch-frei wie dort.
+)+"#ifdef FACETTEN_APG_HAKEN3"+R(
+	return 1.0f+0.0009765625f*(float)coordinates(nb).x; // ★ TESTHAKEN 3 (16.09.): analytisches rho = 1 + x/1024 -- exakt darstellbar, Achsdifferenzen exakt 2^-10; Host prueft gx bitgenau
+)+"#else"+R(
 	uxx jj[def_velocity_set]; float fh[def_velocity_set]; float rr, ux_, uy_, uz_;
 	neighbors(nb, jj); load_f(nb, fh, fi, jj, tt TS_A); calculate_rho_u(fh, &rr, &ux_, &uy_, &uz_);
 	return rr;
+)+"#endif"+R( // FACETTEN_APG_HAKEN3
 }
 )+"#endif"+R( // FACETTEN_APG
 )+R(kernel void fac_nachbar_ab(const global velxx* u, const global uchar* flags, const global float* fac_geo,
@@ -5598,6 +5602,9 @@ kernel void fac_apg_ab(const global uchar* flags, const global uint* gd_zellen, 
 )+"#ifdef FACETTEN_APG_HAKEN"+R(
 	  gx = 1.0e-3f; gy = 0.0f; gz = 0.0f; // ★ TESTHAKEN CFD_FAC_APG_HAKEN=2: Konstantgradient -> Host prueft fac_nb bitgenau und den Durchstich bis dp/ds
 )+"#endif"+R( // FACETTEN_APG_HAKEN
+)+"#ifdef FACETTEN_APG_HAKEN3"+R(
+	  gz = kx; // ★ TESTHAKEN 3: Seitenkanal -- der Host prueft gx == 2^-10 exakt wo kx>0 (sonst 0) und gy == 0
+)+"#endif"+R( // FACETTEN_APG_HAKEN3
 	  fac_nb[def_nb_stride*(ulong)gid+2ul] = gx; fac_nb[def_nb_stride*(ulong)gid+3ul] = gy; fac_nb[def_nb_stride*(ulong)gid+4ul] = gz;
 	}
 } // fac_apg_ab()

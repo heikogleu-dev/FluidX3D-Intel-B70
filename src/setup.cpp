@@ -1377,13 +1377,15 @@ static void sat_shell_and_void_fill(LBM& lbm, Mesh* mesh, const uint Nx, const u
 // Bericht mitreissen (Lehre H1 vom 16.09.).
 bool apg_verletzt = false;
 static void berichte_apg(LBM& L, const char* wo) {
-	if(LBM_Domain::s_fac_apg==0.0f) return;
 	LBM_Domain* d = L.lbm_domain[0];
+	if(!d->apg_on) return; // ★ 16.09. HOCH-1 (Pruefagent): INSTANZZUSTAND, nicht die Statik -- fahrzeug_dd nullt s_fac_apg vor dem Fernfeldbau, die Statik ist am Fallende 0 und der Bericht fiele still aus
+	const ulong st = d->nb_stride;
+	if(st!=5ull) { print_warning(string("APG ")+wo+": nb_stride "+to_string(st)+" != 5 unter APG -- Stride-Einfrieren verletzt."); apg_verletzt = true; return; }
 	if(!d->nachbar_on||d->fac_N==0ull) { print_warning(string("APG ")+wo+": kein Facetten-/Nachbarpfad in dieser Domaene -- CFD_FAC_APG ist hier wirkungslos (Wirkpfad 0, kein Befund)."); return; }
 	d->finish_queue(); d->rho_clamp_hits.read_from_device();
 	ulong v[320]; for(uint k=0u; k<320u; k++) v[k] = (ulong)d->rho_clamp_hits[k];
 	const ulong soll308 = v[7]>=v[9] ? v[7]-v[9] : 0ull;
-	print_info(string("APG ")+wo+" (kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+", Vorkernel fac_nachbar_ab, grad rho aus 6 Achsnachbarn): Vorkernel-Besuche [306] "+to_string(v[306])+" (Soll [7] = "+to_string(v[7])+"), entartet [307] "+to_string(v[307])+", APG-Zweig besucht [308] "+to_string(v[308])+" (Soll [7]-[9] = "+to_string(soll308)+"), dp/ds > 0 (APG) [311] "+to_string(v[311])+" / < 0 (FPG) [312] "+to_string(v[312])+", Klemme unten [309] "+to_string(v[309])+" / oben [310] "+to_string(v[310])+" (Slot 19 beide "+to_string(v[19])+").");
+	print_info(string("APG ")+wo+" (kappa = "+to_string(d->apg_kappa,4u)+", Vorkernel fac_apg_ab, grad rho aus 6 Achsnachbarn): Vorkernel-Besuche [306] "+to_string(v[306])+" (Soll [7] = "+to_string(v[7])+"), entartet [307] "+to_string(v[307])+", APG-Zweig besucht [308] "+to_string(v[308])+" (Soll [7]-[9] = "+to_string(soll308)+"), dp/ds > 0 (APG) [311] "+to_string(v[311])+" / < 0 (FPG) [312] "+to_string(v[312])+", Klemme unten [309] "+to_string(v[309])+" / oben [310] "+to_string(v[310])+" (Slot 19 beide "+to_string(v[19])+").");
 	const ulong hs = v[313]+v[314]+v[315]+v[316];
 	if(hs>0ull) print_info(string("APG ")+wo+" Autoritaet |kappa*y_ab*dp/ds|/tw: <0,1 "+to_string(100.0*(double)v[313]/(double)hs,1u)+" % | 0,1-0,5 "+to_string(100.0*(double)v[314]/(double)hs,1u)+" % | 0,5-1 "+to_string(100.0*(double)v[315]/(double)hs,1u)+" % | >=1 "+to_string(100.0*(double)v[316]/(double)hs,1u)+" % (n = "+to_string(hs)+"; liegt die Korrektur ueberwiegend in der Klemme, ist kappa nicht deutbar -- Augustlehre).");
 	string verl;
@@ -1392,16 +1394,23 @@ static void berichte_apg(LBM& L, const char* wo) {
 	if(v[308]!=soll308) verl += " [308] "+to_string(v[308])+" != [7]-[9] "+to_string(soll308)+" (jeder Facettenbesuch mit u_t > 1e-6 muss den APG-Zweig durchlaufen);";
 	if(v[308]>0ull&&v[311]+v[312]==0ull) verl += " dp/ds war an jedem Besuch exakt 0 -- Gradient kommt nicht an (Stride/Emission?);";
 	if(v[309]+v[310]!=v[19]) verl += " [309]+[310] "+to_string(v[309]+v[310])+" != [19] "+to_string(v[19])+" (die getrennten Klemmzaehler muessen den alten Sammelzaehler ergeben);";
-	if(LBM_Domain::s_fac_apg_haken>0u) { // Haken 1: Statistik, Haken 2: Konstantgradient bitgenau
+	if(d->apg_haken>0u) { // Haken 1: Statistik, Haken 2: Konstantgradient bitgenau
 		d->fac_nb.read_from_device();
 		const ulong N = d->fac_N; ulong n0=0ull, nkonst=0ull; double sum=0.0, mx=0.0;
-		for(ulong f=0ull; f<N; f++) { const float gx=d->fac_nb[5ull*f+2ull], gy=d->fac_nb[5ull*f+3ull], gz=d->fac_nb[5ull*f+4ull];
+		for(ulong f=0ull; f<N; f++) { const float gx=d->fac_nb[st*f+2ull], gy=d->fac_nb[st*f+3ull], gz=d->fac_nb[st*f+4ull];
 			const double g=sqrt((double)gx*gx+(double)gy*gy+(double)gz*gz); sum+=g; if(g>mx) mx=g; if(g<1e-9) n0++;
 			if(gx==1.0e-3f&&gy==0.0f&&gz==0.0f) nkonst++; }
-		print_info(string("APG ")+wo+" HAKEN "+to_string(LBM_Domain::s_fac_apg_haken)+": |grad rho| ueber "+to_string(N)+" Facetten -- Mittel "+to_string((float)(N>0ull?sum/(double)N:0.0),9u)+", Maximum "+to_string((float)mx,9u)+", exakt 0: "+to_string(n0)+", Konstantgradient (1e-3,0,0): "+to_string(nkonst)+".");
-		if(LBM_Domain::s_fac_apg_haken==2u&&nkonst!=N) verl += " HAKEN 2: nur "+to_string(nkonst)+" von "+to_string(N)+" Facetten tragen den Konstantgradienten bitgenau;";
-		if(LBM_Domain::s_fac_apg_haken==2u&&v[308]>0ull&&v[311]+v[312]==0ull) verl += " HAKEN 2: Konstantgradient gesetzt, aber dp/ds an jedem Besuch 0 -- der Durchstich fac_nb -> dp/ds ist unterbrochen;";
-		if(LBM_Domain::s_fac_apg_haken==1u&&N>0ull&&n0==N) verl += " HAKEN 1: grad rho an ALLEN Facetten exakt 0 -- der Vorkernel schreibt nichts (Stride/Bindung?);";
+		print_info(string("APG ")+wo+" HAKEN "+to_string(d->apg_haken)+": |grad rho| ueber "+to_string(N)+" Facetten -- Mittel "+to_string((float)(N>0ull?sum/(double)N:0.0),9u)+", Maximum "+to_string((float)mx,9u)+", exakt 0: "+to_string(n0)+", Konstantgradient (1e-3,0,0): "+to_string(nkonst)+".");
+		if(d->apg_haken==2u&&nkonst!=N) verl += " HAKEN 2: nur "+to_string(nkonst)+" von "+to_string(N)+" Facetten tragen den Konstantgradienten bitgenau;";
+		if(d->apg_haken==2u&&v[308]>0ull&&v[311]+v[312]==0ull) verl += " HAKEN 2: Konstantgradient gesetzt, aber dp/ds an jedem Besuch 0 -- der Durchstich fac_nb -> dp/ds ist unterbrochen;";
+		if(d->apg_haken==3u) { // ★ 16.09. MITTEL-1 (Pruefagent): analytischer Gradiententest -- rho = 1 + x/1024 im Vorkernel, gz traegt kx
+			const float a = 0.0009765625f; ulong nok=0ull, nkx0=0ull;
+			for(ulong f=0ull; f<N; f++) { const float gx=d->fac_nb[st*f+2ull], gy=d->fac_nb[st*f+3ull], kx=d->fac_nb[st*f+4ull];
+				if(kx>0.0f) { if(gx==a&&gy==0.0f) nok++; } else { nkx0++; if(gx==0.0f&&gy==0.0f) nok++; } }
+			print_info(string("APG ")+wo+" HAKEN 3: "+to_string(nok)+" von "+to_string(N)+" Facetten exakt (gx == 2^-10 bei kx>0, sonst 0; gy == 0), "+to_string(nkx0)+" ohne x-Nachbarn.");
+			if(nok!=N) verl += " HAKEN 3: analytischer Gradient an "+to_string(N-nok)+" von "+to_string(N)+" Facetten NICHT exakt;";
+		}
+		if(d->apg_haken==1u&&N>0ull&&n0==N) verl += " HAKEN 1: grad rho an ALLEN Facetten exakt 0 -- der Vorkernel schreibt nichts (Stride/Bindung?);";
 	}
 	if(!verl.empty()) { print_warning(string("APG ")+wo+": ABNAHME VERLETZT --"+verl+" Abbruch am Fallende."); apg_verletzt = true; }
 }
@@ -4383,7 +4392,8 @@ void main_setup_kanal() {
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
-	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
+	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv (16.09.): tw-Ziel = Spalding - kappa*y_ab*dp/ds, dp/ds = (grad rho . t1)/3 aus dem Vorkernel fac_apg_ab (6 Achsnachbarn aus den DDFs), kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Zaehler [306..316], Klemmen getrennt [309]/[310] (Slot 19 = Summe).");
+	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_FAC_APG_HAKEN", 0u)>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin; Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld durchlaeuft).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
 	  if(LBM_Domain::s_fac_ema>0.0f&&LBM_Domain::s_fac_pema>0.0f) print_warning("CFD_FAC_EMA und CFD_FAC_PEMA GLEICHZEITIG: zwei kompoundierende Lags -- als Messarm wertlos (IR3-Audit).");
@@ -5569,7 +5579,8 @@ void main_setup_kugel() {
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
-	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
+	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv (16.09.): tw-Ziel = Spalding - kappa*y_ab*dp/ds, dp/ds = (grad rho . t1)/3 aus dem Vorkernel fac_apg_ab (6 Achsnachbarn aus den DDFs), kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Zaehler [306..316], Klemmen getrennt [309]/[310] (Slot 19 = Summe).");
+	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_FAC_APG_HAKEN", 0u)>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin; Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld durchlaeuft).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
 	  LBM_Domain::s_fac_tau = (fc==2u||fc==4u) ? 0.0f : 1.0f;
@@ -6795,7 +6806,8 @@ static void main_setup_fahrzeug_dd() {
 	  if(LBM_Domain::s_fac_alpha>2u) print_error("CFD_FAC_ALPHA kennt nur 0..2 (1 = Massenkorrektur, 2 = + Momenten-Downdate). Die Stufe 3 (A2-Rueckfall) wurde am 2026-08-25 als beweisbar wirkungslos zurueckgenommen -- q_i ist fuer Einzellink-Facetten unter alpha identisch null.");
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
-	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv: tw-Ziel um kappa*y_w*dp/ds korrigiert, kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Slot 19 zaehlt beide Klemmen (0 / 2*tw).");
+	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv (16.09.): tw-Ziel = Spalding - kappa*y_ab*dp/ds, dp/ds = (grad rho . t1)/3 aus dem Vorkernel fac_apg_ab (6 Achsnachbarn aus den DDFs), kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Zaehler [306..316], Klemmen getrennt [309]/[310] (Slot 19 = Summe).");
+	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_FAC_APG_HAKEN", 0u)>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin; Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld durchlaeuft).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc==3u&&(LBM_Domain::s_fac_alpha<2u||!LBM_Domain::s_fac_satgate)) print_warning("Arm 3 ohne SATGATE+ALPHA2 an gekruemmter Geometrie -- Kugel-J4-Lehre: nur als bewusster Messarm fahren.");
 	  if(env_u("CFD_FERN_FACETTEN",0u)==3u&&(env_u("CFD_FAC_ALPHA",0u)<2u||env_u("CFD_FAC_SATGATE",0u)==0u)) print_warning("FERN_FACETTEN Arm 3 ohne SATGATE+ALPHA2 -- Kugel-J4-Lehre gilt am Treppenkoerper erst recht (P8-N2).");
