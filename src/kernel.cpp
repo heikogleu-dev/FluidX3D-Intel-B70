@@ -2921,7 +2921,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 }
 )+R(void klemm_summe(global uint* hits, const uint slot, const float a) { // Festkomma-Summand q = round(a*S) mit a >= 0; wickelt ABSICHTLICH mod 2^32 (Host bildet Fensterdifferenzen)
 	float b = a;
-	if(!(b<=16.0f)) { b = 16.0f; if(hits[265]<0xF0000000u) atomic_inc(&hits[265]); } // Kappung, Soll 0 -- sonst sind die Summen Untergrenzen. ★ Audit 16.09.2026 (Befund A-N6): NEGIERTER Vergleich, damit NaN in die Kappung faellt -- "b>16" ist fuer NaN falsch, und convert_uint_sat(NaN) liefert 0: der Summand waere still verschwunden, waehrend klemm_dekade(NaN) in Eimer 5 zaehlt.
+	if(b>16.0f||(as_uint(b)&0x7F800000u)==0x7F800000u) { b = 16.0f; if(hits[265]<0xF0000000u) atomic_inc(&hits[265]); } // Kappung, Soll 0 -- sonst sind die Summen Untergrenzen. ★ Audit 16.09.2026 (A-N6), nachgebessert nach Pruefbefund H4: EXPONENT-BITTEST statt negiertem Vergleich -- unter -cl-finite-math-only (opencl.hpp) darf der Uebersetzer "!(b<=16)" wieder zu "b>16" falten und NaN erneut durchlassen; derselbe Bittest steht im Lift. Fuer endliche Werte unveraendert. "b>16" ist fuer NaN falsch, und convert_uint_sat(NaN) liefert 0: der Summand waere still verschwunden, waehrend klemm_dekade(NaN) in Eimer 5 zaehlt.
 	atomic_add((volatile global uint*)&hits[slot], convert_uint_sat(fma(b, def_klemm_s, 0.5f)));
 }
 )+R(float klemm_rho_roh(const float* f) { // rho VOR der Dichteklemme, Summenreihenfolge wie calculate_rho_u
@@ -2945,7 +2945,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 }
 )+R(void pos_summe(global uint* hits, const uint slot, const float a) { // ★ P1c: Festkomma-Summand wie klemm_summe, eigene Kappung Slot 294 (Stufe 0 behaelt 265)
 	float b = a;
-	if(!(b<=16.0f)) { b = 16.0f; if(hits[294]<0xF0000000u) atomic_inc(&hits[294]); } // ★ Audit 16.09.2026 (A-N6): NaN faellt in die Kappung, siehe klemm_summe
+	if(b>16.0f||(as_uint(b)&0x7F800000u)==0x7F800000u) { b = 16.0f; if(hits[294]<0xF0000000u) atomic_inc(&hits[294]); } // ★ Audit 16.09.2026 (A-N6, H4): NaN/Inf ueber den Exponent-Bittest, siehe klemm_summe
 	atomic_add((volatile global uint*)&hits[slot], convert_uint_sat(fma(b, def_klemm_s, 0.5f)));
 }
 )+"#endif"+R( // POSITIV
@@ -3124,6 +3124,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		//   Es ist ein BESUCHSZAEHLER, kein Ist=Soll -- verglichen wird er auf dem Host mit nichts.
 		if(((as_uint(rhon)&0x7F800000u)==0x7F800000u||rhon<=def_w210_lo||rhon>=def_w210_hi)&&rho_clamp_hits[210]<0xF0000000u) atomic_inc(&rho_clamp_hits[210]); // Soll 0 -- Huelle seit Z2e/Z2f emittiert (Vorgabe 0,4/2,1; TOR_HUELLE: Bildhuelle +- 16/32768; RHO_HUELLE: (0; 3))
 		if(t==(ulong)def_zaehl_takt+2ul&&rho_clamp_hits[211]<0xF0000000u) atomic_inc(&rho_clamp_hits[211]); // Besuche
+)+"#ifdef KLEMM_BILANZ"+R(
+		// ★ Audit-Nachpruefung 16.09.2026, Befund M3: CFD_TOR_HUELLE verengt ZWEI Dinge -- das Lift-Tor (gespiegelt in [301]/[302])
+		// UND diese Waechterhuelle. Ohne Spiegel war die zweite Haelfte des Schalters weiter nur durch eine Null belegt.
+		// Ein Schritt je Zaehltakt, gleiche Gatterung wie der Besuchszaehler [211]; kein atomic, alle Threads schreiben denselben Wert.
+		if(t==(ulong)def_zaehl_takt+2ul) { rho_clamp_hits[304] = (uint)fma(def_w210_lo, def_klemm_s, 0.5f); rho_clamp_hits[305] = (uint)fma(def_w210_hi, def_klemm_s, 0.5f); }
+)+"#endif"+R( // KLEMM_BILANZ
 		uxn  = load_u(u, n);
 		uyn  = load_u(u, def_N+(ulong)n);
 		uzn  = load_u(u, 2ul*def_N+(ulong)n);
@@ -4336,7 +4342,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(rho_local<=RHO_CLAMP_MIN||rho_local>=RHO_CLAMP_MAX) { // ★ 15.09.2026 Klemmen S0d (KLEMMEN-STUFE0-PLAN.md §1 Punkt 2): Faktor 1, weil f hier durch f_eq(rho_c) ERSETZT wird
 		const float dq_ = fabs(rho_local-klemm_rho_roh(fhn));
 		if(diag[266]<0xF0000000u) atomic_inc(&diag[266]);
-		if(!(dq_<=2.0f)&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0 -- ★ Audit 16.09.2026 (A-N6): negiert, damit NaN gezaehlt wird
+		if((dq_>2.0f||(as_uint(dq_)&0x7F800000u)==0x7F800000u)&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0 -- ★ Audit 16.09.2026 (A-N6, H4): Exponent-Bittest, damit NaN/Inf gezaehlt wird
 		atomic_add(&diag[rho_local<=RHO_CLAMP_MIN ? 267u : 268u], convert_uint_sat(fma(fmin(dq_, 2.0f), def_klemm_s, 0.5f)));
 	}
 )+"#endif"+R( // KLEMM_BILANZ
@@ -4375,7 +4381,7 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 	if(rho_local<=RHO_CLAMP_MIN||rho_local>=RHO_CLAMP_MAX) { // ★ 15.09.2026 Klemmen S0d (KLEMMEN-STUFE0-PLAN.md §1 Punkt 2): Faktor 1, weil f hier durch f_eq(rho_c) ERSETZT wird
 		const float dq_ = fabs(rho_local-klemm_rho_roh(fhn));
 		if(diag[266]<0xF0000000u) atomic_inc(&diag[266]);
-		if(!(dq_<=2.0f)&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0 -- ★ Audit 16.09.2026 (A-N6): negiert, damit NaN gezaehlt wird
+		if((dq_>2.0f||(as_uint(dq_)&0x7F800000u)==0x7F800000u)&&diag[265]<0xF0000000u) atomic_inc(&diag[265]); // Kappung 2 (Host-Wickelschranke), Soll 0 -- ★ Audit 16.09.2026 (A-N6, H4): Exponent-Bittest, damit NaN/Inf gezaehlt wird
 		atomic_add(&diag[rho_local<=RHO_CLAMP_MIN ? 267u : 268u], convert_uint_sat(fma(fmin(dq_, 2.0f), def_klemm_s, 0.5f)));
 	}
 )+"#endif"+R( // KLEMM_BILANZ

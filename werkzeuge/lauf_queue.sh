@@ -52,12 +52,18 @@ while IFS= read -r zeile; do
 	# Leerzeichen, ein TAB zwischen zwei Zuweisungen haette sie umgangen. Jetzt: optionales '+' und fuehrende Nullen, [[:space:]] als Anker.
 	# Zusaetzlich die GEERBTE Umgebung pruefen: 'env $env_teil' erbt exportierte Variablen, ein 'export CFD_KLEMM_HAKEN=1' in der Startschale
 	# war fuer die Queue unsichtbar. Die Code-Sperre in lbm.cpp faengt den gefaehrlichen Rest weiterhin vor dem Geraetebau ab.
+	# ★ Nachpruefung 16.09.2026 (Befund M4): die geerbte Umgebung zaehlt NUR, wenn die Zeile die Variable nicht selbst setzt --
+	# "env CFD_KLEMM_HAKEN=0 ..." ueberschreibt den geerbten Wert, der Lauf ist dann harmlos und darf nicht verweigert werden.
 	geerbt_haken=0
-	[ -n "${CFD_KLEMM_HAKEN:-}" ] && [ "${CFD_KLEMM_HAKEN:-0}" != "0" ] && geerbt_haken=1
-	[ -n "${CFD_POSITIV_HAKEN:-}" ] && [ "${CFD_POSITIV_HAKEN:-0}" != "0" ] && geerbt_haken=1
+	if ! echo " $env_teil " | grep -q '[[:space:]]CFD_KLEMM_HAKEN='; then
+		[ -n "${CFD_KLEMM_HAKEN:-}" ] && [ "${CFD_KLEMM_HAKEN:-0}" != "0" ] && geerbt_haken=1
+	fi
+	if ! echo " $env_teil " | grep -q '[[:space:]]CFD_POSITIV_HAKEN='; then
+		[ -n "${CFD_POSITIV_HAKEN:-}" ] && [ "${CFD_POSITIV_HAKEN:-0}" != "0" ] && geerbt_haken=1
+	fi
 	if { echo " $env_teil " | grep -Eq '[[:space:]]CFD_(KLEMM|POSITIV)_HAKEN=\+?0*[1-9]' || [ "$geerbt_haken" = "1" ]; } && ! echo " $env_teil " | grep -q ' CFD_CASE=kugel ' \
 	   && ! { echo " $env_teil " | grep -q ' CFD_DEV_FINE=0 ' && echo " $env_teil " | grep -q ' CFD_DEV_COARSE=0 '; }; then
-		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.)" | tee -a "$Q"
+		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.; Ausloeser: $( [ \"$geerbt_haken\" = 1 ] && echo GEERBTE UMGEBUNG || echo Zeilenmuster ))" | tee -a "$Q"
 		continue
 	fi
 	if [ "${CFD_QUEUE_DEV:-2}" = "1" ] && command -v journalctl >/dev/null 2>&1; then
