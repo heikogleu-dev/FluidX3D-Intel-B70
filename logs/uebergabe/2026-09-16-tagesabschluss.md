@@ -81,3 +81,16 @@ Danach 3,75 mm / 15 m, dann D3Q27, dann OpenFOAM-13-Abgleich.
 `isfinite` in `dx_skal_setzen`, zwei Meldungen), bauen, Kugel-CPU-Runde, committen.
 **Regel neu:** Serienzeilen tragen auf ALLEN Sprossen die 4-mm-Schrittwerte (15000/5000/5000, ZAEHL_TAKT 200, SAMPLE_EVERY 50); alte 8-mm-Dateien
 mit 7500 nie mit `CFD_BASIS=aus` fahren; jede dd-Zeile braucht jetzt `CFD_FAR_LX` (Basis führt ihn); 3,75-mm-Läufe mit `CFD_QUEUE_HANG_S≥600`.
+
+
+## 6 · Nachtrag 20:40 — dx-Umrechnung abgenommen, y-Halbzellen-Versatz gebaut, 3,75-mm-Läufe mit Versatz laufen
+
+- **TODO 4a ERLEDIGT:** alle vier Abnahmen bestanden (Kugel-Hashes, 8 mm bitgleich, `p4_pu8_dx` bitgleich zu p4_pu8, `p375_b` SISM 150,0 ms und Kräfte = p375_a).
+  Prüfagent-Reste gebaut (67266b1, Kugel ka5 4/4). Regel: Serienzeilen tragen auf ALLEN Sprossen die 4-mm-Schrittwerte; jede dd-Zeile braucht `CFD_FAR_LX`.
+- **TODO 4c (neu, Heiko 20:27):** Mittelebenen-Membran gemessen (p375_b 82,2 %, 8 mm 73,3 %), `CFD_Y_VERSATZ=1` gebaut (91843b7), Probe: Membran weg (0,8 %).
+  `p375_c` (Band ohne Versatz) auf Heikos Anweisung abgebrochen und als `p375_c_ABGEBROCHEN_ohne_versatz` aufgehoben.
+- **Läuft (B70, ab 20:34, `logs/p375_dv.txt`):** `p375_d` = p375_b + Versatz (Kraft-A/B gegen p375_b: eine Variable Geometrie +1,875 mm), danach
+  `p375_e` = Band Lagen 2+3 + Versatz + `CFD_U_SPARSAM=0` (Codesperre Band×U_SPARSAM; deklariert) → Bandwirkung gegen p375_d. Ende ~22:45.
+- **Auswertung morgen früh:** `fenster_50ms.py p375_b p375_d` und `p375_d p375_e` (cd_rest/cz_rest je 50 ms), `membran_y0.py p375_d`, Laufzeit/VRAM
+  (`export/p375_dv_vram.csv`), Prüfagent-Bericht zum Versatz (lief 20:32 parallel; bei HOCH: Läufe bewerten, ggf. wiederholen).
+- **Entscheide für Heiko:** Versatz in die Basis (Standard)? T_WARMUP a/b/c? Danach Performance-Restliste (X messen → B2, D1/D2, C1, Prüfpunkt-Plan).
