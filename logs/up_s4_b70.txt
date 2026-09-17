@@ -1,0 +1,2 @@
+# 17.09.2026 Upstream S4 B70: 16 mm 20 ms (CAT-Pruefung der Queue aktiv mit CFD_QUEUE_DEV=1), Werte ~ CPU-Lauf up16_s1_cpu.
+CFD_BIN=upstream CFD_DX=16 CFD_T_END=0.02 CFD_T_WARMUP=0 CFD_VTK_ZEITEN=0.02 CFD_SLICE_DT=0.01 :: up16_s4_b70
