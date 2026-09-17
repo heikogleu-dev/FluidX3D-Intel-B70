@@ -3,6 +3,27 @@
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
 # --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---
+# NACHGEZOGEN (basis_aus_lauf.py --nachziehen, 2026-09-17, Grund: Heiko 17.09.2026, Skalierungsaudit (SKALIERUNG-BEFUNDE-2026-09-17.md): Punkt 1 Kontaktband-Oberkante nach Regel, Punkt 4 BODEN_EQ-Familie als bewusst gitterfeste Lagen, Punkt 12 Produktionsschalter in die Basis (Werte aus export/p375_b/code/LAUF.txt), Punkt 6 Schritte je Zelle 8 basisgeprueft): Einheiten CFD_BODEN_EQ modus->lagen; CFD_BODEN_EQ_DOWN modus->lagen; CFD_FERN_BODEN_EQ modus->lagen; CFD_FERN_BODEN_EQ_DOWN modus->lagen; CFD_FERN_EINLASS_EQ modus->lagen; CFD_KRAFT_ZBAND zellen_fein->band_oberkante_mm (Wert 4 Zellen -> Sollhoehe 16 mm; Regel bei dx_ref 4 mm: N = 4, Oberkante 14.000 mm); ergaenzt CFD_PTRT 1.90, CFD_FAC_DETEPS 16, CFD_POSITIV 2, CFD_U_KLEMME 1, CFD_ZAEHL_TAKT 1000, CFD_SCHRITTE_PRO_ZELLE 8.
+# STANDARD GEAENDERT (Heiko 17.09.2026, Skalierungsaudit SKALIERUNG-BEFUNDE-2026-09-17.md):
+#   PUNKT 1, CFD_KRAFT_ZBAND 16 band_oberkante_mm: das Band zaehlt z < N, z = 0 ist Fahrbahn -> wirksam z = 1..N-1,
+#     wirksame Oberkante (N-1/2)*dx ueber Welt-z = 0 (Welt-z-Konvention bleibt, OF13). Der WERT ist jetzt die Sollhoehe
+#     16 mm, nicht mehr die Zellzahl bei dx_ref. Soll-N: (N-1/2)*dx am naechsten an 16 mm, Gleichstand -> niedriger, N >= 3
+#     -> 4 mm N = 4 (14 mm), 8 mm N = 3 (20 mm; alt 2), 3,75 mm N = 5 (16,875 mm; die alte llround-Umrechnung gab 4 = 13,125 mm),
+#     16 mm N = 3 (40 mm). Gegenstueck im Code: KRAFT_ZBAND_SOLL_MM (setup.cpp) -- der Waechter bricht ab, wenn beide abweichen.
+#     MINIMUM 3 (Heiko 17.09. ~12:00, Punkt 6 Option 1 "nur Auswertung"): die Bandkraft sitzt in den Keilzellen z = 1 vor/hinter
+#     dem Latsch unter dem Reifenueberhang, deren Links auch auf die Ueberhang-Unterseite z = 2 (Deckellage) gehen -- das Band
+#     MUSS die Deckellage enthalten. Alle Laeufe mit N < 3 (8 mm mit ZBAND 2) tragen sie im Rest: BAND-ARTEFAKT-8MM.md.
+#     Bis 17.09. nannten Log und kraft_zband.csv N*dx (16 / 16 / 15 / 16 mm); das waren nie die wirksamen Kanten.
+#   PUNKT 4, Einheit 'lagen' fuer CFD_BODEN_EQ, _DOWN, CFD_FERN_BODEN_EQ, _DOWN, CFD_FERN_EINLASS_EQ: roh in Zellen
+#     (kernel.cpp:4318-4319, setup.cpp:6909/6959) und SO GEWOLLT -- Wert bleibt auf jeder Sprosse. Vorher 'modus' mit
+#     gleicher Wirkung im Waechter; die Einheit haelt die Absicht fest. CFD_BODEN_EQ_ABSTAND bleibt seit 16.09. eine Laenge.
+#   PUNKT 12, Produktionsschalter aufgenommen (Werte aus export/p375_b/code/LAUF.txt, gleich in p4_pu8/p4_apg1/p375_*):
+#     CFD_PTRT 1.90, CFD_FAC_DETEPS 16, CFD_POSITIV 2, CFD_U_KLEMME 1 (modus); CFD_ZAEHL_TAKT 1000 (schritte_fein --
+#     zaehl_takt() rechnet mit u_lat x dx um). Sie liefen in jeder Produktionszeile, der Waechter meldete sie nur als ZUSAETZLICH.
+#   PUNKT 6, CFD_SCHRITTE_PRO_ZELLE 8 (modus): die Bandkraft skaliert ~ 1/u_lat^2 (Audit-Messbefund mit Confound Code-Stand; 8 mm u_lat 0,075: Fx_band 830 N gegen
+#     297 N bei 8 Schritten je Zelle). Ein Lauf mit anderem u_lat startet jetzt nur noch deklariert; CFD_U_LAT statt
+#     SCHRITTE_PRO_ZELLE heisst CFD_BASIS_ABWEICHUNG=CFD_SCHRITTE_PRO_ZELLE=- (die schritte_fein-Werte bleiben auf u_lat 0,075 definiert).
+#   NICHT aufgenommen, obwohl in allen Produktionszeilen: CFD_FAC_PINV 1, CFD_SGS_BAND 0, CFD_RHO_SPARSAM 1, CFD_U_SPARSAM 1 -- offen.
 # NACHGEZOGEN (basis_aus_lauf.py --nachziehen, 2026-09-16, Grund: Heiko 16.09.2026 21:55: Y-Halbzellen-Versatz wird Standard (Mittelebenen-Blech 82 % bei 3,75 mm, 73 % bei 8 mm; 4 mm zufaellig frei)): Einheiten unveraendert; ergaenzt CFD_Y_VERSATZ 1.
 # NACHGEZOGEN (basis_aus_lauf.py --nachziehen, 2026-09-16, Heiko-Entscheid 16.09. 14:58: Abstaende/Masse bleiben physikalisch fest, Zeiten folgen der Aufloesung): Einheiten CFD_BODEN_EQ_ABSTAND modus->zellen_fein; CFD_N2F_BAND_N zellen_grob->zellen_grob_laenge; CFD_N2F_BAND_PLATEAU modus->zellen_grob_laenge; CFD_N2F_BAND_WANDFREI modus->zellen_grob_laenge; ergaenzt CFD_SGS_SISM_AB 15000, CFD_SGS_SISM_T 5000, CFD_SGS_SISM 1, CFD_FAR_LX 12.2720, CFD_PERF_AB 0.1. schritte_fein heisst ab jetzt WERT BLEIBT (env_schritte rechnet im Lauf um, Waechter prueft den Rohwert) -- die Absaetze vom 12.09. und 07.09. ('2500 bei 8 mm') sind damit ueberholt.
 # EINHEIT GEAENDERT (12.09.2026, Pruefbefund B5 zum u_lat-Schalter): CFD_SLICE_NEAR_STEPS stand als
@@ -92,9 +113,9 @@
 #     drift-frei: 5000 feine Schritte = 50,0 ms bei 4 mm (dt_f = 1e-5 s), skaliert wie zellen_fein mit
 #     dx_ref/dx -> 2500 bei 8 mm (dt_f = 2e-5 s). Einheit zellen_fein bewusst, weil dt_f proportional dx.
 #     Der Diff-Schnitt ist im Kadenz-Modus per Default AUS (Heiko 26.08.), CFD_DIFF_SCHNITT=1 reaktiviert ihn.
-CFD_BODEN_EQ 2 modus
+CFD_BODEN_EQ 2 lagen
 CFD_BODEN_EQ_ABSTAND 2 zellen_fein
-CFD_BODEN_EQ_DOWN 1 modus
+CFD_BODEN_EQ_DOWN 1 lagen
 CFD_CASE fahrzeug_dd modus
 CFD_DX 4 phys
 CFD_FACETTEN 3 modus
@@ -103,17 +124,18 @@ CFD_FACETTEN_NORMQUELLE 1 modus
 CFD_FACETTEN_YWKLEMME 1 modus
 CFD_FAC_ALPHA 2 modus
 CFD_FAC_CD_EVERY 1 ausgabe
+CFD_FAC_DETEPS 16 modus
 CFD_FAC_ELIBB 1 modus
 CFD_FAC_NACHBAR 1 modus
 CFD_FAC_SATGATE 1 modus
 CFD_FAC_UTKORR 1.5 modus
 CFD_FAR_LX 12.2720 phys
-CFD_FERN_BODEN_EQ 2 modus
-CFD_FERN_BODEN_EQ_DOWN 1 modus
-CFD_FERN_EINLASS_EQ 2 modus
+CFD_FERN_BODEN_EQ 2 lagen
+CFD_FERN_BODEN_EQ_DOWN 1 lagen
+CFD_FERN_EINLASS_EQ 2 lagen
 CFD_F_LISTE 1 modus
 CFD_KOPPLUNG_GLATT 1 modus
-CFD_KRAFT_ZBAND 4 zellen_fein
+CFD_KRAFT_ZBAND 16 band_oberkante_mm
 CFD_N2F_BAND 1 modus
 CFD_N2F_BAND_N 8 zellen_grob_laenge
 CFD_N2F_BAND_PLATEAU 2 zellen_grob_laenge
@@ -127,6 +149,9 @@ CFD_NEAR_LY 2.6400 phys
 CFD_NEAR_LZ 1.8560 phys
 CFD_NEAR_VOR_MM 96 phys
 CFD_PERF_AB 0.1 phys
+CFD_POSITIV 2 modus
+CFD_PTRT 1.90 modus
+CFD_SCHRITTE_PRO_ZELLE 8 modus
 CFD_SGS_FDWAND 1 modus
 CFD_SGS_SISM 1 modus
 CFD_SGS_SISM_AB 15000 schritte_fein
@@ -135,6 +160,8 @@ CFD_SLICE_NEAR_STEPS 5000 schritte_fein
 CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.501 phys
 CFD_T_WARMUP 0.201 phys
+CFD_U_KLEMME 1 modus
 CFD_VTK_DT 0.15 ausgabe
 CFD_VTK_ENDE 1 ausgabe
 CFD_Y_VERSATZ 1 modus
+CFD_ZAEHL_TAKT 1000 schritte_fein

@@ -34,6 +34,38 @@ extern char** environ;
 #define U_LAT_VORGABE 0.075f // ★ Pruefbefund B8: die Zahl stand dreimal im Block -- der Zweck der
                              // Aenderung war, Kopien zu beseitigen. EINE Stelle, beide Helfer lesen sie.
 
+// ★ 17.09.2026 (Heiko, SKALIERUNG-BEFUNDE-2026-09-17.md Punkt 1): KONTAKTBAND-OBERKANTE AUS DER PHYSIKALISCHEN SOLLHOEHE.
+// CFD_KRAFT_ZBAND = N zaehlt die Zellen z < N. Zeile z = 0 ist Fahrbahn (handover_contact nimmt dort TYPE_X weg), wirksam
+// sind also z = 1..N-1. Welt-z-Konvention (BLEIBT, gewaehlt fuer die OF13-Vergleichbarkeit): Fahrbahnknoten z = 0 bei
+// Welt-z = 0, Zellmitte z bei z*dx, Halfway-Wand bei +dx/2 -- die Oberkante der Zelle N-1 liegt damit bei (N-1/2)*dx.
+// Log und CSV-Kopf nannten bis zum 17.09. N*dx, eine halbe Zelle zu hoch, und die Serienzeilen rechneten N mit
+// llround(16/dx) um (3,75 mm: N = 4 = 13,125 mm statt der naeheren 16,875 mm).
+// REGEL: N so, dass (N-1/2)*dx am naechsten an der Sollhoehe liegt; Gleichstand -> die NIEDRIGERE Kante; N >= KRAFT_ZBAND_N_MIN = 3,
+// also N = max(3, ceil(16/dx)). Ergebnis: 4 mm N = 4 (14 mm), 8 mm N = 3 (20 mm), 3,75 mm N = 5 (16,875 mm), 16 mm N = 3 (40 mm).
+// ★ MINIMUM 3 = MINDESTENS KEIL- UND DECKELLAGE (Heiko 17.09.2026, Punkt 6 Option 1 "nur Auswertung", BAND-ARTEFAKT-8MM.md): die
+// Bandkraft sitzt in den Keilzellen z = 1 vor/hinter dem Latsch unter dem Reifenueberhang; deren Links gehen auch auf die
+// Ueberhang-Unterseite z = 2 (Deckellage). Bei N = 2 (8 mm bisher) landete die Deckellage im REST -- cd/cz_rest verschmutzt.
+// Die erste Fassung dieses Tages hatte N >= 2 ("mindestens eine wirksame Zelle") und damit bei 8 mm N = 2 (12 mm).
+// Wortgleich in werkzeuge/basis_zeile.py (basis_aus_lauf.py importiert sie; Einheit band_oberkante_mm);
+// der Basis-Waechter prueft, dass basis/fahrzeug_dd.basis dieselbe Sollhoehe traegt wie diese Konstante.
+// Reine Host-Beschriftung und Waechter-Sollwert -- Kernel und Band-Praedikat [0,N) bleiben unveraendert.
+// Gilt NUR im dd-Fall: die Kugel schwebt (kein Latsch, kein Keil, kein Deckel), dort bleibt N frei (Negativ-Kontrolle).
+#define KRAFT_ZBAND_SOLL_MM 16.0
+#define KRAFT_ZBAND_N_MIN 3u // Keillage z = 1 + Deckellage z = 2 (z = 0 ist Fahrbahn)
+static uint kraft_zband_regel(const double soll_mm, const double dx_mm) {
+	if(!(soll_mm>0.0)||!(dx_mm>0.0)) print_error("kraft_zband_regel: Sollhoehe "+to_string(soll_mm,3u)+" mm und dx "+to_string(dx_mm,3u)+" mm muessen positiv sein.");
+	const uint n_max = KRAFT_ZBAND_N_MIN+1u+(uint)ceil(soll_mm/dx_mm);
+	uint n_best = KRAFT_ZBAND_N_MIN; double d_best = fabs(((double)KRAFT_ZBAND_N_MIN-0.5)*dx_mm-soll_mm);
+	for(uint n=KRAFT_ZBAND_N_MIN+1u; n<=n_max; n++) {
+		const double d = fabs(((double)n-0.5)*dx_mm-soll_mm);
+		// 1e-4 mm Gleichstandstoleranz gegen float-dx (0.004f*1000 = 4,0000002); echter Gleichstand behaelt die NIEDRIGERE Kante
+		if(d<d_best-1e-4) { n_best = n; d_best = d; }
+	}
+	return n_best;
+}
+static double kraft_zband_oberkante_mm(const uint n, const double dx_mm) { return ((double)n-0.5)*dx_mm; }
+static string kraft_zband_soll_text() { return fabs(KRAFT_ZBAND_SOLL_MM-(double)llround(KRAFT_ZBAND_SOLL_MM))<1e-9 ? to_string((ulong)llround(KRAFT_ZBAND_SOLL_MM)) : to_string((double)KRAFT_ZBAND_SOLL_MM,3u); }
+
 // ★ 12.09.2026 (Heiko): DER SCHALTER HEISST JETZT "SCHRITTE JE ZELLE".
 // CFD_SCHRITTE_PRO_ZELLE = N setzt u_lat = 1/N: so viele Zeitschritte braucht die Anstroemung, um
 // eine Zelle zu durchqueren. N = 8 ist u_lat = 0,125, die Vorgabe 0,075 sind 13,333 Schritte.
@@ -5749,7 +5781,20 @@ void main_setup_kugel() {
 	const uint zb = env_u("CFD_KRAFT_ZBAND", 0u);
 	double zb_fx_band=0.0, zb_fz_band=0.0, zb_fx_rest=0.0, zb_fz_rest=0.0, zb_selftest_max=0.0; ulong zb_nn=0ull;
 	if(zb>0u&&zb>=Nz) print_error("CFD_KRAFT_ZBAND ("+to_string(zb)+") >= Nz ("+to_string(Nz)+") -- das Band muss unter der Domaenendecke bleiben.");
-	if(zb>0u) print_info("KRAFT-ZBAND aktiv (Kugel, Negativ-Kontrolle): unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx*1000.0f,2u)+" mm (dx = "+to_string(dx*1000.0f,2u)+" mm). GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar.");
+	if(zb>0u) { // ★ 17.09.2026 (Skalierungsaudit Punkt 1): wirksame Kante statt N*dx. Die Kugel hat KEINE Sollhoehe (Negativ-Kontrolle) -- die Regel kraft_zband_regel gilt nur im dd-Fall.
+		// ★ Auch das Minimum KRAFT_ZBAND_N_MIN = 3 (Keil- UND Deckellage, Heiko 17.09. Option 1) gilt hier NICHT: die Kugel schwebt, es gibt keinen
+		// Latsch, keinen Keil unter einem Ueberhang und keine Deckellage. Das Band soll ~0 liefern; N bleibt frei, gewarnt wird nur beim leeren Band.
+		// Hoehe ueber dem Bodenknoten z = 0 (Kugelmitte bei Dz_center*dx, dieselbe Knotenkonvention wie im dd-Fall). Mit Kanalwaenden ist z = 0
+		// Wand (TYPE_S) -> wirksam z = 1..N-1; mit CFD_KUGEL_FREE=1 ist z = 0 Freistromrand (TYPE_E) und zaehlt mit -> wirksam z = 0..N-1.
+		// Die Oberkante (N-1/2)*dx gilt in beiden Faellen.
+		const double dx_mm_k = (double)dx*1000.0, kante_k = kraft_zband_oberkante_mm(zb, dx_mm_k);
+		const double kugel_unten_mm = (double)Dz_center*dx_mm_k-500.0*(double)D;
+		print_info("KRAFT-ZBAND-KANTE (Kugel): N = "+to_string(zb)+" Zellen ("+(free_stream ? "z = 0.."+to_string(zb-1u)+" wirksam, z = 0 Freistromrand" : "z = 1.."+to_string(zb-1u)+" wirksam, z = 0 Kanalboden")
+			+"), wirksame Oberkante "+to_string(kante_k,3u)+" mm ueber dem Bodenknoten z = 0 (keine Sollhoehe, Negativ-Kontrolle; Kugelunterkante "+to_string(kugel_unten_mm,3u)+" mm; dx "+to_string(dx_mm_k,3u)+" mm)");
+		print_info("KRAFT-ZBAND aktiv (Kugel, Negativ-Kontrolle): unterste "+to_string(zb)+" Zellen, wirksame Oberkante "+to_string(kante_k,3u)+" mm (dx = "+to_string(dx*1000.0f,2u)+" mm). GITTERBAND -- Kante in Schritten von dx.");
+		if(!free_stream&&zb<2u) print_warning("KRAFT-ZBAND Kugel: N = 1 umfasst nur die Bodenwand z = 0 -- das Band ist konstruktiv leer.");
+		if(kante_k>=kugel_unten_mm) print_warning("KRAFT-ZBAND Kugel: die Oberkante "+to_string(kante_k,3u)+" mm reicht an die Kugelunterkante "+to_string(kugel_unten_mm,3u)+" mm -- das ist keine Negativ-Kontrolle mehr.");
+	}
 	ts.reserve(n_steps/sample_every + 2ull);
 	fx.reserve(n_steps/sample_every + 2ull); fy.reserve(fx.capacity()); fz.reserve(fx.capacity());
 	std::unordered_map<ulong,std::array<uchar,18>> elibb_qmap; // ★ B1-Stufe 2: Remesh-q-Karte
@@ -5962,7 +6007,7 @@ void main_setup_kugel() {
 	print_info("  Populations-Sigma des Momentansignals: +- "+to_string((float)sd,5u)+"  -- KEIN Fehlerbalken, nur zum Vergleich");
 	} // stat_ok
 	if(zb>0u&&zb_nn>0ull) { // ★ KRAFT-ZBAND-Endreport (Kugel schwebt frei -> Band ~0 = Negativ-Kontrolle)
-		print_info("KRAFT-ZBAND Kugel (unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx*1000.0f,2u)+" mm; GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar), "+to_string(zb_nn)+" Samples (ALLE, inkl. Anlauf):");
+		print_info("KRAFT-ZBAND Kugel (unterste "+to_string(zb)+" Zellen, wirksame Oberkante "+to_string(kraft_zband_oberkante_mm(zb, (double)dx*1000.0),3u)+" mm ueber dem Bodenknoten z = 0; GITTERBAND -- Kante in Schritten von dx), "+to_string(zb_nn)+" Samples (ALLE, inkl. Anlauf):"); // ★ 17.09.: war N*dx
 		print_info("  Band-Mittel: Fx = "+to_string((float)(zb_fx_band/(double)zb_nn),6u)+" N, Fz = "+to_string((float)(zb_fz_band/(double)zb_nn),6u)+" N (Soll ~0 -- Negativ-Kontrolle)");
 		print_info("  Rest-Mittel: Fx = "+to_string((float)(zb_fx_rest/(double)zb_nn),6u)+" N, Fz = "+to_string((float)(zb_fz_rest/(double)zb_nn),6u)+" N");
 		print_info("  Selbsttest-Maximum |Band+Rest-Gesamt|/max(|Fx|,|Fz|): "+to_string((float)zb_selftest_max,9u)+" (Soll < 5e-5)");
@@ -6465,6 +6510,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 		}
 	}
 	std::vector<string> fehlt, weicht_ab; string vorschlag, zu_setzen; ulong n_geprueft=0ull;
+	string lagen_liste; // ★ 17.09.2026: Schalter der Einheit 'lagen' fuer die Ansage hinter der Schleife
 	for(const BasisZeile& b : B) {
 		if(b.einheit=="ausgabe") {
 			// ★ Audit I2 29.08.: uebersprungen, WEIL Ausgabe keine Physik ist -- aber still.
@@ -6479,9 +6525,11 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 		if(b.name=="CFD_DX"||b.name=="CFD_CASE") continue;  // die Sprosse selbst bzw. der Fall
 		n_geprueft++;
 		if(b.einheit!="phys"&&b.einheit!="modus"&&b.einheit!="zellen_grob"&&b.einheit!="zellen_fein"
-		   &&b.einheit!="zellen_grob_laenge"&&b.einheit!="index_grob"&&b.einheit!="schritte_fein")
+		   &&b.einheit!="zellen_grob_laenge"&&b.einheit!="index_grob"&&b.einheit!="schritte_fein"
+		   &&b.einheit!="band_oberkante_mm"&&b.einheit!="lagen") // ★ 17.09.2026 (Heiko, Skalierungsaudit Punkte 1 und 4)
 			print_error("BASIS-WAECHTER: unbekannte Einheit '"+b.einheit+"' bei "+b.name+" -- sie fiele still auf 'Wert bleibt' zurueck (M6).");
 		string soll=b.wert, hinweis;
+		string erklaerung; // ★ 17.09.: Zusatz NUR fuer FEHLT/ABWEICHEND -- 'hinweis' loest die Rundungswahl-Ansage aus, die fuer band_oberkante_mm nicht gilt
 		// ★ Audit I 29.08.: 'phys', 'modus' und 'zellen_grob' fielen still auf "Wert bleibt"
 		// durch -- genau die Rueckfallklasse, die M6 schliessen sollte. Sie sind wirklich
 		// sprossenunabhaengig, aber das gehoert hingeschrieben, nicht durchgereicht:
@@ -6491,12 +6539,27 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 		//               (dx_c = dx_f*ratio); wer eine feste LAENGE will, nimmt zellen_grob_laenge.
 		//   schritte_fein  WERT BLEIBT (16.09.2026): auf dx_ref und U_LAT_VORGABE definiert, env_schritte rechnet im Lauf
 		//                  LAUT um; hier wird der ROHE Wert geprueft -- 7500 bei 8 mm faellt als ABWEICHEND auf (Doppelumrechnung).
+		//   band_oberkante_mm  (17.09.2026, Heiko) WERT = physikalische Sollhoehe H [mm] der WIRKSAMEN Band-Oberkante ueber Welt-z = 0;
+		//                  die Serienzeile traegt die Zellzahl N, Soll ist kraft_zband_regel(H, dx): (N-1/2)*dx am naechsten an H,
+		//                  Gleichstand -> niedriger, N >= 3 (Keil- und Deckellage). Ersetzt 'zellen_fein' (llround(16/dx) -- bei 3,75 mm 4 statt 5, bei 8 mm 2 statt 3).
+		//   lagen          (17.09.2026, Heiko) bewusst GITTERFESTE Lagenzahl: Wert bleibt auf jeder Sprosse, die Dicke waechst mit dx.
+		//                  Wirkt im Waechter wie 'modus'; die eigene Einheit haelt fest, dass die Gitterbindung GEWOLLT ist.
 		if(b.einheit=="zellen_fein"||b.einheit=="zellen_grob_laenge"||b.einheit=="index_grob") {
 			const double roh = atof(b.wert.c_str())*skal;
 			const long unten=(long)floor(roh), oben=(long)ceil(roh);
 			soll = to_string((ulong)llround(roh));
 			if(unten!=oben) hinweis = " (nicht eindeutig: "+to_string((ulong)unten)+" oder "+to_string((ulong)oben)+" -- Wahl deklarieren)";
 		}
+		if(b.einheit=="band_oberkante_mm") {
+			const double h_soll = atof(b.wert.c_str());
+			if(fabs(h_soll-KRAFT_ZBAND_SOLL_MM)>1e-9) print_error("BASIS-WAECHTER: "+b.name+" traegt die Sollhoehe "+b.wert+" mm, der Code KRAFT_ZBAND_SOLL_MM = "+kraft_zband_soll_text()+" mm -- zwei Quellen fuer dieselbe Kante (Regel hier, 'Soll' in der KRAFT-ZBAND-KANTE-Zeile). Eine davon nachziehen.");
+			const uint n_regel = kraft_zband_regel(h_soll, (double)dx_lauf);
+			const ulong n_alt = (ulong)llround(h_soll/(double)dx_lauf);
+			soll = to_string(n_regel);
+			erklaerung = " (Regel Heiko 17.09.: wirksame Oberkante (N-1/2)*dx = "+to_string(kraft_zband_oberkante_mm(n_regel, (double)dx_lauf),3u)+" mm am naechsten an "+b.wert+" mm, Gleichstand -> niedriger, N >= "+to_string(KRAFT_ZBAND_N_MIN)+" = mindestens Keil- UND Deckellage (Option 1)"
+				+((ulong)n_regel!=n_alt ? "; die alte Umrechnung llround("+b.wert+"/dx) ergab "+to_string(n_alt)+" = Oberkante "+to_string(kraft_zband_oberkante_mm((uint)n_alt, (double)dx_lauf),3u)+" mm" : string(""))+")";
+		}
+		if(b.einheit=="lagen") lagen_liste += (lagen_liste.empty()?"":", ")+b.name+"="+b.wert;
 		const char* ist_c = getenv(b.name.c_str());
 		if(ist_c==nullptr) {
 			// ★ M4: ein bewusst weggelassener Schalter war bisher NICHT deklarierbar -- der
@@ -6504,7 +6567,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 			// Sentinel "-" heisst "absichtlich ungesetzt".
 			auto itf=erlaubt.find(b.name);
 			if(itf!=erlaubt.end()&&itf->second=="-") continue;
-			fehlt.push_back(b.name+" (Soll "+soll+", Einheit "+b.einheit+")"+hinweis);
+			fehlt.push_back(b.name+" (Soll "+soll+", Einheit "+b.einheit+")"+hinweis+erklaerung);
 			zu_setzen+=(zu_setzen.empty()?"":" ")+b.name+"="+soll; continue; }
 		const string ist(ist_c);
 		// Wertvergleich, nicht Stringvergleich -- sonst schlaegt "8" gegen "08" oder "1.5" gegen "1.50" an.
@@ -6513,7 +6576,7 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 		if(gleich) continue;
 		auto it=erlaubt.find(b.name);
 		if(it!=erlaubt.end()&&(fabs(atof(it->second.c_str())-atof(ist.c_str()))<1e-9||it->second==ist)) continue;
-		weicht_ab.push_back(b.name+": Soll "+soll+", Ist "+ist+" ("+b.einheit+")"+hinweis);
+		weicht_ab.push_back(b.name+": Soll "+soll+", Ist "+ist+" ("+b.einheit+")"+hinweis+erklaerung);
 		vorschlag+=(vorschlag.empty()?"":",")+b.name+"="+ist;
 	}
 	// ★ H3: die Schleife lief nur ueber die BASIS und fragte getenv. Der Spiegelfall -- im Lauf
@@ -6531,11 +6594,13 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME") continue;
 			print_warning("BASIS ZUSAETZLICH: "+nm+"="+ev.substr(g+1)+" -- steht nicht in der Referenz, wird also NICHT geprueft.");
 			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. schritte_fein wird seit 16.09. von env_schritte umgerechnet, der Waechter prueft den Referenzwert (4-mm-Wert in der Zeile). Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
+			if(nm=="CFD_U_LAT") print_warning("CFD_U_LAT ist gesetzt: u_lat prueft der Waechter seit 17.09.2026 ueber CFD_SCHRITTE_PRO_ZELLE (Referenzwert) -- der fehlt dann und muss mit CFD_BASIS_ABWEICHUNG=CFD_SCHRITTE_PRO_ZELLE=- deklariert werden (Bandkraft ~ 1/u_lat^2, Skalierungsaudit Punkt 6).");
 			if(nm=="CFD_RATIO") print_error("CFD_RATIO ist gesetzt, steht aber nicht in der Referenz -- die Umrechnung zellen_grob/index_grob haengt an unveraendertem ratio (dx_c = dx_f*ratio). Referenz erneuern oder Schalter entfernen.");
 			extra++;
 		}
 		if(extra>0ull) print_info("  "+to_string(extra)+" Schalter ausserhalb der Referenz (siehe Warnungen) -- die Entwarnung unten gilt NUR fuer die gefuehrten.");
 	}
+	if(!lagen_liste.empty()) print_info("BASIS Lagen, bewusst gitterfest (Heiko 17.09.): "+lagen_liste+" -- Einheit 'lagen', Wert bleibt auf jeder Sprosse; die physikalische Dicke waechst mit dx (Nahfeld in Feinzellen, CFD_FERN_* in Grobzellen).");
 	print_info("BASIS-WAECHTER: "+basisdatei+", dx_ref "+to_string(dx_ref,2u)+" gegen Lauf-dx "+to_string(dx_lauf,2u)
 		+", "+to_string((ulong)n_geprueft)+" von "+to_string((ulong)B.size())+" Schaltern geprueft (Rest: ausgabe/Fall/Sprosse), "+to_string((ulong)erlaubt.size())+" Abweichungen deklariert.");
 	if(fehlt.empty()&&weicht_ab.empty()) { print_info("  Keine Abweichung unter den gefuehrten Schaltern (nach Umrechnung)."); return; }
@@ -8490,6 +8555,9 @@ static void main_setup_fahrzeug_dd() {
 	// ★ FORK Kraft-Zerlegung nach z-Region (Heiko-Vorgabe): CFD_KRAFT_ZBAND = unterste N Zellen ab z=0
 	// (inkl.) vs Rest. unset/0 = AUS = bitidentisch (null neue Kernelaufrufe/Logzeilen/Dateien).
 	// EINMAL gelesen, nicht je Zelle/Sample (env-Read-Falle).
+	// ★ 17.09.2026 (Heiko, Skalierungsaudit Punkt 1): z=0 ist Fahrbahn -> wirksam z=1..N-1, Oberkante (N-1/2)*dx ueber Welt-z=0.
+	// Log und CSV-Kopf nennen seitdem diese WIRKSAME Kante statt N*dx; N soll kraft_zband_regel folgen (Basis-Einheit band_oberkante_mm).
+	// Das Band-Praedikat [0,N) und der Kernel bleiben unveraendert. Die Zeile "KRAFT-ZBAND-KANTE:" wird maschinell gelesen -- Format halten.
 	const uint zb = env_u("CFD_KRAFT_ZBAND", 0u);
 	std::ofstream zcsv;
 	double zb_cd_band=0.0, zb_cz_band=0.0, zb_cd_rest=0.0, zb_cz_rest=0.0, zb_selftest_max=0.0; ulong zb_nn=0ull;
@@ -8502,13 +8570,27 @@ static void main_setup_fahrzeug_dd() {
 		for(ulong n2=0ull; n2<lbm_f.get_N(); n2++) if(lbm_f.flags[n2]==(TYPE_S|TYPE_X)) {
 			zc_ges++; const uint zz=(uint)(n2/((ulong)fNx*(ulong)fNy)); if(zz<zb) zc_band++; if(zz==0u) zc_z0++;
 		}
-		print_info("KRAFT-ZBAND aktiv: unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx_f*1000.0f,2u)+" mm (dx = "+to_string(dx_f*1000.0f,2u)
+		const double zb_dx_mm = (double)dx_f*1000.0, zb_kante_mm = kraft_zband_oberkante_mm(zb, zb_dx_mm);
+		const uint zb_regel = kraft_zband_regel(KRAFT_ZBAND_SOLL_MM, zb_dx_mm);
+		print_info("KRAFT-ZBAND-KANTE: N = "+to_string(zb)+" Zellen (z = 1.."+to_string(zb-1u)+" wirksam, z = 0 Fahrbahn), wirksame Oberkante "+to_string(zb_kante_mm,3u)
+			+" mm ueber Welt-z = 0 (Soll "+kraft_zband_soll_text()+" mm, dx "+to_string(zb_dx_mm,3u)+" mm)");
+		// ★ Begruendung als EIGENE Zeile direkt dahinter -- die KANTE-Zeile hat ein vereinbartes Format und wird maschinell gelesen (Parallel-Agent).
+		print_info("KRAFT-ZBAND-REGEL: N = max("+to_string(KRAFT_ZBAND_N_MIN)+", naechste Kante an "+kraft_zband_soll_text()+" mm) = "+to_string(zb_regel)+" bei dx "+to_string(zb_dx_mm,3u)
+			+" mm -- mindestens Keil- UND Deckellage (z = 1 Keilzellen vor/hinter dem Latsch, z = 2 Ueberhang-Unterseite), Heiko 17.09. Option 1 (BAND-ARTEFAKT-8MM.md)");
+		// zonen_kraft.py liest "KRAFT-ZBAND aktiv: unterste (\d+) Zellen" und "Band-Census 0x41: (\d+) von \d+ Zellen" -- beide Teilstrings bleiben
+		print_info("KRAFT-ZBAND aktiv: unterste "+to_string(zb)+" Zellen (z < "+to_string(zb)+", z = 0 ist Fahrbahn), wirksame Oberkante "+to_string(zb_kante_mm,3u)+" mm ueber Welt-z = 0 (dx = "+to_string(dx_f*1000.0f,2u)
 			+" mm); Band-Census 0x41: "+to_string(zc_band)+" von "+to_string(zc_ges)+" Zellen, davon z=0: "+to_string(zc_z0)+" (Soll 0).");
-		print_warning("GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar (Bandhoehe skaliert mit dx, nicht mit der Geometrie).");
+		if(zb<2u) print_warning("KRAFT-ZBAND: N = 1 umfasst nur die Fahrbahnzeile z = 0 -- das Band ist konstruktiv leer; Keil- UND Deckellage liegen im Rest (cd/cz_rest = Gesamt, verschmutzt).");
+		else if(zb<KRAFT_ZBAND_N_MIN) print_warning("KRAFT-ZBAND: N = "+to_string(zb)+" enthaelt die Keillage z = 1, aber NICHT die Deckellage z = 2 (Ueberhang-Unterseite, auf die die Links der Keilzellen gehen) -- deren Kraft landet im REST: cd/cz_rest VERSCHMUTZT (Heiko 17.09. Option 1, BAND-ARTEFAKT-8MM.md).");
+		if(zb!=zb_regel) print_warning("KRAFT-ZBAND: N = "+to_string(zb)+" weicht von der Regel ab -- N = "+to_string(zb_regel)+" (Oberkante "+to_string(kraft_zband_oberkante_mm(zb_regel, zb_dx_mm),3u)
+			+" mm) liegt am naechsten an "+kraft_zband_soll_text()+" mm (Gleichstand -> niedriger, N >= "+to_string(KRAFT_ZBAND_N_MIN)+" = Keil- und Deckellage; Heiko 17.09.). Band/Rest dieses Laufs sind nicht kantengleich mit Regel-Laeufen.");
+		print_warning("GITTERBAND -- die wirksame Oberkante liegt "+to_string(fabs(zb_kante_mm-KRAFT_ZBAND_SOLL_MM),3u)+" mm "+(zb_kante_mm>=KRAFT_ZBAND_SOLL_MM ? "ueber" : "unter")
+			+" der Sollhoehe "+kraft_zband_soll_text()+" mm; zwischen DX-Sprossen nur bis auf diesen Rest vergleichbar (die Kante springt in Schritten von dx).");
 		if(zc_band==0ull) print_warning("KRAFT-ZBAND: Band-Census = 0 -- die Zerlegung liefert nur Nullen im Band.");
 		zcsv.open(out_dir+"kraft_zband.csv"); zcsv.precision(8);
-		zcsv << "# zband_zellen=" << zb << " dx_mm=" << dx_f*1000.0f << " band_mm=" << (float)zb*dx_f*1000.0f
-		     << " -- GITTERBAND, zwischen DX-Sprossen nicht direkt vergleichbar\n";
+		// ★ 17.09.: 'band_mm=' (= N*dx) ENTFERNT statt umgedeutet -- ein Leser des alten Schluessels soll laut scheitern, nicht still die andere Groesse lesen
+		zcsv << "# zband_zellen=" << zb << " wirksam_z=1.." << (zb-1u) << " dx_mm=" << to_string(zb_dx_mm,3u) << " oberkante_mm=" << to_string(zb_kante_mm,3u)
+		     << " soll_mm=" << kraft_zband_soll_text() << " -- wirksame Oberkante (N-1/2)*dx ueber Welt-z=0 (z=0 ist Fahrbahn); GITTERBAND, Kante in Schritten von dx\n";
 		zcsv << "# ACHTUNG: Fx/Fz aus object_force -- an facettenbehandelten Links PHANTOM-Reibung; fuer A/B nur die VERSCHIEBUNG zwischen Armen werten\n";
 		zcsv << "time_s,Fx_band_N,Fz_band_N,Fx_rest_N,Fz_rest_N,Cz_band,Cz_rest,selbsttest_rel,cz_druck_band,cz_druck_rest\n" << std::flush;
 	}
@@ -9571,7 +9653,7 @@ static void main_setup_fahrzeug_dd() {
 	if(zb>0u&&zb_nn>0ull) { // ★ KRAFT-ZBAND-Endreport (Zeitmittel ab Warmlauf ueber dieselben Samples)
 		const double mcd_b=zb_cd_band/(double)zb_nn, mcz_b=zb_cz_band/(double)zb_nn;
 		const double mcd_r=zb_cd_rest/(double)zb_nn, mcz_r=zb_cz_rest/(double)zb_nn;
-		print_info("KRAFT-ZBAND (unterste "+to_string(zb)+" Zellen = "+to_string((float)zb*dx_f*1000.0f,2u)+" mm; GITTERBAND -- zwischen DX-Sprossen nicht direkt vergleichbar), "+to_string(zb_nn)+" Samples:");
+		print_info("KRAFT-ZBAND (unterste "+to_string(zb)+" Zellen, wirksam z = 1.."+to_string(zb-1u)+", Oberkante "+to_string(kraft_zband_oberkante_mm(zb, (double)dx_f*1000.0),3u)+" mm ueber Welt-z = 0, Soll "+kraft_zband_soll_text()+" mm; GITTERBAND -- Kante in Schritten von dx), "+to_string(zb_nn)+" Samples:"); // ★ 17.09.: war N*dx
 		print_info("  Band: Cd = "+to_string((float)mcd_b,4u)+"   Cz = "+to_string((float)mcz_b,4u));
 		print_info("  Rest: Cd = "+to_string((float)mcd_r,4u)+"   Cz = "+to_string((float)mcz_r,4u));
 		for(uint k : {4u, 8u, 16u}) { const double se=block_sem(zb_cz_rest_reihe,k); if(se>=0.0) print_info("      Block-SEM Cz_rest ueber "+to_string(k)+" Bloecke: +- "+to_string((float)se,5u)); }
