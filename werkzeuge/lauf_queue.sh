@@ -77,6 +77,16 @@ while IFS= read -r zeile; do
 	# Geerbtes CFD_VELSET zaehlt nicht fuer die Wahl -- main_setup bricht dann ab, weil Build-Satz und CFD_VELSET nicht passen.
 	BIN=bin/FluidX3D
 	if echo " $env_teil " | grep -Eq '[[:space:]]CFD_VELSET=27[[:space:]]'; then BIN=bin_q27/FluidX3D; fi
+	# 17.09.2026 UPSTREAM-LAUF (Heiko: Upstream-FluidX3D, Fahrzeug Single-Domain 4 mm): CFD_BIN=upstream in der Zeile waehlt den
+	# festen Pfad des Upstream-Klons (Zweig mr2-singledomain). Positivliste, kein freier Pfad; zusammen mit CFD_VELSET=27 verweigert.
+	if echo " $env_teil " | grep -Eq '[[:space:]]CFD_BIN=upstream[[:space:]]'; then
+		if [ "$BIN" != "bin/FluidX3D" ]; then
+			echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- CFD_BIN=upstream und CFD_VELSET=27 in einer Zeile" | tee -a "$Q"; continue
+		fi
+		BIN=/home/heiko/CFD/FluidX3D-upstream/bin/FluidX3D
+	elif echo " $env_teil " | grep -Eq '[[:space:]]CFD_BIN='; then
+		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- CFD_BIN nur mit dem Wert upstream erlaubt" | tee -a "$Q"; continue
+	fi
 	if [ ! -x "$BIN" ]; then
 		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Binary $BIN fehlt oder ist nicht ausfuehrbar" | tee -a "$Q"
 		continue

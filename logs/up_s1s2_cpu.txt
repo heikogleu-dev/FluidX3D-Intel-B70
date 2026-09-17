@@ -1,0 +1,5 @@
+# 17.09.2026 Upstream-FluidX3D (Zweig mr2-singledomain, Commit 022cefb), Fahrzeug Single-Domain = v2-Nahkasten. Plan: ~/CFD/FluidX3D-upstream/PLAN-MR2-SINGLEDOMAIN.md
+# S1 CPU 16 mm, 20 ms: kein NaN, Flag-Zensus, P1-Schliessung, P1 bei 20 ms = offline zonen_kraft.py. Warmup 0 und VTK bei 0,02, Slices alle 10 ms.
+# S2 CPU 4 mm NUR_GEOMETRIE, Y_VERSATZ=0: Zaehlungen gegen p4_pu8 (SAT 1852517, Void 69370, 0x41 62207484, Stirnflaeche 117201, Kontakt 6412, Band 33956).
+CFD_BIN=upstream CFD_DX=16 CFD_T_END=0.02 CFD_T_WARMUP=0 CFD_VTK_ZEITEN=0.02 CFD_SLICE_DT=0.01 :: up16_s1_cpu
+CFD_BIN=upstream CFD_DX=4 CFD_NUR_GEOMETRIE=1 CFD_Y_VERSATZ=0 :: up4_s2_geo_cpu
