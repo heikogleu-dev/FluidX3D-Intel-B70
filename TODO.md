@@ -24,6 +24,19 @@ Vorzeichen), `RHO_HUELLE` um −0,189. Das KLEMM-BUDGET bucht davon nur 1/15 bzw
 Kraftwirkung**, weil es die Verlagerung des Zustands (u-Klemme am bewegten Boden ×10,4) konstruktiv nicht sieht.
 Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 σ" widerlegt (Herleitung: §2.5 des Plans).
 
+## 0b-Stand 17.09.2026 Tagesabschluss (Details: Tagesprotokoll 17.09., UEBERGABE-2026-09-18.md)
+
+| # | Punkt | Ergebnis | Beleg |
+|---|---|---|---|
+| 1 | Upstream-FluidX3D als 4-mm-Single-Domain (Heiko) | **ERLEDIGT.** Upstream-Kernel unverändert, Kasten = v2-Nahfeld (37,8 % Versperrung). Divergiert in v2-Lage am Reifenaufstand (15 Schritte) und mit 1 Zelle Bodenspalt bei u_lat 0,125 (8 ms, Hinterrad); stabil mit Spalt + u_lat 0,075 (`up4_u075_b70`). Netto 6875 / brutto 6600 MLUPs ab 100 ms, Index 7866 s/s (v2 p4_register 6230 MLUPs, 5491 s/s). VRAM frei min 3007 MiB gegen v2 mit Sparschaltern 8119 MiB (p4_apg1) → **v2 ≈ 5,1 GiB sparsamer**. P1 cd_rest 1,591 / cz_rest −1,179 (confinement-dominiert) | `~/CFD/FluidX3D-upstream` 9d2165e, `export/up4_u075_b70/` |
+| 2 | Ablösung Upstream / v2 / OF13 (Heiko-Beobachtung) | **Gemessen, vorläufig** (unterseite.py ungeprüft). Upstream weniger Rückstrom an Dach/Heckscheibe/Haube, mehr am Flügel; Diffusor-Knick beide gleich (OF13 anliegend). Dach-Randgeschwindigkeit Upstream 57 m/s gegen OF13 36 → Confinement, kein Solververdienst. Echte Differenz: v2-Dachgrenzschicht ~doppelt so dick (δ99 74–126 gegen 34–66 mm, OF13 29–35) | `logs/dach_up4_gegen_p4pu8_of13_2026-09-17.txt`, `logs/unterseite_up4_p4pu8_of13_2026-09-17.txt` |
+| 3 | Skalierungsaudit v2 | **Entschieden und umgesetzt** (673bbfc): Bandkante N = max(3, ceil(16/dx)), BODEN_EQ als Lagen, Produktionsschalter + SCHRITTE_PRO_ZELLE in der Basis; Fahrbahnwand bleibt (OF13), SAT-Aufdickung akzeptiert, N2F-Rate zurückgestellt | `SKALIERUNG-BEFUNDE-2026-09-17.md` |
+| 4 | Kontaktband-Artefakt | **Ursache geklärt:** Keilzellen k=1 vor/hinter Latsch unter Reifenüberhang an der Dichteklemme, Treffer ∝ 1/dx, Druckanteil N/9. **214 8-mm-Läufe** mit Deckellage im Rest markiert; POSITIV-8-mm-Cz-Verschiebung = Artefakt; D3Q27-A/B (+0,238 Cz_rest) **unter Vorbehalt** (P1-Druckanteil der Deckellage erklärt ihn nicht, Nicht-Gleichgewicht offen) | `BAND-ARTEFAKT-8MM.md` |
+| 5 | Auswertewerkzeuge gitterfest | Umgebaut (lauf_meta.py), zweifach geprüft „verwertbar"; **Korrektur-Agent lief bei Abschluss** (Toleranzen, Bandgleichheit in Paarwerkzeugen, dk in OF13-Werkzeugen, unterseite.py) → danach Commit | Tagesprotokoll 17.09. |
+
+**Offene Entscheide Heiko:** (a) D3Q27-A/B mit Band N=3 wiederholen (2 × 8 mm, am 17.09. eigenmächtig gestartet und abgebrochen); (b) Keilzellen geometrisch schließen (Option 2, Host, 8-mm-Lauf); (c) N2F-Rückkopplung je Grobschritt (Punkt 5 Audit, zurückgestellt); (d) Nebenbefunde Audit (16-mm-Abbrüche Sponge/N2F, SAMPLE_EVERY-Rundung 8/16 mm, Kastenrundung); (e) Upstream: Log-Blockbericht (voll = ceil) und Lagetext — Heiko: „interessiert erstmal nicht".
+**Achtung vor dem nächsten v2-Lauf:** alte Serienzeilen (241 × 8 mm ZBAND 2, 6 × 3,75 mm ZBAND 4) werden vom neuen Wächter abgewiesen — neue Zeilen mit `werkzeuge/basis_zeile.py`.
+
 ## 0a-Stand 17.09.2026 vormittags (Details: Tagesprotokoll 17.09., zwei Prüfrunden, alle Werkzeuge sauber)
 
 | # | Punkt | Ergebnis | Beleg |
