@@ -40,7 +40,20 @@ Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 
 **Nächstes Mal (Heiko 17.09. ~12:40):**
 - **(N1) Grenzschicht laminarartig?** Offline, ohne GPU: aufgelöste Turbulenz (u′-RMS aus den 20 Momentfeldern von `q19_bb8`, Dachband) gegen OF13-k (`~/CFD-Cases/mr2v40H/1200/k.gz`). Anlass: Formfaktor H am Dach OF13 1,2–1,5 (turbulent), v2 1,5–2,4, Upstream 2,0–2,7; V1-Befund 26.06.: mehr wandnahes ν_t verschlimmert die Ablösung.
 - **(N2) Einlaufturbulenz** (synthetische Wirbel vor dem Fahrzeug, Intensität/Längenmaß aus den OF13-Einlasswerten, keine Handwerte) — nur wenn N1 „keine aufgelöste Turbulenz" zeigt; Bau + ein Testlauf nach Go. Alternative Stolperkante an der Front (Geometrieänderung, bei 1–2 Zellen Höhe fraglich).
-- **(N3) Kasten bei 3,75 mm:** Heiko erwägt Fernfeld in y/z zu strecken (Versperrung heute 2,74 %, OF13 1,93 %) und das Nahfeld nach z+ und x- in den freien VRAM zu schieben. Vorher messen: absolute Fernfeld-Schrittzeit bei 3,75 mm (`CFD_TIMER_FERN=1`, kurzer Lauf, serialisiert — kein Leistungsmaß), weil die iGPU die Grenze setzt, nicht der RAM. Stand: sichtbare Fernfeld-Wartezeit 2,3 % (wie 4 mm), Fernfeld 816×512×589 = 246 Mio, Nahfeldfenster ≈ 457 ms, gemessener iGPU-Gitterpreis 1,414 ns/Zelle (Leiter 16.09., Nx%16=0) → reine Gitterzeit heute ≈ 348 ms, Kopplungsaufschlag bei 3,75 mm ungemessen (4 mm: +18 %). Nahfeld: extern gemessen frei min 2877 MiB (p375_d/e), Plan 45 B/Zelle → rechnerisch ~55 MB je z-Lage (1801×709), ~15 MB je x-Lage (709×497); Heiko-Grenze 1,0–1,5 GB Restluft.
+- **(N3) Kasten bei 3,75 mm — GERECHNET 17.09. (nur Messdaten, kein Lauf):** Grenzkosten Nahfeld 46,0 B/Zelle (aus den Speicherplänen p4_pu8 23 063 MB/519,1 Mio und p375_b 28 185 MB/634,6 Mio, Facettenpuffer abgezogen) → 56 MB je z-Lage (224 MB je 15 mm), 15,5 MB je x-Lage (62 MB je 15 mm); frei gemessen min 2860 MiB (p375_c). Nahfeldfenster 458 ms (p375_e 95,5 % von 7666 s/s · 4 dt). Fernfeld: iGPU 1,414 ns/Zelle (Leiter 16.09., Nx%16=0) + Kopplungsaufschlag 17,5 % (4 mm gemessen, bei 3,75 mm UNGEMESSEN) → heute 409 ms (Reserve ~49 ms, passt zu 2,3 % sichtbarer Wartezeit).
+  | Nahfeld (Restluft) | z+ | x- | Zellen | Nahfeldfenster |
+  |---|---|---|---|---|
+  | 1,0 GB | 60 mm | 225 mm | +6,7 % | ~488 ms |
+  | 1,0 GB | 30 mm | 330 mm | +6,6 % | ~488 ms |
+  | 1,5 GB | 30 mm | 210 mm | +4,8 % | ~479 ms |
+  | Fernfeld-Versperrung | Ly × Lz | Zellen | Fernfeldschritt (mit Aufschlag) |
+  |---|---|---|---|
+  | 2,74 % (heute) | 7,665 × 8,820 m | 246 Mio | 409 ms |
+  | 2,50 % | 8,025 × 9,225 m | 269 Mio | 448 ms |
+  | 2,30 % | 8,355 × 9,615 m | 292 Mio | 486 ms |
+  | 2,10 % | 8,745 × 10,065 m | 320 Mio | 532 ms |
+  | 1,93 % (OF13) | 9,135 × 10,500 m | 349 Mio | 580 ms |
+  Folgerung: mit Nahfeld +6,7 % (Fenster ~488 ms) passt das Fernfeld bis ~2,3 % ohne Wartezeit (Grenzfall), 2,5 % mit ~40 ms Reserve; OF13-Versperrung 1,93 % macht die iGPU zum Engpass (Grobschritt ~580 statt ~488 ms, ≈ +19 % Laufzeit). Ungemessen: Aufschlag bei 3,75 mm, B70-Durchsatz bei geändertem Nx (1861 % 16 = 5), Speicherplan exakt (Setupstart meldet ihn vor jedem teuren Schritt). Neuer Kasten = neuer Bezug.
 
 **Achtung vor dem nächsten v2-Lauf:** alte Serienzeilen (241 × 8 mm ZBAND 2, 6 × 3,75 mm ZBAND 4) werden vom neuen Wächter abgewiesen — neue Zeilen mit `werkzeuge/basis_zeile.py`.
 
