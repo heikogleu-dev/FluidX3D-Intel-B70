@@ -24,6 +24,14 @@ Vorzeichen), `RHO_HUELLE` um −0,189. Das KLEMM-BUDGET bucht davon nur 1/15 bzw
 Kraftwirkung**, weil es die Verlagerung des Zustands (u-Klemme am bewegten Boden ×10,4) konstruktiv nicht sieht.
 Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 σ" widerlegt (Herleitung: §2.5 des Plans).
 
+## 0a-Stand 17.09.2026 vormittags (Details: Tagesprotokoll 17.09., zwei Prüfrunden, alle Werkzeuge sauber)
+
+| # | Punkt | Ergebnis | Beleg |
+|---|---|---|---|
+| 1 | Abtriebslücke zonenweise | **ERLEDIGT.** Momentanfelder p375_e/b: gesamt +0,45; **Heckflügel +0,18** (Enden am schlechtesten), **Nase/Splitter +0,14**, Dach nur +0,03. Grenzschicht schon auf der **Windschutzscheibe** zu dick (δ90 13–62 gegen ≤ 3 mm), Defizit wächst im Druckanstieg 2,0–2,3 m; Ablöseort nicht früher. Kette Dach → Flügel: in der Flügelmitte gestützt, an den Enden nicht (`totaldruck_kette.py`, UNGEPRÜFT) | `logs/zonen_vergleich_p375_2026-09-17.txt`, `logs/dach_p375_*_2026-09-17.txt`, `werkzeuge/zonen_kraft.py`, `zonen_vergleich.py`, `abl_dach/stromauf.py` |
+| 2 | D3Q27-Zensus mit Flächen-Gate | **ERLEDIGT, ohne GPU-Lauf** (echte Normalen nachgebaut, Log-Zensus exakt getroffen). Hebt 1-Link 56,5 % (5,40 m²) + 2-Link 99,96 % (1,43 m²), nur Rang 1 entlang der Kante; lösbare Fläche dann 1,096 × eigene Remesh-Fläche (Überbuchung). KDIAG-Lauf nicht nötig | `export/p375_*/d3q27_zensus.txt`, `werkzeuge/facetten_normalen.py`, `d3q27_zensus.py` |
+| 3 | Entscheid D3Q27 | **bei Heiko.** Messlage gegen die Wandzellen-Variante: τ_w ±100 % bei 4 mm ohne Druckwirkung (16.09.), DETEPS-Abdeckung 71→94 % kostete +0,0285 Cz (10.09.), MASSE_ALLE +20 pp Abdeckung kippte Cz weg von OF13 (04.09., 8 mm). Band-Variante (echte Eckadvektion in der Grenzschicht) ist ungemessen und nur durch Bau testbar | Tagesprotokoll 17.09. 09:45 |
+
 ## 0a · MORGEN ZUERST (Heiko 16.09.2026 22:05) — kein Bau, zuerst Auswertung und Zensus
 
 | # | Punkt | Was genau | Kosten |

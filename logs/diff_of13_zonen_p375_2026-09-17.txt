@@ -1,0 +1,78 @@
+===== p375_e 501 ms
+FX-Ebene 1801x497 @ 4 mm, y-Index 361 (Welt-y +0.026 m)
+GESAMT: n=725745 RMS 4.185 Mittel +0.012 p50 -0.58 m/s
+--- nach Wandabstand in der Ebene:
+Wand <=9 Zellen (~32 mm)           n=   46867 Mittel  +5.54 p50  +3.22 RMS  9.29 | OF13  18.1 FX  12.5 m/s
+Wand 10..27 Zellen (~100 mm)       n=   83477 Mittel  +2.05 p50  +0.93 RMS  5.55 | OF13  22.4 FX  20.4 m/s
+fern >27 Zellen (>100 mm)          n=  595401 Mittel  -0.71 p50  -0.67 RMS  3.20 | OF13  22.9 FX  23.6 m/s
+--- nach x-Zone x z-Zone (Fahrzeug x 0..4,44 m):
+vor Fahrzeug x<0                   n=   42742 Mittel  -0.02 p50  -0.68 RMS  1.65 | OF13  25.7 FX  25.7 m/s
+   z<0,15 Unterboden               n=    3440 Mittel  +1.19 p50  +2.97 RMS  4.19 | OF13  23.1 FX  21.9 m/s
+   z 0,15..1,3 Aufbau              n=   26402 Mittel  +0.18 p50  -0.48 RMS  1.35 | OF13  24.4 FX  24.2 m/s
+   z 1,3..1,94 Deckelzone          n=   12900 Mittel  -0.75 p50  -0.73 RMS  0.75 | OF13  29.1 FX  29.9 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Front 0..1,5                       n=  148624 Mittel  +0.72 p50  -0.61 RMS  4.03 | OF13  28.4 FX  27.7 m/s
+   z<0,15 Unterboden               n=    9932 Mittel  +2.73 p50  +0.99 RMS  7.80 | OF13  33.5 FX  30.8 m/s
+   z 0,15..1,3 Aufbau              n=   78692 Mittel  +1.52 p50  -0.29 RMS  4.75 | OF13  26.2 FX  24.7 m/s
+   z 1,3..1,94 Deckelzone          n=   60000 Mittel  -0.66 p50  -0.67 RMS  0.69 | OF13  30.4 FX  31.1 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Mitte 1,5..3,0                     n=   95401 Mittel  +0.57 p50  -0.37 RMS  3.44 | OF13  31.7 FX  31.2 m/s
+   z<0,15 Unterboden               n=   12916 Mittel  +3.17 p50  +2.10 RMS  6.15 | OF13  30.9 FX  27.8 m/s
+   z 0,15..1,3 Aufbau              n=   22485 Mittel  +1.63 p50  +0.64 RMS  5.28 | OF13  27.3 FX  25.7 m/s
+   z 1,3..1,94 Deckelzone          n=   60000 Mittel  -0.39 p50  -0.44 RMS  0.48 | OF13  33.6 FX  33.9 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Heck 3,0..4,44                     n=  175071 Mittel  +0.99 p50  -0.48 RMS  4.79 | OF13  20.4 FX  19.5 m/s
+   z<0,15 Unterboden               n=   14385 Mittel  +0.97 p50  +0.44 RMS  3.42 | OF13  34.0 FX  33.1 m/s
+   z 0,15..1,3 Aufbau              n=  103086 Mittel  +2.16 p50  +1.06 RMS  6.05 | OF13  13.4 FX  11.2 m/s
+   z 1,3..1,94 Deckelzone          n=   57600 Mittel  -1.09 p50  -1.06 RMS  1.20 | OF13  29.7 FX  30.8 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Nachlauf x>4,44                    n=  263907 Mittel  -1.23 p50  -1.10 RMS  4.37 | OF13  16.8 FX  18.1 m/s
+   z<0,15 Unterboden               n=   21240 Mittel  +2.68 p50  +3.01 RMS  6.11 | OF13  18.7 FX  16.0 m/s
+   z 0,15..1,3 Aufbau              n=  163017 Mittel  -1.77 p50  -1.91 RMS  4.68 | OF13  10.9 FX  12.7 m/s
+   z 1,3..1,94 Deckelzone          n=   79650 Mittel  -1.18 p50  -0.86 RMS  2.90 | OF13  28.4 FX  29.6 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+--- wandfern (>100 mm) je x-Zone -- der Ueberbeschleunigungsverlauf:
+   fern vor Fahrzeug x<0           n=   41230 Mittel  -0.13 p50  -0.68 RMS  1.45 | OF13  25.8 FX  26.0 m/s
+   fern Front 0..1,5               n=  112924 Mittel  -0.50 p50  -0.68 RMS  0.92 | OF13  29.9 FX  30.4 m/s
+   fern Mitte 1,5..3,0             n=   66727 Mittel  -0.28 p50  -0.42 RMS  0.61 | OF13  33.5 FX  33.8 m/s
+   fern Heck 3,0..4,44             n=  112478 Mittel  -0.10 p50  -0.80 RMS  2.83 | OF13  22.8 FX  22.9 m/s
+   fern Nachlauf x>4,44            n=  262042 Mittel  -1.26 p50  -1.12 RMS  4.36 | OF13  16.8 FX  18.0 m/s
+===== p375_b 501 ms
+FX-Ebene 1801x497 @ 4 mm, y-Index 361 (Welt-y +0.026 m)
+GESAMT: n=725750 RMS 4.610 Mittel +0.067 p50 -0.60 m/s
+--- nach Wandabstand in der Ebene:
+Wand <=9 Zellen (~32 mm)           n=   46867 Mittel  +5.27 p50  +3.06 RMS  8.90 | OF13  18.1 FX  12.8 m/s
+Wand 10..27 Zellen (~100 mm)       n=   83477 Mittel  +2.31 p50  +0.99 RMS  5.95 | OF13  22.4 FX  20.1 m/s
+fern >27 Zellen (>100 mm)          n=  595406 Mittel  -0.66 p50  -0.70 RMS  3.84 | OF13  22.9 FX  23.6 m/s
+--- nach x-Zone x z-Zone (Fahrzeug x 0..4,44 m):
+vor Fahrzeug x<0                   n=   42742 Mittel  -0.01 p50  -0.67 RMS  1.65 | OF13  25.7 FX  25.7 m/s
+   z<0,15 Unterboden               n=    3440 Mittel  +1.23 p50  +2.99 RMS  4.22 | OF13  23.1 FX  21.9 m/s
+   z 0,15..1,3 Aufbau              n=   26402 Mittel  +0.19 p50  -0.47 RMS  1.36 | OF13  24.4 FX  24.2 m/s
+   z 1,3..1,94 Deckelzone          n=   12900 Mittel  -0.74 p50  -0.73 RMS  0.75 | OF13  29.1 FX  29.9 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Front 0..1,5                       n=  148626 Mittel  +0.66 p50  -0.62 RMS  3.89 | OF13  28.4 FX  27.7 m/s
+   z<0,15 Unterboden               n=    9932 Mittel  +2.62 p50  +0.93 RMS  7.64 | OF13  33.5 FX  30.9 m/s
+   z 0,15..1,3 Aufbau              n=   78694 Mittel  +1.42 p50  -0.29 RMS  4.57 | OF13  26.2 FX  24.8 m/s
+   z 1,3..1,94 Deckelzone          n=   60000 Mittel  -0.66 p50  -0.66 RMS  0.69 | OF13  30.4 FX  31.1 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Mitte 1,5..3,0                     n=   95403 Mittel  +0.44 p50  -0.36 RMS  3.10 | OF13  31.7 FX  31.3 m/s
+   z<0,15 Unterboden               n=   12916 Mittel  +2.01 p50  +1.52 RMS  4.61 | OF13  30.9 FX  28.9 m/s
+   z 0,15..1,3 Aufbau              n=   22487 Mittel  +1.71 p50  +0.66 RMS  5.29 | OF13  27.3 FX  25.6 m/s
+   z 1,3..1,94 Deckelzone          n=   60000 Mittel  -0.38 p50  -0.43 RMS  0.47 | OF13  33.6 FX  33.9 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Heck 3,0..4,44                     n=  175072 Mittel  +1.27 p50  -0.54 RMS  5.28 | OF13  20.4 FX  19.2 m/s
+   z<0,15 Unterboden               n=   14385 Mittel  +1.53 p50  +1.15 RMS  3.54 | OF13  34.0 FX  32.5 m/s
+   z 0,15..1,3 Aufbau              n=  103087 Mittel  +2.51 p50  +0.96 RMS  6.70 | OF13  13.4 FX  10.9 m/s
+   z 1,3..1,94 Deckelzone          n=   57600 Mittel  -1.03 p50  -1.00 RMS  1.12 | OF13  29.7 FX  30.7 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+Nachlauf x>4,44                    n=  263907 Mittel  -1.18 p50  -1.28 RMS  5.24 | OF13  16.8 FX  18.0 m/s
+   z<0,15 Unterboden               n=   21240 Mittel  +1.26 p50  +2.01 RMS  5.29 | OF13  18.7 FX  17.5 m/s
+   z 0,15..1,3 Aufbau              n=  163017 Mittel  -1.12 p50  -1.24 RMS  5.41 | OF13  10.9 FX  12.0 m/s
+   z 1,3..1,94 Deckelzone          n=   79650 Mittel  -1.96 p50  -1.54 RMS  4.86 | OF13  28.4 FX  30.4 m/s
+   z>1,94 darueber                 n=       0  (zu wenig)
+--- wandfern (>100 mm) je x-Zone -- der Ueberbeschleunigungsverlauf:
+   fern vor Fahrzeug x<0           n=   41230 Mittel  -0.12 p50  -0.68 RMS  1.45 | OF13  25.8 FX  26.0 m/s
+   fern Front 0..1,5               n=  112926 Mittel  -0.51 p50  -0.68 RMS  0.91 | OF13  29.9 FX  30.4 m/s
+   fern Mitte 1,5..3,0             n=   66729 Mittel  -0.27 p50  -0.41 RMS  0.62 | OF13  33.5 FX  33.8 m/s
+   fern Heck 3,0..4,44             n=  112479 Mittel  +0.08 p50  -0.81 RMS  3.54 | OF13  22.8 FX  22.8 m/s
+   fern Nachlauf x>4,44            n=  262042 Mittel  -1.22 p50  -1.30 RMS  5.22 | OF13  16.8 FX  18.0 m/s

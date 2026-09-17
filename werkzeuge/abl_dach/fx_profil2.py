@@ -8,10 +8,14 @@ Ergebnis: prof2_<name>.npz mit
   ut1            u_t in der ERSTEN FLUIDZELLE (kein Interpolat, direkt die Zelle ueber der Wand)
   ux1            u_x   ebendort (das B58-Kriterium)
   negfrac        Anteil der (y,t)-Stichproben mit u_x < 0 in der ersten Fluidzelle
-  cp             cp in der ersten Fluidzelle, (rho-1)*2/(3*u_lat^2), u_lat = 0.075
+  cp             cp in der ersten Fluidzelle, (rho-1)*2/(3*u_lat^2) - cp_ref
+                 ★ 17.09.2026 (Pruefagent H2/M5): u_lat aus dem Laufprotokoll logs/<lauf>.log, wenn das Band unter
+                 export/<lauf>/dach_band_<t>ms.npz liegt; cp_ref = Totaldruck-Bezug ueber dem Dach aus
+                 export/<lauf>/zonenkraft_<t>ms.npz (rho_inf_mitte). Sonst Rueckfall auf CFD_U_LAT (Vorgabe 0,075) und
+                 cp_ref = 0 -- LAUT angesagt. u_lat und cp_ref stehen in der npz (je Zeitpunkt).
   zw             Wandlage (Oberkante der obersten Solidzelle)
   d99,dstern,theta,H  aus dem geglaetteten Profil (Fenster +-24 mm in x)
-Wand ausschliesslich aus flags & TYPE_S (Voxelkoerper).
+Wand aus (flags & 3) == TYPE_S (Kernel-Praedikat: Fahrzeug 0x41 und Strasse 0x01, NICHT 0x03 = Fluid an bewegter Wand).
 """
 import sys, os
 import numpy as np
@@ -28,14 +32,36 @@ CP_FAK=2.0/(3.0*U_LAT*U_LAT); Q_INF=0.5*1.225*30.0**2
 def glatt(a,w):
     k=np.ones(2*w+1)/(2*w+1); return np.convolve(np.pad(a,w,mode="edge"),k,mode="valid")
 
+def lauf_konstanten(npz):
+    """u_lat und cp_ref fuer ein Band aus export/<lauf>/dach_band_<t>ms.npz; Rueckfall mit Ansage."""
+    import re
+    lauf=os.path.dirname(os.path.abspath(npz)); m=re.match(r"dach_band_(\d+)ms\.npz$", os.path.basename(npz))
+    log=os.path.join(lauf,"..","..","logs",os.path.basename(lauf)+".log")
+    if m and os.path.exists(log):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        from zonen_kraft import protokoll
+        ul=protokoll(lauf)["u_lat"]
+        zk=os.path.join(lauf, f"zonenkraft_{m.group(1)}ms.npz")
+        if os.path.exists(zk):
+            z=np.load(zk); cpref=(float(z["rho_inf_mitte"][0])-1.0)*2.0/(3.0*ul*ul)
+        else:
+            cpref=0.0; print(f"WARNUNG: {zk} fehlt -- cp OHNE Bezugsabgleich (FX traegt ~+0,08)", file=sys.stderr)
+        return ul, cpref
+    # ★ Pruefrunde 2 (17.09., MITTEL 1): kein stiller Rueckfall mehr -- ohne Protokoll nur mit AUSDRUECKLICHEM CFD_U_LAT
+    if "CFD_U_LAT" not in os.environ:
+        raise SystemExit(f"FEHLER: kein Laufprotokoll zu {npz} und CFD_U_LAT nicht gesetzt -- u_lat unbekannt (Falle 17.09.: Faktor 2,78)")
+    print(f"WARNUNG: kein Laufprotokoll zu {npz} -- u_lat = {U_LAT} aus CFD_U_LAT, cp_ref = 0 (ohne Bezugsabgleich)", file=sys.stderr)
+    return U_LAT, 0.0
+
 def einer(npz, x0, x1, nmax, glatt_mm):
+    ul, cpref = lauf_konstanten(npz); CP_FAK = 2.0/(3.0*ul*ul)
     d=np.load(npz); U,RHO,FL=d["u"],d["rho"],d["flags"]
     Nx,Ny,Nz=[int(v) for v in d["dims"]]; ox,oy,oz=[float(v) for v in d["orig"]]; dx=float(d["dx"])
     ny=U.shape[1]
     x=ox+np.arange(Nx)*dx; z=oz+np.arange(Nz)*dx
     i0,i1=int(np.searchsorted(x,x0)),int(np.searchsorted(x,x1))
     k0,k1=int(np.searchsorted(z,0.30)),int(np.searchsorted(z,1.62))
-    solid=(FL&TYPE_S)!=0
+    solid=(FL&3)==TYPE_S
     ns=int(round(nmax/dx)); sd=(np.arange(ns)+0.5)*dx
     w=max(1,int(round(0.001*glatt_mm/dx))); NX=i1-i0; idx=np.arange(NX)
     UT=np.full((ny,NX,ns),np.nan); CPS=np.full((ny,NX,ns),np.nan); UT1=np.full((ny,NX),np.nan)
@@ -49,7 +75,7 @@ def einer(npz, x0, x1, nmax, glatt_mm):
         dxx=np.gradient(x[i0:i1]); dzz=np.gradient(zg); L=np.hypot(dxx,dzz); tx,tz=dxx/L,dzz/L
         UT1[j,f1]=(U[kf[f1],j,i0+idx[f1],0]*tx[f1]+U[kf[f1],j,i0+idx[f1],2]*tz[f1])
         UX1[j,f1]=U[kf[f1],j,i0+idx[f1],0]
-        CP[j,f1]=(RHO[kf[f1],j,i0+idx[f1]]-1.0)*CP_FAK
+        CP[j,f1]=(RHO[kf[f1],j,i0+idx[f1]]-1.0)*CP_FAK-cpref
         nx_,nz_=-tz,tx
         px=x[i0:i1][:,None]+nx_[:,None]*sd[None,:]; pz=zw[:,None]+nz_[:,None]*sd[None,:]
         fi=(px-ox)/dx; fk=(pz-oz)/dx
@@ -65,14 +91,16 @@ def einer(npz, x0, x1, nmax, glatt_mm):
         # erster Abtastpunkt: echte erste Fluidzelle statt Interpolat
         ut[:,0]=UT1[j]
         UT[j]=ut
-        cps=(bil(RHO[:,:,:][:,:,:])-1.0)*CP_FAK if False else (bil(RHO)-1.0)*CP_FAK
+        cps=(bil(RHO)-1.0)*CP_FAK-cpref
         cps[solid[kk,j,ii]]=np.nan; cps[:,0]=CP[j]
         CPS[j]=cps
-    return dict(x=x[i0:i1],s=sd,dx=dx,UT=UT,CPS=CPS,UT1=UT1,UX1=UX1,CP=CP,ZW=ZW,glatt_w=w)
+    return dict(x=x[i0:i1],s=sd,dx=dx,UT=UT,CPS=CPS,UT1=UT1,UX1=UX1,CP=CP,ZW=ZW,glatt_w=w,u_lat=ul,cp_ref=cpref)
 
 def main():
     name=sys.argv[1]; npzs=sys.argv[2:]
-    R=[einer(p,2.0,4.05,0.35,24.0) for p in npzs]
+    # x-Bereich per Umgebung (17.09.2026: Suche stromauf bis zur Haube); Vorgabe unveraendert 2,0..4,05 m
+    X0=float(os.environ.get("DACH_X0","2.0")); X1=float(os.environ.get("DACH_X1","4.05"))
+    R=[einer(p,X0,X1,0.35,24.0) for p in npzs]
     x=R[0]["x"]; s=R[0]["s"]; dx=R[0]["dx"]; w=R[0]["glatt_w"]
     UT=np.concatenate([r["UT"] for r in R],axis=0)
     UT1=np.concatenate([r["UT1"] for r in R],axis=0)
@@ -102,6 +130,7 @@ def main():
     s50=np.array(s50);s90=np.array(s90)
     out=f"{os.path.dirname(os.path.abspath(__file__))}/prof2_{name}.npz"
     np.savez_compressed(out,x=x,s=s,dx=dx,ut=ut,utg=utg,cps=cps,cpsg=cpsg,ut1=ut1,ux1=ux1,cp=cp,
-                        negfrac=negfrac,zw=zw,d99=d99,dstern=ds,theta=th,H=H,s50=s50,s90=s90,n_proben=UT1.shape[0])
-    print(f"{name}: {len(npzs)} Zeitpunkte x {R[0]['UT'].shape[0]} y-Ebenen = {UT1.shape[0]} Proben -> {out}")
+                        negfrac=negfrac,zw=zw,d99=d99,dstern=ds,theta=th,H=H,s50=s50,s90=s90,n_proben=UT1.shape[0],
+                        u_lat=np.array([r["u_lat"] for r in R]),cp_ref=np.array([r["cp_ref"] for r in R]))
+    print(f"{name}: {len(npzs)} Zeitpunkte x {R[0]['UT'].shape[0]} y-Ebenen = {UT1.shape[0]} Proben, u_lat {[r['u_lat'] for r in R]}, cp_ref {[round(r['cp_ref'],4) for r in R]} -> {out}")
 main()

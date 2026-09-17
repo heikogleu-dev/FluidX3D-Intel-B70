@@ -97,7 +97,7 @@ del zeilen
 if idx.size != ns.sum(): raise SystemExit(f"faces: {idx.size} Indizes statt {ns.sum()}")
 off = np.concatenate(([0], np.cumsum(ns)))[:-1]
 print(f"  Eckenzahlen: {dict(zip(*[v.tolist() for v in np.unique(ns, return_counts=True)]))}", flush=True)
-Sf = np.zeros((nf, 3)); Cz = np.zeros(nf)
+Sf = np.zeros((nf, 3)); Cz = np.zeros(nf); Cxyz = np.zeros((nf, 3))   # Cxyz: flaechengewichtete Mitte (17.09.2026, Zonenzerlegung)
 for k in np.unique(ns):                              # je Eckenzahl EIN vektorisierter Block
     m = ns == k
     ids = idx[off[m][:, None] + np.arange(k)]        # (M,k)
@@ -109,6 +109,9 @@ for k in np.unique(ns):                              # je Eckenzahl EIN vektoris
     at = np.linalg.norm(tri, axis=2)
     zc = (P[:, :, 2] + np.roll(P[:, :, 2], -1, axis=1) + c[:, 2:3]) / 3.0
     Cz[m] = (at * zc).sum(axis=1) / np.maximum(at.sum(axis=1), 1e-30)
+    for ax in range(3):
+        ac = (P[:, :, ax] + np.roll(P[:, :, ax], -1, axis=1) + c[:, ax:ax+1]) / 3.0
+        Cxyz[m, ax] = (at * ac).sum(axis=1) / np.maximum(at.sum(axis=1), 1e-30)
     del ids, P, a, b, tri, at, zc
 del idx, pts
 print(f"  |Sf| gesamt {np.linalg.norm(Sf,axis=1).sum():.4f} m2, z-Schwerpunkte {Cz.min():.4f}..{Cz.max():.4f} m", flush=True)
@@ -142,6 +145,11 @@ for name, ist, sl in (("Druck", F_druck.sum(axis=0), soll and soll["p"]), ("Reib
     if max(d[0], d[2]) > 0.01:
         print("  ACHTUNG: Abweichung > 1 % -- die Bandzerlegung unten ist NICHT belastbar.")
 
+CACHE = os.environ.get("OF13_CACHE", "")
+if CACHE:   # Rohgroessen je Randflaeche fuer werkzeuge/zonen_kraft.py -- identisch zu den Summen oben (Abnahme gilt mit)
+    np.savez_compressed(CACHE, Sf=Sf, C=Cxyz, pw=pw, tau=tau, rho_inf=RHO_INF, a_ref=A_REF, q_inf=Q_INF, zeit=ZEIT,
+                        F_druck_summe=F_druck.sum(axis=0), F_reib_summe=F_reib.sum(axis=0))
+    print(f"  Cache geschrieben: {CACHE}  (C = flaechengewichtete Mitte, OF13-Koordinaten; x_v2 = x + 2,2063)")
 print(f"\n=== HOEHENBANDER (Cd/Cz auf A_ref {A_REF} m2, q_inf {Q_INF:.1f} Pa) ===")
 cd = lambda F: F[0] / (Q_INF * A_REF); cz = lambda F: F[2] / (Q_INF * A_REF)
 ges_p, ges_v = F_druck.sum(axis=0), F_reib.sum(axis=0)

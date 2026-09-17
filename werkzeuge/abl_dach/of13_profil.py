@@ -14,7 +14,8 @@ D = np.genfromtxt(SP+"/of13_dachlinie.csv", delimiter=",", names=True)
 S = np.load(SP+"/of13_slab.npy").astype(np.float64)     # x y z p Ux Uy Uz
 sx, sz, sux, suz = S[:,0], S[:,2], S[:,4], S[:,6]
 
-m = (D["x_v2_m"]>1.95)&(D["x_v2_m"]<4.10)
+# x-Bereich per Umgebung (17.09.2026); Vorgabe unveraendert 1,95..4,10 m
+m = (D["x_v2_m"]>float(os.environ.get("DACH_X0","1.95")))&(D["x_v2_m"]<float(os.environ.get("DACH_X1","4.10")))
 xw, zw = D["x_of13_m"][m], D["z_m"][m]
 zg = glatt(zw, 2)
 dx=np.gradient(xw); dz=np.gradient(zg); L=np.hypot(dx,dz); tx,tz=dx/L,dz/L
@@ -46,9 +47,14 @@ for i in range(len(xw)):
     f=uu[:ke+1]/ue; ss=smid[:ke+1]
     ds.append(np.trapezoid(1-f,ss)); th.append(np.trapezoid(f*(1-f),ss))
 d99=np.array(d99);ds=np.array(ds);th=np.array(th);H=ds/np.where(th>0,th,np.nan)
+# ★ 17.09.2026 (Pruefagent H2): Totaldruck-Bezug ueber dem Dach (x_v2 0,3-3,0, z 1,5-1,8, |y|<0,03) wie in
+# zonen_kraft.py/zonen_vergleich.py -- OF13 roh traegt +0,0235, FX +0,08. cp wird auf denselben Bezug gestellt.
+mr=(sx+XOFF>0.3)&(sx+XOFF<3.0)&(sz>1.5)&(sz<1.8)
+CPREF=float(np.median(S[mr,3]+0.5*((S[mr,4:7]**2).sum(1)-900.0))/(0.5*900.0))
+print(f"OF13 cp_ref (Totaldruck ueber dem Dach): {CPREF:+.4f}")
 np.savez_compressed(SP+"/prof_of13.npz", x=xw+XOFF, s=smid, ut=UT, zw=zw,
                     d99=d99, dstern=ds, theta=th, H=H,
-                    cp=D["cp_wand"][m], cf=D["cf"][m], tau=D["tau_t_m2s2"][m])
+                    cp=D["cp_wand"][m]-CPREF, cf=D["cf"][m], tau=D["tau_t_m2s2"][m], cp_ref=CPREF)
 print("prof_of13.npz:", len(xw), "Stationen")
 for i in range(0,len(xw),6):
     print(f"x_v2 {xw[i]+XOFF:6.3f} z {zw[i]:6.3f}  d99 {1000*d99[i]:6.1f} mm  d* {1000*ds[i]:6.2f}  "
