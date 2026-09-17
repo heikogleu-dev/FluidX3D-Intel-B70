@@ -39,17 +39,34 @@ def lies_header(f):
 
 vtk=sys.argv[1]
 of13=sys.argv[3] if len(sys.argv)>3 else OF13_STD
+# ★ 17.09.2026 (SKALIERUNG-BEFUNDE Nebenbefund 10): Y_SOLL ist KOERPERBEZOGEN (OF13-Fahrzeug steht auf y = 0). CFD_Y_VERSATZ
+# schiebt den FX-Koerper um eine halbe feine Zelle nach +y -- die FX-Ebene muss mitwandern, sonst liegt sie bei 4 mm 22 statt
+# 25 mm neben der Mittelebene. Versatz aus dem Laufprotokoll (werkzeuge/lauf_meta.py); unbekannt -> 0 mit WARNUNG.
+import lauf_meta as _lm
+_yv,_yq=_lm.y_versatz_m(_lm.lauf_dir_aus(vtk), vtk)
+if _yv is None:
+    print(f"WARNUNG: Y-Versatz unbekannt ({_yq}) -- Ebene OHNE Versatz gewaehlt; bei CFD_Y_VERSATZ=1 liegt sie eine halbe Zelle daneben.")
+    _yv=0.0
+# ★ 17.09.2026 (Pruefbefund 9): OF13-z ist KOERPERBEZOGEN (Fahrzeug auf der Fahrbahn), FX-Welt-z nicht, wenn der Upstream-Bodenspalt den
+# Koerper um dk ganze Zellen anhebt. Die OF13-Bins werden deshalb auf Koerper-z = Welt-z - dk*dx gelegt (dk aus lauf_meta.bodenspalt).
+_dk,_dkq=_lm.bodenspalt(_lm.lauf_dir_aus(vtk))
+if _dk is None:
+    print(f"WARNUNG: Bodenspalt dk {_dkq} -- 0 angenommen; bei einem Upstream-Lauf mit Spalt liegt OF13 dann um dk*dx zu tief.")
+    _dk=0
 with open(vtk,"rb") as f:
     (Nx,Ny,Nz),orig,spac,off=lies_header(f)
-    yq=int(round((Y_SOLL-orig[1])/spac[1]))
+    yq=int(round((Y_SOLL+_yv-orig[1])/spac[1]))
     ebene=np.empty((Nz,Nx,3),dtype=np.float32)
     for z in range(Nz):
         f.seek(off+((z*Ny+yq)*Nx)*12)
         ebene[z]=np.frombuffer(f.read(Nx*12),dtype=">f4").reshape(Nx,3)
 fx=np.linalg.norm(ebene.astype(np.float64),axis=2)
 solid=fx==0.0
-x0,z0,dx=orig[0],orig[2],spac[0]
-print(f"FX-Ebene: y-Index {yq} (Welt-y {orig[1]+yq*spac[1]:+.3f} m, Soll {Y_SOLL}), {Nx}x{Nz} Zellen")
+x0,dx=orig[0],spac[0]
+z0=orig[2]-_dk*spac[2]   # Koerper-z der Zeile k = 0 (Welt-z minus Bodenspalt)
+print(f"FX-Ebene: y-Index {yq} (Welt-y {orig[1]+yq*spac[1]:+.4f} m, koerperbezogen {orig[1]+yq*spac[1]-_yv:+.4f} m, Soll {Y_SOLL}; "
+      f"Y-Versatz {_yv*1e3:.3f} mm aus {_yq}), {Nx}x{Nz} Zellen")
+print(f"Bodenspalt dk = {_dk} Zellen ({_dkq}) -> Koerper-z = Welt-z - {_dk*spac[2]*1e3:.3f} mm; OF13-z gegen Koerper-z gebinnt")
 
 d=np.loadtxt(of13)
 ox,oz,ou=d[:,0]+XOFF,d[:,2],np.linalg.norm(d[:,3:6],axis=1)

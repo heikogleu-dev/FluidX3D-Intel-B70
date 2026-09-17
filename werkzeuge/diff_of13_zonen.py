@@ -21,17 +21,34 @@ def lies_header(f):
 
 vtk  = sys.argv[1]
 of13 = sys.argv[2] if len(sys.argv) > 2 else OF13_STD
+# ★ 17.09.2026 (SKALIERUNG-BEFUNDE Nebenbefund 10): Y_SOLL ist KOERPERBEZOGEN; CFD_Y_VERSATZ verschiebt den FX-Koerper -> Ebene mitschieben
+# (wie diff_of13_yslice.py). Versatz aus dem Laufprotokoll (werkzeuge/lauf_meta.py); unbekannt -> 0 mit WARNUNG.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
+yv, yv_quelle = lauf_meta.y_versatz_m(lauf_meta.lauf_dir_aus(vtk), vtk)
+if yv is None:
+    print(f"WARNUNG: Y-Versatz unbekannt ({yv_quelle}) -- Ebene OHNE Versatz gewaehlt; bei CFD_Y_VERSATZ=1 liegt sie eine halbe Zelle daneben.")
+    yv = 0.0
+# ★ 17.09.2026 (Pruefbefund 9): OF13-z ist KOERPERBEZOGEN; der Upstream-Bodenspalt hebt den FX-Koerper um dk ganze Zellen. OF13-Bins und
+# z-Zonen werden deshalb in Koerper-z = Welt-z - dk*dx gerechnet (dk aus lauf_meta.bodenspalt), die FX-Ebene bleibt in Welt-Indizes.
+dk, dk_quelle = lauf_meta.bodenspalt(lauf_meta.lauf_dir_aus(vtk))
+if dk is None:
+    print(f"WARNUNG: Bodenspalt dk {dk_quelle} -- 0 angenommen; bei einem Upstream-Lauf mit Spalt liegen OF13 und die z-Zonen dann um dk*dx zu tief.")
+    dk = 0
 with open(vtk, "rb") as f:
     (Nx, Ny, Nz), orig, spac, off = lies_header(f)
-    yq = int(round((Y_SOLL - orig[1]) / spac[1]))
+    yq = int(round((Y_SOLL + yv - orig[1]) / spac[1]))
     ebene = np.empty((Nz, Nx, 3), dtype=np.float32)
     for z in range(Nz):
         f.seek(off + ((z * Ny + yq) * Nx) * 12)
         ebene[z] = np.frombuffer(f.read(Nx * 12), dtype=">f4").reshape(Nx, 3)
 fx = np.linalg.norm(ebene.astype(np.float64), axis=2)
 solid = fx == 0.0
-x0, z0, dx = orig[0], orig[2], spac[0]
-print(f"FX-Ebene {Nx}x{Nz} @ {dx*1000:.0f} mm, y-Index {yq} (Welt-y {orig[1]+yq*spac[1]:+.3f} m)")
+x0, dx = orig[0], spac[0]
+z0 = orig[2] - dk*spac[2]   # Koerper-z der Zeile k = 0 (Welt-z minus Bodenspalt)
+print(f"FX-Ebene {Nx}x{Nz} @ {dx*1000:.4g} mm, y-Index {yq} (Welt-y {orig[1]+yq*spac[1]:+.4f} m, koerperbezogen {orig[1]+yq*spac[1]-yv:+.4f} m; "
+      f"Y-Versatz {yv*1e3:.3f} mm aus {yv_quelle})")
+print(f"Bodenspalt dk = {dk} Zellen ({dk_quelle}) -> Koerper-z = Welt-z - {dk*spac[2]*1e3:.3f} mm; OF13-Bins und z-Zonen koerperbezogen")
 
 d = np.loadtxt(of13)
 ox, oz, ou = d[:, 0] + XOFF, d[:, 2], np.linalg.norm(d[:, 3:6], axis=1)

@@ -17,6 +17,8 @@ je Fenster mit Block-SEM ausgewiesen.
 import sys, os, csv, math, argparse
 
 WURZEL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 
 # Groesse -> (Datei, Spaltenname). Reihenfolge = Ausgabereihenfolge.
 # STANDARD sind die ZWEI Groessen des Laufberichts. Ihre Definition steht in setup.cpp:7709:
@@ -35,7 +37,10 @@ GROESSEN_MEHR = [
 ]
 
 def lies(lauf, datei, spalte):
-    """{ms(int): wert(float)} aus export/<lauf>/<datei>. Kommentarzeilen (#) uebersprungen."""
+    """{us(int): wert(float)} aus export/<lauf>/<datei>. Kommentarzeilen (#) uebersprungen.
+    ★ 17.09.2026 (SKALIERUNG-BEFUNDE Nebenbefund 10): Schluessel waren GANZE ms -- bei 0,9375 ms (p375_a), 0,08 ms (kl_a*_dd8)
+    oder 1,067 ms (SPZ 8 auf 8/16 mm) fielen Samples auf denselben Schluessel und ueberschrieben sich still, und die Paarung
+    lief ueber gerundete statt echte Zeitstempel. Jetzt Mikrosekunden (die CSV traegt float32-Sekunden, Jitter ~1e-8 s)."""
     pfad = os.path.join(WURZEL, "export", lauf, datei)
     if not os.path.isfile(pfad): return None, f"fehlt: {pfad}"
     with open(pfad) as fh:
@@ -50,7 +55,7 @@ def lies(lauf, datei, spalte):
             t = float(z["time_s"]); v = float(z[spalte])
         except (TypeError, ValueError):
             continue
-        if math.isfinite(v): d[int(round(t*1000.0))] = v   # Schluessel: ganze ms
+        if math.isfinite(v): d[int(round(t*1e6))] = v   # Schluessel: Mikrosekunden (echter Zeitstempel)
     return d, None
 
 def mittel(xs): return sum(xs)/len(xs) if xs else float("nan")
@@ -83,6 +88,7 @@ def main():
     if a.mehr: GROESSEN = GROESSEN + GROESSEN_MEHR
 
     ab_ms, br_ms = int(round(a.ab*1000)), int(round(a.breite*1000))
+    ab_us, br_us = 1000*ab_ms, 1000*br_ms
     ref = a.laeufe[0]
 
     # --- einlesen ---
@@ -100,8 +106,26 @@ def main():
 
     # --- gemeinsame Zeitschritte JE GROESSE (Iron Rule: gepaart heisst gleicher Zeitschritt) ---
     print(f"Laeufe: {' | '.join(a.laeufe)}   (Referenz: {ref})")
+    # ★ 17.09.2026 (Pruefbefund 3): die REST-Groessen haengen an der Kontaktband-Kante N (seit 17.09. N = max(3, ceil(16/dx)); alte Laeufe
+    # 8 mm N = 2, 3,75 mm N = 4). Kante aller Laeufe aus dem Laufprotokoll -- Abweichung wird LAUT gemeldet (Kopf und Ende).
+    bz, band_gleich, band_kurz = lauf_meta.band_vergleich([(l, os.path.join(WURZEL, "export", l)) for l in a.laeufe])
+    print("\n".join(bz))
     print(f"Fenster: {br_ms} ms ab {ab_ms} ms, gepaart ueber gemeinsame Zeitschritte, "
           f"Block-SEM ueber {a.bloecke} Bloecke je Fenster\n")
+
+    # Abtastraster je Lauf aus den DATEN (Median-Abstand) -- verschiedene Raster heissen: gepaart wird nur auf dem gemeinsamen Teil.
+    def raster_us(d):
+        t = sorted(d); dd = sorted(t[i+1] - t[i] for i in range(len(t) - 1))
+        return dd[len(dd)//2] if dd else 0
+    raster = {}
+    for lauf in a.laeufe:
+        rr = [raster_us(daten[(lauf, n)]) for n, _, _ in GROESSEN if daten[(lauf, n)]]
+        raster[lauf] = max(rr) if rr else 0
+    print("Abtastraster (Median-Abstand der Zeitstempel): " + " | ".join(f"{l} {raster[l]/1000:.4f} ms" for l in a.laeufe))
+    if len({r for r in raster.values() if r}) > 1:
+        print("  HINWEIS: verschiedene Abtastraster -- gepaart wird nur auf den gemeinsamen Zeitstempeln (siehe 'durch Zeitversatz verworfen');"
+              " fuer Laeufe verschiedener Sprossen ist werkzeuge/fenster_50ms.py (ungepaarte Fenstermittel) das passende Werkzeug.")
+    print()
 
     ausgabe = []
     teil_gesehen = False
@@ -110,13 +134,13 @@ def main():
         if any(not r for r in reihen):
             print(f"### {name}: uebersprungen (mindestens ein Lauf ohne Daten)\n"); continue
         gemeinsam = sorted(set.intersection(*[set(r.keys()) for r in reihen]))
-        gemeinsam = [t for t in gemeinsam if t >= ab_ms]
+        gemeinsam = [t for t in gemeinsam if t >= ab_us]
         if not gemeinsam:
             print(f"### {name}: keine gemeinsamen Zeitschritte ab {ab_ms} ms\n"); continue
 
         # Deckungsprobe: je Lauf die Punkte ab ab_ms, damit sichtbar ist, WER kuerzer ist
         # (ein noch laufender Arm ist kurz, ein Versatz der ersten Zeile ist etwas anderes).
-        einzeln = [(l, len([t for t in r if t >= ab_ms])) for l, r in zip(a.laeufe, reihen)]
+        einzeln = [(l, len([t for t in r if t >= ab_us])) for l, r in zip(a.laeufe, reihen)]
         je = ", ".join(f"{l[:16]} {n}" for l, n in einzeln)
         kuerzest = min(n for _, n in einzeln)
         versatz = kuerzest - len(gemeinsam)   # verloren TROTZ gleicher Laenge = echter Zeitversatz
@@ -131,20 +155,23 @@ def main():
         print(kopf)
 
         t_max = max(gemeinsam)
+        dt_us = max(1, max(raster[l] for l in a.laeufe))
         start = ab_ms
-        while start <= t_max:
+        while 1000*start <= t_max:
             ende = start + br_ms
-            fenster = [t for t in gemeinsam if start <= t < ende]
+            fenster = [t for t in gemeinsam if 1000*start <= t < 1000*ende]
             # Den Rest NUR anhaengen, wenn er kurz ist (der bekannte Fall: 450-500 plus die eine
             # 501-ms-Probe). Frueher hing hier jeder Rest am letzten Fenster -- bei einem noch
             # LAUFENDEN Arm verschmolz dadurch das erste Fenster mit dem Anbruch zu "200-262",
             # und die 50-ms-Aufloesung war weg, ohne dass es auffiel.
-            rest = [t for t in gemeinsam if t >= ende]
-            if rest and len(rest) <= max(1, br_ms//5):
-                fenster = fenster + rest; ende = max(rest) + 1
+            # ★ 17.09.2026: "kurz" in ZEIT (< 1/5 Fensterbreite), nicht in Samplezahl -- bei 0,08 ms Abtastung waeren 10 Samples
+            # nur 0,8 ms. Fuer 1-ms-Daten identisch zur alten Regel (len(rest) <= br_ms//5).
+            rest = [t for t in gemeinsam if t >= 1000*ende]
+            if rest and max(rest) - 1000*ende < br_us//5:
+                fenster = fenster + rest; ende = max(rest)//1000 + 1
             teil = ""
             if not fenster: break
-            if ende - start < br_ms or (start + br_ms > t_max + 1):
+            if ende - start < br_ms or (1000*(start + br_ms) > t_max + dt_us):
                 teil = " *"   # angebrochenes Fenster: der Lauf endet hier (oder laeuft noch)
                 teil_gesehen = True
             zeile = f"{start:>6}-{ende:<7} {len(fenster):>4}{teil:<2}"
@@ -167,6 +194,8 @@ def main():
     if teil_gesehen:
         print("* = angebrochenes Fenster: der Lauf endet dort oder laeuft noch. "
               "Diese Zeile ist KEIN 50-ms-Mittel und nicht mit den vollen Fenstern vergleichbar.\n")
+
+    if not band_gleich: print(band_kurz + "\n")
 
     if a.csv:
         with open(a.csv, "w", newline="") as fh:

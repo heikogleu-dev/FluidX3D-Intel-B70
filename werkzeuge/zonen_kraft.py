@@ -17,12 +17,14 @@ VERFAHREN (Planungsagent 17.09., Antworten 1-8; rein lesend):
 
 EINGEBAUTE ABNAHMEN (Abbruch = SystemExit, Warnung = markiert in der Ausgabe):
   A1 Layout (Marker, Dateigroesse) wie fx_band.py; u_lat aus dem Laufprotokoll (NIE Vorgabe -- Falle 17.09.: x2,78).
-  A2 Flag-Zensus: nur {0x00,0x01,0x02,0x03,0x41}; z=0 nur 0x01; 0x41 bei z<4 == "Band-Census" im Log;
+  A2 Flag-Zensus: nur {0x00,0x01,0x02,0x03,0x41}; z=0 nur 0x01; 0x41 bei z<N == "Band-Census" im Log (N = KRAFT-ZBAND des Laufs);
      Facettenzellen (Fluid mit >=1 Fahrzeuglink) == Zeilenzahl facetten_histogramme.csv.
   A3 Schliessung EXAKT: Sum 2wc ueber (Fluid->Fahrzeug) + (Nicht-Fluid->Fahrzeug) == 0 je Komponente
      (jede Gerade tritt gleich oft in den Koerper ein wie aus). Prueft Vorzeichen und Vollstaendigkeit der Linksuche.
   A4 Gegen den Facettenpfad (cd_facetten.csv, Momentanwert zum selben t): |dCz| <= 0,05, |dCd| <= 0,08 fuer P1;
-     Band (Fahrzeugzellen z-Index < 4) gegen cd/cz_druck_band. Grenzen VOR dem ersten Lauf festgelegt (Planungsagent).
+     Band (Fahrzeugzellen z-Index < N, N = KRAFT-ZBAND des Laufs; Regel seit 17.09. N = max(3, ceil(16 mm/dx)): 4 mm N = 4 / 14 mm,
+     8 mm N = 3 / 20 mm, 3,75 mm N = 5 / 16,875 mm, 16 mm N = 3 / 40 mm; alte Laeufe 8 mm N = 2 / 12 mm, 3,75 mm N = 4 / 13,125 mm)
+     gegen cd/cz_druck_band. Grenzen VOR dem ersten Lauf festgelegt (Planungsagent).
      ★ BERICHTIGT nach dem ersten Lauf (17.09., offen deklariert): der Plan nannte E1 als Vergleichsgroesse. E1 ist
      UNPROJIZIERT und enthaelt den tangentialen Bounce-Back-Impulsfluss 2w*3(c.u)c (p375_e 501 ms: Cd +11,6); der
      Facettenpfad projiziert F auf die Facettennormale (setup.cpp:4247-4264) und entfernt ihn. Der normalprojizierte
@@ -31,6 +33,23 @@ EINGEBAUTE ABNAHMEN (Abbruch = SystemExit, Warnung = markiert in der Ausgabe):
      Groesse wie OF13 p*Sf. A4 gilt deshalb fuer P1, getrennt GESAMT / BAND / REST (Pruefagent: das Gesamt bestand nur durch
      Kompensation Rest +0,05 gegen Band -0,07). E1 bleibt Information.
   A5 Freistrom: Median |u| im Einlassstreifen muss si_u treffen (+-3 %), sonst stimmt die u-Umrechnung nicht.
+     Streifen x = ORIGIN + 15..75 mm (auf ganze Zellen gerundet, mindestens 2..6 Zellen), |y| 1,15-1,30, z 0,3-1,5 m.
+
+GITTERUNABHAENGIG (★ 17.09.2026, Heiko "Skripte muessen immer passen", SKALIERUNG-BEFUNDE Befund 1 + Nebenbefund 10):
+  - u_lat, Y-Versatz, Kontaktband N und Bodenspalt dk aus dem Laufprotokoll ueber werkzeuge/lauf_meta.py; die Quelle wird gedruckt.
+    Kein stiller Rueckfall mehr auf "4 Zellen" (fruehere Fassung: `zband or 4`) -- ohne Bandquelle bricht A2 ab.
+  - Erste z-Binkante = WIRKSAME Oberkante des Kontaktbands in Fahrzeugkoordinaten (= OF13-Koordinaten): (N - 0,5) dx - dk dx
+    bzw. die Log-Zeile KRAFT-ZBAND-KANTE. Frueher fest 15 mm (= N dx auf 3,75 mm). Bin 0 enthaelt GENAU die Band-Links
+    (Fahrzeugzelle z-Index < N); Links auf der Kante (Midpoint == Kante) werden nach dem Band-Flag zugeordnet, nicht nach Rundung.
+    Gegen npz vor dem 17.09. (erste Kante N dx, Bin nach Mittelpunkt) ist das NICHT bitgleich, auch nicht mit derselben Kante:
+    p375_e 501 ms: 8740 Nicht-Band-Links mit Mittelpunkt z = 13,125 mm (< 15 mm) wandern von Bin 0 nach Bin 1. Gleich bleiben nur
+    die Bins >= 2 (bitgleich), die Summe Bin 0 + Bin 1 und die Summen je Band-Flag.
+  - Linkhoehen fuer die z-Bins in Fahrzeugkoordinaten (z_Welt - dk dx): der Upstream-Bodenspalt hebt den Koerper um dk Zellen an,
+    OF13 steht auf der Fahrbahn. h_mitte (Bodenfreiheit) bleibt der Abstand zur Strassenwand des LAUFS (Welt).
+  - A5-Streifen in Metern statt ORIGIN + 4..20 Zellen (auf 3,75 mm identisch, auf 8 mm vorher 32-160 mm, jetzt 16-72 mm).
+  - A4-Zeittoleranz aus der Abtastkadenz der cd_facetten.csv (0,5 ms Namensrundung + halbe Kadenz) statt fest 0,5 ms. ★ Abstand > 0,5 ms
+    wird als WARNUNG gemeldet: dann stammen VTK und cd_facetten-Zeile nicht aus derselben Sample-Iteration (Pruefbefund 4).
+  - Y-Versatz mit dem VTK-Kopf bestimmt (lauf_meta.y_versatz_m(lauf, vtk), wie fx_band/diff_of13) -- ohne Log greift die Solver-Regel.
   A6 Bezugsdruck rho_inf aus der Totaldruck-Invariante rho*exp(1,5(|u|^2-u_inf^2)) im Potentialgebiet ueber dem Dach
      (Median, IQR) und Kontrolle Seitenstreifen; beide werden ausgegeben, die Differenz ist die Bezugsunsicherheit.
 
@@ -39,21 +58,35 @@ Aufruf: zonen_kraft.py <export/lauf> <t_ms, z.B. 000501>
 """
 import sys, os, re
 import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 
 TYPE_FAHRZEUG, FLUID_WERTE, ERLAUBT = 0x41, (0x00, 0x03), {0x00, 0x01, 0x02, 0x03, 0x41}
 SI_U, SI_RHO, A_REF = 30.0, 1.225, 1.85
 Q_INF = 0.5 * SI_RHO * SI_U**2
-# Bins -- reine Auswerteraster, keine Modellkonstanten. x: 100-mm-Streifen; z: Grenzen an der Kontaktband-Hoehe
-# (15 mm = 4 Zellen, Solver-Band) und sonst grob nach Bauhoehe; Orientierung nach der Zellnormale (ORI unten).
+# Bins -- reine Auswerteraster, keine Modellkonstanten. x: 100-mm-Streifen; z: erste Grenze an der WIRKSAMEN Kontaktband-
+# Oberkante DES LAUFS (zkanten_fuer_lauf, ★ 17.09.2026 -- vorher fest 15 mm) und sonst grob nach Bauhoehe; Orientierung nach der
+# Zellnormale (ORI unten).
 XB0, XBW, NXB = -0.2, 0.1, 48
-ZKANTEN = np.array([0.015, 0.06, 0.12, 0.20, 0.40, 0.70, 1.00, 1.30])      # 9 Bins: [0,.015) ... [1.30, inf)
-NZB = len(ZKANTEN) + 1
+ZKANTEN_AB_2 = (0.06, 0.12, 0.20, 0.40, 0.70, 1.00, 1.30)                   # Bins 1..8: [kante,.06) ... [1.30, inf)
+NZB = len(ZKANTEN_AB_2) + 2
 ORI = ("oben", "seite", "unten")    # nach der ZELLNORMALE der Fluidzelle, m = Sum 2wc ueber ihre Fahrzeuglinks (zeigt ins Fahrzeug):
                                     # m_z < 0 Koerper darunter (Oberseite), m_z > 0 Unterseite, m_z == 0 Seite.
                                     # ★ Pruefagent 17.09. H1: die erste Fassung sortierte je Link nach sign(c_z) -- an einer
                                     # senkrechten Wand fielen die Diagonallinks halb nach oben, halb nach unten; die projizierte
                                     # Flaeche "oben" war 8,63 gegen OF13 7,05 (Vielfache von A_ref, nicht m2; mit Zellnormale 7,08).
-NBIN = NXB * NZB * 3 * 2            # letzter Faktor: Band-Flag (Fahrzeugzelle z-Index < 4)
+NBIN = NXB * NZB * 3 * 2            # letzter Faktor: Band-Flag (Fahrzeugzelle z-Index < N, N = KRAFT-ZBAND des Laufs)
+
+def zkanten_fuer_lauf(zb):
+    """z-Binkanten in Fahrzeugkoordinaten: [wirksame Bandkante, 0.06, ..., 1.30]."""
+    k = float(zb["kante_fz_m"])
+    if not (0.0 < k < ZKANTEN_AB_2[0]): raise SystemExit(f"A2 FEHLER: wirksame Bandkante {k*1e3:.4g} mm ausserhalb (0, {ZKANTEN_AB_2[0]*1e3:.0f}) mm")
+    return np.array((k,) + ZKANTEN_AB_2)
+
+def z_bin(zmid_fz, band, zk):
+    """Bin-Index je Link: 0 genau fuer Band-Links, sonst searchsorted, mindestens 1 (Kanten-Gleichstand nach dem Band-Flag)."""
+    zb = np.searchsorted(zk, zmid_fz, side="right")
+    return np.where(band == 1, 0, np.maximum(zb, 1))
 
 def richtungen():
     C, W = [], []
@@ -85,19 +118,16 @@ def kopf(pfad):
         f.seek(d["off_rho"] + n*4); assert f.read(len(s2)) == s2, "A1 FEHLER: flags-Marker"
     return d
 
-def protokoll(lauf_dir):
-    name = os.path.basename(os.path.normpath(lauf_dir))
-    pfad = os.path.join(lauf_dir, "..", "..", "logs", name + ".log")
-    txt = open(pfad, errors="replace").read()
-    flach = re.sub(r"\x1b\[[0-9;]*m", "", txt); flach = re.sub(r"\|\s*\n\|\s*", " ", flach); flach = re.sub(r"\s+", " ", flach)
-    m = re.search(r"Freistrom im Speicherwort: u_lat = ([0-9.]+)", flach)
-    if not m: raise SystemExit(f"A1 FEHLER: u_lat nicht im Log {pfad}")
-    u_lat = float(m.group(1))
-    b = re.search(r"Band-Census 0x41: (\d+) von \d+ Zellen", flach)
-    zb = re.search(r"KRAFT-ZBAND aktiv: unterste (\d+) Zellen", flach)
-    v = re.search(r"Koerper um ([0-9.]+) mm nach \+y versetzt", flach)
-    return dict(log=os.path.abspath(pfad), u_lat=u_lat, band_census=int(b.group(1)) if b else None,
-                zband=int(zb.group(1)) if zb else None, y_versatz_mm=float(v.group(1)) if v else 0.0)
+def protokoll(lauf_dir, dx=None, vtk=None):
+    """Laufkonstanten (Schluessel wie vor dem 17.09.: log, u_lat, band_census, zband, y_versatz_mm -- fx_profil2.py und
+    totaldruck_kette.py lesen sie). Seit 17.09.2026 ueber werkzeuge/lauf_meta.py mit Quellenangabe; zband_info nur mit dx.
+    vtk: Nahfeld-VTK des Laufs -- ohne Log bestimmt lauf_meta den Y-Versatz aus LAUF.txt + VTK-Kopf (Pruefbefund 10)."""
+    u_lat, q_u = lauf_meta.u_lat(lauf_dir)
+    yv, q_y = lauf_meta.y_versatz_m(lauf_dir, vtk)
+    zb = lauf_meta.zband(lauf_dir, dx if dx is not None else float("nan"))
+    return dict(log=lauf_meta.log_pfad(lauf_dir), u_lat=u_lat, band_census=zb["census"], zband=zb["N"],
+                y_versatz_mm=round((yv if yv is not None else 0.0)*1e3, 9), u_lat_quelle=q_u, y_versatz_quelle=q_y,
+                y_versatz_bekannt=yv is not None, zband_info=zb if dx is not None else None)
 
 def facetten_zeilen(lauf_dir):
     p = os.path.join(lauf_dir, "facetten_histogramme.csv")
@@ -112,12 +142,19 @@ def main():
     lauf_dir, tms = sys.argv[1], sys.argv[2]
     vtk = os.path.join(lauf_dir, f"feld_nah_{tms}ms.vtk")
     d = kopf(vtk); Nx, Ny, Nz = d["dims"]; ox, oy, oz = d["orig"]; dx = d["spac"][0]
-    P = protokoll(lauf_dir); u_lat = P["u_lat"]
+    P = protokoll(lauf_dir, dx, vtk); u_lat = P["u_lat"]; ZB = P["zband_info"]
     FKRAFT = SI_RHO * dx*dx * (SI_U/u_lat)**2
     KC = FKRAFT / (Q_INF * A_REF)
     print(f"# zonen_kraft.py  {vtk}\n# Laufprotokoll {P['log']}")
     print(f"A1 Layout ok: {Nx}x{Ny}x{Nz}, dx {dx*1e3:.4f} mm, ORIGIN {ox:+.5f} {oy:+.5f} {oz:+.5f}")
-    print(f"A1 u_lat {u_lat} (Log) -> 1 Kraft-Gittereinheit = {FKRAFT:.5f} N = {KC:.4e} in C; Y-Versatz {P['y_versatz_mm']} mm (wirkt auf den Koerper, nicht auf ORIGIN)")
+    print(f"A1 u_lat {u_lat} ({P['u_lat_quelle']}) -> 1 Kraft-Gittereinheit = {FKRAFT:.5f} N = {KC:.4e} in C; Y-Versatz {P['y_versatz_mm']} mm "
+          f"(wirkt auf den Koerper, nicht auf ORIGIN; {P['y_versatz_quelle']})")
+    if not P["y_versatz_bekannt"]: print("A1 WARNUNG: Y-Versatz unbekannt -- 0 angenommen (Bodenfreiheit |y| < 0,1 m um y = 0)")
+    print("A1 " + lauf_meta.zband_text(ZB))
+    if ZB["N"] is None: raise SystemExit("A2 FEHLER: Kontaktband N unbekannt -- keine Bandzerlegung ohne Quelle (frueher still 4 Zellen)")
+    if ZB.get("aus"): raise SystemExit("A2 FEHLER: Kontaktband AUS (CFD_KRAFT_ZBAND=0) -- die Zonenzerlegung braucht die Bandkante als erste z-Grenze")
+    NBAND = ZB["N"]; ZSHIFT = ZB["dk"]*dx; ZKANTEN = zkanten_fuer_lauf(ZB)
+    print(f"A1 z-Binkanten (Fahrzeugkoordinaten, m): {np.array2string(ZKANTEN, precision=6)}; Linkhoehe = z_Welt - {ZSHIFT*1e3:.4g} mm (Bodenspalt dk {ZB['dk']})")
     FL = np.memmap(vtk, dtype=np.uint8, mode="r", offset=d["off_flags"], shape=(Nz, Ny, Nx))
     RH = np.memmap(vtk, dtype=">f4", mode="r", offset=d["off_rho"], shape=(Nz, Ny, Nx))
     UU = np.memmap(vtk, dtype=">f4", mode="r", offset=d["off_u"], shape=(Nz, Ny, Nx, 3))
@@ -131,7 +168,7 @@ def main():
         if m.any():
             jj, ii = np.nonzero(m); kmin = min(kmin, k); kmax = k
             imin = min(imin, ii.min()); imax = max(imax, ii.max()); jmin = min(jmin, jj.min()); jmax = max(jmax, jj.max())
-            if k < (P["zband"] or 4): n_band += int(m.sum())
+            if k < NBAND: n_band += int(m.sum())
     if not werte <= ERLAUBT: raise SystemExit(f"A2 FEHLER: unerwartete Flags {sorted(werte - ERLAUBT)}")
     print(f"A2 Flags ok: {sorted(hex(v) for v in werte)}; Fahrzeug-Box i {imin}..{imax} j {jmin}..{jmax} k {kmin}..{kmax}")
     if P["band_census"] is not None:
@@ -183,9 +220,9 @@ def main():
         r = rho[kk, jj, ii]; cu = u[kk, jj, ii] @ c.astype(np.float64); uq = usq[kk, jj, ii]
         feq_w = w*r*(1.0 + 3.0*cu + 4.5*cu*cu - 1.5*uq) - w
         xb = np.clip(np.floor((xs[ii] + 0.5*cx*dx - XB0)/XBW).astype(np.int64), 0, NXB-1)
-        zb = np.searchsorted(ZKANTEN, zs[kk] + 0.5*cz*dx, side="right")
         ori = (1 + np.sign(np.round(mz[kk, jj, ii].astype(np.float64)*36.0))).astype(np.int64)   # *36: exakte Ganzzahl, kein Float-Rest
-        band = ((k0 + kk + cz) < (P["zband"] or 4)).astype(np.int64)
+        band = ((k0 + kk + cz) < NBAND).astype(np.int64)
+        zb = z_bin(zs[kk] + 0.5*cz*dx - ZSHIFT, band, ZKANTEN)
         idx = ((xb*NZB + zb)*3 + ori)*2 + band
         # je Bin Skalar-Summen, der Kraftvektor ist Skalar * c (c ist je Richtung konstant)
         cnt = np.bincount(idx, minlength=NBIN).astype(np.float64); cc = c.astype(np.float64)
@@ -220,9 +257,10 @@ def main():
             m_ = (f_ == 0x00)
             out.append((r_[m_], v_[m_]))
         return np.concatenate([o[0] for o in out]), np.concatenate([o[1] for o in out])
-    r_e, v_e = region(ox + 4*dx, ox + 20*dx, 1.15, 1.30, 0.3, 1.5)   # seitlich vor dem Fahrzeug, ausserhalb des Staugebiets
+    n_a5 = max(2, int(round(0.015/dx))); n_b5 = max(n_a5 + 4, int(round(0.075/dx)))   # 15..75 mm hinter dem Einlass (3,75 mm: 4..20 Zellen wie bisher)
+    r_e, v_e = region(ox + n_a5*dx, ox + n_b5*dx, 1.15, 1.30, 0.3, 1.5)   # seitlich vor dem Fahrzeug, ausserhalb des Staugebiets
     um = np.median(np.linalg.norm(v_e, axis=1))
-    print(f"A5 Einlass-Seitenstreifen (x < ORIGIN+20 dx, |y| 1,15-1,30): Median |u| = {um:.3f} m/s (si_u {SI_U}) " + ("ok" if abs(um/SI_U-1) < 0.03 else "WARNUNG"))
+    print(f"A5 Einlass-Seitenstreifen (x = ORIGIN + {n_a5}..{n_b5} dx = {n_a5*dx*1e3:.4g}..{n_b5*dx*1e3:.4g} mm, |y| 1,15-1,30): Median |u| = {um:.3f} m/s (si_u {SI_U}) " + ("ok" if abs(um/SI_U-1) < 0.03 else "WARNUNG"))
     def rho_inf(r_, v_):
         ul = v_*(u_lat/SI_U); q = (ul*ul).sum(axis=1)
         ri = r_*np.exp(1.5*(q - u_lat*u_lat))
@@ -238,7 +276,12 @@ def main():
     print(f"A6 rho_inf Seitenstreifen   : Median {ri_seite[0]:.7f} (IQR {ri_seite[1]:.7f}..{ri_seite[2]:.7f}, n {ri_seite[3]}) = cp_ref {(ri_seite[0]-1)*cpf:+.4f}")
     print(f"A6 rho_inf ueber dem Dach |y|<0,03 (Bezug fuer den OF13-Vergleich): Median {ri_mitte[0]:.7f} (n {ri_mitte[3]}) = cp_ref {(ri_mitte[0]-1)*cpf:+.4f}")
     print(f"   Bezugsunsicherheit Dach - Seite: d cp_ref = {(ri_dach[0]-ri_seite[0])*cpf:+.4f}")
-    print("   HINWEIS (Pruefagent M6): die Regionen liegen 7-96 Zellen unter/neben dem Nahfeldrand -- 'Potentialgebiet' ist nicht belegt.")
+    # ★ 17.09.2026 (Pruefbefund 12): "7-96 Zellen" galt fuer 3,75 mm (Seitenstreifen |y| 1,30 -> 7 Zellen zur Seitenwand, Dachregion z 1,50
+    # -> 96 Zellen unter der Decke). Jetzt aus Kasten und dx DIESES Laufs: Dach/Mitte z 1,50-1,80 unter der Decke, Seite |y| 1,15-1,30 neben der Seitenwand.
+    z_top, y_rand = oz + (Nz-1)*dx, min(oy + (Ny-1)*dx, -oy)
+    r_dach = (int(round((z_top - 1.80)/dx)), int(round((z_top - 1.50)/dx))); r_seite = (int(round((y_rand - 1.30)/dx)), int(round((y_rand - 1.15)/dx)))
+    print(f"   HINWEIS (Pruefagent M6): die Regionen liegen {min(r_dach + r_seite)}-{max(r_dach + r_seite)} Zellen unter/neben dem Nahfeldrand "
+          f"(Dach/Mitte {r_dach[0]}-{r_dach[1]} unter der Decke, Seite {r_seite[0]}-{r_seite[1]} neben der Seitenwand; dx {dx*1e3:.3f} mm) -- 'Potentialgebiet' ist nicht belegt.")
 
     # --- A4 Abnahme gegen den Facettenpfad
     tsoll = int(tms) / 1000.0
@@ -259,7 +302,17 @@ def main():
         zeilen = [l for l in open(cdf) if not l.startswith("#")]
         kopfz = zeilen[0].strip().split(","); daten = np.array([[float(v) for v in l.split(",")] for l in zeilen[1:]])
         it = int(np.argmin(np.abs(daten[:, 0] - tsoll))); fz = dict(zip(kopfz, daten[it]))
-        if abs(fz["time_s"] - tsoll) > 5e-4: raise SystemExit(f"A4 FEHLER: kein cd_facetten-Sample bei t={tsoll} (naechstes {fz['time_s']})")
+        dt_s = float(np.median(np.diff(daten[:, 0]))) if len(daten) > 1 else 0.0
+        tol = 5e-4 + 0.5*dt_s      # VTK-Name = t auf ganze ms gerundet (setup.cpp), dazu halbe Abtastkadenz
+        print(f"A4 Sample-Zuordnung: VTK-Name t = {tsoll:.3f} s, naechstes cd_facetten-Sample {fz['time_s']:.6f} s (Abstand {abs(fz['time_s']-tsoll)*1e3:.3f} ms, "
+              f"Kadenz {dt_s*1e3:.4f} ms, Toleranz {tol*1e3:.3f} ms)" + ("  WARNUNG: Kadenz < 1 ms -- Zuordnung ueber den ms-Namen mehrdeutig" if 0 < dt_s < 1e-3 - 1e-9 else ""))
+        if abs(fz["time_s"] - tsoll) > tol: raise SystemExit(f"A4 FEHLER: kein cd_facetten-Sample bei t={tsoll} (naechstes {fz['time_s']})")
+        a4_abstand = abs(fz["time_s"] - tsoll)
+        if a4_abstand > 5e-4:
+            # ★ 17.09.2026 (Pruefbefund 4): innerhalb der Toleranz, aber mehr als die 0,5-ms-Namensrundung -- VTK und cd_facetten-Zeile stammen
+            # dann NICHT aus derselben Sample-Iteration; die A4-Differenzen enthalten den Zeitversatz (Momentanwerte, cz springt je Sample).
+            print(f"A4 WARNUNG: Abstand VTK-Name -> cd_facetten-Sample {a4_abstand*1e3:.3f} ms > 0,5 ms -- VTK und Facettenzeile stammen NICHT aus derselben "
+                  "Sample-Iteration; A4 vergleicht verschiedene Zeitpunkte (Toleranz nur wegen der Kadenz erfuellt)")
         dcz, dcd = P1g[2] - fz["cz_druck"], P1g[0] - fz["cd_druck"]
         ok4 = abs(dcz) <= 0.05 and abs(dcd) <= 0.08
         dczb, dcdb = P1b[2] - fz["cz_druck_band"], P1b[0] - fz["cd_druck_band"]
@@ -289,7 +342,8 @@ def main():
                         rho_inf_seite=np.array(ri_seite), rho_inf_mitte=np.array(ri_mitte), abnahme_a4_band=ok4b, abnahme_a4_rest=ok4r,
                         a4_rest_dcz=dczr, a4_band_dcz=dczb, orientierung="zellnormale", XB0=XB0, XBW=XBW, NXB=NXB, ZKANTEN=ZKANTEN, h_mitte=np.array(hx),
                         fac_cd=fz["cd_druck"], fac_cz=fz["cz_druck"], fac_t=fz["time_s"], abnahme_a4=ok4, cp_faktor=cpf,
-                        y_versatz_mm=P["y_versatz_mm"])
+                        y_versatz_mm=P["y_versatz_mm"], zband_n=NBAND, zband_dk=ZB["dk"], kante_welt_m=ZB["kante_welt_m"], kante_fz_m=ZB["kante_fz_m"],
+                        kante_quelle=ZB["quelle_kante"], zband_quelle=ZB["quelle_N"], z_shift_m=ZSHIFT, u_lat_quelle=P["u_lat_quelle"])
     print(f"geschrieben: {out}")
 
 if __name__ == "__main__":

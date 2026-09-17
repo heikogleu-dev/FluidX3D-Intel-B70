@@ -2,7 +2,10 @@
 """q27_ab_auswertung.py -- 8-mm-A/B D3Q27 gegen D3Q19 ohne Wandmodell (Heiko 17.09.2026, Option 1): Kraefte und Kosten.
 
 KRAEFTE: kraft_zband.csv (object_force = Impulsaustausch INKLUSIVE Reibung, BB-Arme haben keinen Facettenpfad und damit kein
-cd_druck_rest). "rest" = ohne das Kontaktband (Fahrzeugzellen z-Index < CFD_KRAFT_ZBAND, bei 8 mm 2 Zellen = 16 mm).
+cd_druck_rest). "rest" = ohne das Kontaktband (Fahrzeugzellen z-Index < N = CFD_KRAFT_ZBAND des Laufs; wirksam z = 1..N-1, Oberkante
+  (N - 0,5) dx -- z = 0 ist Fahrbahn, SKALIERUNG-BEFUNDE Befund 1). ★ 17.09.2026: Regel seit heute N = max(3, ceil(16 mm/dx)) -> 8 mm N = 3,
+  Kante 20 mm (Keil- UND Deckellage im Band). Die A/B-Laeufe q19_bb8/q27_bb8 liefen davor mit N = 2 (Kante 12 mm, Deckellage z = 2 im
+  REST, BAND-ARTEFAKT-8MM.md). N und Kante beider Arme werden aus dem Laufprotokoll gelesen und verglichen; Abweichung = WARNUNG.
   Cd_rest = Fx_rest_N / (q_inf A_ref), Cz_rest = Spalte Cz_rest. Nur Arm gegen Arm lesbar, nicht gegen OF13 oder cd_druck_rest.
   Fenster ab T_WARMUP (0,201 s): Mittel, 50-ms-Blockmittel, GEPAARTE Differenz je Abtastzeit mit Blockfehler (SEM ueber die
   50-ms-Bloecke der Differenzreihe) und Vorzeichenzaehlung.
@@ -13,6 +16,8 @@ Aufruf: q27_ab_auswertung.py [bezug=q19_bb8] [arm=q27_bb8]
 import sys, os, re, csv
 import numpy as np
 HIER = os.path.dirname(os.path.abspath(__file__)); WURZEL = os.path.join(HIER, "..")
+sys.path.insert(0, HIER)
+import lauf_meta
 REF = sys.argv[1] if len(sys.argv) > 1 else "q19_bb8"; ARM = sys.argv[2] if len(sys.argv) > 2 else "q27_bb8"
 Q, A = 0.5*1.225*30.0**2, 1.85; T0 = 0.201
 
@@ -36,6 +41,9 @@ def bloecke(t, v, breite=0.05):
 
 tr, R = zband(REF); ta, Aa = zband(ARM)
 print(f"# q27_ab_auswertung.py  Bezug {REF}  Arm {ARM}  (object_force inkl. Reibung, ohne Kontaktband; Fenster ab {T0} s)")
+# ★ 17.09.2026 (Pruefbefund 3): *_rest haengt an der Bandkante -- beide Arme vergleichen, Abweichung LAUT (Kopf und Ende)
+BZ, BAND_GLEICH, BAND_KURZ = lauf_meta.band_vergleich([(l, os.path.join(WURZEL, "export", l)) for l in (REF, ARM)])
+print("\n".join(BZ))
 gemeinsam = np.intersect1d(np.round(tr, 6), np.round(ta, 6)); gemeinsam = gemeinsam[gemeinsam >= T0]
 ir = np.isin(np.round(tr, 6), gemeinsam); ia = np.isin(np.round(ta, 6), gemeinsam)
 print(f"gemeinsame Abtastzeiten im Fenster: {gemeinsam.size} ({gemeinsam.min() if gemeinsam.size else float('nan'):.4f} .. {gemeinsam.max() if gemeinsam.size else float('nan'):.4f} s)")
@@ -69,3 +77,4 @@ for lauf in (REF, ARM):
     if s and e:
         sek = lambda m: int(m.group(1))*3600 + int(m.group(2))*60 + int(m.group(3))
         print(f"  Wanduhr {lauf}: {sek(e) - sek(s)} s (Queue START..ENDE, inkl. Aufbau und VTK-Ausgabe)")
+if not BAND_GLEICH: print("\n" + BAND_KURZ)

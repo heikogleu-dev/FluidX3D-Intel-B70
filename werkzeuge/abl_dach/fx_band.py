@@ -14,9 +14,18 @@ Index n = x + Nx*(y + Ny*z)  -> eine (y,z)-Zeile ist in x zusammenhaengend,
 und aufeinanderfolgende y bei festem z liegen ebenfalls zusammenhaengend.
 
 Aufruf: fx_band.py <vtk> <out.npz> [halb_mm]   (Default 40 mm zu jeder Seite)
+
+★ 17.09.2026 (SKALIERUNG-BEFUNDE Nebenbefund 10): das Band lag um WELT-y = 0. Mit CFD_Y_VERSATZ=1 steht der Koerper eine halbe
+feine Zelle weiter +y -- das Band war dann um eine halbe Zelle asymmetrisch zur Fahrzeug-Mittelebene. Jetzt koerperbezogen:
+Mittelebene m = (y_versatz - y0)/dx aus dem Laufprotokoll (werkzeuge/lauf_meta.py; unbekannt -> 0 mit WARNUNG). Liegt m auf einer
+Zellmitte, bleibt alles wie bisher (jy0 +- hb, 2 hb + 1 Ebenen); liegt m auf einer Zellflaeche, werden die 2 hb Ebenen
+symmetrisch darum genommen. Die npz traegt zusaetzlich y_versatz_m, y_mitte_index und u_lat (NaN, wenn nicht bestimmbar) samt
+Quellen -- fx_dach.py/fx_profil.py lesen u_lat von dort.
 """
 import sys, os
 import numpy as np
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import lauf_meta
 
 def kopf(pfad):
     with open(pfad, "rb") as f:
@@ -53,12 +62,24 @@ def main():
     halb_mm = float(sys.argv[3]) if len(sys.argv) > 3 else 40.0
     d = kopf(vtk)
     Nx, Ny, Nz = d["dims"]; x0, y0, z0 = d["orig"]; dx = d["spac"][0]
-    jy0 = int(round((0.0 - y0)/dx))                  # y = 0
+    lauf = lauf_meta.lauf_dir_aus(vtk)
+    yv, q_yv = lauf_meta.y_versatz_m(lauf, vtk)
+    if yv is None:
+        print(f"WARNUNG: Y-Versatz unbekannt ({q_yv}) -- Band um Welt-y = 0; bei CFD_Y_VERSATZ=1 eine halbe Zelle asymmetrisch.", file=sys.stderr)
+        yv = 0.0
+    try: ul, q_ul = lauf_meta.u_lat(lauf)
+    except SystemExit as e: ul, q_ul = float("nan"), f"UNBEKANNT ({e})"
+    m   = (yv - y0)/dx                                  # Fahrzeug-Mittelebene als (gebrochener) y-Index
     hb  = int(round(0.001*halb_mm/dx))
-    ja, jb = max(0, jy0-hb), min(Ny-1, jy0+hb)
+    if abs(m - round(m)) < 0.25:                        # Zellmitte: wie bisher
+        jy0 = int(round(m)); ja, jb = jy0-hb, jy0+hb
+    else:                                               # Zellflaeche (Versatz): 2 hb Ebenen symmetrisch
+        jl = int(np.floor(m)); jy0 = jl; ja, jb = jl+1-hb, jl+hb
+    ja, jb = max(0, ja), min(Ny-1, jb)
     ny = jb - ja + 1
-    print(f"{os.path.basename(vtk)}: {Nx}x{Ny}x{Nz} dx={dx*1000:.1f} mm  "
-          f"y-Band j={ja}..{jb} (y={y0+ja*dx:+.3f}..{y0+jb*dx:+.3f} m), {ny} Ebenen")
+    print(f"{os.path.basename(vtk)}: {Nx}x{Ny}x{Nz} dx={dx*1000:.4g} mm  "
+          f"y-Band j={ja}..{jb} (y={y0+ja*dx:+.4f}..{y0+jb*dx:+.4f} m, koerperbezogen {y0+ja*dx-yv:+.4f}..{y0+jb*dx-yv:+.4f} m), {ny} Ebenen; "
+          f"Mittelebene Index {m:.3f} (Y-Versatz {yv*1e3:.4g} mm aus {q_yv}); u_lat {ul} aus {q_ul}")
     U   = np.empty((Nz, ny, Nx, 3), dtype=np.float32)
     RHO = np.empty((Nz, ny, Nx),    dtype=np.float32)
     FL  = np.empty((Nz, ny, Nx),    dtype=np.uint8)
@@ -73,7 +94,8 @@ def main():
             FL[z] = np.frombuffer(f.read(ny*Nx), dtype=np.uint8).reshape(ny, Nx)
     np.savez_compressed(out, u=U, rho=RHO, flags=FL,
                         dims=np.array([Nx, Ny, Nz]), orig=np.array([x0, y0, z0]),
-                        dx=dx, ja=ja, jb=jb, jy0=jy0)
+                        dx=dx, ja=ja, jb=jb, jy0=jy0, y_versatz_m=yv, y_mitte_index=m, y_versatz_quelle=q_yv,
+                        u_lat=ul, u_lat_quelle=q_ul)
     print("geschrieben:", out, os.path.getsize(out)//1048576, "MB")
 
 main()

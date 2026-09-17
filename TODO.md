@@ -35,6 +35,8 @@ Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 
 | 5 | Auswertewerkzeuge gitterfest | Umgebaut (lauf_meta.py), zweifach geprüft „verwertbar"; **Korrektur-Agent lief bei Abschluss** (Toleranzen, Bandgleichheit in Paarwerkzeugen, dk in OF13-Werkzeugen, unterseite.py) → danach Commit | Tagesprotokoll 17.09. |
 
 **Offene Entscheide Heiko:** (a) D3Q27-A/B mit Band N=3 wiederholen (2 × 8 mm, am 17.09. eigenmächtig gestartet und abgebrochen); (b) Keilzellen geometrisch schließen (Option 2, Host, 8-mm-Lauf); (c) N2F-Rückkopplung je Grobschritt (Punkt 5 Audit, zurückgestellt); (d) Nebenbefunde Audit (16-mm-Abbrüche Sponge/N2F, SAMPLE_EVERY-Rundung 8/16 mm, Kastenrundung); (e) Upstream: Log-Blockbericht (voll = ceil) und Lagetext — Heiko: „interessiert erstmal nicht".
+**Nächstes Mal ZUERST:** Werkzeug-Korrekturdurchgang (14 Punkte aus zwei Prüfberichten, Tagesprotokoll 17.09. 12:21/12:45) wurde beim Tagesabschluss gestoppt — Stand unbekannt, im Werkzeug-Commit vom 17.09. als UNGEPRÜFT enthalten. Diff lesen, Rest abarbeiten, Prüfagent.
+
 **Nächstes Mal (Heiko 17.09. ~12:40):**
 - **(N1) Grenzschicht laminarartig?** Offline, ohne GPU: aufgelöste Turbulenz (u′-RMS aus den 20 Momentfeldern von `q19_bb8`, Dachband) gegen OF13-k (`~/CFD-Cases/mr2v40H/1200/k.gz`). Anlass: Formfaktor H am Dach OF13 1,2–1,5 (turbulent), v2 1,5–2,4, Upstream 2,0–2,7; V1-Befund 26.06.: mehr wandnahes ν_t verschlimmert die Ablösung.
 - **(N2) Einlaufturbulenz** (synthetische Wirbel vor dem Fahrzeug, Intensität/Längenmaß aus den OF13-Einlasswerten, keine Handwerte) — nur wenn N1 „keine aufgelöste Turbulenz" zeigt; Bau + ein Testlauf nach Go. Alternative Stolperkante an der Front (Geometrieänderung, bei 1–2 Zellen Höhe fraglich).

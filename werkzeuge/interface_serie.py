@@ -18,6 +18,7 @@
 # CSV -- die entstehen direkt aus den Feldern, nicht aus dem Bild.
 #
 # Aufruf: interface_serie.py <feld_fern.vtk> <of13_zellen.npz> <out_dir> [n_ebenen=16]
+#   Nahfeld-Box und Fahrzeughuelle kommen seit 17.09.2026 aus dem Lauf (feld_nah_*.vtk bzw. Log im selben Ordner), s. geometrie().
 import sys, os, re, warnings
 import numpy as np
 import matplotlib; matplotlib.use("Agg")
@@ -26,7 +27,7 @@ import matplotlib.pyplot as plt
 XOFF_HINWEIS = "OF13-Zellen liegen im Cache bereits in v2-Koordinaten (x_v2 = x_OF13 + 2,2063)."
 SKALA = 15.0
 SCHRITT_ZELLEN = 8          # Heikos Vorgabe
-BIN = 0.032                 # OF13-Binning: 2 Grobzellen
+BIN = None                  # OF13-Binning: 2 Grobzellen -- wird nach dem Lesen des Fern-VTK gesetzt (2*dx_c)
 DILAT = 10
 # Slab-Halbdicke fuer die OF13-Auswahl. MUSS mindestens die halbe groebste Zellkante sein,
 # sonst faellt eine Ebene in eine Luecke zwischen zwei Grobzell-Lagen und liefert nichts:
@@ -39,13 +40,64 @@ SLAB = 0.15
 # gilt im ganzen Zellvolumen). Mittelwertbildung ueber verschiedene Verfeinerungsstufen
 # waere hier falsch -- sie mischte eine 4-mm-Wandzelle mit einer 250-mm-Fernzelle.
 
-# --- Geometrie aus dem Lauf f4_vollumfang_mls (Log Z. 30/32; Fahrzeughuelle aus dem
-#     Facetten-Zensus der Nahfeld-Wandzellen, 27.08.) ------------------------------------
-NAH = dict(x0=-0.325840, y0=-1.240000, z0=0.0, dx=0.004, nx=1689, ny=621, nz=485)
-FZG = dict(x=(-0.006, 4.442), y=(-0.924, 0.924), z=(0.004, 1.208))
-NAH_X = (NAH["x0"], NAH["x0"] + NAH["nx"]*NAH["dx"])
-NAH_Y = (NAH["y0"], NAH["y0"] + NAH["ny"]*NAH["dx"])
-NAH_Z = (NAH["z0"], NAH["z0"] + NAH["nz"]*NAH["dx"])
+# --- Geometrie AUS DEM LAUF (★ 17.09.2026, SKALIERUNG-BEFUNDE Nebenbefund 10) -----------------------------------------
+# Bis 17.09. standen hier die Nahfeld-Box und die Fahrzeughuelle des Laufs f4_vollumfang_mls fest (y0 -1,24, ny 621, nz 485,
+# dx 4 mm) -- auf JEDER heutigen Sprosse falsch (NEAR_LY/LZ geaendert, 8/3,75/16 mm, CFD_Y_VERSATZ), ohne Meldung.
+# Jetzt:  NAH = Kopf eines feld_nah_*.vtk im Ordner des Fern-VTK (exakt; gleiche Zeit bevorzugt), sonst Log-Zeile
+#               "Nahfeld x[..] y[..] z[..]" (3 Nachkommastellen, LAUT) + feine Zellweite aus "Unit Conversion", sonst Abbruch.
+#         FZG = Fahrzeughuelle wie am 27.08. definiert: Bounding-Box der FLUIDzellen neben dem Fahrzeug (0x41) = 0x41-Box +-1 Zelle;
+#               unten die unterste Fluidlage neben dem Koerper (z-Index 0 ist Fahrbahn). Aus den flags des Nah-VTK, sonst
+#               (LAUT, grob) aus den flags des Fern-VTK. Der Y-Versatz steckt damit automatisch im Voxelkoerper.
+def _nah_quelle(fern_vtk):
+    d = os.path.dirname(os.path.abspath(fern_vtk))
+    m = re.search(r"feld_fern_(\d+ms)\.vtk$", os.path.basename(fern_vtk))
+    gleich = os.path.join(d, f"feld_nah_{m.group(1)}.vtk") if m else None
+    if gleich and os.path.exists(gleich): return gleich
+    kand = sorted(p for p in os.listdir(d) if p.startswith("feld_nah_") and p.endswith(".vtk"))
+    return os.path.join(d, kand[-1]) if kand else None
+
+def _huelle(vtk):
+    """(FZG-dict, Text) aus den flags eines dd-Feld-VTK: 0x41-Box +-1 Zelle, unten die unterste Fluidlage ueber der Fahrbahn."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from zonen_kraft import kopf
+    k = kopf(vtk); nx, ny, nz = k["dims"]; ox, oy, oz = k["orig"]; dx = k["spac"][0]
+    FL = np.memmap(vtk, dtype=np.uint8, mode="r", offset=k["off_flags"], shape=(nz, ny, nx))
+    imin = jmin = kmin = 10**9; imax = jmax = kmax = -1
+    for kk in range(nz):
+        e = np.asarray(FL[kk]) == 0x41
+        if not e.any(): continue
+        jj = np.nonzero(e.any(axis=1))[0]; ii = np.nonzero(e.any(axis=0))[0]
+        kmin = min(kmin, kk); kmax = kk; jmin = min(jmin, jj[0]); jmax = max(jmax, jj[-1]); imin = min(imin, ii[0]); imax = max(imax, ii[-1])
+    if kmax < 0: raise SystemExit(f"FEHLER: keine Fahrzeugzelle (0x41) in {vtk}")
+    klo = kmin - 1 if kmin - 1 >= 1 else kmin      # z-Index 0 ist Fahrbahn (TYPE_S), keine Fluidlage
+    imin, imax, jmin, jmax, kmin, kmax, klo = (int(v) for v in (imin, imax, jmin, jmax, kmin, kmax, klo))   # Python-int -> Python-float: np.float64-Skalare
+    # wuerden float32-OF13-Caches in of13_ebene() auf float64 heben (NEP 50) und die Slab-Auswahl gegen die alte Fassung verschieben
+    f = dict(x=(ox + (imin-1)*dx, ox + (imax+1)*dx), y=(oy + (jmin-1)*dx, oy + (jmax+1)*dx), z=(oz + klo*dx, oz + (kmax+1)*dx))
+    return f, f"0x41-Box i {imin}..{imax} j {jmin}..{jmax} k {kmin}..{kmax} in {os.path.basename(vtk)} (dx {dx*1e3:.4g} mm)"
+
+def geometrie(fern_vtk):
+    nah_vtk = _nah_quelle(fern_vtk)
+    if nah_vtk:
+        with open(nah_vtk, "rb") as f: kopf_ = f.read(1024)
+        nx, ny, nz = map(int, re.search(rb"DIMENSIONS (\d+) (\d+) (\d+)", kopf_).groups())
+        x0, y0, z0 = map(float, re.search(rb"ORIGIN (\S+) (\S+) (\S+)", kopf_).groups())
+        dx = float(re.search(rb"SPACING (\S+)", kopf_).group(1))
+        nah = dict(x0=x0, y0=y0, z0=z0, dx=dx, nx=nx, ny=ny, nz=nz); q_nah = f"Kopf {nah_vtk}"
+        fzg, q_fzg = _huelle(nah_vtk)
+        return nah, fzg, q_nah, q_fzg
+    d = os.path.dirname(os.path.abspath(fern_vtk)); name = os.path.basename(d)
+    log = os.path.join(d, "..", "..", "logs", name + ".log")
+    if not os.path.exists(log): raise SystemExit(f"FEHLER: weder feld_nah_*.vtk in {d} noch Log {log} -- Nahfeld-Box unbekannt")
+    t = re.sub(r"\s+", " ", re.sub(r"\|\s*\n\|\s*", " ", re.sub(r"\x1b\[[0-9;]*m", "", open(log, errors="replace").read())))
+    m = re.search(r"Nahfeld x\[(-?[0-9.]+);(-?[0-9.]+)\] y\[(-?[0-9.]+);(-?[0-9.]+)\] z\[(-?[0-9.]+);(-?[0-9.]+)\]", t)
+    u = re.search(r"Unit Conversion: 1 cell = ([0-9.]+) mm", t)
+    if not (m and u): raise SystemExit(f"FEHLER: Log {log} ohne 'Nahfeld x[..]'/'Unit Conversion' -- Nahfeld-Box unbekannt")
+    a = [float(v) for v in m.groups()]; dx = float(u.group(1))*1e-3
+    nah = dict(x0=a[0], y0=a[2], z0=a[4], dx=dx, nx=int(round((a[1]-a[0])/dx))+1, ny=int(round((a[3]-a[2])/dx))+1, nz=int(round((a[5]-a[4])/dx))+1)
+    print("WARNUNG: kein feld_nah_*.vtk -- Nahfeld-Box aus der Log-Zeile (3 Nachkommastellen, Ursprung auf 1 mm genau) "
+          "und Fahrzeughuelle aus den GROBEN flags des Fern-VTK (eine Grobzelle Unschaerfe).")
+    fzg, q_fzg = _huelle(fern_vtk)
+    return nah, fzg, f"Log {os.path.abspath(log)}", q_fzg + " [GROB]"
 
 def lies_fern(pfad):
     with open(pfad, "rb") as f:
@@ -109,9 +161,16 @@ NEB = int(sys.argv[4]) if len(sys.argv) > 4 else 16
 os.makedirs(out, exist_ok=True)
 u, M = lies_fern(vtk)
 DX = M["dx"]; SCHRITT = SCHRITT_ZELLEN * DX
-print(f"Fernfeld {M['nx']}x{M['ny']}x{M['nz']} @ {DX*1000:.0f} mm, Ursprung ({M['ox']:.4f},{M['oy']:.4f},{M['oz']:.4f})")
+BIN = 2*DX      # ★ 17.09.2026: "2 Grobzellen" war fest 0,032 m (nur bei dx_c 16 mm richtig)
+NAH, FZG, Q_NAH, Q_FZG = geometrie(vtk)
+NAH_X = (NAH["x0"], NAH["x0"] + NAH["nx"]*NAH["dx"])
+NAH_Y = (NAH["y0"], NAH["y0"] + NAH["ny"]*NAH["dx"])
+NAH_Z = (NAH["z0"], NAH["z0"] + NAH["nz"]*NAH["dx"])
+print(f"Fernfeld {M['nx']}x{M['ny']}x{M['nz']} @ {DX*1000:.4g} mm, Ursprung ({M['ox']:.4f},{M['oy']:.4f},{M['oz']:.4f}); OF13-Binning {BIN*1000:.4g} mm")
+print(f"Nahfeld-Box {NAH['nx']}x{NAH['ny']}x{NAH['nz']} @ {NAH['dx']*1000:.4g} mm aus {Q_NAH}")
+print(f"Fahrzeughuelle x [{FZG['x'][0]:+.4f},{FZG['x'][1]:+.4f}] y [{FZG['y'][0]:+.4f},{FZG['y'][1]:+.4f}] z [{FZG['z'][0]:+.4f},{FZG['z'][1]:+.4f}] m aus {Q_FZG}")
 print(f"Nahfeld-Ausschnitt x [{NAH_X[0]:.3f},{NAH_X[1]:.3f}] y [{NAH_Y[0]:.3f},{NAH_Y[1]:.3f}] z [{NAH_Z[0]:.3f},{NAH_Z[1]:.3f}] m")
-print(f"Schritt {SCHRITT_ZELLEN} Grobzellen = {SCHRITT*1000:.0f} mm, {NEB} Ebenen je Serie. {XOFF_HINWEIS}\n")
+print(f"Schritt {SCHRITT_ZELLEN} Grobzellen = {SCHRITT*1000:.0f} mm (Heikos Vorgabe in ZELLEN -- auf 8 mm sind das 256 mm), {NEB} Ebenen je Serie. {XOFF_HINWEIS}\n")
 
 z = np.load(cache)
 C = dict(x=z["cx"], y=z["cy"], z=z["cz"])

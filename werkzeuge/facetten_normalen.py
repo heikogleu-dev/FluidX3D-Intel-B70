@@ -25,6 +25,10 @@ lauf = sys.argv[1]
 tms = sys.argv[2] if len(sys.argv) > 2 else "000501"
 vtk = os.path.join(lauf, f"feld_nah_{tms}ms.vtk")
 d = kopf(vtk); Nx, Ny, Nz = d["dims"]; NXY = Nx*Ny
+LOG = protokoll(lauf)["log"]
+if LOG is None:   # ★ 17.09.2026 (Pruefbefund 8): vorher TypeError in open(None) -- und erst NACH der Zellschleife; jetzt vorab
+    raise SystemExit(f"FEHLER: kein Laufprotokoll logs/{os.path.basename(os.path.normpath(lauf))}.log zu {lauf} -- die Abnahmen "
+                     "'Kipps gegen PCA-Schwerpunkt', 'Duennteil-Rueckfall' und 'K2-Zahl' vergleichen gegen das Log; ohne Log keine Normalen")
 t0 = time.time()
 FL = np.fromfile(vtk, dtype=np.uint8, count=Nx*Ny*Nz, offset=d["off_flags"])
 C, sp = Z.lies_csv(os.path.join(lauf, "facetten_histogramme.csv"))
@@ -85,7 +89,7 @@ for s in range(0, N, CH):
     koh[s:e] = np.where(nq > 0, l6/np.maximum(nq, 1), 0.0)
     if s % (CH*25) == 0: print(f"  {e}/{N}  {time.time()-t0:.0f} s", flush=True)
 print(f"Zellschleife fertig {time.time()-t0:.0f} s")
-L = open(protokoll(lauf)["log"], errors="replace").read()
+L = open(LOG, errors="replace").read()
 L = re.sub(r"\x1b\[[0-9;]*m", "", L); L = re.sub(r"\|\s*\n\|\s*", " ", L); L = re.sub(r"\s+", " ", L)
 mk = re.search(r"Vorzeichen gekippt (\d+) \(Duennteil-Rueckfall (\d+)\)", L); mk2 = re.search(r"K2\(Kante\) (\d+)", L)
 def pruef(name, ok, info=""):

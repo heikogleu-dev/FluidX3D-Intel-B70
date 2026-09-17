@@ -28,9 +28,15 @@ ZWEI DINGE, DIE MAN WISSEN MUSS, BEVOR MAN DAS BILD DEUTET
    object_force -- mit Phantomreibung und ohne Bandabzug, also NICHT dasselbe.)
 
 2. DIE SCHREIBKADENZ HAENGT AM ZEITSCHRITT, NICHT AN DER UHR. Der Loeser legt
-   alle 25 groben (= 100 feinen) Schritte eine Zeile ab. Physikalisch sind das
-   1,00 ms bei 4 mm und 2,00 ms bei 8 mm -- die grobe Sprosse tastet also nur
-   halb so dicht ab (Nyquist 250 statt 500 Hz).
+   alle CFD_SAMPLE_EVERY groben Schritte eine Zeile ab; der Wert wird seit dem
+   12./16.09. mit u_lat und dx umgerechnet und dabei auf ganze Schritte GERUNDET.
+   Gemessen (17.09.): 1,000 ms auf 4 mm und 3,75 mm, 2,000 ms auf 8 mm bei
+   u_lat 0,075, 0,9375 ms bei p375_a, 1,067 ms bei SCHRITTE_PRO_ZELLE 8 auf 8 und
+   16 mm (SKALIERUNG-BEFUNDE Nebenbefund 9), 0,08 ms in Kurzlaeufen. Das Werkzeug
+   mittelt deshalb ueber ZEITFENSTER (--raster) und nie ueber Sample-Paare; die
+   gemessene Kadenz je Lauf steht in der Konsolenausgabe. Bei grobem Raster und
+   kleinem --raster bleiben Fenster leer (dann fehlt der Punkt, er wird nicht
+   erfunden).
 
 3. DIE MOMENTANWERTE SCHWANKEN STARK. cz_druck_rest springt von Abtastung zu
    Abtastung zwischen etwa -0,63 und -1,51 (gemessen an p4_voll). Eine
@@ -89,6 +95,11 @@ def lies(lauf):
         raise SystemExit(f"{lauf}: keine verwertbaren Zeilen -- benoetigt werden die Spalten "
                          f"time_s, {', '.join(k for k, _, _, _ in GROESSEN)}; die Datei hat: {kopf}")
     return np.array(t), {k: np.array(v) for k, v in sp.items()}
+
+
+def kadenz(t):
+    """Gemessene Schreibkadenz in ms (Median-Abstand der Zeitstempel) -- aus den Daten, nicht aus der Sprosse."""
+    return float(np.median(np.diff(np.sort(t)))) if len(t) > 1 else float("nan")
 
 
 def rastern(t, y, raster, roh):
@@ -217,7 +228,7 @@ def serie(lauf, a):
         geschrieben.append(zeichne([lauf], a, os.path.join(ziel, f"kraftverlauf_{m:06d}ms.png"), float(m)))
     # Abschlussbild ueber den GANZEN Lauf -- die Marken enden bei 500 ms, die Daten bei 501.
     geschrieben.append(zeichne([lauf], a, os.path.join(ziel, "kraftverlauf.png"), a.bis))
-    print(f"{lauf}: {len(t)} Abtastungen, {t.min():.0f} bis {t.max():.0f} ms"
+    print(f"{lauf}: {len(t)} Abtastungen, {t.min():.0f} bis {t.max():.0f} ms, Kadenz {kadenz(t):.4f} ms"
           f" -> {len(geschrieben)} Bilder in export/{lauf}/")
     for g in geschrieben:
         print(f"  geschrieben: {os.path.relpath(g, WURZEL)}")
@@ -252,7 +263,7 @@ def main(argv):
     print(f"geschrieben: {aus}")
     for lauf in a.laeufe:
         t, _ = lies(lauf)
-        print(f"  {lauf}: {len(t)} Abtastungen, {t.min():.0f} bis {t.max():.0f} ms")
+        print(f"  {lauf}: {len(t)} Abtastungen, {t.min():.0f} bis {t.max():.0f} ms, Kadenz {kadenz(t):.4f} ms")
 
 
 if __name__ == "__main__":

@@ -113,7 +113,11 @@ def main():
     lauf = sys.argv[1]; tms = sys.argv[2] if len(sys.argv) > 2 else "000501"
     vtk = os.path.join(lauf, f"feld_nah_{tms}ms.vtk")
     d = kopf(vtk); Nx, Ny, Nz = d["dims"]; ox, oy, oz = d["orig"]; dx = d["spac"][0]
-    LZ = log_zensus(protokoll(lauf)["log"])
+    log = protokoll(lauf)["log"]
+    if log is None:   # ★ 17.09.2026 (Pruefbefund 8): vorher TypeError in open(None)
+        raise SystemExit(f"FEHLER: kein Laufprotokoll logs/{os.path.basename(os.path.normpath(lauf))}.log zu {lauf} -- B2/B3 brauchen den "
+                         "statischen Klassenzensus und das Linkhistogramm aus dem Log; ohne Log keine Abnahme, kein Zensus")
+    LZ = log_zensus(log)
     C, sp = lies_csv(os.path.join(lauf, "facetten_histogramme.csv"))
     n_alle = C["n"].astype(np.int64)
     NRp = os.path.join(lauf, "facetten_normalen.npz")

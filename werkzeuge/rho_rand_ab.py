@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
 # RHO_RAND C2d (15.09.2026): A/B-Vergleich zweier dd-Laeufe am VOLLEN 3D-Feld (Iron Rule 5: Felddaten, keine Bilder).
 #   A = Produktionszeile (rho-Puffer, heutiger Ausgabewert), B = CFD_RHO_RAND=1 (Ausgabe = Nachkollisionssumme, Entscheidung (b)).
-# Soll: u in allen Zellen BITGLEICH; rho weicht nur im Rahmen der FP16S-Rundung ab (RHO_RAND-PLAN.md §14a: max cp <= ~0,0034),
+# Soll: u in allen Zellen BITGLEICH; rho weicht nur im Rahmen der FP16S-Rundung ab (RHO_RAND-PLAN.md §14a: max drho <= ~2,87e-5, gemessen als cp 0,0034 bei u_lat 0,075),
 # ausgenommen Klemmzellen (Pufferwort auf der Klemmgrenze 0,5/1,5) -- dort ist die Nachkollisionssumme != geklemmtes rho.
 # Nur den ENDDUMP vergleichen: RHO_SPARSAM schreibt rho im A-Arm nur an Host-Lese-Schritten voll; der Enddump liegt
 # in der letzten Sample-Periode (rho_voll_zwang), Zwischendumps koennen im A-Arm veraltetes rho tragen.
 # Aufruf: werkzeuge/rho_rand_ab.py <lauf_A> <lauf_B> [vtk-Name, Vorgabe: juengster feld_nah_*.vtk in A]
 import sys, os, glob, mmap
 import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 
-U_LAT = 0.075
-CP = (2.0/3.0)/(U_LAT*U_LAT)
+# ★ 17.09.2026 (SKALIERUNG-BEFUNDE Nebenbefund 10): U_LAT stand hier fest auf 0,075 -- bei SCHRITTE_PRO_ZELLE 8 (u_lat 0,125)
+# waere jede cp-Zahl um (0,125/0,075)^2 = 2,78 zu gross gewesen. u_lat kommt jetzt aus dem Laufprotokoll beider Arme
+# (werkzeuge/lauf_meta.py, Quelle wird gedruckt); verschiedene u_lat in A und B brechen ab.
+U_LAT = None
+CP = None
+# ★ 17.09.2026 (Pruefbefund 5): die Sichtungsgrenze aus RHO_RAND-PLAN.md §14a ist eine RHO-Groesse (FP16S-Rundung im rho-Wort, gemessen
+# bei u_lat 0,075 als cp 0,0034): drho = 0,0034 * 1,5 * 0,075^2 = 2,87e-5. Frueher stand cp 0,0034 fest und wurde je u_lat nach drho
+# zurueckgerechnet -- bei u_lat 0,125 waere die Grenze 7,97e-5 gewesen (2,78-fach weiter). Jetzt fest in drho, cp je u_lat abgeleitet.
+DRHO_GRENZE = 2.87e-5
 
 def lade(pfad):
     f = open(pfad, 'rb'); m = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
@@ -30,6 +39,11 @@ def main():
     if len(sys.argv) < 3: print(__doc__ if __doc__ else 'Aufruf: rho_rand_ab.py <lauf_A> <lauf_B> [vtk]'); sys.exit(2)
     a, b = sys.argv[1], sys.argv[2]
     basis = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'export')
+    global U_LAT, CP
+    ula, qa = lauf_meta.u_lat(os.path.join(basis, a)); ulb, qb = lauf_meta.u_lat(os.path.join(basis, b))
+    print(f'u_lat A {ula} ({qa}) | B {ulb} ({qb})')
+    if abs(ula - ulb) > 1e-6*max(ula, ulb): print('ABBRUCH: A und B mit verschiedenem u_lat -- rho/cp nicht vergleichbar'); sys.exit(1)
+    U_LAT = ula; CP = (2.0/3.0)/(U_LAT*U_LAT)
     if len(sys.argv) > 3: name = sys.argv[3]
     else: name = sorted(os.path.basename(p) for p in glob.glob(os.path.join(basis, a, 'feld_nah_*.vtk')))[-1]
     da, ua, ra, fa = lade(os.path.join(basis, a, name))
@@ -54,9 +68,9 @@ def main():
         q = np.quantile(v, [0.5, 0.999])
         print(f'  {kn:28s}: {n:10d} Zellen, gleich {ng:10d}, max {v.max():.3e} (cp {v.max()*CP:.4f}), Median {q[0]:.3e} (cp {q[0]*CP:.5f}), 99,9 % {q[1]:.3e} (cp {q[1]*CP:.4f})')
     nicht_klemm = ~klemm & (bo != 1) & (bo != 2)
-    grenze = 3.4e-3/CP
+    grenze = DRHO_GRENZE
     n_ueber = int(np.count_nonzero(d[nicht_klemm] > grenze))
-    print(f'rho-Abweichung ueber cp 0,0034 (Messwert §14a) ausserhalb Klemmzellen: {n_ueber} Zellen (zur Sichtung, kein hartes Soll)')
+    print(f'rho-Abweichung ueber drho {grenze:.3g} (Messwert §14a, FP16S-Rundung; bei u_lat {U_LAT} = cp {grenze*CP:.4f}) ausserhalb Klemmzellen: {n_ueber} Zellen (zur Sichtung, kein hartes Soll)')
     ok = u_gleich and f_gleich and int(np.count_nonzero(d[bo == 2])) == 0 and int(np.count_nonzero(d[bo == 1])) == 0
     print('ERGEBNIS: ' + ('u/flags bitgleich, TYPE_E/TYPE_S rho gleich' if ok else 'ABWEICHUNG -- siehe oben'))
     sys.exit(0 if ok else 1)

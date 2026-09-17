@@ -7,6 +7,8 @@
 # Marke 0,20 ist die einzige Ausnahme: Fenster 0,201..0,211 (Warmup-Ende, halbseitig).
 # Aufruf: paar_100ms.py <neu> <bezug> [marke]   -- ohne Marke: alle verfuegbaren.
 import csv, math, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 def reihe(lauf, sp):
     p=f"export/{lauf}/cd_facetten.csv"
     if not os.path.exists(p): return []
@@ -23,6 +25,9 @@ def bei(rh, t):
     return m, 2*s/math.sqrt(len(v)), len(v)
 neu, bez = sys.argv[1], sys.argv[2]
 marken = [float(sys.argv[3])] if len(sys.argv)>3 else [0.2,0.3,0.4,0.5]
+# ★ 17.09.2026 (Pruefbefund 3): cd/cz_druck_rest haengen an der Bandkante N -- beide Laeufe vergleichen, LAUT bei Abweichung
+BZ, BAND_GLEICH, BAND_KURZ = lauf_meta.band_vergleich([(bez, os.path.join("export", bez)), (neu, os.path.join("export", neu))])
+print("\n".join(BZ))
 R={l:{sp:reihe(l,sp) for sp in ('cd_druck_rest','cz_druck_rest')} for l in (neu,bez)}
 tn = R[neu]['cd_druck_rest'][-1][0] if R[neu]['cd_druck_rest'] else 0.0
 for t in marken:
@@ -34,3 +39,4 @@ for t in marken:
         z+=f" | {lab}: {bez} {a[0]:+.4f}+-{a[1]:.4f}  {neu} {b[0]:+.4f}+-{b[1]:.4f}  Delta {d:+.4f} ({d/sig if sig>0 else 0:+.1f} sigma, n={b[2]})"
     print(z)
 print(f"[{neu} steht bei t = {tn:.3f} s]")
+if not BAND_GLEICH: print(BAND_KURZ)

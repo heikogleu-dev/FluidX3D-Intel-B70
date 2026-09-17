@@ -7,6 +7,8 @@ Gemittelt wird je Marke ueber +-10 ms, sonst ist der Momentanwert reines Rausche
 (Cz oszilliert druckdominiert; ein Einzelpunkt taeuscht -- alte Projektlehre).
 """
 import csv, math, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 
 def reihe(pfad, spalte):
     if not os.path.exists(pfad): return []
@@ -45,8 +47,12 @@ neu = sys.argv[1] if len(sys.argv)>1 else 'f4_kopplung_prod'
 bez = sys.argv[2] if len(sys.argv)>2 else 'f4_std_diff2'
 marken=[0.1,0.2,0.3,0.4,0.5]
 print(f"NEU: export/{neu}   BEZUG: export/{bez}   (Mittel je Marke ueber +-10 ms)")
+# ★ 17.09.2026 (Pruefbefund 3): die Z-Band-Zerlegung (cz_druck_rest/_band) haengt an der Bandkante N -- beide Laeufe vergleichen, LAUT bei Abweichung
+BZ, BAND_GLEICH, BAND_KURZ = lauf_meta.band_vergleich([(bez, os.path.join("export", bez)), (neu, os.path.join("export", neu))])
+print("\n".join(BZ))
 block("object_force (ganzes Fahrzeug) -- forces.csv", 'forces.csv', [('Cd','Cd'),('Cz','Cz')], neu, bez, marken)
 block("Facetten-Druckanteil -- cd_facetten.csv (erst ab t_warmup = 0,2 s)", 'cd_facetten.csv', [('cd_druck','cd_dr'),('cz_druck','cz_dr')], neu, bez, marken)
 block("Z-Band-Zerlegung -- kraft_zband.csv (rest = OBERHALB des Bodenbands)", 'kraft_zband.csv', [('cz_druck_rest','cz_rest'),('cz_druck_band','cz_band')], neu, bez, marken)
 n=reihe(f'export/{neu}/forces.csv','Cd')
 if n: print(f"\nFortschritt: t = {n[-1][0]:.3f} s von 0,500 s ({100*n[-1][0]/0.5:.0f} %)")
+if not BAND_GLEICH: print(BAND_KURZ)

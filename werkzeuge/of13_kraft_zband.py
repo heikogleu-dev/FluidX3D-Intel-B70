@@ -18,13 +18,44 @@
 # ABNAHME: die Summen muessen forces.dat bei derselben Zeit reproduzieren -- das Werkzeug
 # bricht ab, wenn die Abweichung > 1 % ist (sonst waere die Bandzerlegung wertlos).
 #
-# Aufruf: of13_kraft_zband.py [fall=~/CFD-Cases/mr2v40H] [zeit=1200] [band_mm=16,32,64]
+# Aufruf: of13_kraft_zband.py [fall=~/CFD-Cases/mr2v40H] [zeit=1200] [band=16,32,64]
+#   band: Liste aus Zahlen (mm, fest) und/oder LAUFNAMEN (export/<lauf>). ★ 17.09.2026 (SKALIERUNG-BEFUNDE Befund 1): fuer den
+#   Vergleich mit einem FX-Lauf ist die OF13-Bandkante die WIRKSAME FX-Oberkante DIESES Laufs, nicht 16 mm -- das FX-Band
+#   "unterste N Zellen" wirkt auf z = 1..N-1 (z = 0 ist Fahrbahn), Oberkante (N - 0,5) dx. Regel seit 17.09.2026 N = max(3, ceil(16 mm/dx)):
+#   4 mm N = 4 -> 14 mm, 8 mm N = 3 -> 20 mm, 3,75 mm N = 5 -> 16,875 mm, 16 mm N = 3 -> 40 mm. Alte Laeufe (vor der Regel): 8 mm N = 2 ->
+#   12 mm, 3,75 mm N = 4 -> 13,125 mm. Ein Laufname liest die Kante aus werkzeuge/lauf_meta.py (KRAFT-ZBAND-KANTE-Zeile, sonst Kopf
+#   kraft_zband.csv bzw. Rueckfall (N - 0,5) dx; Upstream-Bodenspalt dk abgezogen) und DRUCKT den Weg. Lauf mit Band AUS
+#   (CFD_KRAFT_ZBAND=0), ohne bestaetigtes N oder mit Warnung (z. B. dk unbekannt) -> Abbruch statt einer erfundenen Kante.
+#   Beispiel: of13_kraft_zband.py ~/CFD-Cases/mr2v40H 1200 p375_e,16
 import sys, os, gzip, subprocess
 import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 
 FALL = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/CFD-Cases/mr2v40H")
 ZEIT = sys.argv[2] if len(sys.argv) > 2 else "1200"
-BAENDER_MM = [float(v) for v in (sys.argv[3].split(",") if len(sys.argv) > 3 else ["16", "32", "64"])]
+
+def band_eintrag(e):
+    """(kante_mm, beschriftung oder None) -- Zahl = feste Kante, sonst Laufname."""
+    try: return float(e), None
+    except ValueError: pass
+    d = os.path.join(lauf_meta.WURZEL, "export", e)
+    if not os.path.isdir(d): raise SystemExit(f"Band '{e}': weder Zahl (mm) noch Lauf export/{e}")
+    dx, qdx = lauf_meta.dx_m(d)
+    if dx is None: raise SystemExit(f"Band '{e}': Zellweite des Laufs unbekannt")
+    zb = lauf_meta.zband(d, dx)
+    # ★ 17.09.2026 (Pruefbefund 7): Band AUS gab vorher N = 0 und die Kante (0 - 0,5) dx < 0 -- hier wurde dann "z < -2 mm" gerechnet
+    if zb.get("aus"): raise SystemExit(f"Band '{e}': Lauf ohne Kontaktband -- {lauf_meta.zband_text(zb)}; keine OF13-Bandkante ableitbar")
+    if zb["N"] is None or zb.get("warnung"): raise SystemExit(f"Band '{e}': {lauf_meta.zband_text(zb)}")
+    return zb["kante_fz_m"]*1000.0, f"Lauf {e} (dx {dx*1e3:.3f} mm aus {qdx}): {lauf_meta.zband_text(zb)}"
+
+BAENDER = [band_eintrag(v) for v in (sys.argv[3].split(",") if len(sys.argv) > 3 else ["16", "32", "64"])]
+BAENDER_MM = [b[0] for b in BAENDER]
+for mm, txt in BAENDER:
+    if txt: print(f"Bandkante {mm:.3f} mm <- {txt}")
+if len(sys.argv) <= 3:
+    print("HINWEIS: feste Baender 16/32/64 mm. Die wirksame FX-Bandkante ist laufabhaengig (Regel seit 17.09.: 4 mm 14, 8 mm 20, 3,75 mm 16,875,"
+          " 16 mm 40 mm; alte Laeufe 8 mm 12, 3,75 mm 13,125 mm) -- fuer den FX-Vergleich den Laufnamen als Band angeben (Befund 1, 17.09.).")
 RHO_INF, A_REF, U_INF = 1.225, 1.85, 30.0
 Q_INF = 0.5 * RHO_INF * U_INF**2
 
@@ -155,9 +186,10 @@ cd = lambda F: F[0] / (Q_INF * A_REF); cz = lambda F: F[2] / (Q_INF * A_REF)
 ges_p, ges_v = F_druck.sum(axis=0), F_reib.sum(axis=0)
 print(f"  GESAMT      Cd_p {cd(ges_p):+.4f}  Cd_v {cd(ges_v):+.4f}  Cd {cd(ges_p+ges_v):+.4f} | "
       f"Cz_p {cz(ges_p):+.4f}  Cz_v {cz(ges_v):+.4f}  Cz {cz(ges_p+ges_v):+.4f}")
-for mm in BAENDER_MM:
+for mm, txt in BAENDER:
     m = Cz < mm / 1000.0
     bp, bv = F_druck[m].sum(axis=0), F_reib[m].sum(axis=0)
-    print(f"  z < {mm:5.1f} mm  Flaechen {int(m.sum()):7d} ({100*m.mean():5.2f} %)  Flaeche {A[m].sum():7.4f} m2 ({100*A[m].sum()/A.sum():5.2f} %)")
+    if txt: print(f"  [{txt}]")
+    print(f"  z < {mm:6.3f} mm  Flaechen {int(m.sum()):7d} ({100*m.mean():5.2f} %)  Flaeche {A[m].sum():7.4f} m2 ({100*A[m].sum()/A.sum():5.2f} %)")
     print(f"               Cd_p {cd(bp):+.4f} ({100*cd(bp)/cd(ges_p):+6.2f} % von Cd_p)  "
           f"Cz_p {cz(bp):+.4f} ({100*cz(bp)/cz(ges_p):+6.2f} %)  Cd_v {cd(bv):+.4f}")

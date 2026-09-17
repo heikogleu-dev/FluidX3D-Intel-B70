@@ -17,6 +17,8 @@
 # Normierung: q_inf*A_ref = 0,5*1,225*30^2 * 1,85 m2 = 1019,8 N (Projektkonvention, Log "A_ref = 1.8500 m2").
 # Aufruf: paar_bb.py <bb_lauf> <wm_lauf> [marke]
 import csv, math, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lauf_meta
 QA = 0.5*1.225*30.0*30.0*1.85
 def reihe(lauf, datei, sp):
     p=f"export/{lauf}/{datei}"
@@ -37,6 +39,9 @@ def bei(rh, t):
     return m, 2*s/math.sqrt(len(v)), len(v)
 bb, wm = sys.argv[1], sys.argv[2]
 marken = [float(sys.argv[3])] if len(sys.argv)>3 else [0.2,0.3,0.4,0.5]
+# ★ 17.09.2026 (Pruefbefund 3): Fx_rest_N/Fz_rest_N und cd/cz_druck_rest haengen an der Bandkante N -- beide Arme vergleichen, LAUT bei Abweichung
+BZ, BAND_GLEICH, BAND_KURZ = lauf_meta.band_vergleich([(bb, os.path.join("export", bb)), (wm, os.path.join("export", wm))])
+print("\n".join(BZ))
 R={}
 for l in (bb,wm):
     R[l]={'cd':[(t,f/QA) for t,f in reihe(l,'kraft_zband.csv','Fx_rest_N')],
@@ -69,3 +74,4 @@ for t in marken:
 for l in (bb,wm):
     r=R[l]['cd']
     print(f"[{l} steht bei t = {r[-1][0]:.3f} s]" if r else f"[{l}: keine Daten]")
+if not BAND_GLEICH: print(BAND_KURZ)

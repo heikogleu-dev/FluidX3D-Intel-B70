@@ -7,8 +7,8 @@ z in [z_min_koerper, z_max_koerper] gesucht -> Dachzelle. Die Zelle darueber ist
 ERSTE FLUIDZELLE; genau darauf beruht das Abloesekriterium aus AUDIT-BEFUNDE B58
 ("u_x in der ersten Fluidzelle").
 
-Druck: p_lat = (rho-1)/3 (Gittereinheiten); cp = p_lat/(0.5*u_lat^2) = (rho-1)*118.5185
-mit u_lat = 0.075 (setup.cpp:4051); p_Pa = cp*0.5*si_rho*si_u^2 = cp*551.25
+Druck: p_lat = (rho-1)/3 (Gittereinheiten); cp = p_lat/(0.5*u_lat^2) = (rho-1)*2/(3*u_lat^2)
+mit u_lat DES LAUFS (u_lat_fuer unten; 0,075 -> 118,5185, 0,125 -> 42,6667); p_Pa = cp*0.5*si_rho*si_u^2 = cp*551.25
 (si_u = 30 m/s, si_rho = 1.225 -- setup.cpp:4043-4051).
 
 Aufruf: fx_dach.py <band.npz> <out.csv> [x0_m] [x1_m]
@@ -20,14 +20,29 @@ TYPE_S = 0x01
 # 2/(3*u_lat^2). Seit es den Schalter CFD_U_LAT gibt, wuerde ein Arm mit abweichendem u_lat
 # LAUTLOS mit dem falschen Faktor ausgewertet -- bei u_lat = 0,1 waere cp um (0,075/0,1)^2,
 # also um 44 %, zu gross. Jetzt aus der Umgebung, mit Ansage auf stderr.
-U_LAT = float(os.environ.get("CFD_U_LAT", 0.075))
-if abs(U_LAT-0.075) > 1e-12:
-    print(f"HINWEIS: u_lat = {U_LAT} aus CFD_U_LAT (Vorgabe 0.075) -- cp-Faktor 2/(3*u_lat^2) = {2.0/(3.0*U_LAT*U_LAT):.4f} statt 118.5185.", file=sys.stderr)
-CP_FAK = 2.0/(3.0*U_LAT*U_LAT)      # 118.5185 bei der Vorgabe: cp aus (rho-1)
+# ★ 17.09.2026 (SKALIERUNG-BEFUNDE Nebenbefund 10): der Rueckfall "CFD_U_LAT, sonst 0,075" war STILL -- bei SCHRITTE_PRO_ZELLE 8
+# (u_lat 0,125) wurde cp um den Faktor 2,78 zu gross, ohne Meldung. Jetzt wie fx_profil2.py (Pruefrunde 2, MITTEL 1): u_lat aus der
+# Band-npz (fx_band.py ab 17.09.), sonst aus dem Laufprotokoll, wenn die npz unter export/<lauf>/ liegt, sonst NUR mit ausdruecklichem
+# CFD_U_LAT -- ohne Quelle Abbruch.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+def u_lat_fuer(npz, d=None):
+    import lauf_meta
+    d = np.load(npz) if d is None else d
+    if "u_lat" in d.files and np.isfinite(float(d["u_lat"])):
+        ul = float(d["u_lat"]); q = f"{os.path.basename(npz)} (u_lat aus fx_band.py: {str(d['u_lat_quelle']) if 'u_lat_quelle' in d.files else '?'})"
+    elif lauf_meta.log_pfad(os.path.dirname(os.path.abspath(npz))):
+        ul, q = lauf_meta.u_lat(os.path.dirname(os.path.abspath(npz)))
+    elif "CFD_U_LAT" in os.environ:
+        ul, q = float(os.environ["CFD_U_LAT"]), "CFD_U_LAT (ausdruecklich gesetzt)"
+    else:
+        raise SystemExit(f"FEHLER: u_lat fuer {npz} unbekannt -- npz ohne u_lat, kein Laufprotokoll, CFD_U_LAT nicht gesetzt (Falle 17.09.: Faktor 2,78)")
+    print(f"u_lat = {ul} aus {q} -> cp-Faktor 2/(3*u_lat^2) = {2.0/(3.0*ul*ul):.4f}", file=sys.stderr)
+    return ul
 Q_INF  = 0.5*1.225*30.0**2          # 551.25 Pa
 
 def dachlinie(npz, x0=1.6, x1=4.6, zmin=0.30, zmax=1.60):
     d = np.load(npz)
+    ul = u_lat_fuer(npz, d); CP_FAK = 2.0/(3.0*ul*ul)
     U, RHO, FL = d["u"], d["rho"], d["flags"]        # (Nz, ny, Nx, 3) / (Nz,ny,Nx)
     Nx, Ny, Nz = d["dims"]; ox, oy, oz = d["orig"]; dx = float(d["dx"])
     ny = U.shape[1]
