@@ -1,0 +1,10 @@
+P1-Druckproxy OHNE Kontaktband, x-Streifen (bezugsunabhaengig), Mittel ueber 12 Felder 208..494 ms; dCz = D3Q27 - D3Q19; Streuung = SD der Feld-Differenzen / sqrt(12)
+Bereich                    Cz q19   Cz q27      dCz     +- |  Cd q19  Cd q27     dCd     +-
+Nase/Splitter              -0.198   -0.099   +0.098  0.007 |  +0.120  +0.128  +0.008  0.001
+Vorderrad/Haube            -0.028   +0.004   +0.032  0.013 |  +0.103  +0.091  -0.012  0.003
+Scheibe                    -0.122   -0.098   +0.025  0.014 |  -0.016  -0.013  +0.004  0.002
+Dach                       +0.173   +0.140   -0.033  0.048 |  -0.008  -0.008  +0.000  0.001
+Heckscheibe/Hinterrad      -0.052   -0.014   +0.038  0.036 |  +0.200  +0.199  -0.000  0.007
+Deck/Diffusor              -0.093   -0.040   +0.053  0.048 |  +0.017  +0.018  +0.001  0.003
+Fluegel/Heck               -0.207   -0.155   +0.052  0.073 |  +0.121  +0.097  -0.024  0.014
+GESAMT                     -0.527   -0.262   +0.265  0.141 |  +0.536  +0.513  -0.023  0.016
