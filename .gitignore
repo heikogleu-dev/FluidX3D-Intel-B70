@@ -5,6 +5,8 @@ stl/
 FluidX3D.vcxproj.user
 # Fork
 bin/
+bin_q27/
+*.npy
 temp/
 export/
 logs/

@@ -4,8 +4,14 @@
 
 //#define D2Q9 // choose D2Q9 velocity set for 2D; allocates 53 (FP32) or 35 (FP16) Bytes/cell
 //#define D3Q15 // choose D3Q15 velocity set for 3D; allocates 77 (FP32) or 47 (FP16) Bytes/cell
+// ★ 17.09.2026 (Heiko, Option 1: 8-mm-A/B D3Q27 gegen D3Q19 ohne Wandmodell): der Satz ist ein BUILD-Define.
+// Ohne -DCFD_VELSET27 bleibt alles Zeichen fuer Zeichen D3Q19 (Abnahme: Binary byte-gleich zum Stand 423de98).
+// Das D3Q27-Binary baut werkzeuge/bau_q27.sh nach bin_q27/FluidX3D; die Queue waehlt es ueber CFD_VELSET=27 in der Zeile.
+#ifndef CFD_VELSET27
 #define D3Q19 // choose D3Q19 velocity set for 3D; allocates 93 (FP32) or 55 (FP16) Bytes/cell; (default)
-//#define D3Q27 // choose D3Q27 velocity set for 3D; allocates 125 (FP32) or 71 (FP16) Bytes/cell
+#else
+#define D3Q27 // choose D3Q27 velocity set for 3D; allocates 125 (FP32) or 71 (FP16) Bytes/cell
+#endif
 
 #define SRT // choose single-relaxation-time LBM collision operator; (default)
 // ★ FORK 2026-08-08: TRT statt SRT. Bei SRT sind tau und Lambda=(tau-0.5)^2 gekoppelt; Lambda=3/16
@@ -77,7 +83,9 @@
 
 #define VOLUME_FORCE // enables global force per volume in one direction (equivalent to a pressure gradient); specified in the LBM class constructor; the force can be changed on-the-fly between time steps at no performance cost
 #define FORCE_FIELD // enables computing the forces on solid boundaries with lbm.update_force_field(); and enables setting the force for each lattice point independently (enable VOLUME_FORCE too); allocates an extra 12 Bytes/cell
+#ifndef CFD_VELSET27 // ★ 17.09.2026: nur D3Q19 (Wache unten); physikalisch inert, solange CFD_REG_BC aus ist (lbm.cpp: REG_E = feq in beiden Faellen)
 #define REGULARIZED_BOUNDARIES // ★ FORK 2026-08-08: TYPE_E-Raender setzen f = f_eq + f_neq statt nur f = f_eq.
+#endif
 // Der reine Gleichgewichts-Reset legt alle 19 Verteilungen fest, wo hoechstens 5 zulaessig sind, und
 // verwirft damit jeden Schritt den gesamten Spannungstensor. Gemessen am leeren groben Kanal: die
 // Stoerung entsteht in der ersten Fluidzelle hinter der Einlassebene, und bei w -> 2 klingt sie nicht

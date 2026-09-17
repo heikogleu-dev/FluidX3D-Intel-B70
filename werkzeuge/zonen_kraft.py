@@ -242,31 +242,38 @@ def main():
 
     # --- A4 Abnahme gegen den Facettenpfad
     tsoll = int(tms) / 1000.0
-    zeilen = [l for l in open(os.path.join(lauf_dir, "cd_facetten.csv")) if not l.startswith("#")]
-    kopfz = zeilen[0].strip().split(","); daten = np.array([[float(v) for v in l.split(",")] for l in zeilen[1:]])
-    it = int(np.argmin(np.abs(daten[:, 0] - tsoll))); fz = dict(zip(kopfz, daten[it]))
-    if abs(fz["time_s"] - tsoll) > 5e-4: raise SystemExit(f"A4 FEHLER: kein cd_facetten-Sample bei t={tsoll} (naechstes {fz['time_s']})")
     bandm = np.zeros(NBIN, dtype=bool); bandm[1::2] = True
     E1g, P1g = E1.sum(axis=0)*KC, P1.sum(axis=0)*KC
-    E1b = E1[bandm].sum(axis=0)*KC
-    P1b = P1[bandm].sum(axis=0)*KC
-    dcz, dcd = P1g[2] - fz["cz_druck"], P1g[0] - fz["cd_druck"]
-    ok4 = abs(dcz) <= 0.05 and abs(dcd) <= 0.08
-    dczb, dcdb = P1b[2] - fz["cz_druck_band"], P1b[0] - fz["cd_druck_band"]
-    dczr, dcdr = (P1g[2]-P1b[2]) - fz["cz_druck_rest"], (P1g[0]-P1b[0]) - fz["cd_druck_rest"]
-    ok4b = abs(dczb) <= 0.05 and abs(dcdb) <= 0.08
-    ok4r = abs(dczr) <= 0.05 and abs(dcdr) <= 0.08
-    print(f"A4 Facettenpfad t={fz['time_s']:.5f}: cd_druck {fz['cd_druck']:+.4f} cz_druck {fz['cz_druck']:+.4f} | band cd {fz['cd_druck_band']:+.4f} cz {fz['cz_druck_band']:+.4f}")
+    E1b, P1b = E1[bandm].sum(axis=0)*KC, P1[bandm].sum(axis=0)*KC
     print(f"   E1 (Gleichgew.-MEA unprojiziert, nur Info): Cd {E1g[0]:+.4f} Cz {E1g[2]:+.4f} Cy {E1g[1]:+.4f} | Band Cd {E1b[0]:+.4f} Cz {E1b[2]:+.4f}")
     print(f"A4 P1 (Druckproxy, Bezug 1): Cd {P1g[0]:+.4f} Cz {P1g[2]:+.4f} Cy {P1g[1]:+.4f} | Band Cd {P1b[0]:+.4f} Cz {P1b[2]:+.4f}")
-    print(f"A4 Rest ohne Band: P1 Cd {P1g[0]-P1b[0]:+.4f} Cz {P1g[2]-P1b[2]:+.4f} | Facettenpfad cd_druck_rest {fz['cd_druck_rest']:+.4f} cz_druck_rest {fz['cz_druck_rest']:+.4f}")
     print(f"   Bezugsempfindlichkeit gesamt (offene Kontaktflaeche): dCz/dcp_ref = {-G.sum(axis=0)[2]*KC*1.5*u_lat*u_lat:+.4f}")
-    print(f"A4 GESAMT dCz {dcz:+.4f} dCd {dcd:+.4f} -> " + ("bestanden" if ok4 else "NICHT bestanden"))
-    print(f"A4 BAND   dCz {dczb:+.4f} dCd {dcdb:+.4f} -> " + ("bestanden" if ok4b else "NICHT bestanden"))
-    print(f"A4 REST   dCz {dczr:+.4f} dCd {dcdr:+.4f} -> " + ("bestanden" if ok4r else "NICHT bestanden"))
-    print("   (Grenzen |dCz| <= 0,05, |dCd| <= 0,08. P1 ist die diskrete Form von Sum p n dA; der Facettenpfad ist normalprojizierter"
-          " MEA -- an der gitterparallelen ebenen Wand identisch, am Voxelkoerper nicht. Band- und Restabweichung sind nicht"
-          " lokalisiert und gehoeren als systematischer Anteil in jeden Zonen-Fehlerbalken.)")
+    cdf = os.path.join(lauf_dir, "cd_facetten.csv")
+    if not os.path.exists(cdf):
+        # ★ 17.09.2026: Laeufe ohne Facetten (BB-Arme q19_bb8/q27_bb8) haben keinen Facettenpfad -- A4 entfaellt LAUT.
+        # Die Zonenwerte sind dann nur Arm gegen Arm vergleichbar, nicht gegen OF13 (abnahme_a4 = False sperrt zonen_vergleich.py).
+        # P1 nutzt die D3Q19-Linkmenge als Quadratur fuer Sum p n dA -- auf einem D3Q27-Feld ist das weiterhin der Druckproxy, keine MEA des Laufs.
+        print("A4 ENTFAELLT: keine cd_facetten.csv (Lauf ohne Facetten) -- nur Arm gegen Arm lesen.")
+        fz = dict(time_s=float("nan"), cd_druck=float("nan"), cz_druck=float("nan")); ok4 = ok4b = ok4r = False; dczb = dczr = float("nan")
+    else:
+        zeilen = [l for l in open(cdf) if not l.startswith("#")]
+        kopfz = zeilen[0].strip().split(","); daten = np.array([[float(v) for v in l.split(",")] for l in zeilen[1:]])
+        it = int(np.argmin(np.abs(daten[:, 0] - tsoll))); fz = dict(zip(kopfz, daten[it]))
+        if abs(fz["time_s"] - tsoll) > 5e-4: raise SystemExit(f"A4 FEHLER: kein cd_facetten-Sample bei t={tsoll} (naechstes {fz['time_s']})")
+        dcz, dcd = P1g[2] - fz["cz_druck"], P1g[0] - fz["cd_druck"]
+        ok4 = abs(dcz) <= 0.05 and abs(dcd) <= 0.08
+        dczb, dcdb = P1b[2] - fz["cz_druck_band"], P1b[0] - fz["cd_druck_band"]
+        dczr, dcdr = (P1g[2]-P1b[2]) - fz["cz_druck_rest"], (P1g[0]-P1b[0]) - fz["cd_druck_rest"]
+        ok4b = abs(dczb) <= 0.05 and abs(dcdb) <= 0.08
+        ok4r = abs(dczr) <= 0.05 and abs(dcdr) <= 0.08
+        print(f"A4 Facettenpfad t={fz['time_s']:.5f}: cd_druck {fz['cd_druck']:+.4f} cz_druck {fz['cz_druck']:+.4f} | band cd {fz['cd_druck_band']:+.4f} cz {fz['cz_druck_band']:+.4f}")
+        print(f"A4 Rest ohne Band: P1 Cd {P1g[0]-P1b[0]:+.4f} Cz {P1g[2]-P1b[2]:+.4f} | Facettenpfad cd_druck_rest {fz['cd_druck_rest']:+.4f} cz_druck_rest {fz['cz_druck_rest']:+.4f}")
+        print(f"A4 GESAMT dCz {dcz:+.4f} dCd {dcd:+.4f} -> " + ("bestanden" if ok4 else "NICHT bestanden"))
+        print(f"A4 BAND   dCz {dczb:+.4f} dCd {dcdb:+.4f} -> " + ("bestanden" if ok4b else "NICHT bestanden"))
+        print(f"A4 REST   dCz {dczr:+.4f} dCd {dcdr:+.4f} -> " + ("bestanden" if ok4r else "NICHT bestanden"))
+        print("   (Grenzen |dCz| <= 0,05, |dCd| <= 0,08. P1 ist die diskrete Form von Sum p n dA; der Facettenpfad ist normalprojizierter"
+              " MEA -- an der gitterparallelen ebenen Wand identisch, am Voxelkoerper nicht. Band- und Restabweichung sind nicht"
+              " lokalisiert und gehoeren als systematischer Anteil in jeden Zonen-Fehlerbalken.)")
     print(f"   Links an Fahrzeugzellen mit y-Index {jy0+j0} (Membran nur ohne Versatz): {membran_n} Links, P1 Cz {membran[2]*KC:+.5f} Cd {membran[0]*KC:+.5f}")
 
     # --- Geometrie: Bodenfreiheit der Mittellinie (|y| < 0,1 m), ohne z-Index <= 1

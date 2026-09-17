@@ -1411,8 +1411,19 @@ void LBM_Domain::alloc_f_liste(const uchar* flags_host, const uint Nx, const uin
 #endif
 	const ulong FN = (ulong)fbnx*(ulong)fbny*(ulong)fbnz;
 	const ulong FNB = (FN+31ull)/32ull;
+#ifndef D3Q27
 	static const int FZ18[18][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
 		{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1}};
+	const uint n_fz = 18u;
+#else
+	// ★ 17.09.2026 (Planungsagent D3Q27, Risiko 1): der Kernel prueft in update_force_field ALLE 26 Nachbarn
+	// (kernel.cpp has_fluid_neighbor). Mit nur 18 Richtungen bekaeme eine Wandzelle, deren einziger Fluidnachbar
+	// eine Ecke ist, keinen Slot -- store3_F verwirft dann ihre Kraft still (Slot 77). Deshalb hier die 8 Ecken dazu.
+	static const int FZ18[26][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
+		{1,1,0},{-1,-1,0},{1,0,1},{-1,0,-1},{0,1,1},{0,-1,-1},{1,-1,0},{-1,1,0},{1,0,-1},{-1,0,1},{0,1,-1},{0,-1,1},
+		{1,1,1},{-1,-1,-1},{1,1,-1},{-1,-1,1},{1,-1,1},{-1,1,-1},{-1,1,1},{1,-1,-1}};
+	const uint n_fz = 26u;
+#endif
 	for(ulong i=0ull; i<2ull*FNB; i++) f_maske[i]=0u;
 	ulong n_solid=0ull, n_wand=0ull;
 	for(uint zb=0u; zb<fbnz; zb++) for(uint yb=0u; yb<fbny; yb++) for(uint xb=0u; xb<fbnx; xb++) {
@@ -1421,7 +1432,7 @@ void LBM_Domain::alloc_f_liste(const uchar* flags_host, const uint Nx, const uin
 		if((flags_host[n]&(TYPE_S|TYPE_E))!=TYPE_S) continue; // Host-Maske fuer TYPE_BO (device-seitig 0x03)
 		n_solid++;
 		bool wand=false;
-		for(uint i=0u; i<18u&&!wand; i++) {
+		for(uint i=0u; i<n_fz&&!wand; i++) {
 			const int zn0=(int)z+FZ18[i][2];
 			// OBERMENGE: liegt der Nachbar ausserhalb des Gitters in z, gilt die Zelle als Wandzelle
 			// (der Kernel wickelt dort und koennte einen Nicht-Solid treffen -- wir raten zugunsten
@@ -2288,7 +2299,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	"\n	#define REG_E(i) (feq[i])")
 	+
 #else
-	"\n	#define REG_E(i) (feq[i])"
+	+ "\n	#define REG_E(i) (feq[i])" // ★ 17.09.2026: hier fehlte das '+' -- der Zweig ohne REGULARIZED_BOUNDARIES war nie gebaut worden (erster D3Q27-Build)
 #endif // REGULARIZED_BOUNDARIES
 	#ifdef RHO_CLAMP
 	"\n	#define RHO_CLAMP"

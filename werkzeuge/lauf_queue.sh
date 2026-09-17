@@ -73,7 +73,15 @@ while IFS= read -r zeile; do
 			sleep 60
 		fi
 	fi
-	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name" | tee -a "$Q"
+	# ★ 17.09.2026 BINARY-WAHL (D3Q27-A/B): CFD_VELSET=27 in der ZEILE waehlt bin_q27/FluidX3D (gebaut von werkzeuge/bau_q27.sh).
+	# Geerbtes CFD_VELSET zaehlt nicht fuer die Wahl -- main_setup bricht dann ab, weil Build-Satz und CFD_VELSET nicht passen.
+	BIN=bin/FluidX3D
+	if echo " $env_teil " | grep -Eq '[[:space:]]CFD_VELSET=27[[:space:]]'; then BIN=bin_q27/FluidX3D; fi
+	if [ ! -x "$BIN" ]; then
+		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Binary $BIN fehlt oder ist nicht ausfuehrbar" | tee -a "$Q"
+		continue
+	fi
+	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name (Binary $BIN)" | tee -a "$Q"
 	# ★★ 06.09.2026 FORTSCHRITTSWAECHTER. Der Herzschlag bezeugt nur, dass der PROZESS lebt, nicht
 	# dass er RECHNET. Am 06.09. stand xf_elibb_pur 2 h 10 min nach "Allocating memory" bei 100 % auf
 	# einem Thread, waehrend die Statusdatei im Zweiminutentakt "LAEUFT" schrieb -- zwei Stunden
@@ -85,7 +93,7 @@ while IFS= read -r zeile; do
 	versuch=0; rc=0
 	while :; do
 		versuch=$((versuch+1))
-		env $env_teil CFD_RUN_NAME="$name" bin/FluidX3D "${CFD_QUEUE_DEV:-2}" < /dev/null > "logs/$name.log" 2>&1 &
+		env $env_teil CFD_RUN_NAME="$name" "$BIN" "${CFD_QUEUE_DEV:-2}" < /dev/null > "logs/$name.log" 2>&1 &
 		pid=$!
 		gestartet=0
 		for _ in $(seq 1 $HANG_S); do

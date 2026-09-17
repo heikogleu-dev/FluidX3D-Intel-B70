@@ -2127,6 +2127,11 @@ void sichere_lauf(const string& out_dir, const string& fall) {
 	m << "Fall            : " << fall << "\nOrdner          : " << out_dir << "\n";
 	m << "Gesichert       : " << n_files << " Quelldateien, " << (n_bytes/1024ull) << " kB\n\n";
 	m << "Git-Commit      : " << commit << "\n";
+#if defined(D3Q27)
+	m << "Geschw.-Satz    : D3Q27 (Build-Define CFD_VELSET27), Binary " << get_exe_path() << "FluidX3D\n";
+#else
+	m << "Geschw.-Satz    : D3Q19, Binary " << get_exe_path() << "FluidX3D\n";
+#endif
 	m << "Arbeitsbaum     : " << (schmutz=="(leer)" ? "SAUBER -- der Commit oben beschreibt den Code vollstaendig"
 		: "SCHMUTZIG -- der Commit allein reicht NICHT, siehe aenderungen.diff") << "\n";
 	if(schmutz!="(leer)") m << "\nGeaenderte Dateien:\n" << schmutz << "\n";
@@ -9727,6 +9732,14 @@ static void main_setup_fahrzeug_dd() {
 		}
 		if(swf!=0ull) print_error("Nahfeld zaehlt Schalen-Blend-Wirkpfad -- es MUSS unberuehrt bleiben (alpha-Statik-Bruch: s_schale_alpha muss fuer lbm_f EXPLIZIT 0 sein).");
 	}
+	// ★ 17.09.2026 (Planungsagent D3Q27, Risiko 1): der F-MARKERLISTEN-Waechter (Slot 77) stand nur im Facetten-Block --
+	// ohne Facetten (z. B. die BB-Arme q19_bb8/q27_bb8) wurde er nie gelesen, verlorene Kraft bliebe stumm. Gleicher Text wie unten.
+	if(env_u("CFD_FACETTEN", 0u)==0u&&lbm_f.lbm_domain[0]->f_liste_on) {
+		LBM_Domain* d77 = lbm_f.lbm_domain[0]; d77->rho_clamp_hits.read_from_device();
+		const ulong s77=(ulong)d77->rho_clamp_hits[77];
+		if(s77>0ull) print_error("[Nahfeld] F-MARKERLISTE: Slot 77 = "+to_string(s77)+" Schreibversuche OHNE Slot. Die Host-Maske ist KEINE Obermenge des Kernel-Praedikats -- an diesen Zellen geht Kraft still verloren. Ergebnis nicht verwenden.");
+		else print_info("[Nahfeld] F-MARKERLISTE: Slot 77 = 0 -- jede vom Kernel beschriebene Zelle hatte einen Slot ("+to_string(d77->f_slots)+" Slots).");
+	}
 	if(env_u("CFD_FACETTEN", 0u)>0u) { // ★ Stufe 5: Pruefpfade IMMER (ausserhalb stat_ok -- Audit-R1-Muster)
 		LBM_Domain* df = lbm_f.lbm_domain[0];
 		df->rho_clamp_hits.read_from_device();
@@ -10330,6 +10343,19 @@ void main_setup_facetten_test() {
 }
 
 void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeug | fahrzeug_dd | fernfeld | facetten_test
+	{	// ★ 17.09.2026 (Planungsagent D3Q27, Risiko 2): Geschwindigkeitssatz ist ein Build-Define (defines.hpp, -DCFD_VELSET27).
+		// Die Zeile erklaert mit CFD_VELSET, welchen Satz sie erwartet (Vorgabe 19); ein falsches Binary bricht hier ab statt still zu rechnen.
+#if defined(D3Q27)
+		const uint vs_build = 27u;
+#elif defined(D3Q19)
+		const uint vs_build = 19u;
+#else
+		const uint vs_build = 0u;
+#endif
+		const uint vs_soll = env_u("CFD_VELSET", 19u);
+		if(vs_soll!=vs_build) print_error("CFD_VELSET="+to_string(vs_soll)+" verlangt, dieses Binary ("+get_exe_path()+"FluidX3D) ist aber D3Q"+to_string(vs_build)+" gebaut. D3Q27: werkzeuge/bau_q27.sh -> bin_q27/FluidX3D; die Queue waehlt es ueber CFD_VELSET=27 in der Zeile.");
+		print_info("GESCHWINDIGKEITSSATZ: D3Q"+to_string(vs_build)+" (Build), CFD_VELSET="+to_string(vs_soll)+", Binary "+get_exe_path()+"FluidX3D");
+	}
 	const char* c = getenv("CFD_CASE");
 	if(getenv("CFD_RHO_RAND")!=nullptr&&c!=nullptr&&string(c)!="fahrzeug_dd"&&string(c)!="kugel") print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld und am Kugel-Pruefstand angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0/C2c
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
