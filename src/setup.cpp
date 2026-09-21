@@ -6591,7 +6591,12 @@ static void pruefe_basis(const string& basisdatei, const float dx_lauf) { // ★
 			const string ev(*e); const size_t g=ev.find('=');
 			if(g==string::npos||ev.compare(0,4,"CFD_")!=0) continue;
 			const string nm=ev.substr(0,g);
-			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME") continue;
+			// ★ 21.09.2026 (Heiko): CFD_QUEUE_* sind QUEUE-Schalter, kein Solverzustand -- das Binary liest
+			// KEINEN davon (grep ueber src/: null Treffer), sie werden allein von werkzeuge/lauf_queue.sh
+			// ausgewertet (DEV, HANG_S, KRAFTBILD, KRAFTBILD_MS). Sie in der Basis zu fuehren waere falsch,
+			// und sie als "ZUSAETZLICH" zu melden erzeugt bei JEDEM Produktionslauf drei Warnungen, die
+			// nichts bedeuten -- genau die Sorte Dauerrauschen, die eine echte Warnung untergehen laesst.
+			if(bekannt.count(nm)||nm=="CFD_BASIS"||nm=="CFD_BASIS_ABWEICHUNG"||nm=="CFD_RUN_NAME"||nm.compare(0,10,"CFD_QUEUE_")==0) continue;
 			print_warning("BASIS ZUSAETZLICH: "+nm+"="+ev.substr(g+1)+" -- steht nicht in der Referenz, wird also NICHT geprueft.");
 			if(nm=="CFD_U_LAT"&&fabs(atof(ev.substr(g+1).c_str())-(double)U_LAT_VORGABE)>1e-9) print_warning("CFD_U_LAT weicht von der Vorgabe ab und steht nicht in der Referenz. schritte_fein wird seit 16.09. von env_schritte umgerechnet, der Waechter prueft den Referenzwert (4-mm-Wert in der Zeile). Sollwerte mit "+to_string((float)((double)U_LAT_VORGABE/atof(ev.substr(g+1).c_str())),4u)+" mit -- das ist gedeckt. Schalter, die als 'zellen_fein' oder 'modus' gefuehrt sind, aber in SCHRITTEN zaehlen, sind es NICHT (B5).");
 			if(nm=="CFD_U_LAT") print_warning("CFD_U_LAT ist gesetzt: u_lat prueft der Waechter seit 17.09.2026 ueber CFD_SCHRITTE_PRO_ZELLE (Referenzwert) -- der fehlt dann und muss mit CFD_BASIS_ABWEICHUNG=CFD_SCHRITTE_PRO_ZELLE=- deklariert werden (Bandkraft ~ 1/u_lat^2, Skalierungsaudit Punkt 6).");
