@@ -6723,19 +6723,32 @@ static void main_setup_fahrzeug_dd() {
 	// dann auf die naechste GROBzelle auf -- auch das Nahfeld, das darum mit dx_c gerastert wird und
 	// nicht mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen
 	// (Deckungspunkt-Konvention), und nur so ist die Box aufloesungsunabhaengig dieselbe Geometrie.
-	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 7,000 H
-	// Z+ FERN: 7,000 -> 6,500 (16:16) -> ZURUECK AUF 7,000 (Heiko 2026-09-21, 17:22).
-	// Der Zwischenschritt 6,500 beruhte auf einer Zahl aus der ANWAERMPHASE (p4_regel5 kam nur bis
-	// t = 0,052 s bei CFD_T_WARMUP = 0,201 s) und war damit nicht belastbar -- siehe Korrektur in
-	// BOX-REGELWERK.md. Die Rueckkehr auf 7,000 steht dagegen auf einer EINGESCHWUNGENEN Messung mit
-	// einem FREMDEN Instrument: /proc/<pid>/fdinfo, 60-s-Fenster bei t > 0,201 s (p4_regel6, 17:14):
-	//   B70  (pdev 04:00.0, drm-cycles-ccs)     94,3 % busy -> Nahfenster ~495 ms
-	//   iGPU (pdev 00:02.0, drm-engine-compute) 86,2 % busy -> Fernschritt  ~452 ms
-	// bei 524,7 ms je Grobschritt, also 43 ms = 8,2 % Reserve bei Z+ 6,500 H (Fern Nz 568).
-	// Z+ 7,000 H bringt Nz auf 608, +7,04 % Fernzellen. HOCHGERECHNET (lineare Skalierung, auf dieser
-	// Maschine NICHT gemessen): Fernschritt ~484 ms gegen 495 ms, Reserve ~11 ms = 2,2 %.
-	// Gewinn: Versperrung 2,01 % -> 1,875 %. Wenn der naechste Lauf den Grobschritt bei ~525 ms haelt,
-	// ist die Hochrechnung bestaetigt; steigt er Richtung 484 ms+, wird die iGPU zum Taktgeber.
+	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 6,500 H
+	// Z+ FERN, ENDSTAND nach drei Laeufen an einem Tag (Heiko 2026-09-21, 17:33): 6,500 H.
+	// Der Weg dahin, weil die Zwischenschritte falsch begruendet waren und das nicht verloren gehen soll:
+	//   7,000 -> 6,500 (16:16) auf eine Zahl aus der ANWAERMPHASE gestuetzt (p4_regel5 kam nur bis
+	//     t = 0,052 s bei CFD_T_WARMUP = 0,201 s) -- richtige Richtung, unbelastbare Begruendung.
+	//   6,500 -> 7,000 (17:22) auf eine HOCHRECHNUNG gestuetzt: lineare Skalierung des Fernschritts
+	//     mit der Zellzahl, Vorhersage ~484 ms. p4_regel7 hat sie WIDERLEGT.
+	//   7,000 -> 6,500 (17:33), diesmal auf zwei eingeschwungene Messungen mit einem FREMDEN
+	//     Instrument (/proc/<pid>/fdinfo, drm-cycles-ccs bzw. drm-engine-compute):
+	//
+	//     Lauf        Fern Nz  Zellen    Grobschritt  B70 busy  iGPU busy  Fernschritt  Reserve
+	//     p4_regel6   568      289,0 M   524,7 ms     94,3 %    86,2 %     ~452 ms      8,2 %
+	//     p4_regel7   608      309,4 M   ~536 ms      ~97,0 %   ~97,0 %    ~520 ms      ~0
+	//
+	// ★ NEUE MESSUNG DIESER MASCHINE, die hier hingehoert: der Fernschritt skaliert NICHT linear mit
+	// der Zellzahl. +7,04 % Zellen erzeugen rund +15 % Fernschrittzeit, also etwa DOPPELT so viel wie
+	// die Zellzahl. Wer Fernfeldwachstum plant, rechnet mit diesem Faktor, nicht mit der Zellzahl.
+	// Bei 7,000 H laufen Nah und Fern kopf an kopf -- die Verdeckung ist weg, und das bestaetigt
+	// nebenbei die Volumenschranke aus BOX-REGELWERK.md (~1 155 m3): 6,500 H = 1 178 m3 versteckt
+	// sich mit 8,2 % Reserve, 7,000 H = 1 261 m3 nicht mehr.
+	// Warum 6,500 H trotz 2,01 % statt 1,87 % Versperrung (Heiko 17:33): die 0,14 Prozentpunkte sind
+	// in den KRAEFTEN nicht sichtbar. p4_regel4 (2,07 %) gegen p4_regel7 (1,87 %) -- 0,2 Punkte
+	// Unterschied -- bewegt cd_rest und cz_rest um 3-18 % EINER Streuung, nach dem Warmlauf gemessen.
+	// Versperrung ist in diesem Bereich nicht die bindende Groesse; die Verdeckungsreserve ist es.
+	// Die 2-%-Marke ist ohnehin kein physikalischer Schwellwert, sondern der Vergleichsfall
+	// OF13 mr2v40H mit 1,93 % (BOX-REGELWERK.md).
 	// TEILBARKEIT (Heiko 2026-09-21): Nx durch 16, Ny/Nz durch 4 -- und zwar auf der ALLOZIERTEN
 	// GITTERBREITE (Knoten), denn daran haengt der gemessene 5-%-Effekt (TODO.md, iGPU). Fuer das
 	// FERNFELD ist das erfuellbar und wird hier erzwungen. Fuer das NAHFELD ist es STRUKTURELL
@@ -6744,7 +6757,7 @@ static void main_setup_fahrzeug_dd() {
 	// fuer das Fernfeld, das Nahfeld behaelt 4k+1 -- die Kopplung umzubauen waere ein Verfahrenswechsel,
 	// und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
 	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.625f;
-	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=7.000f;
+	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=6.500f;
 	// Kleinste ZELLSPANNE >= soll, deren KNOTENZAHL (Spanne+1) durch teiler teilbar ist. teiler=1 heisst
 	// "nur aufrunden" (Nahfeld). Aufgerundet wird IMMER -- eine Box darf den Sollabstand ueberschreiten,
 	// nie unterschreiten, sonst misst man die Regel nicht mehr, die man aufgeschrieben hat.

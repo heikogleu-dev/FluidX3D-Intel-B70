@@ -15,7 +15,7 @@ Fahrzeugausrichtung: Radaufstandsflächen auf z = 0, Nase bei x = 0, Mittelebene
 | X+ (hinter dem Heck) | 0,625 L | 1,250 L |
 | Y (je Seite) | 0,250 B | **2,250 B** |
 | Z− | 0 (Fahrzeug steht auf der Fahrbahn) | 0 |
-| Z+ (über dem Dach) | 0,625 H | **7,000 H** |
+| Z+ (über dem Dach) | 0,625 H | **6,500 H** |
 
 **Rundung (Heiko 21.09.2026):** Das Regelwerk orientiert sich **immer an den Sollabständen** und rundet
 dann auf die **nächste Grobzelle** auf — auch das Nahfeld, das deshalb mit dx_c gerastert wird und nicht
@@ -246,3 +246,48 @@ zum Taktgeber und 7,000 H ist zu viel. Die Zahl steht im `[PHASEN]`-Profil und i
 
 **Offen und bewusst so stehengelassen:** die lineare Skalierung des Fernschritts mit der Zellzahl
 ist eine Annahme, keine Messung dieser Maschine.
+
+## ENDSTAND 21.09.2026, 17:33 — Fern Z+ = 6,500 H (Heiko)
+
+Nach drei Läufen an einem Tag steht die Zahl auf Messungen statt auf Schätzungen. **Die Tabelle
+oben ist maßgeblich; die Nachträge 16:16 und 17:22 sind der Weg dahin und in ihrer Begründung
+überholt.**
+
+### Die Messreihe, mit einem fremden Instrument
+Quelle: `/proc/<pid>/fdinfo` — B70 `drm-cycles-ccs` (pdev 04:00.0, xe), iGPU `drm-engine-compute`
+(pdev 00:02.0, i915). Beide Läufe **nach** dem Warmlauf (t > 0,201 s).
+
+| Lauf | Fern Nz | Zellen | Volumen | Grobschritt | B70 busy | iGPU busy | Fernschritt | Reserve |
+|---|---|---|---|---|---|---|---|---|
+| p4_regel6 | 568 | 289,0 M | 1 178 m³ | 524,7 ms | 94,3 % | **86,2 %** | ~452 ms | **8,2 %** |
+| p4_regel7 | 608 | 309,4 M | 1 261 m³ | ~536 ms | ~97,0 % | **~97,0 %** | ~520 ms | ~0 |
+
+### NEUE MESSUNG DIESER MASCHINE: der Fernschritt skaliert nicht linear
+**+7,04 % Fernzellen erzeugen rund +15 % Fernschrittzeit** — etwa doppelt so viel wie die Zellzahl.
+Die Hochrechnung vom 17:22 (linear, Vorhersage ~484 ms) lag um Faktor 2 daneben; gemessen ~520 ms.
+**Wer Fernfeldwachstum plant, rechnet ab jetzt mit diesem Faktor, nicht mit der Zellzahl.**
+
+Das kalibriert nebenbei die Volumenschranke weiter oben (~1 155 m³): 1 178 m³ versteckt sich noch
+mit 8,2 % Reserve, 1 261 m³ nicht mehr. Die Schranke war also leicht konservativ, die Größenordnung
+stimmt.
+
+### Warum 6,500 H, obwohl 7,000 H die kleinere Versperrung hat
+| | Z+ 6,500 H | Z+ 7,000 H |
+|---|---|---|
+| Versperrung | 2,01 % | 1,87 % |
+| Verdeckungsreserve | **8,2 %** | ~0 |
+| Wanduhr je Grobschritt | **524,7 ms** | ~536 ms (+2,2 %) |
+
+Die 0,14 Prozentpunkte Versperrung sind **in den Kräften nicht sichtbar**. p4_regel4 (2,07 %) gegen
+p4_regel7 (1,87 %) — 0,2 Punkte Unterschied, beide nach dem Warmlauf, gleiche Größe, gleiches
+Fenster — bewegt `cd_rest` und `cz_rest` um **3–18 % einer Streuung** (Zahlen im Tagesprotokoll
+2026-09-21, Abschnitt 19:25). In diesem Bereich ist Versperrung nicht die bindende Größe, die
+Verdeckungsreserve ist es.
+
+Dazu: die 2-%-Marke ist **kein physikalischer Schwellwert**, sondern der Vergleichsfall
+OF13 mr2v40H mit 1,93 % (Zeile 68). 6,500 H liegt mit 2,01 % um 0,08 Punkte darüber — eine
+Differenz, die nach obiger Messung keine Kraft sieht.
+
+### Far-Domain im Standard (dx_c = 16 mm)
+Gitter **800 × 636 × 568**, Kanten 12,784 × 10,160 × 9,072 m, Volumen 1 178 m³, 289,0 Mio Grobzellen,
+~13,0 GB System-RAM. Querschnitt 92,17 m², Versperrung 2,01 %.
