@@ -196,3 +196,21 @@ also −6,6 % Fernzellen. Die Verdeckungsreserve wächst entsprechend; der gemes
 **Lehre: Diagnoseschalter gehören nicht in eine Produktionszeile.** `CFD_TIMER_FERN=1` kostet exakt
 einen Fernfeldschritt je Grobschritt (+101 % Wanduhr) und druckt seine `[FERNFELD-ZEIT]`-Statistik erst
 am Laufende (`src/setup.cpp:9728`).
+
+### Korrektur 21.09.2026, 17:10 — die Fernfeldzahl oben ist ein ANWAERM-Wert
+
+`CFD_T_WARMUP` stand in beiden Laeufen auf 0,201 s. p4_regel5 kam bis **t = 0,052 s**, also nie
+aus der Anwaermphase heraus. Die Zahlen im Nachtrag 16:16 (Fernfeldschritt ~538 ms, Nahfenster
+549 ms, Reserve 2,0 %) stammen damit aus der ANWAERMPHASE und sind keine eingeschwungenen Werte.
+Die Zahl aus p4_regel4 (531 ms, Kopplung 0,7 %) ist dagegen ein ENDwert — die beiden sind nicht
+direkt vergleichbar. Der Entscheid Z+ 6,500 H bleibt davon unberuehrt, die QUANTITATIVE Reserve
+ist offen und wird aus dem `[PHASEN]`-Profil von p4_regel6 NACH t = 0,201 s genommen.
+
+Gueltig ist der Vergleich p4_regel5 -> p4_regel6, weil beide in derselben Phase gemessen wurden:
+
+| | Kopplung | Nahfeld | Fern sync | je Grobschritt | t |
+|---|---|---|---|---|---|
+| p4_regel5 (CFD_TIMER_FERN=1) | 48,8 % | 49,4 % | — | 1111,0 ms | 0,052 s |
+| p4_regel6 (ohne Timer) | 0,7 % | 96,5 % | 1,9 % | **524,5 ms** | 0,150 s |
+
+Das belegt die Ursache (der Timer hebt die Ueberlappung auf), nicht die Groesse der Reserve.
