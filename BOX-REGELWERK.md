@@ -15,7 +15,7 @@ Fahrzeugausrichtung: Radaufstandsflächen auf z = 0, Nase bei x = 0, Mittelebene
 | X+ (hinter dem Heck) | 0,625 L | 1,250 L |
 | Y (je Seite) | 0,250 B | **2,250 B** |
 | Z− | 0 (Fahrzeug steht auf der Fahrbahn) | 0 |
-| Z+ (über dem Dach) | 0,625 H | 7,000 H |
+| Z+ (über dem Dach) | 0,625 H | **6,500 H** |
 
 **Rundung (Heiko 21.09.2026):** Das Regelwerk orientiert sich **immer an den Sollabständen** und rundet
 dann auf die **nächste Grobzelle** auf — auch das Nahfeld, das deshalb mit dx_c gerastert wird und nicht
@@ -171,3 +171,28 @@ Fernfeld **800 × 636 × 608 = 309,4 Mio**, Box 12,784 × **10,160** × 9,712 m,
 **Deshalb läuft der nächste Lauf mit `CFD_TIMER_FERN`.** Die 517 ms sind aus 338 ms bei 202,4 Mio
 hochgerechnet (p4_neu); gemessen ist bisher nur „versteckt", also ≤ Nahfenster. Liegt der echte Schritt
 über 532 ms, wird die iGPU zum Taktgeber und die Wanduhr steigt entsprechend — der Lauf misst das selbst.
+
+## Nachtrag 21.09.2026, 16:16 — Fern Z+ 7,000 → 6,500 H (Heiko)
+
+**Anlass: gemessene Verdeckungsreserve, nicht geschätzt.** p4_regel5 lief mit `CFD_TIMER_FERN=1`.
+Der Schalter ruft direkt nach `lbm_c.run_async(1u)` ein `lbm_c.finish()` (`src/setup.cpp:8880`) und
+**hebt die Überlappung Nah/Fern auf** — das ist sein dokumentierter Zweck und macht den Fernfeldschritt
+isoliert sichtbar:
+
+| | Kopplung grob→fein | Nahfenster | je Grobschritt |
+|---|---|---|---|
+| p4_regel4 (ohne Timer, überlappt) | 0,7 % = 3,7 ms | 96,1 % = 510 ms | 531 ms |
+| p4_regel5 (mit Timer, seriell) | 48,8 % = **542 ms** | 49,4 % = **549 ms** | 1111 ms |
+
+Fernfeldschritt also **~538 ms** (542 − ~4 ms Drive) gegen ein Nahfenster von **549 ms**:
+**Reserve 11 ms = 2,0 %.** Das Fernfeld versteckte sich bei Fern-Y 2,250 B / Z+ 7,000 H gerade noch,
+aber ohne Luft — jede weitere Fernvergrößerung hätte die Verdeckung gebrochen.
+
+**Folge der Änderung** (Sollrechnung, Ist steht nach dem Lauf in der Abnahme):
+Fern Nz von 608 auf **568** (`(1+6,5)·1,20833 m / 0,016 m = 566,4 → 567`, Knotenzahl 568 durch 4 teilbar),
+also −6,6 % Fernzellen. Die Verdeckungsreserve wächst entsprechend; der gemessene Wert kommt aus dem
+`[PHASEN]`-Profil des nächsten Laufs.
+
+**Lehre: Diagnoseschalter gehören nicht in eine Produktionszeile.** `CFD_TIMER_FERN=1` kostet exakt
+einen Fernfeldschritt je Grobschritt (+101 % Wanduhr) und druckt seine `[FERNFELD-ZEIT]`-Statistik erst
+am Laufende (`src/setup.cpp:9728`).

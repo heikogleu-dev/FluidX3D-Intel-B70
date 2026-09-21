@@ -6723,7 +6723,12 @@ static void main_setup_fahrzeug_dd() {
 	// dann auf die naechste GROBzelle auf -- auch das Nahfeld, das darum mit dx_c gerastert wird und
 	// nicht mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen
 	// (Deckungspunkt-Konvention), und nur so ist die Box aufloesungsunabhaengig dieselbe Geometrie.
-	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 7,000 H
+	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 6,500 H
+	// Z+ FERN 7,000 -> 6,500 (Heiko 2026-09-21, 16:16): GEMESSENE Verdeckungsreserve, nicht geschaetzt.
+	// p4_regel5 lief mit CFD_TIMER_FERN=1, der die Ueberlappung aufhebt (setup.cpp:8880) und damit den
+	// Fernfeldschritt ISOLIERT sichtbar macht: [PHASEN] Kopplung 48,8 % von 1111 ms = 542 ms, minus ~4 ms
+	// Drive => Fernschritt ~538 ms gegen ein Nahfenster von 549 ms. Reserve 11 ms = 2,0 % -- das Fernfeld
+	// versteckte sich gerade noch, aber ohne Luft. 6,500 H nimmt Nz von 608 auf 568 (-6,6 % Fernzellen).
 	// TEILBARKEIT (Heiko 2026-09-21): Nx durch 16, Ny/Nz durch 4 -- und zwar auf der ALLOZIERTEN
 	// GITTERBREITE (Knoten), denn daran haengt der gemessene 5-%-Effekt (TODO.md, iGPU). Fuer das
 	// FERNFELD ist das erfuellbar und wird hier erzwungen. Fuer das NAHFELD ist es STRUKTURELL
@@ -6732,7 +6737,7 @@ static void main_setup_fahrzeug_dd() {
 	// fuer das Fernfeld, das Nahfeld behaelt 4k+1 -- die Kopplung umzubauen waere ein Verfahrenswechsel,
 	// und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
 	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.625f;
-	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=7.000f;
+	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=6.500f;
 	// Kleinste ZELLSPANNE >= soll, deren KNOTENZAHL (Spanne+1) durch teiler teilbar ist. teiler=1 heisst
 	// "nur aufrunden" (Nahfeld). Aufgerundet wird IMMER -- eine Box darf den Sollabstand ueberschreiten,
 	// nie unterschreiten, sonst misst man die Regel nicht mehr, die man aufgeschrieben hat.
@@ -8727,6 +8732,19 @@ static void main_setup_fahrzeug_dd() {
 	// Log und CSV-Kopf nennen seitdem diese WIRKSAME Kante statt N*dx; N soll kraft_zband_regel folgen (Basis-Einheit band_oberkante_mm).
 	// Das Band-Praedikat [0,N) und der Kernel bleiben unveraendert. Die Zeile "KRAFT-ZBAND-KANTE:" wird maschinell gelesen -- Format halten.
 	const uint zb = env_u("CFD_KRAFT_ZBAND", 0u);
+	// ★ 21.09.2026 LAGENPROFIL der Kontaktbandkraft (Heiko). CFD_ZBAND_PROFIL = Anzahl z-Lagen, die je
+	// Stichprobe einzeln reduziert werden (0 = aus, Vorgabe 8 sobald ein Band aktiv ist); die Kadenz steht
+	// in CFD_ZBAND_PROFIL_MS (Vorgabe 100 ms). Zweck: die Bandoberkante nicht mehr als Faustzahl
+	// KRAFT_ZBAND_SOLL_MM = 16 mm fuehren, sondern an den Moving-Floor-Fix haengen (N = CFD_BODEN_EQ + 1).
+	// Die Messung zeigt, in welcher Lage die Kraft sitzt und ab welcher sie abgeklungen ist.
+	// ★ VORGABE 0 (Pruefagent 2026-09-21, Befund 7): die Hausregel drei Zeilen weiter oben (8724) lautet
+	// "unset/0 = AUS = bitidentisch (null neue Kernelaufrufe/Logzeilen/Dateien)". Mit Vorgabe 8 bekaeme
+	// JEDER Lauf mit Band das Instrument ungefragt -- Physik bliebe bitgleich, Logs und die
+	// Serienvergleichbarkeit nicht (+4,8 % auf den Kraftpfad, 8 Vollfeld-Reduktionen je 100 ms).
+	const uint  zb_profil_n  = zb>0u ? min(24u, env_u("CFD_ZBAND_PROFIL", 0u)) : 0u;
+	const double zb_profil_ms = 0.001*(double)fmax(1.0f, env_f("CFD_ZBAND_PROFIL_MS", 100.0f));
+	double zb_profil_next = 0.0;
+	if(zb_profil_n>0u) print_info("KRAFT-ZBAND LAGENPROFIL aktiv (CFD_ZBAND_PROFIL="+to_string(zb_profil_n)+" Lagen, alle "+to_string((float)(zb_profil_ms*1000.0),0u)+" ms): je Lage EINE Vollfeld-Reduktion object_force_zband(z, z+1). Zweck: Bandoberkante an CFD_BODEN_EQ haengen statt an der Sollhoehe "+kraft_zband_soll_text()+" mm.");
 	std::ofstream zcsv;
 	double zb_cd_band=0.0, zb_cz_band=0.0, zb_cd_rest=0.0, zb_cz_rest=0.0, zb_selftest_max=0.0; ulong zb_nn=0ull;
 	std::vector<double> zb_cz_rest_reihe; // fuer Block-SEM 4/8/16
@@ -9132,6 +9150,28 @@ static void main_setup_fahrzeug_dd() {
 				// Fz-Nulldurchgang nicht als Scheinfehler explodiert (absolute Toleranz dort).
 				const double skala = fmax(fmax(fabs((double)F.x), fabs((double)F.z)), 1e-30);
 				zb_rel = fmax(fmax(fabs(((double)Fb.x+(double)Fr.x)-(double)F.x), fabs(((double)Fb.y+(double)Fr.y)-(double)F.y)), fabs(((double)Fb.z+(double)Fr.z)-(double)F.z))/skala; // R1-N2: Fy mitgeprueft
+				// ★★ 21.09.2026 LAGENPROFIL DER KONTAKTBANDKRAFT (Heiko: "so harte haendische Millimeter-Zahlen
+				// triggern mich, das muesste automatisch eingestellt werden"). Bisher steht die Bandoberkante als
+				// Sollhoehe KRAFT_ZBAND_SOLL_MM = 16 mm im Code -- eine Faustzahl aus der 8-mm-Beobachtung, nie bei
+				// 4 mm gemessen. Heikos Regel waere "eine Zelle oberhalb der Aufpraegung", also N = BODEN_EQ + 1.
+				// DIESE MESSUNG ENTSCHEIDET DAS: sie zeigt, in welcher z-Lage die Bandkraft wirklich sitzt und ab
+				// welcher Lage sie abgeklungen ist. object_force_zband nimmt den z-Bereich ohnehin als Parameter --
+				// je Lage ein Aufruf, kein neuer Kernel, kein neuer Zaehlerslot.
+				// KADENZ: der Aufruf ist eine VOLLFELD-Reduktion. Er laeuft deshalb NUR an der Berichtskadenz
+				// (CFD_ZBAND_PROFIL_MS, Vorgabe 100 ms = 8-10 Stichproben je Lauf), nicht je Sample -- sonst kaeme
+				// je Lage eine weitere Reduktion auf die ~800 Samples und das Profil kostete mehr als der Lauf.
+				const double t_si_vor = (double)((float)(outer+1ull)*dt_c); // t_si entsteht erst unter diesem Block
+				if(zb_profil_n>0u&&t_si_vor>=zb_profil_next) {
+					string zl; float3 Fs = float3(0.0f, 0.0f, 0.0f);
+					for(uint zl_i=1u; zl_i<=zb_profil_n; zl_i++) {
+						const float3 Fz1 = lbm_f.object_force_zband((uchar)(TYPE_S|TYPE_X), zl_i, zl_i+1u);
+						Fs += Fz1; zl += (zl_i>1u?" | ":"") + to_string(zl_i) + ": Fx " + to_string(Fz1.x,2u) + " Fz " + to_string(Fz1.z,2u);
+					}
+					print_info("KRAFT-ZBAND LAGENPROFIL t = "+to_string((float)t_si_vor,3u)+" s (z-Lage: Fx/Fz in N, Lage 1 = erste Zelle ueber der Fahrbahn; BODEN_EQ praegt z = 1.."
+						+to_string(env_u("CFD_BODEN_EQ", 0u))+" auf, Band heute z = 1.."+to_string(zb-1u)+"): "+zl
+						+" || Summe Lagen 1.."+to_string(zb_profil_n)+": Fx "+to_string(Fs.x,2u)+" Fz "+to_string(Fs.z,2u)+" N gegen Bandsumme Fx "+to_string(Fb.x,2u)+" Fz "+to_string(Fb.z,2u)+" N (Lagen >= zb liegen im REST).");
+					zb_profil_next += zb_profil_ms;
+				}
 			}
 			const double t_si = (double)((float)(outer+1ull)*dt_c);
 			t_si_letzt = t_si; // n_outer_ist NICHT hier -- s. Schleifenende (Pruefagent-B-2)
