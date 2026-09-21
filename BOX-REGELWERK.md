@@ -15,7 +15,7 @@ Fahrzeugausrichtung: Radaufstandsflächen auf z = 0, Nase bei x = 0, Mittelebene
 | X+ (hinter dem Heck) | 0,625 L | 1,250 L |
 | Y (je Seite) | 0,250 B | **2,250 B** |
 | Z− | 0 (Fahrzeug steht auf der Fahrbahn) | 0 |
-| Z+ (über dem Dach) | 0,625 H | **6,500 H** |
+| Z+ (über dem Dach) | 0,625 H | **7,000 H** |
 
 **Rundung (Heiko 21.09.2026):** Das Regelwerk orientiert sich **immer an den Sollabständen** und rundet
 dann auf die **nächste Grobzelle** auf — auch das Nahfeld, das deshalb mit dx_c gerastert wird und nicht
@@ -214,3 +214,35 @@ Gueltig ist der Vergleich p4_regel5 -> p4_regel6, weil beide in derselben Phase 
 | p4_regel6 (ohne Timer) | 0,7 % | 96,5 % | 1,9 % | **524,5 ms** | 0,150 s |
 
 Das belegt die Ursache (der Timer hebt die Ueberlappung auf), nicht die Groesse der Reserve.
+
+## Nachtrag 21.09.2026, 17:22 — Fern Z+ zurück auf 7,000 H (Heiko), diesmal gemessen
+
+Der Zwischenschritt auf 6,500 H (Nachtrag 16:16) beruhte auf einer Zahl aus der **Anwärmphase**
+und war nicht belastbar — siehe Korrektur 17:10. Die Rückkehr auf 7,000 H steht dagegen auf einer
+**eingeschwungenen Messung mit einem fremden Instrument**: `/proc/<pid>/fdinfo`, 60-s-Fenster bei
+t > 0,201 s, Lauf p4_regel6 um 17:14.
+
+| Gerät | Zähler | busy | abgeleitet bei 524,7 ms Grobschritt |
+|---|---|---|---|
+| B70 (pdev 04:00.0) | `drm-cycles-ccs` | **94,3 %** | Nahfenster ~495 ms |
+| iGPU (pdev 00:02.0) | `drm-engine-compute` | **86,2 %** | Fernschritt ~452 ms |
+
+Reserve bei Z+ 6,500 H (Fern Nz 568): **43 ms = 8,2 %** — gemessen.
+
+Z+ 7,000 H bringt Fern Nz auf 608, **+7,04 % Fernzellen**. **Hochgerechnet** (lineare Skalierung
+des Fernschritts mit der Zellzahl — auf dieser Maschine nicht gemessen): Fernschritt ~484 ms gegen
+ein unverändertes Nahfenster von ~495 ms, **Reserve ~11 ms = 2,2 %**.
+
+| | Z+ 6,500 H | Z+ 7,000 H |
+|---|---|---|
+| Fern Nz | 568 | 608 |
+| Versperrung | 2,01 % | **1,875 %** |
+| Reserve | 8,2 % (gemessen) | ~2,2 % (hochgerechnet) |
+
+**Prüfkriterium für den nächsten Lauf:** bleibt der Grobschritt bei ~525 ms, ist die Hochrechnung
+bestätigt und das Nahfeld bleibt Taktgeber. Steigt er Richtung 484 ms und darüber, wird die iGPU
+zum Taktgeber und 7,000 H ist zu viel. Die Zahl steht im `[PHASEN]`-Profil und in der
+`fdinfo`-Stichprobe.
+
+**Offen und bewusst so stehengelassen:** die lineare Skalierung des Fernschritts mit der Zellzahl
+ist eine Annahme, keine Messung dieser Maschine.

@@ -6723,12 +6723,19 @@ static void main_setup_fahrzeug_dd() {
 	// dann auf die naechste GROBzelle auf -- auch das Nahfeld, das darum mit dx_c gerastert wird und
 	// nicht mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen
 	// (Deckungspunkt-Konvention), und nur so ist die Box aufloesungsunabhaengig dieselbe Geometrie.
-	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 6,500 H
-	// Z+ FERN 7,000 -> 6,500 (Heiko 2026-09-21, 16:16): GEMESSENE Verdeckungsreserve, nicht geschaetzt.
-	// p4_regel5 lief mit CFD_TIMER_FERN=1, der die Ueberlappung aufhebt (setup.cpp:8880) und damit den
-	// Fernfeldschritt ISOLIERT sichtbar macht: [PHASEN] Kopplung 48,8 % von 1111 ms = 542 ms, minus ~4 ms
-	// Drive => Fernschritt ~538 ms gegen ein Nahfenster von 549 ms. Reserve 11 ms = 2,0 % -- das Fernfeld
-	// versteckte sich gerade noch, aber ohne Luft. 6,500 H nimmt Nz von 608 auf 568 (-6,6 % Fernzellen).
+	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 7,000 H
+	// Z+ FERN: 7,000 -> 6,500 (16:16) -> ZURUECK AUF 7,000 (Heiko 2026-09-21, 17:22).
+	// Der Zwischenschritt 6,500 beruhte auf einer Zahl aus der ANWAERMPHASE (p4_regel5 kam nur bis
+	// t = 0,052 s bei CFD_T_WARMUP = 0,201 s) und war damit nicht belastbar -- siehe Korrektur in
+	// BOX-REGELWERK.md. Die Rueckkehr auf 7,000 steht dagegen auf einer EINGESCHWUNGENEN Messung mit
+	// einem FREMDEN Instrument: /proc/<pid>/fdinfo, 60-s-Fenster bei t > 0,201 s (p4_regel6, 17:14):
+	//   B70  (pdev 04:00.0, drm-cycles-ccs)     94,3 % busy -> Nahfenster ~495 ms
+	//   iGPU (pdev 00:02.0, drm-engine-compute) 86,2 % busy -> Fernschritt  ~452 ms
+	// bei 524,7 ms je Grobschritt, also 43 ms = 8,2 % Reserve bei Z+ 6,500 H (Fern Nz 568).
+	// Z+ 7,000 H bringt Nz auf 608, +7,04 % Fernzellen. HOCHGERECHNET (lineare Skalierung, auf dieser
+	// Maschine NICHT gemessen): Fernschritt ~484 ms gegen 495 ms, Reserve ~11 ms = 2,2 %.
+	// Gewinn: Versperrung 2,01 % -> 1,875 %. Wenn der naechste Lauf den Grobschritt bei ~525 ms haelt,
+	// ist die Hochrechnung bestaetigt; steigt er Richtung 484 ms+, wird die iGPU zum Taktgeber.
 	// TEILBARKEIT (Heiko 2026-09-21): Nx durch 16, Ny/Nz durch 4 -- und zwar auf der ALLOZIERTEN
 	// GITTERBREITE (Knoten), denn daran haengt der gemessene 5-%-Effekt (TODO.md, iGPU). Fuer das
 	// FERNFELD ist das erfuellbar und wird hier erzwungen. Fuer das NAHFELD ist es STRUKTURELL
@@ -6737,7 +6744,7 @@ static void main_setup_fahrzeug_dd() {
 	// fuer das Fernfeld, das Nahfeld behaelt 4k+1 -- die Kopplung umzubauen waere ein Verfahrenswechsel,
 	// und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
 	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.625f;
-	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=6.500f;
+	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=7.000f;
 	// Kleinste ZELLSPANNE >= soll, deren KNOTENZAHL (Spanne+1) durch teiler teilbar ist. teiler=1 heisst
 	// "nur aufrunden" (Nahfeld). Aufgerundet wird IMMER -- eine Box darf den Sollabstand ueberschreiten,
 	// nie unterschreiten, sonst misst man die Regel nicht mehr, die man aufgeschrieben hat.
