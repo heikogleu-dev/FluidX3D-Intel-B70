@@ -60,6 +60,9 @@ GROESSEN = [("cd_druck_rest", "cd_rest", "--", "links"),
             ("cz_druck_rest", "cz_rest", "-", "rechts")]
 ACHSE = {"cz_rest": (-1.5, 0.0), "cd_rest": (0.0, 0.75)}  # cz invertiert: 0 oben
 RATE_GRENZE = 15.0
+MITTEL_FENSTER = 200.0   # ms, Fenster der waagerechten Mittelwertlinie oben (Heiko 21.09.2026)
+FARBE_CD = "#ff5555"    # Widerstand = rot (Heiko-Vorgabe)
+FARBE_CZ = "#5aff7d"    # Abtrieb    = gruen
 
 
 def lies(lauf):
@@ -163,6 +166,20 @@ def zeichne(laeufe, a, aus, bis):
             li, = achse[seite].plot(tr, yr, stil, color=farbe, lw=1.7, label=beschr)
             griffe.append(li)
             u.plot(tr, rate(tr, yr, a.fenster), stil, color=farbe, lw=1.7, label=beschr)
+            # ★ Waagerechte Mittelwertlinie ueber die LETZTEN MITTEL_FENSTER ms (Heiko 21.09.2026):
+            # rot = Widerstand, gruen = Abtrieb. Sie beantwortet "worauf laeuft es hinaus" direkt im
+            # Bild, ohne dass man cd_bericht.csv aufmachen muss. Gezeichnet wird auf DERSELBEN Achse
+            # wie die Kurve (cd links, cz rechts) -- sonst laege sie um Groessenordnungen daneben.
+            mfen = tr >= (tr.max() - MITTEL_FENSTER)
+            if mfen.sum() >= 2:
+                mw = float(np.mean(yr[mfen]))
+                mfarbe = FARBE_CD if k == "cd_druck_rest" else FARBE_CZ
+                achse[seite].axhline(mw, color=mfarbe, lw=1.0, alpha=0.9)
+                if len(laeufe) == 1:
+                    achse[seite].annotate(f"{name} {mw:+.4f}  (Mittel letzte {MITTEL_FENSTER:.0f} ms)",
+                                          xy=(tr.max(), mw), xytext=(-6, 4),
+                                          textcoords="offset points", ha="right", va="bottom",
+                                          fontsize=8, color=mfarbe)
 
     o.set_ylabel("cd_rest  (gestrichelt)", color="#d8dee9")
     o2.set_ylabel("cz_rest  (durchgezogen)", color="#d8dee9")
@@ -188,8 +205,8 @@ def zeichne(laeufe, a, aus, bis):
     u.set_xlabel("Zeit [ms]", color="#d8dee9")
     u.set_ylim(-RATE_GRENZE, RATE_GRENZE)
     u.axhline(0.0, color="#8b98b0", lw=0.9)
-    for sg in (-5, 5):
-        u.axhline(sg, color="#4a5266", lw=0.8, ls=":")
+    for sg in (-5, 5):   # ★ rot gepunktet (Heiko 21.09.2026): die +-5-%-Marke ist die
+        u.axhline(sg, color="#ff5555", lw=1.0, ls=":")   # Einschwingschwelle, keine Hilfslinie
     u.grid(alpha=0.18, color="#8b98b0")
     if griffe:
         u.legend(fontsize=8, ncol=2, facecolor="#1b1e26", edgecolor="#3a4152",
