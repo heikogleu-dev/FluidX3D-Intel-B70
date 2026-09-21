@@ -355,3 +355,83 @@ Kernel. **Die echten Argumente gegen S4 sind Reichweite und tote Tiles, nicht di
 in `lbm.cpp:180/202/213` und `setup.cpp:4413`.
 `setup.cpp`: „4798ff" (Slot-7 Ist=Soll) → **4754 / 6061 / 10017 / 10087**; 4798ff ist der
 Doppelbuchungs-Detektor.
+
+---
+
+## 10 · APG-Performanceverlust — Befund und Hebel
+
+**Gemessen (16.09., 4 mm):** APG kostet +17,0 % Zeitschleife und −14,6 % Durchsatz (6000 → 5124 MLUPs).
+Im heutigen Lauf p4_regel4 bestätigt: 5279 MLUPs gegen p4_pu8 6000 = −12 %, Index 7967 gegen 5701.
+
+**Der Code rechnet seine Kosten selbst vor** (`kernel.cpp:5579`):
+> *„Verkehr: 7 Zellen x (19 x 2 B + 1 B) je Facette und Schritt = **273 B/Facette** (Rechnung;
+> Cache-Wiederverwendung ungemessen)."*
+
+`apg_rho_zelle` holt rho **aus den DDFs** — `load_f(…, t+1)` für die Zelle und ihre sechs Achsnachbarn.
+
+| | |
+|---|---|
+| Facetten (p4_regel4) | 3 127 618 |
+| APG-Verkehr | 854 MB je feinem Schritt, **3,42 GB** je Grobschritt |
+| bei 254 GB/s Spitze | 13,4 ms von 510 ms = **2,6 %** |
+| gemessen kostet APG | **17,0 % = 87 ms** |
+| **Lücke** | **Faktor 6,5** |
+
+**Das Volumen erklärt den Verlust nicht — das Zugriffsmuster tut es:** 7 × 19 = **133 Streuzugriffe je
+Facette**, macht **416 Mio Gather-Operationen je feinem Schritt** über eine dünne Schale. Unter
+Esoteric-Pull liegt jede der 19 Populationen an einer anderen Adresse.
+
+### Warum der teure Weg gebaut wurde — und das ist der Hebel
+
+Der Kommentar sagt es wörtlich (`kernel.cpp:5576-5578`):
+> *„KEIN rho-Puffer wird gelesen: RHO_RAND, RHO_SPARSAM und RHO_FP16 bleiben unberuehrt, die alten
+> Sperren entfallen."*
+
+**Weil rho unter RHO_SPARSAM/RHO_RAND nicht überall vorgehalten wird, rekonstruiert APG es aus den DDFs.**
+Die Sparschalter bremsen APG also nicht direkt — sie sind der *Grund*, warum APG den teuren Pfad nimmt.
+
+`RHO_RAND-PLAN.md:333` führt die Alternative als **offenen Punkt**: *„APG-Weg (a) Region oder (b) DDFs im
+eigenen Kernellauf? … RHO_RAND blockiert keinen der beiden."* Gebaut ist (b).
+
+**Weg (a), aus dem heutigen Lauflog beziffert:** die APG-Lesemenge umfasst **6 380 057 Zellen**, die
+rho-Region dafür kostet **12,76 MB FP16** (`logs/p4_regel4.log`, RHO_RAND C0 Zensus). Damit fiele der
+Verkehr von 273 B auf **7 × 2 B = 14 B je Facette** — **Faktor 19,5** — und von 133 auf 7 Zugriffe.
+
+**Preis: 12,76 MB VRAM** von 3 733 MB gemessener Restluft.
+
+**Der Haken, der es bisher verhindert hat:** `load_f(t+1)` liefert *„das rho, das stream_collide(t+1) dort
+selbst bilden wird … synchron zum rhon der Facette im naechsten Schritt statt des alten t-1/t-Gemischs
+(Befund A3, bitreproduzierbar)"*. Ein rho-Puffer trägt rho aus Schritt t. Man tauscht also Determinismus
+gegen Tempo — und der Determinismus war am 03.09. teuer erkauft (`lbm.cpp:1716`).
+
+### Drei Hebel, nach Aufwand
+
+| | Hebel | Erwartung | Preis |
+|---|---|---|---|
+| **1** | **Timer um `fac_apg_ab`** (Muster `CFD_TIMER_FERN`) | zerlegt die 17 % — **ohne das ist alles andere geraten** | Zweizeiler, 8 mm, eine Variable |
+| **2** | **Zähltakt**: die Nachbarschleife läuft in **jedem** Schritt, obwohl dp/ds sich über vier feine Schritte kaum ändert. Muster `fac_nachbar_ab` | bis zu 4× weniger Aufrufe | eine Variable, **kein** Determinismusverlust |
+| **3** | **Weg (a)**: rho-Region statt DDF-Rekonstruktion | Faktor 19,5 auf den Verkehr | 12,76 MB VRAM **und** der t+1-Determinismus muss neu begründet werden |
+
+**Reihenfolge: 1, dann 2, dann erst 3.** Hebel 3 fasst eine Eigenschaft an, die einmal teuer erkämpft
+wurde — das lohnt nur, wenn Hebel 1 zeigt, dass der Verkehr wirklich der Engpass ist.
+
+**Und der Vorbehalt, der bleibt:** APG bewegt die Kräfte weder bei 8 mm noch bei 4 mm
+(`PLAN-APG-2026-09-16.md` §I: cd_druck_rest −0,0022 ± 0,0011, 41 Vorzeichenwechsel). Die Übergabe vom
+16.09. empfahl **„endgültig parken"**. Heiko hat ihn am 21.09. bewusst im Standard gelassen. Solange er
+keine messbare Kraftwirkung hat, ist die billigste Performance-Maßnahme, ihn auszuschalten — das gehört
+ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwort ist.
+
+---
+
+## 11 · Reihenfolge für morgen
+
+| # | Schritt | Warum zuerst | Kosten |
+|---|---|---|---|
+| **1** | **`CFD_FAC_KRAFT=1` am Fahrzeug messen**, 8 mm, eine Variable | vorhandener Schalter, literaturgedeckt (Kuwata & Suga IVW), **nie gemessen**. Die billigste offene Messung im ganzen Feld — und sie entscheidet mit, ob der Rekonstruktionsbau überhaupt nötig ist. Vorbehalt: `object_force` sieht die Guo-Kraft nicht, der Reibanteil steht allein in der `fac_tau`-Buchung | ein 8-mm-Lauf |
+| **2** | **Timer um `fac_apg_ab`** | zerlegt die 17 %, bevor irgendetwas optimiert wird | Zweizeiler + 8-mm-A/B |
+| **3** | **FP16S-Rauschlast auf f_neq** beziffern (Histogramm \|f_neq\|/f_eq an Facettenzellen) | entscheidet zwischen Rekonstruktions-Variante A und B, **bevor** gebaut wird | Host-Auswertung, keine GPU |
+| **4** | **S−1**: `hits_n` 320 → 384, `scratch_gate`-Arm | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
+| **5** | **S0+S1** der Rekonstruktion (Laufzeitparameter, kein JIT-Define) | beweist Einbauort und Zählung, bevor Physik dazukommt | CPU, Minuten |
+| **6** | offene Punkte §8 abarbeiten (Volltexte, `boden_eq`-Wächter, `fac_tau_cnt`-Politik, ELIBB-Abgriffpunkt) | alles Lesearbeit, keine GPU | — |
+
+**Was NICHT morgen passiert:** S2 und später. Erst müssen 1–4 stehen.
