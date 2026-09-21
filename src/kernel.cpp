@@ -1878,7 +1878,9 @@ float3 elibb_rekonstruiere(float* fhn, const uxx* j, const global uchar* flags, 
 	// am Additivterm und bleibt exakt). Kein Stapeln: die Blende traegt KEIN u_W mehr.
 	// Bei q = 0,5 kollabiert der gesamte Pfad BITGLEICH auf das heutige iMEM -- der ebene
 	// Kanal-Anker prueft damit wieder echte Bitgleichheit (qb==127-Kurzschluss, auch -0.0-fest).
-	// NEBB in STOERFORM (FP16C: f^ = f - w; w-Subtraktion ist Pflicht -- P1-Offset-Falle):
+	// NEBB in STOERFORM (FP16-Ablage: f^ = f - w; w-Subtraktion ist Pflicht -- P1-Offset-Falle;
+	// ★ 21.09.2026 berichtigt: hier stand "FP16C", gebaut ist aber FP16S (defines.hpp:27, FP16C:80
+	// auskommentiert). Die Stoerform gilt fuer BEIDE 2-Byte-Formate, der Name war falsch.):
 	//   f~_i = w_i*(rho - 1) + (f_ib - feq_ib(u_pre)),  feq_ib mit c_ib = -c_i.
 	// SNAPSHOT ALLER 19 (V1-Audit-Fix A, 1-Zell-Spalt-Aliasing). Slotlogik: Harness A/B (B0).
 	float fpre[def_velocity_set];
@@ -3132,7 +3134,8 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// er das nicht (dafuer ist der Typ-Zensus da). Hier geht es um die SAETTIGUNG: vstore_half_rte
 		// kippt oberhalb |u*2^15| = 65504, also ab |u| = 1,99902, still nach +-inf -- und die
 		// Projektlehre dazu steht schon im Code (setup.cpp: "dd_lauf01 kippte bei 0,15 s NICHT in nan,
-		// sondern in die FP16C-Saettigung"). Die Geschwindigkeitsklemme unten haelt +-0,57735 ein, aber
+		// sondern in die FP16-Saettigung" -- dort steht FP16C, gebaut ist FP16S; die Saettigungsfalle
+		// gilt fuer beide, berichtigt 21.09.2026). Die Geschwindigkeitsklemme unten haelt +-0,57735 ein, aber
 		// sie deckt nicht JEDEN Schreiber.
 		// ★ BERICHTIGT 12.09. (Pruefagent, MITTEL): hier stand, der ungeklemmte Schreiber sei
 		// drive_boundary_cubic_lift. Das war beim Schreiben richtig und ist es seit Slot 214 nicht
@@ -5101,7 +5104,8 @@ kernel void einlass_eq(global fpxx* fi, const global uchar* flags, const ulong t
 		uint abw=0u, ulp_max=0u;
 		for(uint i=0u; i<def_velocity_set; i++) if(feq[i]!=ftrue[i]) {
 			abw++;
-			// RELATIVE Abweichung, nicht float32-ULP: gespeichert wird in FP16C, dessen Aufloesung
+			// RELATIVE Abweichung, nicht float32-ULP: gespeichert wird in FP16S (defines.hpp:27 -- hier
+			// stand FP16C, berichtigt 21.09.2026; beide 2-Byte-Formate), dessen Aufloesung
 			// bei ~2^-11 = 4,9e-4 liegt. Zwei float32-Werte, die sich um 1000 ULP (= 1,2e-4 relativ)
 			// unterscheiden, landen im 16-Bit-Format auf DEMSELBEN Wert -- ein Vergleich in float32-
 			// ULP misst also eine Genauigkeit, die das Feld gar nicht traegt.
