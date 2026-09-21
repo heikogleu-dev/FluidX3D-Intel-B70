@@ -11,6 +11,9 @@
 #   Wer einen dieser Schalter in einer Serienzeile setzt, uebersteuert das Regelwerk -- die Abnahme im Lauf meldet es.
 #   ERGAENZT: CFD_N2F_BAND_WAKE_START 3 (Dachende im Radstand). Der Default wechselte am 21.09. von 0 auf 3;
 #   ohne Basiszeile koennte der Waechter diesen physikrelevanten Wechsel weder als FEHLT noch als ABWEICHEND melden.
+#   ERGAENZT 21.09. (Heiko: "genau die jetzige Konfiguration sollte unsere neue Basis sein"): CFD_FAC_PINV 1, CFD_RHO_SPARSAM 1,
+#   CFD_U_SPARSAM 1, CFD_SGS_BAND 0, CFD_FAC_APG 1.0. Die ersten vier standen seit Wochen in JEDER Produktionszeile, ohne dass der
+#   Waechter sie prueft (Klasse Nebenbefund 12) -- p4_regel1 waere deshalb beinahe ohne PINV gelaufen, also mit anderem Wandmodellzweig.
 # NACHGEZOGEN (basis_aus_lauf.py --nachziehen, 2026-09-17, Grund: Heiko 17.09.2026, Skalierungsaudit (SKALIERUNG-BEFUNDE-2026-09-17.md): Punkt 1 Kontaktband-Oberkante nach Regel, Punkt 4 BODEN_EQ-Familie als bewusst gitterfeste Lagen, Punkt 12 Produktionsschalter in die Basis (Werte aus export/p375_b/code/LAUF.txt), Punkt 6 Schritte je Zelle 8 basisgeprueft): Einheiten CFD_BODEN_EQ modus->lagen; CFD_BODEN_EQ_DOWN modus->lagen; CFD_FERN_BODEN_EQ modus->lagen; CFD_FERN_BODEN_EQ_DOWN modus->lagen; CFD_FERN_EINLASS_EQ modus->lagen; CFD_KRAFT_ZBAND zellen_fein->band_oberkante_mm (Wert 4 Zellen -> Sollhoehe 16 mm; Regel bei dx_ref 4 mm: N = 4, Oberkante 14.000 mm); ergaenzt CFD_PTRT 1.90, CFD_FAC_DETEPS 16, CFD_POSITIV 2, CFD_U_KLEMME 1, CFD_ZAEHL_TAKT 1000, CFD_SCHRITTE_PRO_ZELLE 8.
 # STANDARD GEAENDERT (Heiko 17.09.2026, Skalierungsaudit SKALIERUNG-BEFUNDE-2026-09-17.md):
 #   PUNKT 1, CFD_KRAFT_ZBAND 16 band_oberkante_mm: das Band zaehlt z < N, z = 0 ist Fahrbahn -> wirksam z = 1..N-1,
@@ -131,10 +134,12 @@ CFD_FACETTEN_KANTE_KOH 1 modus
 CFD_FACETTEN_NORMQUELLE 1 modus
 CFD_FACETTEN_YWKLEMME 1 modus
 CFD_FAC_ALPHA 2 modus
+CFD_FAC_APG 1.0 modus
 CFD_FAC_CD_EVERY 1 ausgabe
 CFD_FAC_DETEPS 16 modus
 CFD_FAC_ELIBB 1 modus
 CFD_FAC_NACHBAR 1 modus
+CFD_FAC_PINV 1 modus
 CFD_FAC_SATGATE 1 modus
 CFD_FAC_UTKORR 1.5 modus
 CFD_FERN_BODEN_EQ 2 lagen
@@ -155,7 +160,9 @@ CFD_N2F_SCHALE 0.5 modus
 CFD_PERF_AB 0.1 phys
 CFD_POSITIV 2 modus
 CFD_PTRT 1.90 modus
+CFD_RHO_SPARSAM 1 modus
 CFD_SCHRITTE_PRO_ZELLE 8 modus
+CFD_SGS_BAND 0 modus
 CFD_SGS_FDWAND 1 modus
 CFD_SGS_SISM 1 modus
 CFD_SGS_SISM_AB 15000 schritte_fein
@@ -165,6 +172,7 @@ CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.501 phys
 CFD_T_WARMUP 0.201 phys
 CFD_U_KLEMME 1 modus
+CFD_U_SPARSAM 1 modus
 CFD_VTK_DT 0.15 ausgabe
 CFD_VTK_ENDE 1 ausgabe
 CFD_Y_VERSATZ 1 modus

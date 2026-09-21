@@ -47,7 +47,9 @@ EINHEIT = {
  "CFD_SGS_FDWAND":"modus","CFD_FAC_NACHBAR":"modus",  # ★ 03.09.2026 in die Basis aufgenommen (Heiko-Entscheid)
  "CFD_KOPPLUNG_GLATT":"modus","CFD_N2F_SCHALE":"modus","CFD_N2F_BAND":"modus",
  "CFD_N2F_BAND_PROFIL":"modus","CFD_N2F_BAND_PLATEAU":"zellen_grob_laenge","CFD_N2F_BAND_WANDFREI":"zellen_grob_laenge",  # ★ 16.09.: Lagen = Laengen
- "CFD_N2F_BAND_WAKE":"modus","CFD_N2F_BAND_WAKE_START":"modus","CFD_FAC_UTKORR":"modus","CFD_FAC_ELIBB":"modus",
+ "CFD_N2F_BAND_WAKE":"modus","CFD_N2F_BAND_WAKE_START":"modus",
+ "CFD_FAC_PINV":"modus","CFD_RHO_SPARSAM":"modus","CFD_U_SPARSAM":"modus",
+ "CFD_SGS_BAND":"modus","CFD_FAC_APG":"modus","CFD_FAC_UTKORR":"modus","CFD_FAC_ELIBB":"modus",
  "CFD_FACETTEN_YWMIN":"modus","CFD_FAC_CD_EVERY":"ausgabe","CFD_VTK_ENDE":"ausgabe",
  "CFD_VTK_DT":"ausgabe","CFD_SLICE_DT":"ausgabe","CFD_RUN_NAME":"ausgabe",
  "CFD_CASE":"modus",
