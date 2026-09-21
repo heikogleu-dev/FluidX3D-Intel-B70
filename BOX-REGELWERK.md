@@ -291,3 +291,34 @@ Differenz, die nach obiger Messung keine Kraft sieht.
 ### Far-Domain im Standard (dx_c = 16 mm)
 Gitter **800 × 636 × 568**, Kanten 12,784 × 10,160 × 9,072 m, Volumen 1 178 m³, 289,0 Mio Grobzellen,
 ~13,0 GB System-RAM. Querschnitt 92,17 m², Versperrung 2,01 %.
+
+## Mindestlauflänge: 5 × Fahrzeuglänge (Heiko, 21.09.2026)
+
+**Regel:** ein Lauf wird erst ab **5 × Fahrzeuglänge** durchströmter Strecke ausgewertet.
+
+`t_min = 5 · L / u_inf`. Bei L = 4,4364 m und u_inf = 30 m/s sind das **739 ms**.
+Das entspricht 2,89 Nahfeld-Durchströmungen (Lx = 7,664 m) — die beiden Maße sind **nicht**
+dasselbe; 5 L ist das schärfere Kriterium für den Nachlauf, die Domänen-Durchströmung das
+für das gesamte Feld.
+
+**Beleg (p4_regel7, `cd_bericht.csv`, Änderung gegen 200 ms davor):**
+
+| t [ms] | L | cd_rest | Δcd [%] | cz_rest | Δcz [%] |
+|---|---|---|---|---|---|
+| 500 | 3,38 | 0,5288 | **−7,62** | −1,0326 | **10,34** |
+| 600 | 4,06 | 0,5313 | −1,32 | −1,0228 | 3,66 |
+| 701 | 4,74 | 0,5140 | −2,80 | −1,0244 | 0,80 |
+| 800 | 5,41 | 0,5102 | −3,97 | −1,0097 | 1,28 |
+| 900 | 6,09 | 0,4907 | −4,53 | −1,0211 | 0,32 |
+| 1000 | 6,76 | 0,4979 | −2,41 | −1,0209 | −1,10 |
+
+**Was die Regel leistet und was nicht — ehrlich:**
+- Sie ist eine **untere Schranke**, kein Konvergenzkriterium. Bei 3,38 L reißt cd_rest die
+  5-%-Marke mit −7,62 %; darunter ist ein Lauf eindeutig zu kurz.
+- **cz_rest ist bei 5 L belastbar** (Δ ≤ 1,3 % ab 4,74 L).
+- **cd_rest ist es nicht:** es läuft zwischen 5,41 L und 6,76 L noch um −2,4 % weiter und
+  steht bei 6,09 L auf −4,53 % je 200 ms. Wer cd_rest auf besser als ~3 % braucht, braucht
+  mehr als 5 L.
+
+**Vorbehalt:** der Beleg ist **ein** Lauf, eine Geometrie, eine Auflösung. Die Regel gilt als
+Arbeitsschranke, bis ein zweiter Lauf anderer Länge sie stützt oder kippt.
