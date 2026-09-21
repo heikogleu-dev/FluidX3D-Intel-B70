@@ -13,6 +13,9 @@
 #   iGPU pdev 0000:00:02.0, Treiber i915 : drm-engine-compute [ns]               -> gegen Wanduhr
 # Ausgegeben wird der Anteil ueber das jeweils letzte Intervall, nicht seit Laufbeginn.
 set -u
+# ★ PFLICHT: ohne LC_ALL=C druckt awks %.1f unter de_DE ein DEZIMALKOMMA und zerlegt damit die
+# CSV-Spalten ("0,0" statt "0.0"). Am 21.09.2026 beim ersten Lauf dieses Sammlers passiert.
+export LC_ALL=C
 cd "$(dirname "$0")/.." || exit 2
 N="${1:?Aufruf: gpu_sammler.sh <NAME> [intervall_s]}"; IV="${2:-30}"
 OUT="export/${N}_gpu.csv"
