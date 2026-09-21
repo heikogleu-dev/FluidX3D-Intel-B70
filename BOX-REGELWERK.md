@@ -1,0 +1,116 @@
+# Kasten-Regelwerk für `fahrzeug_dd`
+
+**Festgelegt von Heiko am 21.09.2026.** Führende Quelle für alle Domänengrößen. Implementiert in
+`src/setup.cpp` (Konstanten `RK_NAH_*` / `RK_FERN_*`, Helfer `spanne_regel`, Abnahme „KASTEN-REGELWERK"
+im Lauflog). Die Boxen sind **keine Schalter mehr** — sie werden aus den Fahrzeugmaßen abgeleitet und
+wandern bei jeder Maß- oder Auflösungsänderung mit.
+
+## Die Regel
+
+Fahrzeugausrichtung: Radaufstandsflächen auf z = 0, Nase bei x = 0, Mittelebene y = 0, Anströmung x− → x+.
+
+| Abstand | Nahfeld | Fernfeld |
+|---|---|---|
+| X− (vor der Nase) | 0,100 L | 0,625 L |
+| X+ (hinter dem Heck) | 0,625 L | 1,250 L |
+| Y (je Seite) | 0,250 B | 2,000 B |
+| Z− | 0 (Fahrzeug steht auf der Fahrbahn) | 0 |
+| Z+ (über dem Dach) | 0,550 H | 7,000 H |
+
+**Rundung (Heiko 21.09.2026):** Das Regelwerk orientiert sich **immer an den Sollabständen** und rundet
+dann auf die **nächste Grobzelle** auf — auch das Nahfeld, das deshalb mit dx_c gerastert wird und nicht
+mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen (Deckungspunkt-
+Konvention), und nur so ist die Box über alle Auflösungen dieselbe Geometrie. Eine Box darf den
+Sollabstand überschreiten, nie unterschreiten — sonst misst der Lauf eine andere Box als die notierte.
+Die Abnahme im Log bricht bei Unterschreitung ab.
+
+Die Einlassebene des Nahfelds wird dabei **abgerundet** (also weiter stromauf), und die Boxlänge wird
+erst aus dieser gerundeten Ebene bestimmt — sonst frisst die Rundung des Einlasses den Abstand X+ auf.
+
+**Teilbarkeit (Heiko 21.09.2026):** Nx durch 16, Ny/Nz durch 4 — auf der **allozierten Gitterbreite
+(Knotenzahl)**, denn daran hängt der gemessene 5-%-Effekt (TODO.md, auf der iGPU beziffert).
+
+* **Fernfeld:** erfüllbar, wird erzwungen.
+* **Nahfeld:** strukturell **unmöglich**. `fNx = (cex−1)·ratio+1` (setup.cpp) ist immer 4k+1, also
+  ungerade. Vier der fünf Kopplungsebenen werden getrieben (`drive_face = {true,false,true,true,true}`),
+  und `drive_boundary_from_coarse` (lbm.cpp) verlangt feine Ebenenausdehnung exakt `(grob−1)·ratio+1`.
+  Dabei tritt **jede** Feindimension als Ebenenausdehnung auf: fNy/fNz in x−, fNx/fNz in y−/y+,
+  fNx/fNy in z+. Das Nahfeld rundet deshalb nur auf ganze Grobzellen auf.
+  **Entscheid Heiko 21.09.2026:** Regel gilt fürs Fernfeld, Nahfeld behält 4k+1. Die Kopplung
+  umzubauen wäre ein Verfahrenswechsel, und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
+
+**Paritätsbedingung:** `NF_OY = (cNy−cey)/2` verlangt gleiche Parität von cNy und cey. Die Regel
+**erzwingt** das, indem sie die Nahfeld-y-Spanne notfalls um eine Grobzelle erhöht — von der
+Aufrundungsregel ohnehin gedeckt. Ohne diesen Schritt wäre die Parität nur bei 2 / 4 / 6 / 8 mm
+erfüllt und bei **3,75 / 4,5 / 5 mm verletzt**; dort hätte der frühere stille Bump die Box eine
+Grobzelle breiter gemacht, als das Regelwerk sagt. Der Bump warnt jetzt zusätzlich und darf nie feuern.
+
+## Daraus folgend bei 4 mm (Stand 21.09.2026)
+
+Fahrzeug, skalierte STL: L 4,4364 m, B 1,83855 m, H 1,20833 m
+(STL 4,4341 × 1,8376 × 1,2077, von `place()` um 1,000519 auf `si_length` gestreckt).
+
+| | Gitter (Knoten) | Box | Zellspanne |
+|---|---|---|---|
+| Nahfeld (dx 4 mm) | 1917 × 693 × 473 = **628,4 Mio** | 7,664 × 2,768 × 1,888 m | 1916 × 692 × 472 |
+| Fernfeld (dx 16 mm) | 800 × 576 × 608 = **280,2 Mio** | 12,784 × 9,200 × 9,712 m | 799 × 575 × 607 |
+
+Weltlage: `far_x0 = −2,77275 m`, `NF_OX = 145`, `near_x0 = −0,45275 m`, `NF_OY = 201`, `NF_OZ = 0`.
+
+**Ist-Abstände** (alle ≥ Soll):
+
+| | X− | X+ | Y | Z+ |
+|---|---|---|---|---|
+| Nah | 0,1021 L | 0,6255 L | 0,2528 B | 0,5650 H |
+| Fern | 0,6250 L | 1,2566 L | 2,0020 B | 7,0400 H |
+
+**Versperrung 2,070 %** (Querschnitt 89,35 m², A_ref 1,850 m²). Zum Vergleich: vorher 2,74 %,
+OF13 mr2v40H 1,93 %.
+
+## Kosten (aus Messungen dieser Maschine)
+
+| | Wert | Quelle |
+|---|---|---|
+| Nahfeld-Speicherplan | 28 143 MB, Schlupf **2 016 MB** | 23 118 MB bei 519,1 Mio + 46 B/Zelle Grenzkosten, `logs/p4_apg1.log:222` |
+| VRAM verfügbar / Reserve | 32 655 / 2 496 MB | ebenda |
+| Fernfeld-Speicherplan | ~12 637 MB von 87 444 MB | 45,1 B/Zelle aus 9 124 MB bei 202,7 Mio, `logs/p4_apg1.log:334` |
+| Nahfeldfenster | ~439 ms | 363 ms bei 519,1 Mio (p4_pu8) linear skaliert — **gerechnet, nicht gemessen** |
+| Fernfeldschritt | ~468 ms | 338 ms bei 202,4 Mio (p4_neu, `CFD_TIMER_FERN`) — **gerechnet, nicht gemessen** |
+| Takt je Grobschritt | ~485 ms, die **iGPU** gibt ihn vor (vorher 380 ms, B70-getaktet) | 468 ms Fernfeld + ~17 ms nicht ueberlappte Anteile (aus p4_pu8: 2286 s / 6015 Grobschritte = 380,0 ms bei 363 ms Fenster) |
+| Zeitschleife (501 ms) | ~61 min statt ~48 | p4_pu8 Index 5701 s_wall/s_phys, gemessen; +28 % |
+
+Die Volumenschranke, gegen die jede Fernfeldvergrößerung läuft: bei verstecktem Fernfeld und Nahfeld
+am VRAM-Anschlag passen höchstens ~280 Mio Grobzellen ≈ **1 155 m³** Far-Volumen. Daraus folgt
+`Versperrung [%] ≥ 0,160 × Far-Länge [m]` — unter 2 % geht nur mit Far-Länge ≤ 12,4 m.
+
+## Was das ablöst
+
+Entfernt aus `basis/fahrzeug_dd.basis` (die Werte sind jetzt Regelwerk, keine Schalter):
+`CFD_FAR_LX 12.2720`, `CFD_NEAR_LY 2.6400`, `CFD_NEAR_LZ 1.8560` (Regel Z+ 0,5 H -> 1,824 m), `CFD_NEAR_VOR_MM 96`,
+`CFD_N2F_BAND_WAKE_START_X 311`.
+
+`CFD_NEAR_VOR_MM` (validierter Arm, FACETTEN.md: 8-mm-A/B −0,04…−0,05 Cz) geht im neuen X− = 0,1 L
+auf: der Nahfeldeinlauf wächst von 326 auf 453 mm. Das Gegenargument im Code (setup.cpp: „der geringe
+Einlaufweg wirkt der toten Unterbodenströmung entgegen", Heiko 08.08.) ist überholt — gemessen trägt
+das Bodenband am Einlass 99,85 % von u_inf (`export/p4_apg1/boden_laengsprofil.csv`, erste Zeile).
+**Diese Zeile ist die Abnahmezahl:** fällt sie unter ~0,99, war der längere Einlauf doch ein Fehler.
+
+## Vorbehalte
+
+1. **Die Box ist neu, die Vergleiche sind es nicht.** Versperrung 2,74 → 2,07 %: jeder Cd/Cz-Vergleich
+   gegen `p4_*` und `p375_*` ist ab jetzt kastenfremd. Eine Cd-Verbesserung nach der Umstellung ist
+   **kein Modellbefund**.
+2. **Fenster und Fernfeldschritt sind hochgerechnet**, nicht bei dieser Größe gemessen. 280 Mio
+   Fernfeldzellen sind 38 % über dem Größten, was in v2 gelaufen ist (202,4 Mio). Beim ersten Lauf
+   gegen `CFD_TIMER_FERN` gegenrechnen.
+3. **Zwei Variablen im selben Wechsel:** Boxgröße und Einlaufweg (+127 mm). Bewusst so entschieden
+   (Heiko 21.09.), bei der Auswertung mitführen.
+4. **Zweite Fernfeld-Definition** in `main_setup_fernfeld` (Diagnosefall) folgt dem Regelwerk noch
+   **nicht** — dort stehen weiter feste Meterwerte. Offen.
+5. **Die /16-Regel auf cNx macht den Fernfeld-Nachlauf auflösungsabhängig:** X+ = 1,2566 L (4 mm),
+   1,2530 L (8 mm), 1,2929 L (3,75 mm). Eine Gitterstudie 4 → 3,75 mm ändert die Box mit.
+6. **3,75 mm ist unter diesem Regelwerk nicht mehr fahrbar:** Nahfeld über 730 Mio Zellen, weit über
+   dem VRAM-Anschlag. Bekannt und von Heiko akzeptiert (21.09.) — das Ziel ist ein bei 4 mm
+   ausgereizter Kasten mit Luft für mehr Physik (APG, SISM, D3Q27-Band), nicht die nächste Sprosse.
+7. **Der Schlupf ist das Physikbudget:** 2 016 MB ≈ 43,8 Mio Nahfeldzellen bei 46 B/Zelle. Alles, was
+   ein D3Q27-Band oder zusätzliche Felder brauchen, geht davon ab.

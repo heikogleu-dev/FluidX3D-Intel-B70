@@ -3,6 +3,14 @@
 # dx_ref: 4
 # Spalten: NAME WERT EINHEIT
 # --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---
+# NACHGEZOGEN (von Hand, 2026-09-21, Heiko-Entscheid: KASTEN-REGELWERK). Die Boxmasse sind ab jetzt KEINE Schalter mehr,
+#   sondern werden in setup.cpp aus Fahrzeugmassen und Randfaktoren abgeleitet (BOX-REGELWERK.md, Ist=Soll-Abnahme im Lauf).
+#   ENTFERNT: CFD_FAR_LX 12.2720 (Regel: X- 0,625 L / X+ 1,250 L -> 12,784 m), CFD_NEAR_LY 2.6400 (0,25 B -> 2,768 m),
+#   CFD_NEAR_LZ 1.8560 (Z+ 0,6 H -> 1,936 m), CFD_NEAR_VOR_MM 96 (geht im neuen X- = 0,1 L auf, Einlauf 326 -> 453 mm),
+#   CFD_N2F_BAND_WAKE_START_X 311 (ersetzt durch CFD_N2F_BAND_WAKE_START=3 = Dachende im Radstand, Automatik).
+#   Wer einen dieser Schalter in einer Serienzeile setzt, uebersteuert das Regelwerk -- die Abnahme im Lauf meldet es.
+#   ERGAENZT: CFD_N2F_BAND_WAKE_START 3 (Dachende im Radstand). Der Default wechselte am 21.09. von 0 auf 3;
+#   ohne Basiszeile koennte der Waechter diesen physikrelevanten Wechsel weder als FEHLT noch als ABWEICHEND melden.
 # NACHGEZOGEN (basis_aus_lauf.py --nachziehen, 2026-09-17, Grund: Heiko 17.09.2026, Skalierungsaudit (SKALIERUNG-BEFUNDE-2026-09-17.md): Punkt 1 Kontaktband-Oberkante nach Regel, Punkt 4 BODEN_EQ-Familie als bewusst gitterfeste Lagen, Punkt 12 Produktionsschalter in die Basis (Werte aus export/p375_b/code/LAUF.txt), Punkt 6 Schritte je Zelle 8 basisgeprueft): Einheiten CFD_BODEN_EQ modus->lagen; CFD_BODEN_EQ_DOWN modus->lagen; CFD_FERN_BODEN_EQ modus->lagen; CFD_FERN_BODEN_EQ_DOWN modus->lagen; CFD_FERN_EINLASS_EQ modus->lagen; CFD_KRAFT_ZBAND zellen_fein->band_oberkante_mm (Wert 4 Zellen -> Sollhoehe 16 mm; Regel bei dx_ref 4 mm: N = 4, Oberkante 14.000 mm); ergaenzt CFD_PTRT 1.90, CFD_FAC_DETEPS 16, CFD_POSITIV 2, CFD_U_KLEMME 1, CFD_ZAEHL_TAKT 1000, CFD_SCHRITTE_PRO_ZELLE 8.
 # STANDARD GEAENDERT (Heiko 17.09.2026, Skalierungsaudit SKALIERUNG-BEFUNDE-2026-09-17.md):
 #   PUNKT 1, CFD_KRAFT_ZBAND 16 band_oberkante_mm: das Band zaehlt z < N, z = 0 ist Fahrbahn -> wirksam z = 1..N-1,
@@ -129,7 +137,6 @@ CFD_FAC_ELIBB 1 modus
 CFD_FAC_NACHBAR 1 modus
 CFD_FAC_SATGATE 1 modus
 CFD_FAC_UTKORR 1.5 modus
-CFD_FAR_LX 12.2720 phys
 CFD_FERN_BODEN_EQ 2 lagen
 CFD_FERN_BODEN_EQ_DOWN 1 lagen
 CFD_FERN_EINLASS_EQ 2 lagen
@@ -142,12 +149,9 @@ CFD_N2F_BAND_PLATEAU 2 zellen_grob_laenge
 CFD_N2F_BAND_PROFIL 2 modus
 CFD_N2F_BAND_WAKE 1 modus
 CFD_N2F_BAND_WAKE_ABSTAND 32 zellen_grob_laenge
-CFD_N2F_BAND_WAKE_START_X 311 index_grob
+CFD_N2F_BAND_WAKE_START 3 modus
 CFD_N2F_BAND_WANDFREI 2 zellen_grob_laenge
 CFD_N2F_SCHALE 0.5 modus
-CFD_NEAR_LY 2.6400 phys
-CFD_NEAR_LZ 1.8560 phys
-CFD_NEAR_VOR_MM 96 phys
 CFD_PERF_AB 0.1 phys
 CFD_POSITIV 2 modus
 CFD_PTRT 1.90 modus

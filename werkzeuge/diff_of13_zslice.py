@@ -4,9 +4,11 @@
 # of13 anschauen ... wenn dort kein abdruck sichtbar ist, ist das meines achtens nicht berechtigt".
 #
 # ANLASS: die Nahfeldbox praegt auf fuenf Seiten rho hart aus dem 16-mm-Gitter auf
-# (kernel.cpp apply_kopplung_drive); die Rueckkopplung korrigiert nur u, nie rho. Mit der neuen
-# Box (CFD_NEAR_LZ 1,8560) sitzt die Decke bei z = 1,856 m, also 0,656 m ueber dem Dachscheitel.
-# Zwei unabhaengige Pruefungen hielten das fuer zu eng. Die Frage ist mit Daten entscheidbar:
+# (kernel.cpp apply_kopplung_drive); die Rueckkopplung korrigiert nur u, nie rho. Die Decke sass
+# damals bei z = 1,856 m (CFD_NEAR_LZ 1,8560), also 0,652 m ueber dem Dach; zwei unabhaengige
+# Pruefungen hielten das fuer zu eng. ★ 21.09.2026: die Box kommt jetzt aus dem Kasten-Regelwerk
+# (Z+ 0,55 H -> Decke 1,888 m, 0,683 m ueber dem Dach). Das Werkzeug liest Origin und Spacing aus
+# dem VTK-Kopf und rechnet unabhaengig von diesen Zahlen weiter. Die Frage ist mit Daten entscheidbar:
 # hinterlaesst die Decke einen ABDRUCK in der Stroemung, oder nicht?
 #
 # WARUM GENAU DIESE EBENE: die OF13-Referenz hat einen fertigen z-Schnitt bei z = 1,836 m

@@ -6650,6 +6650,13 @@ static void main_setup_fahrzeug_dd() {
 	                                                  // V1 rechnete mit 1.48e-5 und dokumentierte gleichzeitig 1.51e-5 --
 	                                                  // ein Widerspruch, der nie aufgeloest wurde. Hier gilt die Referenz.
 	const float si_length = 4.4364f;
+	// ★ 2026-09-21: Breite und Hoehe fuer das Kasten-Regelwerk. Die STL misst 4,4341 x 1,8376 x 1,2077 m
+	// (scenes/vehicle.stl, 133 766 Dreiecke, gemessen 2026-09-21). place() streckt sie auf si_length,
+	// also um 4,4364/4,4341 = 1,000519 -- diese Werte tragen denselben Faktor, sonst bezoegen sich die
+	// Randfaktoren auf einen anderen Koerper als den, der voxelisiert wird. Die Ist=Soll-Abnahme dazu
+	// steht hinter place() und bricht ab, wenn die STL getauscht wird, ohne dass diese Zeilen folgen.
+	const float si_breite = 1.83855f;
+	const float si_hoehe  = 1.20833f;
 	const float A_ref     = 1.85f;
 	const float u_lat     = u_lat_schalter("fahrzeug_dd");
 
@@ -6678,6 +6685,10 @@ static void main_setup_fahrzeug_dd() {
 	// Die Maße stammen aus dem V1-Fahrzeugfall (phase7g), wo sie durchgerechnet waren. Sie stehen hier
 	// PHYSIKALISCH statt in Zellen, damit dx frei bleibt; bei dx_f = 4 mm und ratio = 4 kommen die
 	// V1-Zellzahlen exakt zurueck (nachgerechnet 2026-08-08):
+	//   ★ UEBERHOLT 21.09.2026: diese Masse stammen aus der Zeit vor dem Kasten-Regelwerk und sind hier
+	//   nur noch historisch. Die geltenden Zahlen erzeugt das Regelwerk (BOX-REGELWERK.md) und der Lauf
+	//   sagt sie unter "KASTEN-REGELWERK" an; bei 4 mm sind es Fernfeld 800 x 576 x 608 = 280,2 Mio und
+	//   Nahfeld 1917 x 693 x 473 = 628,4 Mio. Historisch, Stand bis 21.09.2026:
 	//   Fernfeld 12.2720 x 7.6640 x 8.8160 m / 16 mm = 768 x 480 x 552 = 203.5 M Zellen
 	//   Nahfeld   6.6560 x 2.4800 x 1.9360 m /  4 mm = 1665 x 621 x 485 = 501.5 M Zellen
 	//   Nahfeld-Fussabdruck grob: Ursprung (152, 162, 0), Ausdehnung (417, 156, 122)
@@ -6691,7 +6702,47 @@ static void main_setup_fahrzeug_dd() {
 	// 63.999996, und die Ganzzahl-Umwandlung schneidet auf 63 ab -- eine Zelle zu wenig, lautlos und
 	// nur bei bestimmten dx. Am 2026-08-08 im Kleinlauf aufgefallen, daher floor(x+0.5).
 	auto n_cells = [](const float len, const float dx) { return (uint)floor(len/dx + 0.5f) + 1u; };
-	const float far_Lx  = env_f("CFD_FAR_LX",  12.2720f), far_Ly  = env_f("CFD_FAR_LY",  7.6640f), far_Lz  = env_f("CFD_FAR_LZ",  8.8160f);
+	// ★★ KASTEN-REGELWERK (Heiko 2026-09-21, ersetzt die festen Meterwerte). Die Boxen werden aus den
+	// FAHRZEUGMASSEN und Randfaktoren abgeleitet, nicht mehr in Metern gesetzt -- damit wandern sie bei
+	// jeder Massen- oder Aufloesungsaenderung mit, statt still zu veralten. Das vollstaendige Regelwerk
+	// mit Herleitung, Kosten und Randbedingungen steht in BOX-REGELWERK.md.
+	//   NAH : X- 0,100 L | X+ 0,625 L | Y je 0,250 B | Z- 0 (Fahrbahn) | Z+ 0,550 H
+	// Z+ 0,550 statt 0,500 (Heiko 2026-09-21): 0,5 H haette 619 mm Freiraum ergeben und damit WENIGER
+	// als die Baseline CFD_NEAR_LZ 1.8560 = 652 mm, die zwei unabhaengige Pruefungen schon fuer zu eng
+	// hielten (werkzeuge/diff_of13_zslice.py). z+ ist eine getriebene Kopplungsebene, die rho hart
+	// aufpraegt -- sie enger zu machen war eine Formelnebenwirkung, kein Entscheid. Jetzt 683 mm.
+	// RUNDUNG (Heiko 2026-09-21): das Regelwerk orientiert sich IMMER an den Sollabstaenden und rundet
+	// dann auf die naechste GROBzelle auf -- auch das Nahfeld, das darum mit dx_c gerastert wird und
+	// nicht mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen
+	// (Deckungspunkt-Konvention), und nur so ist die Box aufloesungsunabhaengig dieselbe Geometrie.
+	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,000 B | Z- 0 (Fahrbahn) | Z+ 7,000 H
+	// TEILBARKEIT (Heiko 2026-09-21): Nx durch 16, Ny/Nz durch 4 -- und zwar auf der ALLOZIERTEN
+	// GITTERBREITE (Knoten), denn daran haengt der gemessene 5-%-Effekt (TODO.md, iGPU). Fuer das
+	// FERNFELD ist das erfuellbar und wird hier erzwungen. Fuer das NAHFELD ist es STRUKTURELL
+	// unmoeglich: fN = (ce-1)*ratio+1 ist immer 4k+1, also ungerade (Deckungspunkt-Konvention, s. u.).
+	// Das Nahfeld rundet deshalb nur auf ganze GROBzellen auf. Entscheid Heiko 2026-09-21: Regel gilt
+	// fuer das Fernfeld, das Nahfeld behaelt 4k+1 -- die Kopplung umzubauen waere ein Verfahrenswechsel,
+	// und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
+	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.550f;
+	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.000f, RK_FERN_ZP=7.000f;
+	// Kleinste ZELLSPANNE >= soll, deren KNOTENZAHL (Spanne+1) durch teiler teilbar ist. teiler=1 heisst
+	// "nur aufrunden" (Nahfeld). Aufgerundet wird IMMER -- eine Box darf den Sollabstand ueberschreiten,
+	// nie unterschreiten, sonst misst man die Regel nicht mehr, die man aufgeschrieben hat.
+	auto spanne_regel = [](const float soll, const float dx, const uint teiler) {
+		if(!(soll>0.0f)) print_error("spanne_regel: Solllaenge "+to_string(soll,6u)+" m ist nicht positiv -- (uint)ceil auf ein negatives Argument waere undefiniert. Kasten-Randfaktoren oder CFD_FAR_X0 pruefen.");
+		// ★ Epsilon RELATIV (Pruefagent 21.09.): 1e-6 absolut ist zwei Groessenordnungen zu klein. Das
+		// float-Rauschen im Quotienten erreicht bei Spannen um 800 rund 4,8e-5 Zellen; in 1432 von 3000
+		// exakten Vielfachen lieferte ceil(q-1e-6) eine Zelle ZU VIEL. Im Fernfeld mit teiler=16 springt
+		// so ein Fehlgriff auf das naechste Vielfache -- bis zu 16 Grobzellen = 5,6 Mio Zellen = 250 MB.
+		const double q = (double)soll/(double)dx;
+		uint s = (uint)ceil(q - 1e-6*(q>1.0 ? q : 1.0)); // max() ist hier ueberladen (int/uint/float) -- Ternaer statt Kandidatenstreit
+		while(((s+1u)%teiler)!=0u) s++;
+		return s;
+	};
+	const uint far_sx = spanne_regel((RK_FERN_XM+1.0f+RK_FERN_XP)*si_length, dx_c, 16u);
+	const uint far_sy = spanne_regel((1.0f+2.0f*RK_FERN_Y)*si_breite,        dx_c,  4u);
+	const uint far_sz = spanne_regel((1.0f+RK_FERN_ZP)*si_hoehe,             dx_c,  4u);
+	const float far_Lx  = env_f("CFD_FAR_LX",  (float)far_sx*dx_c), far_Ly  = env_f("CFD_FAR_LY",  (float)far_sy*dx_c), far_Lz  = env_f("CFD_FAR_LZ",  (float)far_sz*dx_c);
 	// ★★ AUF GANZE GROBE ZELLEN SCHNAPPEN, 2026-08-09. Die V1-Werte gehen bei dx_c = 16 mm glatt auf
 	// (416 / 155 / 121 grobe Zellen), bei jeder anderen Aufloesung nicht: bei 18 mm werden daraus
 	// 369,78 / 137,78 / 107,56. Die Deckungskonvention fein = (grob-1)*ratio + 1 verlangt aber, dass
@@ -6711,17 +6762,41 @@ static void main_setup_fahrzeug_dd() {
 	const float near_vor = dx_c*(float)max(0, (int)floor(near_vor_roh/dx_c + 0.5f));
 	if(near_vor_roh<0.0f) print_warning("CFD_NEAR_VOR_MM < 0 wird auf 0 geklemmt (Box-Verkuerzung ist kein Messarm).");
 	else if(fabs(near_vor-near_vor_roh)>1e-6f) print_warning("CFD_NEAR_VOR_MM liegt nicht auf dem "+to_string(dx_c*1000.0f,0u)+"-mm-Raster -- gerundet auf "+to_string(near_vor*1000.0f,0u)+" mm.");
-	const float near_Lx = auf_grobe_zelle(env_f("CFD_NEAR_LX",  6.6560f)) + near_vor;
-	const float near_Ly = auf_grobe_zelle(env_f("CFD_NEAR_LY", 2.4800f));
-	const float near_Lz = auf_grobe_zelle(env_f("CFD_NEAR_LZ", 1.9360f));
-	// Weltkoordinaten nach V1-Konvention: die Fahrzeugnase liegt bei x = 0, der Einlass 0.6 Fahrzeug-
-	// laengen davor (bei NEAR_VOR=0). Das ist BEWUSST kurz -- Heiko 2026-08-08: der geringe Einlaufweg wirkt der toten
-	// Stroemung in den unteren 5 bis 20 mm und der dadurch stagnierenden Unterbodenstroemung entgegen.
-	// Wer das fuer einen Fehler haelt und "korrigiert", macht den Unterboden wieder falsch.
-	const float far_x0  = env_f("CFD_FAR_X0", -0.6f*si_length);       // -2.66184 m
-	const float near_off_x = auf_grobe_zelle(env_f("CFD_NEAR_OFF_X", 2.4320f)) - near_vor; // ebenfalls auf ganze grobe Zellen; near_vor zieht die Einlass-Ebene vor
+	// ★ REGELWERK NAHFELD (2026-09-21). Reihenfolge ist tragend: zuerst der Fernfeld-Ursprung, dann die
+	// Einlassebene (ABGERUNDET auf ganze Grobzellen, damit X- den Sollabstand nie UNTERschreitet), und
+	// erst daraus die Boxlaenge, die X+ ab dem Heck erreichen muss. Wer near_Lx aus dem Nennmass
+	// 1,725 L rechnet, verliert die Rundung der Einlassebene und landet hinter dem Soll-X+.
+	const float far_x0_regel   = -RK_FERN_XM*si_length;
+	const float far_x0_wert    = env_f("CFD_FAR_X0", far_x0_regel);
+	const float near_x0_soll   = -RK_NAH_XM*si_length;
+	const float near_off_regel = dx_c*floor((near_x0_soll-far_x0_wert)/dx_c);        // ABRUNDEN = Einlass weiter vorn
+	const float near_x0_regel  = far_x0_wert + near_off_regel;
+	const float near_lx_regel  = (float)spanne_regel((si_length+RK_NAH_XP*si_length)-near_x0_regel, dx_c, 1u)*dx_c;
+	const float near_Lx = auf_grobe_zelle(env_f("CFD_NEAR_LX",  near_lx_regel)) + near_vor;
+	// ★ PARITAET IN DIE REGEL (Pruefagent 21.09.2026): NF_OY = (cNy-cey)/2 verlangt gleiche Paritaet von
+	// cNy und cey, also near_sy == far_sy (mod 2). Bei 2 / 4 / 6 / 8 mm geht das von selbst auf, bei
+	// 3,75 / 4,5 / 5 mm NICHT -- dort haette der Paritaets-Bump das Nahfeld eine Grobzelle breiter
+	// gemacht, als das Regelwerk sagt. Eine Grobzelle mehr deckt die Aufrundungsregel ohnehin; so
+	// stimmt die Box auf JEDER Sprosse mit dem Regelwerk ueberein und der Bump feuert nie.
+	uint near_sy = spanne_regel((1.0f+2.0f*RK_NAH_Y)*si_breite, dx_c, 1u);
+	if(((near_sy^far_sy)&1u)!=0u) near_sy++;
+	const float near_Ly = auf_grobe_zelle(env_f("CFD_NEAR_LY", (float)near_sy*dx_c));
+	const float near_Lz = auf_grobe_zelle(env_f("CFD_NEAR_LZ", (float)spanne_regel((1.0f+RK_NAH_ZP)*si_hoehe,      dx_c, 1u)*dx_c));
+	// Weltkoordinaten: die Fahrzeugnase liegt bei x = 0, der Fernfeld-Einlass 0,625 L davor, die
+	// Nahfeld-Einlassebene 0,1 L (Kasten-Regelwerk 21.09.2026).
+	// ★ UEBERHOLT 21.09.2026 -- hier stand: "der Einlass 0.6 Fahrzeuglaengen davor ... BEWUSST kurz
+	// (Heiko 2026-08-08): der geringe Einlaufweg wirkt der toten Stroemung in den unteren 5 bis 20 mm
+	// und der dadurch stagnierenden Unterbodenstroemung entgegen. Wer das fuer einen Fehler haelt und
+	// korrigiert, macht den Unterboden wieder falsch."
+	// Diese Begruendung traegt nicht mehr: am Einlass tragen die untersten fuenf Lagen inzwischen
+	// 99,85 % von u_inf (export/p4_apg1/boden_laengsprofil.csv, erste Zeile) -- die tote Bodenschicht
+	// ist von BODEN_EQ/FERN_BODEN_EQ/Bodenklemme erledigt, nicht von der Boxlaenge. Der Nahfeldeinlauf
+	// waechst damit von 326 auf 453 mm. ABNAHMEZAHL: faellt die erste Zeile von boden_laengsprofil.csv
+	// unter ~0,99, war der laengere Einlauf doch ein Fehler.
+	const float far_x0  = far_x0_wert;                                // Regelwerk: -0,625 L = -2.77275 m (CFD_FAR_X0 uebersteuert)
+	const float near_off_x = auf_grobe_zelle(env_f("CFD_NEAR_OFF_X", near_off_regel)) - near_vor; // ebenfalls auf ganze grobe Zellen; near_vor zieht die Einlass-Ebene vor
 	if(near_off_x<dx_c) print_error("near_off_x < eine Grobzelle: die Near-Box ragte vor den Fernfeld-Einlass (CFD_NEAR_VOR_MM zu gross oder CFD_NEAR_OFF_X zu klein).");
-	const float near_x0 = far_x0 + near_off_x;  // -0.22984 m bei NEAR_VOR=0 und dx_c = 16 mm, V1-Wert
+	const float near_x0 = far_x0 + near_off_x;  // Regelwerk bei 4 mm: -0,45275 m (= 0,1021 L vor der Nase)
 	if(near_vor>0.0f) print_info("NEAR_VOR aktiv: Einlass-Interface "+to_string(near_vor*1000.0f,0u)+" mm weiter vor der Nase (jetzt "+to_string(-near_x0,3u)+" m), Heck-Ende weltfest; +"+to_string((uint)floor(near_vor/dx_f+0.5f))+" feine x-Schichten.");
 	const float veh_x0  = 0.0f;                                      // Nase
 	const float veh_x1  = veh_x0 + si_length;                        // Heck
@@ -6744,7 +6819,11 @@ static void main_setup_fahrzeug_dd() {
 	// bei abweichendem dx wird cey um eins erhoeht statt die Symmetrie aufzugeben -- eine unsymmetrische
 	// Nahfeld-Box waere ein stiller Fehler in genau der Groesse, die hier am empfindlichsten ist.
 	uint cey = n_cells(near_Ly, dx_c);
-	if(((cNy^cey)&1u)!=0u) cey++;
+	// ★ 2026-09-21 (Pruefagent): der Bump korrigierte BISHER STILL -- er machte das Nahfeld eine
+	// Grobzelle breiter, und die Zahl im Protokoll stimmte danach nicht mehr mit der Box ueberein.
+	// Unter dem Regelwerk darf er nicht mehr noetig sein (cNy und cey sind beide gerade); feuert er
+	// doch, ist das ein Regelbruch und gehoert angesagt, nicht wegkorrigiert.
+	if(((cNy^cey)&1u)!=0u) { print_warning("KASTEN-PARITAET: NF_OY = (cNy-cey)/2 verlangt gleiche Paritaet, cNy = "+to_string(cNy)+" gegen cey = "+to_string(cey)+". cey wird auf "+to_string(cey+1u)+" gehoben -- das Nahfeld wird dadurch "+to_string(dx_c*1000.0f,0u)+" mm BREITER als das Regelwerk vorgibt. Regelwerk pruefen (Ny_fern und Ny_nah/ratio muessen dieselbe Paritaet haben)."); cey++; }
 	const uint NF_OX = (uint)floor((near_x0-far_x0)/dx_c + 0.5f);
 	const uint NF_OY = (cNy-cey)/2u;
 	const uint NF_OZ = 0u; // Fahrbahn ist beiden Gittern gemeinsam
@@ -6786,6 +6865,33 @@ static void main_setup_fahrzeug_dd() {
 		print_info("Einlauf vor der Nase "+to_string((veh_x0-far_x0)/si_length,2u)+" L (bewusst kurz), Nachlauf hinter dem Heck "
 			+to_string((far_x0+(float)(cNx-1u)*dx_c-veh_x1)/si_length,2u)+" L  (OpenFOAM: 1.08 L / 3.33 L)");
 		print_info("Nahfeld-Einlauf vor der Nase "+to_string((veh_x0-near_x0),3u)+" m, Nahfeld-Nachlauf hinter dem Heck "+to_string(near_x0+(float)(fNx-1u)*dx_f-veh_x1,3u)+" m (selbstdokumentierend, XL-R4/NEAR_VOR).");
+		// ★★ IST=SOLL DES KASTEN-REGELWERKS (2026-09-21). Ohne diese Klammer ist eine Box nur eine
+		// Behauptung: die Rundung auf Grobzellen und Teilbarkeit verschiebt jeden Abstand, und ob das
+		// Ergebnis die Regel noch erfuellt, sieht man sonst nirgends. UNTERschreitet ein Abstand den
+		// Sollwert, ist das ein harter Fehler -- dann misst der Lauf eine andere Box als die notierte.
+		uint kr_bad = 0u;
+		auto kr_zeile = [&](const string& wo, const string& was, const float ist, const float faktor, const float bezug, const char* einheit) {
+			const float soll = faktor*bezug, d = ist-soll;
+			print_info("  REGEL "+wo+" "+was+": Soll "+to_string(faktor,3u)+" "+einheit+" = "+to_string(soll,4u)+" m, Ist "+to_string(ist,4u)+" m = "+to_string(ist/bezug,4u)+" "+einheit+", Ueberschuss "+to_string(d*1000.0f,1u)+" mm.");
+			if(d<-1e-4f) { print_warning("REGELBRUCH "+wo+" "+was+": Ist "+to_string(ist,4u)+" m UNTERschreitet das Soll "+to_string(soll,4u)+" m um "+to_string(-d*1000.0f,1u)+" mm."); kr_bad++; }
+		};
+		const float veh_z1 = veh_z0+si_hoehe;
+		print_info("KASTEN-REGELWERK (Heiko 2026-09-21; Fahrzeug L "+to_string(si_length,4u)+" B "+to_string(si_breite,4u)+" H "+to_string(si_hoehe,4u)+" m, skalierte STL). Abnahme:");
+		kr_zeile("NAH ", "X-", veh_x0-near_x0,                            RK_NAH_XM,  si_length, "L");
+		kr_zeile("NAH ", "X+", near_x0+(float)(fNx-1u)*dx_f-veh_x1,       RK_NAH_XP,  si_length, "L");
+		kr_zeile("NAH ", "Y ", 0.5f*((float)(fNy-1u)*dx_f-si_breite),     RK_NAH_Y,   si_breite, "B");
+		kr_zeile("NAH ", "Z+", (float)(fNz-1u)*dx_f-veh_z1,               RK_NAH_ZP,  si_hoehe,  "H");
+		kr_zeile("FERN", "X-", veh_x0-far_x0,                             RK_FERN_XM, si_length, "L");
+		kr_zeile("FERN", "X+", far_x0+(float)(cNx-1u)*dx_c-veh_x1,        RK_FERN_XP, si_length, "L");
+		kr_zeile("FERN", "Y ", 0.5f*((float)(cNy-1u)*dx_c-si_breite),     RK_FERN_Y,  si_breite, "B");
+		kr_zeile("FERN", "Z+", (float)(cNz-1u)*dx_c-veh_z1,               RK_FERN_ZP, si_hoehe,  "H");
+		// TEILBARKEIT: Fernfeld nach Heikos Regel (Nx/16, Ny/4, Nz/4 auf der Gitterbreite). Nahfeld ist
+		// durch fN = (ce-1)*ratio+1 auf 4k+1 festgelegt und kann sie NICHT erfuellen -- das wird angesagt,
+		// nicht stillschweigend uebergangen (Entscheid Heiko 2026-09-21: Regel gilt fuers Fernfeld).
+		print_info("  REGEL TEILBARKEIT Fernfeld: Nx "+to_string(cNx)+" %16 = "+to_string(cNx%16u)+", Ny "+to_string(cNy)+" %4 = "+to_string(cNy%4u)+", Nz "+to_string(cNz)+" %4 = "+to_string(cNz%4u)
+			+" | Nahfeld "+to_string(fNx)+" x "+to_string(fNy)+" x "+to_string(fNz)+" ist bauartbedingt 4k+1 (Deckungspunkt-Konvention fN=(ce-1)*ratio+1) und von der Regel ausgenommen.");
+		if(cNx%16u||cNy%4u||cNz%4u) { print_warning("REGELBRUCH TEILBARKEIT Fernfeld: Nx%16 = "+to_string(cNx%16u)+", Ny%4 = "+to_string(cNy%4u)+", Nz%4 = "+to_string(cNz%4u)+" (erwartet 0/0/0). Ein CFD_FAR_L*-Uebersteuern haelt die Regel nicht ein."); kr_bad++; }
+		if(kr_bad>0u) print_error("KASTEN-REGELWERK: "+to_string(kr_bad)+" Regelbrueche (s. o.). Entweder die CFD_FAR_L*/CFD_NEAR_L*/CFD_FAR_X0/CFD_NEAR_OFF_X-Uebersteuerungen zuruecknehmen oder das Regelwerk in BOX-REGELWERK.md und setup.cpp nachziehen -- ein Lauf gegen eine andere Box als die notierte ist wertlos.");
 	}
 #ifdef TRT
 	print_info("Kollisionsoperator: TRT (Lambda-Wandlage aktiv).");
@@ -6827,6 +6933,19 @@ static void main_setup_fahrzeug_dd() {
 	};
 	Mesh* veh_f = read_stl(get_exe_path()+"../scenes/vehicle.stl"); place(veh_f, dx_f, near_x0, near_y0, near_z0);
 	Mesh* veh_c = read_stl(get_exe_path()+"../scenes/vehicle.stl"); place(veh_c, dx_c, far_x0,  far_y0,  0.0f);
+	{	// ★★ ABNAHME si_breite/si_hoehe gegen die WIRKLICHE STL (21.09.2026, Pruefagent H1). Ohne sie ist die
+		// Kasten-Abnahme in Y und Z tautologisch: sie rechnet mit demselben si_breite/si_hoehe, aus dem die
+		// Box abgeleitet wurde. Nur X ist von sich aus verankert, weil place() die STL auf si_length streckt.
+		// Wird vehicle.stl getauscht, wandern B und H -- die Boxen folgen nicht, und ohne diesen Test
+		// meldete es nichts. HIER, weil erst place() den Massstab kennt.
+		const float3 bb = veh_f->get_bounding_box_size();
+		const float ist_l = bb.x*dx_f, ist_b = bb.y*dx_f, ist_h = bb.z*dx_f;
+		print_info("STL-ABNAHME (scenes/vehicle.stl nach place): L "+to_string(ist_l,4u)+" / B "+to_string(ist_b,4u)+" / H "+to_string(ist_h,4u)+" m gegen Regelwerk "
+			+to_string(si_length,4u)+" / "+to_string(si_breite,4u)+" / "+to_string(si_hoehe,4u)+" m; Abweichung "+to_string((ist_b-si_breite)*1000.0f,2u)+" / "+to_string((ist_h-si_hoehe)*1000.0f,2u)+" mm (B/H).");
+		// Schwelle eine halbe FEINE Zelle: darunter aendert sich kein Voxel, darueber stimmt die Box nicht mehr.
+		if(fabs(ist_b-si_breite)>0.5f*dx_f||fabs(ist_h-si_hoehe)>0.5f*dx_f)
+			print_error("STL-ABNAHME: die voxelisierte Fahrzeugbreite/-hoehe weicht um mehr als eine halbe feine Zelle von si_breite/si_hoehe ab. Das Kasten-Regelwerk rechnet dann mit den FALSCHEN Bezugsmassen, und die Y-/Z-Abstaende stimmen nur noch auf dem Papier. si_breite/si_hoehe in setup.cpp auf die neue STL nachziehen (mit demselben place()-Faktor si_length/L_stl) und BOX-REGELWERK.md ergaenzen.");
+	}
 
 	// ---------------------------------------------------------------- Feines Gitter bauen
 	Units units_fine, units_coarse;
@@ -6849,7 +6968,8 @@ static void main_setup_fahrzeug_dd() {
 	}
 	// ★★ DAEMPFUNGSZONE AM NAHFELD: AUSDRUECKLICH AUS, und das ist eine harte Aussage.
 	// Vorpruefung 2026-08-09, nachgerechnet aus der STL-Lage: zwischen der Einlassflaeche x- und der
-	// Fahrzeugnase liegen nur 57,5 Zellen (230 mm) -- der Nahfeld-Einlauf ist bewusst kurz gehalten.
+	// Fahrzeugnase liegen unter dem Regelwerk 113 feine Zellen (453 mm; bis 21.09.2026 waren es 57,5
+	// Zellen = 230 mm). Die Zahl folgt dem Regelwerk und ist hier nur zur Einordnung genannt.
 	// Eine 64-Zellen-Zone UEBERDECKTE die Nase um 7 Zellen, und die Staupunktstroemung davor liefe
 	// durch Faktor 145 (x=50), 422 (x=40), 751 (x=32). Auch N=32 rettet nichts: dann bleiben 100 mm
 	// vor der Nase, mitten im Staugebiet. Seitlich verengte N=64 die freie Breite auf 1,97 m bei
@@ -7110,9 +7230,16 @@ static void main_setup_fahrzeug_dd() {
 	// Kasten als ZWEITE SAATMENGE in dieselbe Distanztransformation geht, bekommt er denselben
 	// Auslauf wie das Koerperband, ohne eine Zeile Sonderlogik.
 	//  CFD_N2F_BAND_WAKE          1 = Kasten dazu (Default 0 = nur Koerperband).
-	//  CFD_N2F_BAND_WAKE_START    0 = am DACHSCHEITEL (Default, Heiko-Vorschlag: erfasst Heckdeck
-	//                             und Backlight mit, wo die Nah-Fern-Differenz am groessten ist),
-	//                             1 = am HECK (konservativ, reiner Nachlauf) -- Ein-Variablen-A/B.
+	//  CFD_N2F_BAND_WAKE_START    3 = DACHENDE IM RADSTAND (DEFAULT seit 2026-09-21, Heiko: "keine
+	//                             Handknoepfe"): hoechste Stelle zwischen Vorder- und Hinterachse,
+	//                             davon die Hinterkante des Plateaus = Beginn des Backlights.
+	//                             Das Radstandfenster schliesst Heckfluegel und Ueberhaenge aus --
+	//                             genau die Falle, an der Modus 0 an diesem Fahrzeug 91 % statt 54 %
+	//                             der Fahrzeuglaenge traf und den Handknopf _START_X noetig machte.
+	//                             0 = am globalen Hoehenmaximum (frueherer Default; Absicht war
+	//                             "erfasst Heckdeck und Backlight mit", trifft hier aber den Fluegel),
+	//                             1 = am HECK (konservativ, reiner Nachlauf) -- Ein-Variablen-A/B,
+	//                             2 = RADSTANDMITTE.
 	//  CFD_N2F_BAND_WAKE_ABSTAND  Grobzellen, die vor dem Nahfeld-Auslass FREI bleiben (Default 16).
 	//                             Grund ist NICHT Zirkularitaet -- x+ ist Druckauslass und wird
 	//                             nicht getrieben --, sondern die Randkontamination der feinen
@@ -7137,7 +7264,7 @@ static void main_setup_fahrzeug_dd() {
 	if(n2f_band>0u&&n2f_wandfrei>=n2f_band_n) print_error("CFD_N2F_BAND_WANDFREI >= N: das ganze Koerperband waere leer -- dafuer gibt es CFD_N2F_BAND_NURWAKE=1 (Fahrzeug als reine Sperre, sauberere Semantik).");
 	if(n2f_band>0u&&n2f_wandfrei>0u) print_info("N2F-BAND WANDFREI (1b): Koerperband-Lagen 1.."+to_string(n2f_wandfrei)+" werden NICHT gelistet -- das Band beginnt erst bei Lage "+to_string(n2f_wandfrei+1u)+". Wandnahe Kastenkern-Zellen werden MIT entfernt (Scan). Damit ist auch CFD_FERN_FACETTEN freigegeben (nur ohne NURWAKE (die Lage-1-Sperre entfaellt, s. dort).");
 	if(n2f_nurwake>0u&&n2f_band==0u) print_warning("CFD_N2F_BAND_NURWAKE=1 ohne CFD_N2F_BAND=1 ist ein stiller No-Op -- der Schalter wirkt ausschliesslich im BAND-Listenbauer (Pruefagent-B-N6).");
-	const uint n2f_wake_start= min(2u, env_u("CFD_N2F_BAND_WAKE_START", 0u)); // 0 = hoechster Punkt, 1 = Heck, 2 = Radstandmitte
+	const uint n2f_wake_start= min(3u, env_u("CFD_N2F_BAND_WAKE_START", 3u)); // ★ STANDARD 3 seit 2026-09-21 (Heiko: keine Handknoepfe) = DACHENDE IM RADSTAND; 0 = hoechster Punkt (trifft an diesem Fahrzeug den Heckfluegel), 1 = Heck, 2 = Radstandmitte
 	const uint n2f_wake_abst = env_u("CFD_N2F_BAND_WAKE_ABSTAND", 16u);
 	if(n2f_band>0u&&n2f_volumen>0u) print_error("CFD_N2F_BAND=1 und CFD_N2F_VOLUMEN=1 schliessen sich aus -- beide ersetzen denselben Listenbauer. Genau einen Arm waehlen.");
 	// Gewichtsprofil als eine Funktion, damit Census-Ausgabe und Listenbau garantiert dasselbe
@@ -7199,7 +7326,7 @@ static void main_setup_fahrzeug_dd() {
 				+to_string(n2f_band_n)+" Lagen VOM FAHRZEUG NACH AUSSEN (Chebyshev-Abstand zu den Fahrzeug-Voxeln des Grobgitters, nicht zur Bounding-Box), Profil "
 				+(n2f_band_prof==0u?string("linear"):n2f_band_prof==1u?string("cos^2"):n2f_band_prof==3u?string("Heiko-Tabelle 50/50/25/12,5/6,8/3,4/1,7"):("Plateau("+to_string(n2f_band_plateau)+" Lagen voll)+geometrisch"))+" (w[1]="+to_string(band_w(1u),3u)+" ... w["+to_string(n2f_band_n)+"]="+to_string(band_w(n2f_band_n),3u)
 				+"), Unterbodenspalt "+(n2f_band_ub>0u?"ENTHALTEN":"AUSGENOMMEN (Vergleichsarm)")+"; Modus "+to_string(n2f_modus)+(n2f_modus==2u?" (IDENT-Debug)":n2f_modus==1u?" (FNEQ)":" (EQ)")+".");
-			if(n2f_wake>0u) print_info("N2F-BAND WAKE-KASTEN aktiv: achsparalleler Kasten in y/z-Ausdehnung der Fahrzeug-BBox, x von "+(n2f_wake_start==2u?string("RADSTANDMITTE"):n2f_wake_start==0u?string("HOECHSTER PUNKT"):string("HECK"))+" bis "+to_string(n2f_wake_abst)+" Grobzellen vor dem Nahfeld-Auslass; geht als ZWEITE SAATMENGE in dieselbe Distanztransformation, bekommt also denselben Auslauf wie das Koerperband.");
+			if(n2f_wake>0u) print_info("N2F-BAND WAKE-KASTEN aktiv: achsparalleler Kasten in y/z-Ausdehnung der Fahrzeug-BBox, x von "+(n2f_wake_start==3u?string("DACHENDE IM RADSTAND"):n2f_wake_start==2u?string("RADSTANDMITTE"):n2f_wake_start==0u?string("HOECHSTER PUNKT"):string("HECK"))+" bis "+to_string(n2f_wake_abst)+" Grobzellen vor dem Nahfeld-Auslass; geht als ZWEITE SAATMENGE in dieselbe Distanztransformation, bekommt also denselben Auslauf wie das Koerperband.");
 			if(n2f_modus==0u) print_warning("N2F-BAND: CFD_N2F_SCHALE_FNEQ=0 EXPLIZIT gesetzt -- der EQ-Arm ist seit 2026-08-22 NICHT mehr Standard (a-unabhaengige fneq-Loeschung, binaerer Textur-Abdruck). Nur noch fuer Vergleichslaeufe gegen EQ-Altbestand verwenden. Alte Empfehlung: CFD_N2F_SCHALE_FNEQ=1 -- Lage 1 liegt DIREKT an der Karosserie, dort traegt der Nichtgleichgewichtsanteil Scherinformation (der EQ-Arm verwirft sie je Blend).");
 			if(getenv("CFD_N2F_SCHALE_LAGEN")||getenv("CFD_N2F_SCHALE_XPLUS")||getenv("CFD_N2F_SCHALE_XMINUS")||getenv("CFD_N2F_SCHALE_XPLUS_SKAL")) print_warning("CFD_N2F_SCHALE_LAGEN/XPLUS/XMINUS/XPLUS_SKAL gelten NUR im Schalen-Modus -- im BAND-Modus werden sie NICHT angewandt (Ansage-Doktrin).");
 		}
@@ -7680,20 +7807,33 @@ static void main_setup_fahrzeug_dd() {
 		// Radstanderkennung im Nur-Wake-Arm kein Fahrzeug und der Fahrbahn-Waechter kein Fahrzeug
 		// auf z=0 (er wuerde still gruenes Licht geben, wo er warnen soll).
 		auto ist_fzg=[&](const uchar d){ return d==255u||d==253u; };
+		// ★ 2026-09-21 VORGEZOGEN (Pruefagent M1): dieser Riegel stand bis hierher ERST hinter dem
+		// Profilblock. Bei leerer Saat bleiben sx0=cNx und sx1=0 stehen -- das Hoehenprofil
+		// allozierte dann (sx1-sx0+1) als uint, also 4 294 966 497 Eintraege (~17 GB), und der
+		// zustaendige Abbruch kam nie zum Zug. Die alte 12-Stuetzstellen-Fassung war unempfindlich,
+		// weil sie nichts alloziert hat; mit dem vollen Profil ist die Reihenfolge tragend.
+		if(saat==0ull) print_error("N2F-BAND: keine einzige Fahrzeug-Grobzelle (0x41) gefunden -- Saatmenge leer, das Band waere leer. Voxelisierung des Fernfelds pruefen.");
 		// DACHSCHEITEL: kleinstes x, an dem das Fahrzeug seine groesste Hoehe erreicht. Zweiter Lauf,
 		// weil sz1 erst nach dem ersten feststeht. Das ist die Vorderkante des Daches.
-		uint x_dach=cNx, x_radmitte=0u;
+		uint x_dach=cNx, x_radmitte=0u, x_dachende=0u, x_achse_v=0u, x_achse_h=0u;
 		for(uint y=sy0; y<=sy1; y++) for(uint x=sx0; x<=sx1; x++) if(dt[(size_t)((ulong)x+((ulong)y+(ulong)sz1*(ulong)cNy)*(ulong)cNx)]>=253u) { x_dach=min(x_dach,x); break; }
 		if(x_dach>=cNx) x_dach=sx0; // kein Treffer auf der obersten Ebene (duenne Anbauteile) -> Fahrzeugfront
 		// HOEHENPROFIL laengs x, damit die Wahl des Wake-Kastenstarts auf Daten steht und nicht auf
 		// der Annahme "hoechster Punkt = Dach". Bei diesem Fahrzeug ist der hoechste Punkt der
 		// HECKFLUEGEL, nicht die Kabine -- ohne dieses Profil sieht man das nicht.
 		{
+			// ★ VOLLES HOEHENPROFIL (Heiko 2026-09-21: "ich mag keine Handknoepfe"). Die alte Fassung
+			// tastete nur 12 Stuetzstellen ab -- Schrittweite (sx1-sx0)/11, bei diesem Fahrzeug 25
+			// Grobzellen = 400 mm. Daraus laesst sich eine Kastenkante nicht ableiten; die 12 Punkte
+			// taugten zum ANSEHEN, nicht zum RECHNEN. Jetzt je Grobzelle x, die 12er-Reihe wird nur
+			// noch daraus abgetastet (Ausgabeformat unveraendert -- Werkzeuge lesen diese Zeile).
+			std::vector<uint> zprof((size_t)(sx1-sx0+1u), 0u);
+			for(uint x=sx0; x<=sx1; x++)
+				for(uint z=sz1+1u; z-->0u; ) { bool tr=false; for(uint y=sy0; y<=sy1&&!tr; y++) if(ist_fzg(dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)])) tr=true; /* ★ B-N1: stand auf ==255u -- im Nur-Wake-Arm (Fahrzeug = 253) meldete das Profil fuer JEDES x die Hoehe 0 */ if(tr) { zprof[(size_t)(x-sx0)]=z; break; } }
 			string prof; const uint schritte=12u; uint hprof[12]={0}, hx[12]={0};
 			for(uint k=0u; k<schritte; k++) {
 				const uint x = sx0 + (sx1-sx0)*k/(schritte-1u);
-				uint hmax=0u;
-				for(uint z=sz1+1u; z-->0u; ) { bool tr=false; for(uint y=sy0; y<=sy1&&!tr; y++) if(ist_fzg(dt[(size_t)((ulong)x+((ulong)y+(ulong)z*(ulong)cNy)*(ulong)cNx)])) tr=true; /* ★ B-N1: stand auf ==255u -- im Nur-Wake-Arm (Fahrzeug = 253) meldete das Profil fuer JEDES x die Hoehe 0 */ if(tr) { hmax=z; break; } }
+				const uint hmax = zprof[(size_t)(x-sx0)];
 				prof += (k?" ":"") + to_string(x) + ":" + to_string(hmax);
 				hprof[k]=hmax; hx[k]=x;
 			}
@@ -7711,7 +7851,7 @@ static void main_setup_fahrzeug_dd() {
 			}
 			for(uint k=k_kabine; k<k_max; k++) senke = max(senke, (uint)(hprof[k_kabine]>hprof[k] ? hprof[k_kabine]-hprof[k] : 0u));
 			if(k_kabine<k_max && senke>=3u)
-				print_warning("N2F-BAND HOEHENPROFIL: der hoechste Punkt (x = "+to_string(hx[k_max])+", z = "+to_string(hprof[k_max])+") ist ein ANBAUTEIL, kein Dach -- davor liegt eine Senke von "+to_string(senke)+" Grobzellen (Kabinenmaximum z = "+to_string(hprof[k_kabine])+" bei x = "+to_string(hx[k_kabine])+"). CFD_N2F_BAND_WAKE_START=0 setzt den Kastenstart damit bei "+to_string((float)(100.0*(double)(hx[k_max]-sx0)/(double)max(1u,sx1-sx0)),0u)+" % der Fahrzeuglaenge statt bei "+to_string((float)(100.0*(double)(hx[k_kabine]-sx0)/(double)max(1u,sx1-sx0)),0u)+" %. Wer den Kasten AB KABINENDACH will: CFD_N2F_BAND_WAKE_START_X="+to_string(hx[k_kabine])+".");
+				print_warning("N2F-BAND HOEHENPROFIL: der hoechste Punkt (x = "+to_string(hx[k_max])+", z = "+to_string(hprof[k_max])+") ist ein ANBAUTEIL, kein Dach -- davor liegt eine Senke von "+to_string(senke)+" Grobzellen (Kabinenmaximum z = "+to_string(hprof[k_kabine])+" bei x = "+to_string(hx[k_kabine])+"). CFD_N2F_BAND_WAKE_START=0 setzt den Kastenstart damit bei "+to_string((float)(100.0*(double)(hx[k_max]-sx0)/(double)max(1u,sx1-sx0)),0u)+" % der Fahrzeuglaenge statt bei "+to_string((float)(100.0*(double)(hx[k_kabine]-sx0)/(double)max(1u,sx1-sx0)),0u)+" %. Die Automatik (CFD_N2F_BAND_WAKE_START=3, Standard) umgeht das, indem sie nur den Radstand betrachtet; der Handknopf CFD_N2F_BAND_WAKE_START_X="+to_string(hx[k_kabine])+" waere die manuelle Notloesung von vor dem 21.09.2026.");
 			// RADSTAND (Heiko-Vorschlag 2026-08-22): die Raeder sind die Fahrzeugzellen auf den
 			// untersten z-Ebenen. Ihr x-Histogramm hat zwei Haufen -- Vorder- und Hinterachse.
 			// Der Mittelpunkt dazwischen ist ein BEGRUENDETER Kastenstart, im Unterschied zum
@@ -7728,12 +7868,28 @@ static void main_setup_fahrzeug_dd() {
 				for(uint k=0u; k<=mitte; k++)            if(hist[k]>bv) { bv=hist[k]; vx=sx0+k; }   // staerkster Haufen vorn
 				for(uint k=mitte+1u; k<hist.size(); k++) if(hist[k]>bh) { bh=hist[k]; hx=sx0+k; }   // staerkster Haufen hinten
 				x_radmitte = (bv>0u&&bh>0u) ? (vx+hx)/2u : x_dach;
-				if(bv>0u&&bh>0u&&(vx-sx0<3u||sx1-hx<3u)) print_warning("N2F-BAND RADSTAND: eine erkannte Achse liegt weniger als 3 Grobzellen von der Fahrzeugkante entfernt (vorn "+to_string(vx-sx0)+", hinten "+to_string(sx1-hx)+") -- das ist eher ein Splitter oder Diffusor als ein Radaufstand. Kastenstart lieber ueber CFD_N2F_BAND_WAKE_START_X aus dem Hoehenprofil setzen.");
+				if(bv>0u&&bh>0u) { x_achse_v=vx; x_achse_h=hx; } // ★ 21.09.2026 nach aussen gereicht: der Radstand ist das Fenster der Dachende-Automatik
+				if(bv>0u&&bh>0u&&(vx-sx0<3u||sx1-hx<3u)) print_warning("N2F-BAND RADSTAND: eine erkannte Achse liegt weniger als 3 Grobzellen von der Fahrzeugkante entfernt (vorn "+to_string(vx-sx0)+", hinten "+to_string(sx1-hx)+") -- das ist eher ein Splitter oder Diffusor als ein Radaufstand. Damit ist auch die Dachende-Automatik (Modus 3) unzuverlaessig, weil ihr Fenster [Vorderachse, Hinterachse] falsch liegt -- Voxelisierung und CFD_Z_OFFSET_MM pruefen, bevor der Kastenstart uebernommen wird.");
 				print_info("N2F-BAND RADSTAND: Vorderachse bei Grobzelle x = "+to_string(vx)+" ("+to_string(bv)+" Latschzellen auf der untersten Ebene), Hinterachse x = "+to_string(hx)+" ("+to_string(bh)+"); Mitte x = "+to_string(x_radmitte)+". Als Kastenstart ueber CFD_N2F_BAND_WAKE_START=2 waehlbar.");
 			}
-			print_info("N2F-BAND HOEHENPROFIL (Grobzellen, x:z_max ueber alle y): "+prof+" -- hoechster Punkt bei x = "+to_string(x_dach)+" (z = "+to_string(sz1)+"), Fahrzeug x["+to_string(sx0)+".."+to_string(sx1)+"]. Wer den Wake-Kasten AB KABINENDACH will, liest den x-Wert hier ab und setzt CFD_N2F_BAND_WAKE_START_X.");
+			// ★ DACHENDE IM RADSTAND (Heiko 2026-09-21, ersetzt den Handknopf CFD_N2F_BAND_WAKE_START_X):
+			// "automatisch nach der hoechsten Stelle zwischen den zwei Radaufstandsflaechen". Das Fenster
+			// [Vorderachse, Hinterachse] schliesst Heckfluegel und Ueberhaenge per Konstruktion aus --
+			// genau die Falle, an der Modus 0 (globales Maximum) bei diesem Fahrzeug 91 % statt 54 % traf.
+			// Gesucht ist nicht der Scheitel, sondern die HINTERKANTE des Scheitels: bei einem Dachplateau
+			// beginnt der Abfall am groessten x mit z == z_max, und dort faengt der Nachlauf an.
+			if(x_achse_v>0u&&x_achse_h>x_achse_v) {
+				uint z_rs=0u; for(uint x=x_achse_v; x<=x_achse_h; x++) z_rs=max(z_rs, zprof[(size_t)(x-sx0)]);
+				uint plateau=0u; for(uint x=x_achse_v; x<=x_achse_h; x++) if(zprof[(size_t)(x-sx0)]==z_rs) { x_dachende=x; plateau++; }
+				print_info("N2F-BAND DACHENDE (Automatik, Standard seit 2026-09-21): hoechste Stelle im Radstand x["+to_string(x_achse_v)+".."+to_string(x_achse_h)+"] ist z = "+to_string(z_rs)
+					+" auf "+to_string(plateau)+" Grobzellen; Hinterkante des Plateaus = Kastenstart x = "+to_string(x_dachende)+" ("
+					+to_string((float)(100.0*(double)(x_dachende-sx0)/(double)max(1u,sx1-sx0)),0u)+" % der Fahrzeuglaenge). Zum Vergleich: globales Maximum x = "+to_string(x_dach)
+					+" ("+to_string((float)(100.0*(double)(x_dach-sx0)/(double)max(1u,sx1-sx0)),0u)+" %), Radstandmitte x = "+to_string(x_radmitte)+", Heck x = "+to_string(sx1+1u)+".");
+				if(z_rs<sz1) print_info("N2F-BAND DACHENDE: das Radstandmaximum z = "+to_string(z_rs)+" liegt "+to_string(sz1-z_rs)+" Grobzellen UNTER dem Fahrzeugmaximum z = "+to_string(sz1)+" -- der hoechste Punkt sitzt also ausserhalb des Radstands (Anbauteil), und die Automatik hat ihn korrekt uebergangen.");
+			}
+			print_info("N2F-BAND HOEHENPROFIL (Grobzellen, x:z_max ueber alle y): "+prof+" -- hoechster Punkt bei x = "+to_string(x_dach)+" (z = "+to_string(sz1)+"), Fahrzeug x["+to_string(sx0)+".."+to_string(sx1)+"]. Der Kastenstart kommt seit 21.09.2026 aus der Automatik (Modus 3, s. Zeile DACHENDE) -- dieses Profil ist die Beleglage dazu, kein Ableseformular mehr.");
 		}
-		if(saat==0ull) print_error("N2F-BAND: keine einzige Fahrzeug-Grobzelle (0x41) gefunden -- Saatmenge leer, das Band waere leer. Voxelisierung des Fernfelds pruefen.");
+		// (Der saat==0-Riegel steht jetzt oben, VOR dem Hoehenprofil -- die Altkopie hier war toter Code.)
 		// Fahrbahn-Falle als HARTER Test, nicht als Kommentar. ERSTE FASSUNG WAR FALSCH (2026-08-22):
 		// sie verglich die 3D-Zellzahl der Saat gegen die 2D-Fahrbahnflaeche und schlug damit am
 		// richtigen Fahrzeug an -- bei 8 mm hat der Fernfeld-Wagen 146.167 Zellen, die Fahrbahnebene
@@ -7751,8 +7907,12 @@ static void main_setup_fahrzeug_dd() {
 		uint wx0=0u, wx1=0u, wy0=0u, wy1=0u, wz1=0u; ulong wake_n=0ull;
 		if(n2f_wake>0u) {
 			const uint wake_start_x = env_u("CFD_N2F_BAND_WAKE_START_X", 0u); // 0 = aus; sonst Grobzell-x, ueberstimmt _START
-			wx0 = wake_start_x>0u ? wake_start_x : (n2f_wake_start==2u ? x_radmitte : (n2f_wake_start==0u ? x_dach : sx1+1u));
-			if(wake_start_x>0u) print_info("N2F-BAND WAKE: Start explizit auf Grobzelle x = "+to_string(wake_start_x)+" gesetzt (CFD_N2F_BAND_WAKE_START_X ueberstimmt CFD_N2F_BAND_WAKE_START).");
+			// ★ 2026-09-21: Modus 3 (Dachende im Radstand) ist der Standard. Faellt die Radstanderkennung
+			// aus, wird NICHT still auf x_dach zurueckgefallen -- das war genau die Falle, die den
+			// Handknopf noetig machte (globales Maximum = Heckfluegel, 91 % statt 54 % der Laenge).
+			if(wake_start_x==0u&&n2f_wake_start==3u&&x_dachende==0u) print_error("N2F-BAND WAKE START=3 (Dachende im Radstand): die Radstanderkennung hat keine zwei Achsen gefunden (x_achse_v="+to_string(x_achse_v)+", x_achse_h="+to_string(x_achse_h)+"), das Dachende ist damit unbestimmt. Kein stiller Rueckfall -- Latschzellen auf der untersten Grobebene pruefen (Z_OFFSET/Voxelisierung) oder Modus 0/1/2 ausdruecklich waehlen.");
+			wx0 = wake_start_x>0u ? wake_start_x : (n2f_wake_start==3u ? x_dachende : (n2f_wake_start==2u ? x_radmitte : (n2f_wake_start==0u ? x_dach : sx1+1u)));
+			if(wake_start_x>0u) print_warning("N2F-BAND WAKE: HANDKNOPF CFD_N2F_BAND_WAKE_START_X="+to_string(wake_start_x)+" ueberstimmt die Automatik (die haette x = "+to_string(x_dachende)+" gesetzt, Abweichung "+to_string((int)wake_start_x-(int)x_dachende)+" Grobzellen). Der Wert ist gitter- UND boxabhaengig: er wandert weder mit dx noch mit far_x0 mit. Nur als deklarierter Messarm verwenden.");
 			const int x_ende = (int)(NF_OX+cex-1u) - (int)n2f_wake_abst;
 			if(x_ende<=(int)wx0) print_error("N2F-BAND WAKE: Kastenstart (x = "+to_string(wx0)+") liegt hinter dem Ende (x = "+to_string(x_ende)+"). CFD_N2F_BAND_WAKE_ABSTAND ("+to_string(n2f_wake_abst)+" Grobzellen) ist groesser als der Nachlauf im Fussabdruck -- Abstand senken oder Nahfeld-Box verlaengern.");
 			wx1 = (uint)x_ende; wy0 = sy0; wy1 = sy1; wz1 = sz1;
@@ -7761,7 +7921,7 @@ static void main_setup_fahrzeug_dd() {
 				if(dt[k]!=0u) continue; // Fahrzeug bleibt Saat (255)
 				dt[k]=254u; wake_n++;   // 254 = Wake-Kern: Quelle der Dilatation UND Listenzelle mit w = 1
 			}
-			print_info("N2F-BAND WAKE-CENSUS: Kasten grob x["+to_string(wx0)+".."+to_string(wx1)+"] y["+to_string(wy0)+".."+to_string(wy1)+"] z["+to_string(z_lo)+".."+to_string(wz1)+"] = "+to_string(wake_n)+" Kernzellen (Start "+(n2f_wake_start==2u?"RADSTANDMITTE x="+to_string(x_radmitte):n2f_wake_start==0u?"HOECHSTER PUNKT x="+to_string(x_dach):"HECK x="+to_string(sx1+1u))+", Fahrzeug-BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z[..%"+to_string(sz1)+"]); frei vor dem Nahfeld-Auslass: "+to_string((int)(NF_OX+cex-1u)-(int)wx1)+" Grobzellen.");
+			print_info("N2F-BAND WAKE-CENSUS: Kasten grob x["+to_string(wx0)+".."+to_string(wx1)+"] y["+to_string(wy0)+".."+to_string(wy1)+"] z["+to_string(z_lo)+".."+to_string(wz1)+"] = "+to_string(wake_n)+" Kernzellen (Start "+(wake_start_x>0u?"HANDKNOPF x="+to_string(wake_start_x):n2f_wake_start==3u?"DACHENDE IM RADSTAND x="+to_string(x_dachende):n2f_wake_start==2u?"RADSTANDMITTE x="+to_string(x_radmitte):n2f_wake_start==0u?"HOECHSTER PUNKT x="+to_string(x_dach):"HECK x="+to_string(sx1+1u))+", Fahrzeug-BBox x["+to_string(sx0)+".."+to_string(sx1)+"] y["+to_string(sy0)+".."+to_string(sy1)+"] z[..%"+to_string(sz1)+"]); frei vor dem Nahfeld-Auslass: "+to_string((int)(NF_OX+cex-1u)-(int)wx1)+" Grobzellen.");
 			if(wake_n==0ull) print_error("N2F-BAND WAKE: Kasten enthaelt keine einzige freie Zelle -- Geometrie pruefen.");
 			bil_x0=wx0; bil_x1=wx1; bil_y0=wy0; bil_y1=wy1; bil_z0=z_lo; bil_z1=wz1; bil_an=true;
 		}
@@ -10017,7 +10177,10 @@ static void main_setup_fernfeld() {
 	}
 	// ★ Daempfungszone -- im Diagnosefall das eine Gitter. Gemessen 2026-08-09: N=64 traegt bis
 	// 0,20 s, u_max saettigt bei 0,69 gegen 2,6 des Kontrollarms. Grenze nach oben: N <= 120,
-	// darueber kaeme die Zone den Kopplungs-Entnahmeebenen des dd-Falls zu nahe (x- hat 152 Zellen).
+	// darueber kaeme die Zone den Kopplungs-Entnahmeebenen des dd-Falls zu nahe. ★ 21.09.2026: die
+	// Schranke 120 stammt aus NF_OX = 152 (alte Box). Unter dem Regelwerk ist NF_OX 145 (4 mm), 72
+	// (8 mm), 155 (3,75 mm) -- der dd-Riegel rechnet NF_OX-32 selbst aus, diese Zahl hier gilt nur
+	// fuer den Diagnosefall und ist bewusst konservativ stehengeblieben.
 	LBM_Domain::s_sponge_n = env_u("CFD_SPONGE_N", 0u);
 	LBM_Domain::s_sponge_a = env_f("CFD_SPONGE_A", 3000.0f);
 	LBM_Domain::s_sponge_wmin = env_f("CFD_SPONGE_WMIN", 0.5f);

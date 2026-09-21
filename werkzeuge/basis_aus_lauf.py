@@ -47,7 +47,7 @@ EINHEIT = {
  "CFD_SGS_FDWAND":"modus","CFD_FAC_NACHBAR":"modus",  # ★ 03.09.2026 in die Basis aufgenommen (Heiko-Entscheid)
  "CFD_KOPPLUNG_GLATT":"modus","CFD_N2F_SCHALE":"modus","CFD_N2F_BAND":"modus",
  "CFD_N2F_BAND_PROFIL":"modus","CFD_N2F_BAND_PLATEAU":"zellen_grob_laenge","CFD_N2F_BAND_WANDFREI":"zellen_grob_laenge",  # ★ 16.09.: Lagen = Laengen
- "CFD_N2F_BAND_WAKE":"modus","CFD_FAC_UTKORR":"modus","CFD_FAC_ELIBB":"modus",
+ "CFD_N2F_BAND_WAKE":"modus","CFD_N2F_BAND_WAKE_START":"modus","CFD_FAC_UTKORR":"modus","CFD_FAC_ELIBB":"modus",
  "CFD_FACETTEN_YWMIN":"modus","CFD_FAC_CD_EVERY":"ausgabe","CFD_VTK_ENDE":"ausgabe",
  "CFD_VTK_DT":"ausgabe","CFD_SLICE_DT":"ausgabe","CFD_RUN_NAME":"ausgabe",
  "CFD_CASE":"modus",
@@ -83,6 +83,17 @@ AUSSCHLUSS = {
     "CFD_FAC_QDUMP",         # q-Dump je Link
     "CFD_FELD_HASH",         # Bitanker
     "CFD_DUMP_CL",           # Kernelquelltext-Dump
+    # ★ 21.09.2026 KASTEN-REGELWERK (Heiko): die Boxmasse sind KEINE Schalter mehr, sondern werden in
+    # setup.cpp aus Fahrzeugmassen und Randfaktoren abgeleitet (BOX-REGELWERK.md). Ohne diesen Ausschluss
+    # schreibt eine Neuerzeugung sie wortlos aus irgendeiner alten LAUF.txt zurueck in die Basis -- 257
+    # LAUF.txt unter export/ tragen allein CFD_NEAR_VOR_MM. Der Waechter wuerde sie dann wieder erzwingen
+    # und das Regelwerk waere ausgehebelt. Wer eine Box bewusst uebersteuert, deklariert das in der
+    # Serienzeile; die Ist=Soll-Abnahme im Lauf meldet es.
+    "CFD_NEAR_LX", "CFD_NEAR_LY", "CFD_NEAR_LZ",  # Nahfeldbox -> Regelwerk
+    "CFD_FAR_LX", "CFD_FAR_LY", "CFD_FAR_LZ",     # Fernfeldbox -> Regelwerk
+    "CFD_FAR_X0", "CFD_NEAR_OFF_X",               # Weltlage der Kaesten -> Regelwerk
+    "CFD_NEAR_VOR_MM",                            # geht im Regel-X- = 0,1 L auf (21.09.)
+    "CFD_N2F_BAND_WAKE_START_X",                  # ersetzt durch CFD_N2F_BAND_WAKE_START=3 (Automatik)
 }
 BEGRUENDUNGSMARKE = "# --- BEGRUENDUNGEN (bleiben bei Neuerzeugung erhalten) ---"
 if len(sys.argv)>=3 and sys.argv[1]=="--nachziehen":
