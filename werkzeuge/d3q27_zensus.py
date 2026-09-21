@@ -60,7 +60,7 @@ def log_zensus(pfad):
 W19 = np.array([1/18 if abs(a)+abs(b)+abs(c) == 1 else 1/36 for (a, b, c) in D19] + [0.0]*8)
 W27 = np.array([2/27 if abs(a)+abs(b)+abs(c) == 1 else (1/54 if abs(a)+abs(b)+abs(c) == 2 else 1/216) for (a, b, c) in ALLE])
 
-def klassifiziere(maske, w, nv, alpha2=True, rel_snn=None):
+def klassifiziere(maske, w, nv, alpha2=True, rel_snn=None, mit_kond=False):
     """Vektorisierter Nachbau von klassifiziere() (setup.cpp zensus_statische_klassen), Schwellen wortgleich:
     Entkopplung Snn<1e-8 oder Kopplung <= 1e-6*Snn*(A11+A22); Rang 0 bei lmax<=1e-12, Rang 1 bei lmin/lmax<1e-9.
     rel_snn: zusaetzlich der Kernel-Waechter Snn < rel*Snn_roh -> Snn = 0 (kernel.cpp ALPHA2-Block, statischer Teil)."""
@@ -87,7 +87,16 @@ def klassifiziere(maske, w, nv, alpha2=True, rel_snn=None):
     disc = np.maximum(tr*tr - 4*det, 0.0)
     lmax = 0.5*(tr + np.sqrt(disc)); lmin = 0.5*(tr - np.sqrt(disc))
     vh = np.where(lmax > 0, np.where(lmin > 0, lmin/np.where(lmax > 0, lmax, 1), 0.0), -1.0)
-    return np.where(~(lmax > 1e-12), 0, np.where(vh < 1e-9, 1, 2)), ent
+    rg = np.where(~(lmax > 1e-12), 0, np.where(vh < 1e-9, 1, 2))
+    if not mit_kond: return rg, ent
+    # ★ 21.09.2026 (Heiko): der Rang allein hat die Frage "hebt D3Q27 die Wandzellen" verdeckt beantwortet --
+    # er ist eine Stufenfunktion. Was im Kernel wirklich entscheidet, sind die GROESSEN dahinter:
+    #   Gt11/Gt22/dett = A11/A22/det NACH der Schur-Elimination (kernel.cpp: dett >= 1e-4*Gt11*Gt22 + det_eps),
+    #   und die Verstaerkung 1/lmax .. 1/lmin, mit der ein tangentiales Residuum in s1 uebersetzt wird.
+    # VORBEHALT, der mitgedruckt wird: A11/A22 haengen an der hier KONSTRUIERTEN Basis (e1 = h x n, h = Achse mit
+    # kleinstem |n|), der Kernel legt t1 in die STROEMUNG. Basisunabhaengig und damit belastbar sind lmax, lmin,
+    # lmin/lmax und det -- die stehen deshalb zuerst.
+    return rg, ent, {"Gt11": A11, "Gt22": A22, "dett": det, "lmax": lmax, "lmin": lmin, "kond": vh}
 
 def affine_dim(LK):
     """Affine Dimension der Linkmenge je Zelle (Schranke: r_t in [aff-1, min(2,aff)]), ueber eindeutige Masken."""
@@ -182,6 +191,42 @@ def main():
     for lab, m in (("achsparallel (n exakt Achse)", B & exakt), ("gekippt", B & ~exakt)):
         k = int(m.sum()); print(f"   {lab:28s}: {k:8d} Zellen, gehoben {int((m & (rg27>=1)).sum())}")
     print(f"  D3Q19 mit Kernel-Snn-Waechter: Rang 2/1/0 = {[int((rgk19==r).sum()) for r in (2,1,0)]} (statische Obergrenze ist damit nicht streng)")
+
+    # ★★ 21.09.2026 KONDITIONIERUNG STATT RANG (Heiko-Auftrag: "billig ohne Bau testen").
+    # Der Rang ist eine Stufenfunktion und hat die Frage verdeckt beantwortet: er sagt, OB eine Zelle
+    # loesbar ist, nicht WIE GUT. Der Kernel entscheidet an dett >= 1e-4*Gt11*Gt22 + det_eps und reisst
+    # danach am SATGATE, wenn s1 zu gross wird -- beides haengt an den Eigenwerten des 2x2 nach der
+    # Schur-Elimination. Hier stehen sie fuer BEIDE Geschwindigkeitssaetze nebeneinander, je D3Q19-Rangklasse.
+    _, _, K19 = klassifiziere(m19, W19, nv, True, mit_kond=True)
+    _, _, K27 = klassifiziere(LK,  W27, nv, True, mit_kond=True)
+    print("\n=== KONDITIONIERUNG D3Q19 gegen D3Q27 (Median je Klasse; ALPHA2, echte Normalen) ===")
+    print("  lmax/lmin/det sind BASISUNABHAENGIG und damit die belastbaren Groessen.")
+    print("  Gt11/Gt22 haengen an der hier konstruierten Tangentialbasis (e1 = h x n); der Kernel legt t1 in die")
+    print("  STROEMUNG -- die Spalten sind deshalb ein Indikator fuer die Groessenordnung, kein Kernelwert.")
+    print(f"  {'Klasse':22s} {'n':>9s} | {'lmax19':>10s} {'lmax27':>10s} {'d%':>7s} | {'lmin19':>10s} {'lmin27':>10s} |"
+          f" {'det19':>10s} {'det27':>10s} {'d%':>7s} | {'Gt11_19':>9s} {'Gt11_27':>9s} {'d%':>7s}")
+    def med(a, m):
+        v = a[m]; return float(np.median(v)) if v.size else float("nan")
+    # ★ Prozent NUR gegen einen Bezugswert oberhalb der Rangschwelle 1e-12 (dieselbe Schwelle wie in
+    # klassifiziere). Darunter ist der Nenner Rauschen, und 100*(b-a)/a liefert Zahlen wie 7e17 % --
+    # eine Zahl, die aussieht wie ein Befund und keiner ist. Dann steht "Rausch->real" bzw. "--".
+    def dpz(a, b):
+        if not (a == a and b == b): return None
+        if abs(a) < 1e-12: return "R->real" if abs(b) > 1e-12 else "--"
+        return f"{100.0*(b-a)/a:+6.1f}%"
+    for lab, m in (("D3Q19 Rang 2", rg19 == 2), ("D3Q19 Rang 1", rg19 == 1), ("D3Q19 Rang 0", rg19 == 0),
+                   ("  davon 1 Link", (rg19 == 0) & (l19 == 1)), ("  davon 2 Links", (rg19 == 0) & (l19 == 2)),
+                   ("Rang1 -> 27 Rang2", (rg19 == 1) & (rg27 == 2)), ("Rang0 -> 27 Rang>=1", (rg19 == 0) & (rg27 >= 1))):
+        k = int(m.sum())
+        if k == 0: continue
+        a, b = med(K19["lmax"], m), med(K27["lmax"], m)
+        c, e = med(K19["lmin"], m), med(K27["lmin"], m)
+        f_, g = med(K19["dett"], m), med(K27["dett"], m)
+        h_, i_ = med(K19["Gt11"], m), med(K27["Gt11"], m)
+        print(f"  {lab:22s} {k:9d} | {a:10.3e} {b:10.3e} {str(dpz(a,b)):>8s} | {c:10.3e} {e:10.3e} |"
+              f" {f_:10.3e} {g:10.3e} {str(dpz(f_,g)):>8s} | {h_:9.3e} {i_:9.3e} {str(dpz(h_,i_)):>8s}")
+    print("  LESART: steigt lmax/det, ist die Zelle unter D3Q27 BESSER konditioniert; sinkt sie, ist sie schlechter")
+    print("  gekoppelt -- dann braucht dieselbe Wandschubspannung ein groesseres s1 und reisst eher das SATGATE.")
 
     # Nutzrichtung (INDIKATOR, Momentanfeld): tangentiale Richtung der Linkvariation gegen u_t der Zelle
     U = np.memmap(vtk, dtype=">f4", mode="r", offset=d["off_u"], shape=(Nx*Ny*Nz, 3))
