@@ -13,7 +13,7 @@ Fahrzeugausrichtung: Radaufstandsflächen auf z = 0, Nase bei x = 0, Mittelebene
 |---|---|---|
 | X− (vor der Nase) | 0,100 L | 0,625 L |
 | X+ (hinter dem Heck) | 0,625 L | 1,250 L |
-| Y (je Seite) | 0,250 B | 2,000 B |
+| Y (je Seite) | 0,250 B | **2,250 B** |
 | Z− | 0 (Fahrzeug steht auf der Fahrbahn) | 0 |
 | Z+ (über dem Dach) | 0,625 H | 7,000 H |
 
@@ -53,7 +53,7 @@ Fahrzeug, skalierte STL: L 4,4364 m, B 1,83855 m, H 1,20833 m
 | | Gitter (Knoten) | Box | Zellspanne |
 |---|---|---|---|
 | Nahfeld (dx 4 mm) | 1917 × 693 × 473 = **628,4 Mio** | 7,664 × 2,768 × 1,888 m | 1916 × 692 × 472 |
-| Fernfeld (dx 16 mm) | 800 × 576 × 608 = **280,2 Mio** | 12,784 × 9,200 × 9,712 m | 799 × 575 × 607 |
+| Fernfeld (dx 16 mm) | 800 × 636 × 608 = **309,4 Mio** | 12,784 × 10,160 × 9,712 m | 799 × 635 × 607 |
 
 Weltlage: `far_x0 = −2,77275 m`, `NF_OX = 145`, `near_x0 = −0,45275 m`, `NF_OY = 201`, `NF_OZ = 0`.
 
@@ -62,10 +62,10 @@ Weltlage: `far_x0 = −2,77275 m`, `NF_OX = 145`, `near_x0 = −0,45275 m`, `NF_
 | | X− | X+ | Y | Z+ |
 |---|---|---|---|---|
 | Nah | 0,1021 L | 0,6255 L | 0,2528 B | 0,6312 H |
-| Fern | 0,6250 L | 1,2566 L | 2,0020 B | 7,0400 H |
+| Fern | 0,6250 L | 1,2566 L | 2,2630 B | 7,0400 H |
 
-**Versperrung 2,070 %** (Querschnitt 89,35 m², A_ref 1,850 m²). Zum Vergleich: vorher 2,74 %,
-OF13 mr2v40H 1,93 %.
+**Versperrung 1,875 %** (Querschnitt 98,67 m², A_ref 1,850 m²) — **erstmals unter 2 %**.
+Zum Vergleich: 21.09. vormittags 2,74 %, mittags 2,07 %, OF13 mr2v40H 1,93 %.
 
 ## Kosten (aus Messungen dieser Maschine)
 
@@ -73,7 +73,7 @@ OF13 mr2v40H 1,93 %.
 |---|---|---|
 | Nahfeld-Speicherplan | ~28 755 MB, frei **~2 511 MB** (aus der Messung p4_regel4 fortgeschrieben) | 23 118 MB bei 519,1 Mio + 46 B/Zelle Grenzkosten, `logs/p4_apg1.log:222` |
 | VRAM verfügbar / Reserve | 32 655 / 2 496 MB | ebenda |
-| Fernfeld-Speicherplan | ~12 637 MB von 87 444 MB | 45,1 B/Zelle aus 9 124 MB bei 202,7 Mio, `logs/p4_apg1.log:334` |
+| Fernfeld-Speicherplan | ~13 952 MB von 87 444 MB | 45,1 B/Zelle aus 9 124 MB bei 202,7 Mio, `logs/p4_apg1.log:334` |
 | Nahfeldfenster | ~532 ms | 363 ms bei 519,1 Mio (p4_pu8) linear skaliert — **gerechnet, nicht gemessen** |
 | Fernfeldschritt | ~468 ms | 338 ms bei 202,4 Mio (p4_neu, `CFD_TIMER_FERN`) — **gerechnet, nicht gemessen** |
 | Takt je Grobschritt | ~485 ms, die **iGPU** gibt ihn vor (vorher 380 ms, B70-getaktet) | 468 ms Fernfeld + ~17 ms nicht ueberlappte Anteile (aus p4_pu8: 2286 s / 6015 Grobschritte = 380,0 ms bei 363 ms Fenster) |
@@ -159,3 +159,15 @@ Fernfeldschritt 468 ms sind das 64 ms = **+38 Mio Grobzellen**. Entweder-oder:
 versteckt ist, also Schritt ≤ 510 ms. Im ungünstigsten Fall (Schritt = 510) bleiben nur 22 ms Reserve
 = **+13 Mio Zellen** statt 38. **Vor jeder Fernfeldvergrößerung gehört `CFD_TIMER_FERN` in die Zeile** —
 das ist Punkt 2 der Reihenfolge für morgen (REKONSTRUKTION-PLAN.md §11).
+
+## Nachtrag 2, 21.09.2026 — Far Y auf 2,25 B (Heiko)
+
+Fernfeld **800 × 636 × 608 = 309,4 Mio**, Box 12,784 × **10,160** × 9,712 m, Y je **2,263 B**.
+**Versperrung 1,875 % — erstmals unter 2 %.** RAM ~13 952 MB von 87 444. Paritäts-Bump feuert nicht.
+
+**Die Reserve ist damit aufgebraucht:** Nahfenster ~532 ms gegen einen **gerechneten** Fernfeldschritt von
+517 ms = **15 ms = 2,8 %**. Zum Vergleich: p4_pu8 hatte 25 ms (6,9 %).
+
+**Deshalb läuft der nächste Lauf mit `CFD_TIMER_FERN`.** Die 517 ms sind aus 338 ms bei 202,4 Mio
+hochgerechnet (p4_neu); gemessen ist bisher nur „versteckt", also ≤ Nahfenster. Liegt der echte Schritt
+über 532 ms, wird die iGPU zum Taktgeber und die Wanduhr steigt entsprechend — der Lauf misst das selbst.

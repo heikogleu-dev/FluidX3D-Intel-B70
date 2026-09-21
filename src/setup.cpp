@@ -6723,7 +6723,7 @@ static void main_setup_fahrzeug_dd() {
 	// dann auf die naechste GROBzelle auf -- auch das Nahfeld, das darum mit dx_c gerastert wird und
 	// nicht mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen
 	// (Deckungspunkt-Konvention), und nur so ist die Box aufloesungsunabhaengig dieselbe Geometrie.
-	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,000 B | Z- 0 (Fahrbahn) | Z+ 7,000 H
+	//   FERN: X- 0,625 L | X+ 1,250 L | Y je 2,250 B | Z- 0 (Fahrbahn) | Z+ 7,000 H
 	// TEILBARKEIT (Heiko 2026-09-21): Nx durch 16, Ny/Nz durch 4 -- und zwar auf der ALLOZIERTEN
 	// GITTERBREITE (Knoten), denn daran haengt der gemessene 5-%-Effekt (TODO.md, iGPU). Fuer das
 	// FERNFELD ist das erfuellbar und wird hier erzwungen. Fuer das NAHFELD ist es STRUKTURELL
@@ -6732,7 +6732,7 @@ static void main_setup_fahrzeug_dd() {
 	// fuer das Fernfeld, das Nahfeld behaelt 4k+1 -- die Kopplung umzubauen waere ein Verfahrenswechsel,
 	// und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
 	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.625f;
-	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.000f, RK_FERN_ZP=7.000f;
+	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.250f, RK_FERN_ZP=7.000f;
 	// Kleinste ZELLSPANNE >= soll, deren KNOTENZAHL (Spanne+1) durch teiler teilbar ist. teiler=1 heisst
 	// "nur aufrunden" (Nahfeld). Aufgerundet wird IMMER -- eine Box darf den Sollabstand ueberschreiten,
 	// nie unterschreiten, sonst misst man die Regel nicht mehr, die man aufgeschrieben hat.
