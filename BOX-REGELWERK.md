@@ -15,7 +15,7 @@ Fahrzeugausrichtung: Radaufstandsflächen auf z = 0, Nase bei x = 0, Mittelebene
 | X+ (hinter dem Heck) | 0,625 L | 1,250 L |
 | Y (je Seite) | 0,250 B | 2,000 B |
 | Z− | 0 (Fahrzeug steht auf der Fahrbahn) | 0 |
-| Z+ (über dem Dach) | 0,550 H | 7,000 H |
+| Z+ (über dem Dach) | 0,625 H | 7,000 H |
 
 **Rundung (Heiko 21.09.2026):** Das Regelwerk orientiert sich **immer an den Sollabständen** und rundet
 dann auf die **nächste Grobzelle** auf — auch das Nahfeld, das deshalb mit dx_c gerastert wird und nicht
@@ -61,7 +61,7 @@ Weltlage: `far_x0 = −2,77275 m`, `NF_OX = 145`, `near_x0 = −0,45275 m`, `NF_
 
 | | X− | X+ | Y | Z+ |
 |---|---|---|---|---|
-| Nah | 0,1021 L | 0,6255 L | 0,2528 B | 0,5650 H |
+| Nah | 0,1021 L | 0,6255 L | 0,2528 B | 0,6312 H |
 | Fern | 0,6250 L | 1,2566 L | 2,0020 B | 7,0400 H |
 
 **Versperrung 2,070 %** (Querschnitt 89,35 m², A_ref 1,850 m²). Zum Vergleich: vorher 2,74 %,
@@ -71,10 +71,10 @@ OF13 mr2v40H 1,93 %.
 
 | | Wert | Quelle |
 |---|---|---|
-| Nahfeld-Speicherplan | 28 143 MB, Schlupf **2 016 MB** | 23 118 MB bei 519,1 Mio + 46 B/Zelle Grenzkosten, `logs/p4_apg1.log:222` |
+| Nahfeld-Speicherplan | ~28 755 MB, frei **~2 511 MB** (aus der Messung p4_regel4 fortgeschrieben) | 23 118 MB bei 519,1 Mio + 46 B/Zelle Grenzkosten, `logs/p4_apg1.log:222` |
 | VRAM verfügbar / Reserve | 32 655 / 2 496 MB | ebenda |
 | Fernfeld-Speicherplan | ~12 637 MB von 87 444 MB | 45,1 B/Zelle aus 9 124 MB bei 202,7 Mio, `logs/p4_apg1.log:334` |
-| Nahfeldfenster | ~439 ms | 363 ms bei 519,1 Mio (p4_pu8) linear skaliert — **gerechnet, nicht gemessen** |
+| Nahfeldfenster | ~532 ms | 363 ms bei 519,1 Mio (p4_pu8) linear skaliert — **gerechnet, nicht gemessen** |
 | Fernfeldschritt | ~468 ms | 338 ms bei 202,4 Mio (p4_neu, `CFD_TIMER_FERN`) — **gerechnet, nicht gemessen** |
 | Takt je Grobschritt | ~485 ms, die **iGPU** gibt ihn vor (vorher 380 ms, B70-getaktet) | 468 ms Fernfeld + ~17 ms nicht ueberlappte Anteile (aus p4_pu8: 2286 s / 6015 Grobschritte = 380,0 ms bei 363 ms Fenster) |
 | Zeitschleife (501 ms) | ~61 min statt ~48 | p4_pu8 Index 5701 s_wall/s_phys, gemessen; +28 % |
@@ -114,3 +114,48 @@ das Bodenband am Einlass 99,85 % von u_inf (`export/p4_apg1/boden_laengsprofil.c
    ausgereizter Kasten mit Luft für mehr Physik (APG, SISM, D3Q27-Band), nicht die nächste Sprosse.
 7. **Der Schlupf ist das Physikbudget:** 2 016 MB ≈ 43,8 Mio Nahfeldzellen bei 46 B/Zelle. Alles, was
    ein D3Q27-Band oder zusätzliche Felder brauchen, geht davon ab.
+
+---
+
+## Nachtrag 21.09.2026 abends — gemessene Zahlen aus p4_regel4 (rc 0, 14:44)
+
+Die Prognosen dieses Dokuments wurden erstmals gegen eine Messung gehalten. **Zwei Annahmen waren falsch.**
+
+| Größe | vorhergesagt | **gemessen** |
+|---|---|---|
+| Nahfeld-Speicherspitze | 28 143 MB | **27 533 MB von 32 655** |
+| freier VRAM | — | **3 733 MB** (enthält den Desktop; rechnerisch frei 5 122) |
+| Fernfeld-RAM | 12 636 MB | **12 561 MB** von 87 444 |
+| Nahfenster | 439 ms | **510 ms** (531 ms Takt × 96,1 %) |
+| Takt je Grobschritt | 468 ms, **iGPU** | **531 ms, die B70** |
+| Zeitschleife 501 ms | — | **3 991,3 s = 66,5 min**, Index 7 967 |
+
+**Falsch war: „die iGPU gibt den Takt vor".** Der Profiler sagt Nahfeld 4 Schritte **96,1 %**, Fernfeld
+synchronisieren und entnehmen **1,9 %**, Kopplung 0,7 %, Kräfte 1,3 %. Das Fernfeld versteckt sich
+weiterhin vollständig. Grund: das Nahfenster ist größer als gerechnet, weil **APG die B70 um 17 %
+verlangsamt** (Messung 16.09.) — das war in der Fensterrechnung nicht enthalten.
+
+**Folge für die Planung: das NAHFELD ist der Taktgeber.** Jede Nahfeldzelle geht 1:1 auf die Wanduhr,
+es gibt dort kein Verstecken. Nur das Fernfeld hat freie Reserve.
+
+### Restluft nach der Messung
+
+**Nahfeld** (Reserve 1 200 MB): +55,1 Mio Zellen = +8,8 % Wanduhr. Davon verbraucht Z+ 0,550 → 0,625 H
+rund 26,6 Mio (+4,2 %, 1 224 MB). Bleibt für x+ oder z+ etwa die Hälfte.
+
+**Fernfeld:** Reserve im Fenster. Mit dem neuen Nahfenster (~532 ms) und dem **gerechneten**
+Fernfeldschritt 468 ms sind das 64 ms = **+38 Mio Grobzellen**. Entweder-oder:
+
+| | Ny × Nz | Abstand | Querschnitt | Versperrung |
+|---|---|---|---|---|
+| heute | 576 × 608 | Y 2,002 B / Z+ 7,040 H | 89,4 m² | 2,070 % |
+| **nur Y** | **652** × 608 | Y **2,333 B** | 101,2 m² | **1,829 %** |
+| **nur Z+** | 576 × **688** | Z+ **8,099 H** | 101,1 m² | **1,829 %** |
+
+**Damit wäre erstmals unter 2 % erreichbar, ohne dass das Fernfeld zum Taktgeber wird.**
+
+**ABER — und das ist der Grund, es NICHT sofort zu tun:** der Fernfeldschritt von 468 ms ist
+**gerechnet, nicht gemessen** (aus 338 ms bei 202,4 Mio, p4_neu). Gemessen ist nur, dass das Fernfeld
+versteckt ist, also Schritt ≤ 510 ms. Im ungünstigsten Fall (Schritt = 510) bleiben nur 22 ms Reserve
+= **+13 Mio Zellen** statt 38. **Vor jeder Fernfeldvergrößerung gehört `CFD_TIMER_FERN` in die Zeile** —
+das ist Punkt 2 der Reihenfolge für morgen (REKONSTRUKTION-PLAN.md §11).

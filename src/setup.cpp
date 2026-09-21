@@ -6711,11 +6711,14 @@ static void main_setup_fahrzeug_dd() {
 	// FAHRZEUGMASSEN und Randfaktoren abgeleitet, nicht mehr in Metern gesetzt -- damit wandern sie bei
 	// jeder Massen- oder Aufloesungsaenderung mit, statt still zu veralten. Das vollstaendige Regelwerk
 	// mit Herleitung, Kosten und Randbedingungen steht in BOX-REGELWERK.md.
-	//   NAH : X- 0,100 L | X+ 0,625 L | Y je 0,250 B | Z- 0 (Fahrbahn) | Z+ 0,550 H
-	// Z+ 0,550 statt 0,500 (Heiko 2026-09-21): 0,5 H haette 619 mm Freiraum ergeben und damit WENIGER
-	// als die Baseline CFD_NEAR_LZ 1.8560 = 652 mm, die zwei unabhaengige Pruefungen schon fuer zu eng
-	// hielten (werkzeuge/diff_of13_zslice.py). z+ ist eine getriebene Kopplungsebene, die rho hart
-	// aufpraegt -- sie enger zu machen war eine Formelnebenwirkung, kein Entscheid. Jetzt 683 mm.
+	//   NAH : X- 0,100 L | X+ 0,625 L | Y je 0,250 B | Z- 0 (Fahrbahn) | Z+ 0,625 H
+	// Z+ 0,625 (Heiko 2026-09-21 abends, nach der VRAM-Messung des Laufs p4_regel4). Verlauf: 0,500 haette
+	// 619 mm Freiraum ergeben und damit WENIGER als die Baseline CFD_NEAR_LZ 1.8560 = 652 mm, die zwei
+	// unabhaengige Pruefungen schon fuer zu eng hielten (werkzeuge/diff_of13_zslice.py); 0,550 gab 683 mm.
+	// z+ ist eine getriebene Kopplungsebene, die rho hart aufpraegt. Gemessen war im Lauf Spitze 27 533 MB
+	// von 32 655 und frei 3 733 MB (inkl. Desktop) -- die 0,625 kosten davon 1 224 MB und lassen 2 509 MB,
+	// also weiter im genehmigten Band 1,0-1,5 GB. Preis: +4,2 % Zellen und damit +4,2 % Wanduhr, denn das
+	// NAHFELD ist der Taktgeber (96,1 % des Grobschritts, [PHASEN] p4_regel4).
 	// RUNDUNG (Heiko 2026-09-21): das Regelwerk orientiert sich IMMER an den Sollabstaenden und rundet
 	// dann auf die naechste GROBzelle auf -- auch das Nahfeld, das darum mit dx_c gerastert wird und
 	// nicht mit dx_f. Grund: die Nahfeldecke muss ohnehin auf einem groben Gitterpunkt liegen
@@ -6728,7 +6731,7 @@ static void main_setup_fahrzeug_dd() {
 	// Das Nahfeld rundet deshalb nur auf ganze GROBzellen auf. Entscheid Heiko 2026-09-21: Regel gilt
 	// fuer das Fernfeld, das Nahfeld behaelt 4k+1 -- die Kopplung umzubauen waere ein Verfahrenswechsel,
 	// und der Nutzen ist auf der B70 nie gemessen (B70-Leiter offen).
-	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.550f;
+	const float RK_NAH_XM=0.100f, RK_NAH_XP=0.625f, RK_NAH_Y=0.250f, RK_NAH_ZP=0.625f;
 	const float RK_FERN_XM=0.625f, RK_FERN_XP=1.250f, RK_FERN_Y=2.000f, RK_FERN_ZP=7.000f;
 	// Kleinste ZELLSPANNE >= soll, deren KNOTENZAHL (Spanne+1) durch teiler teilbar ist. teiler=1 heisst
 	// "nur aufrunden" (Nahfeld). Aufgerundet wird IMMER -- eine Box darf den Sollabstand ueberschreiten,
