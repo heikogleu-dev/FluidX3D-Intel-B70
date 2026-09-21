@@ -3,7 +3,8 @@
 
     werkzeuge/kraftverlauf.py LAUF [LAUF ...]
         --raster 10      Zeitraster in ms (Vorgabe 10)
-        --fenster 100    Bezugsfenster der Aenderungsrate in ms (Vorgabe 100)
+        --fenster 200    Bezugsfenster der Aenderungsrate in ms (Vorgabe 200,
+                         Heiko 21.09.2026: war 100, 200 glaettet das Einschwingmass)
         --roh            Punktabtastung statt Fenstermittel (siehe unten)
         --von / --bis    Zeitgrenzen in ms
         --serie 100      Standbild-Serie: alle 100 ms physikalisch ein Bild nach
@@ -242,7 +243,7 @@ def main(argv):
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument("laeufe", nargs="+")
     ap.add_argument("--raster", type=float, default=10.0)
-    ap.add_argument("--fenster", type=float, default=100.0)
+    ap.add_argument("--fenster", type=float, default=200.0)  # Heiko 21.09.2026: war 100.0
     ap.add_argument("--roh", action="store_true")
     ap.add_argument("--von", type=float, default=None)
     ap.add_argument("--bis", type=float, default=None)
