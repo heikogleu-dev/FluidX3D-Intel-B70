@@ -609,3 +609,55 @@ ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwor
 | **6** | offene Punkte §8: **3 (`boden_eq`), 4 (`fac_tau_cnt`), 5 (ELIBB-Abgriff) am 22.09. erledigt**; 6 (`CFD_FAC_KRAFT`) durch §0b und den 8-mm-A/B erledigt. **Offen bleibt allein Punkt 1: die Volltexte** Malaspinas & Sagaut 2014 und Maeyama 2021/2022 | Lesearbeit, keine GPU | — |
 
 **Was NICHT morgen passiert:** S2 und später. Erst müssen 1–4 stehen.
+
+---
+
+## 12 · Bauentscheide vor S0 (22.09.2026, 22:20) — festgelegt, nicht mehr offen
+
+Die Vorprüfung vor dem Bau (Protokoll B54) hat drei Punkte als echte Blocker benannt. Sie sind hier
+entschieden; ohne diese Festlegungen ist S0 nicht auswertbar.
+
+**R1 · Formelform: Δ-FORM, analytisch in `du = u_rek − u_lok`.** Nicht die Zwei-Array-Form
+`feq[i] += ftrue[i] − feq_loc[i]`, in der `schale_blend` gebaut ist (`kernel.cpp:5174`) — dort misst ein
+eigener Rundungszähler (Slots 23/24, `kernel.cpp:5185-5198`) genau die Gleitkommarundung von
+`x + (y−x)` gegen `y`, und in dieser Form ist „FELD-HASH kipp0 bitgleich" **konstruktiv unerreichbar**.
+In der Δ-Form trägt jeder Term von `f_eq(u_rek) − f_eq(u_lok)` den Faktor `du`; bei `du = 0` ist Δ_i
+damit **strukturell** `+0.0f`, nicht bloß numerisch klein. Gestützt durch die Buildflags
+(`src/opencl.hpp:317`): kein `-cl-fast-relaxed-math`, also keine Reassoziation, und
+`-cl-no-signed-zeros` nimmt der −0.0-Kante die Schärfe. Kein zweites 19-Float-Array (§7).
+
+**R2 · fid-Desync im Zensus: der fid-Zähler wird VOR der Normalenprüfung hochgezählt.** `alloc_facetten`
+vergibt fid als laufenden Zähler über `f.klasse==0` (`lbm.cpp:1639-1641`); der Zensus hat aber ZWEI
+`continue` — `f.klasse!=0` (`setup.cpp:3010`, deckungsgleich) **und** `!(nl>0.0)` (`setup.cpp:3013`,
+**nicht** deckungsgleich: diese Facette bekommt in alloc sehr wohl ein fid). Ein naiver Zähler
+verschiebt ab der ersten solchen Facette alle Marken um eine Zelle. **Das wäre in S0 unsichtbar**, weil
+eps = 0 trotzdem bitgleich bleibt, und träte erst in S2 als vermeintliche Physik auf.
+**Pflicht-Gegenmittel, beide:** (a) Ist=Soll „Marken gesetzt" gegen die Rang-0-Zahl des Zensusberichts
+(`setup.cpp:3148`); (b) eine zweite, unabhängige Probe — Mittelwert von `y_w` über die markierten
+Facetten gegen den Rang-0-`y_w`-Mittelwert desselben Berichts. Dazu ein `print_error` gegen
+`CFD_FAC_ZENSUS=0` (`setup.cpp:2913`), sonst ist die Menge still leer.
+
+**R3 · Konflikt statische Marke ↔ dynamischer Solve (DETEPS/PINV): die Rekonstruktion gewinnt.** Der
+Standard trägt `CFD_FAC_DETEPS 16` und `CFD_FAC_PINV 1` (`basis/fahrzeug_dd.basis:167/170`); beide
+verschieben die **Laufzeit**-Rückfallmenge (`kernel.cpp:2481`, `:2409-2417`, `:2484-2516`) gegen die
+**statische** Rang-0-Marke. Es wird Zellen geben, die statisch Rang 0 sind und trotzdem einen
+Solve-Zweig nähmen, und umgekehrt. **Entscheid: wo die Marke sitzt, setzt die Rekonstruktion und der
+Solve wird übersprungen** — zwei Aktoren an derselben Zelle sind nicht auswertbar. Dazu ein
+Kreuztabellen-Zähler „Marke gesetzt, aber Solve hätte angewandt" (Muster `kernel.cpp:2559-2560`).
+Der Gate-Ort muss schon in S0 so liegen, dass dieser Entscheid später ohne Umbau greift.
+
+**Technische Festlegung, die den Signatur-Splice vermeidet:** Marke und Amplitude wandern in die zwei
+freien `fac_geo`-Slots — `[8i+7]` = Klassenmarke, `[8i+6]` = eps. Beide sind heute nachweislich
+ungelesen (einziger Schreiber `lbm.cpp:1648`, alle Leser nutzen 0..5). `fac_geo` ist bereits Parameter
+und wird in derselben 32-B-Zeile geladen (`kernel.cpp:2025`): **null Signaturänderung, null
+Zusatzverkehr, und beide Werte sind Laufzeit-Speicherladungen** — genau die Eigenschaft, die §5 für
+S0/S1 fordert, ohne die R()-Klammerfalle (`kernel.cpp:5527`) zu berühren.
+
+**Slotstand berichtigt:** nächster freier Zählerslot ist **328**, nicht 317 (§7 war überholt; MOZAFFARI
+belegte am 22.09. 317..327). Verbindliche Legende: `lbm.cpp:804`, Puffer `hits_n = 384`.
+
+**Vor S2 in den Plan, nicht vor S0:** „`CFD_SGS_FDWAND` aus" ist gegen den neuen Anker **kein
+Ein-Variablen-A/B mehr**, sondern ein Vier-Variablen-Arm — der Schalter löscht `SGS_BAND`,
+`SGS_BAND_PI` und `SGS_SISM` still mit (`lbm.cpp:2509-2511`, `:945`, `:132`, hartes `print_error` `:272`),
+und der Standard trägt alle vier (`basis/fahrzeug_dd.basis:193-198`). Ebenfalls offen: ΔP-Teilung (§4),
+`boden_eq`-Bauzeitzensus, `CFD_POSITIV_FACETTE` fehlt in der Basis.
