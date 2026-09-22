@@ -62,6 +62,14 @@
 #   VORBEDINGUNG: CFD_F_NUR_SOLID (Default AN). Im Kugelfall NICHT verdrahtet (Waechter setup.cpp:4619).
 #   NACHGEHOLT: der Schalter war seit dem 03.09. abgenommen, stand aber in keiner Basis und keiner
 #     Serie -- 1,7 GB lagen fuenf Tage brach. Erneut am Stand 54af4af bitgleich geprueft (Serie vs_cpu).
+# STANDARD GEAENDERT (Heiko-Entscheid 22.09.2026, 20:28): CFD_SGS_BAND 0 -> 2, CFD_SGS_BAND_PI 0 -> 1, CFD_U_SPARSAM 1 -> 0.
+#   Wortlaut: "Der letzte 4mm Lauf von soeben ist unser Anker/Standardkonfiguration." Gemeint ist p4_bandpi2_4
+#   (22.09. 17:57-19:13, rc 0, 75 min), gesichert als Git-Tag anker-p4-bandpi2-4 auf Commit f0e9c4c.
+#   BELEG fuer die drei Schalter: das Pi-Band ist der erste Arm seit Wochen, der die Dachgrenzschicht bewegt --
+#   H Dachplateau 2,019 (kein Band) -> 1,715 (FD-Band) -> 1,613 (Pi-Band), Zeitstreuung 0,159 -> 0,074;
+#   cd_reib 0,044924 -> 0,037348 = -16,9 % (8 mm, Dreiervergleich s4_ref12_8 / s4_band2_12_8 / s5_bandpi2_12_8).
+#   Bei 4 mm bestaetigt: alle Abnahmen gruen, Wanduhr 75 min gegen 90,4 min der alten Baseline, Bandpuffer 108 MB.
+#   U_SPARSAM 0 gehoert dazu, weil der Waechter U_SPARSAM x BAND sonst greift (setup.cpp:7257); bitneutral belegt (s3_us0_8).
 # STANDARD GEAENDERT (Heiko-Entscheid 22.09.2026, 19:34): CFD_T_END 0.501 -> 0.741. Wortlaut: "Die Basislauflaenge sollte immer
 #   5x Fahrzeuglaenge betragen." Regel und Herleitung stehen seit 21.09. in BOX-REGELWERK.md:295-299: t_min = 5 L / u_inf =
 #   5 * 4,4364 m / 30 m/s = 739 ms; 0,741 wegen der 1-ms-Konvention (sonst faellt der letzte Slice aus). Bis heute standen Regel
@@ -177,8 +185,8 @@ CFD_POSITIV 2 modus
 CFD_PTRT 1.90 modus
 CFD_RHO_SPARSAM 1 modus
 CFD_SCHRITTE_PRO_ZELLE 8 modus
-CFD_SGS_BAND 0 modus
-CFD_SGS_BAND_PI 0 modus
+CFD_SGS_BAND 2 modus
+CFD_SGS_BAND_PI 1 modus
 CFD_SGS_FDWAND 1 modus
 CFD_SGS_SISM 1 modus
 CFD_SGS_SISM_AB 15000 schritte_fein
@@ -188,7 +196,7 @@ CFD_SPONGE_N 64 zellen_grob_laenge
 CFD_T_END 0.741 phys
 CFD_T_WARMUP 0.201 phys
 CFD_U_KLEMME 1 modus
-CFD_U_SPARSAM 1 modus
+CFD_U_SPARSAM 0 modus
 CFD_VTK_DT 0.15 ausgabe
 CFD_VTK_ENDE 1 ausgabe
 CFD_Y_VERSATZ 1 modus
