@@ -1744,17 +1744,20 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 // enqueue_run nimmt bereits einen Event entgegen; noetig waere allein CL_QUEUE_PROFILING_ENABLE bei der
 // Queue-Erzeugung. Das liefert START/END auf der GPU-Uhr, ohne Pipeline-Stillstand und ohne Startlatenz im
 // Messwert -- dann bliebe der Arm sogar ein Leistungsmass. Nicht heute gebaut, bewusst notiert.
+static bool g_apg_zeit_berichtet = false; // ★ 22.09.2026, Pruefrunde 2 Befund B1: Rueckfallmarke fuer den Waechter am Ende von main_setup()
 static void berichte_apg_zeit(LBM_Domain* d, const char* wo) {
 	if(d==nullptr||d->timer_apg==0u) return;
+	g_apg_zeit_berichtet = true;
 	if(d->apg_t_n==0ull) { print_error(string("CFD_TIMER_APG=1 (")+wo+"): KEIN Vorkernelaufruf gemessen (apg_t_n = 0) -- lautloser No-Op."); return; }
 	const double sum_ = d->apg_t_summe, mit_ = sum_/(double)d->apg_t_n;
 	print_info(string("[APG-ZEIT] ")+wo+": Vorkernel fac_apg_ab isoliert (CFD_TIMER_APG=1): Mittel "+to_string((float)(mit_*1e3),3u)
 		+" ms ueber "+to_string(d->apg_t_n)+" feine Schritte, Spanne "+to_string((float)(d->apg_t_min*1e3),3u)+" .. "
 		+to_string((float)(d->apg_t_max*1e3),3u)+" ms, Summe "+to_string((float)sum_,1u)+" s.");
 	print_warning(string("[APG-ZEIT] ")+wo+": die Spanne enthaelt eine Kernel-Startlatenz und UEBERSCHAETZT den Vorkernel; "
-		"der Arm serialisiert ausserdem (ein zusaetzliches finish_queue je feinem Schritt). Wanduhr, MLUPs und Durchsatz "
+		"der Arm setzt ausserdem ZWEI finish_queue je feinem Schritt (eines vor dem Vorkernel, eines dahinter -- lbm.cpp); "
+		"das hintere ist im Single-GPU-Fall teilredundant, weil do_time_step ohnehin je Schritt einholt. Wanduhr, MLUPs und Durchsatz "
 		"dieses Laufs sind KEIN Leistungsmass. Die Zuordnung zu den +17,0 % vom 16.09. braucht den A/B gegen "
-		"CFD_FAC_APG=0 bei sonst gleicher Zeile. Der Hoechstwert traegt zudem die t%%zaehl_takt-Atomics des Vorkernels "
+		"CFD_FAC_APG=0 bei sonst gleicher Zeile. Der Hoechstwert traegt zudem die t%zaehl_takt-Atomics des Vorkernels "
 		"und ist kein Jittermass.");
 }
 static // ---------------------------------------------------------------------------- Dichte-Klemme berichten
@@ -10803,6 +10806,23 @@ void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeu
 	}
 	const char* c = getenv("CFD_CASE");
 	if(getenv("CFD_RHO_RAND")!=nullptr&&c!=nullptr&&string(c)!="fahrzeug_dd"&&string(c)!="kugel") print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld und am Kugel-Pruefstand angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0/C2c
+	// ★★ 22.09.2026, Pruefrunde 2 Befund B1 (MITTEL) -- ANSAGE VOR DER FALLAUSWAHL.
+	// CFD_TIMER_APG misst den APG-Vorkernel. APG gibt es nur in kanal, kugel und fahrzeug_dd; in
+	// fahrzeug, fernfeld und facetten_test ist s_fac_apg konstruktiv 0. Dort misst der Timer nichts,
+	// berichtet nichts und meldete bisher auch nichts -- waehrend lbm.cpp beim Domaenenbau trotzdem
+	// "CFD_TIMER_APG=1: DIAGNOSEARM" druckt. Der Leser bekam also eine BESTAETIGUNG, dass der Arm
+	// laeuft, obwohl er ein No-Op war: genau die Klasse, die dieses Projekt als harten Fehler fuehrt.
+	// ★ ZWEITER ANLAUF, und der erste war falsch: ich hatte die Pruefung ans ENDE von main_setup()
+	// gesetzt. Unerreichbar -- main_setup_facetten_test endet mit _exit(0) (setup.cpp, Funktionsende),
+	// main_setup_fernfeld ebenso. Der Nachweis am CPU-Lauf t22b_timer_nein_cpu kam mit err=0 zurueck,
+	// also schwieg der Waechter genau in dem Fall, fuer den ich ihn gebaut hatte. Hier vor der
+	// Auswahl ist er in JEDEM Fall erreichbar und bricht ausserdem VOR dem Lauf ab statt danach.
+	if(env_u("CFD_TIMER_APG", 0u)>0u) {
+		const string fall = (c==nullptr) ? string("kugel") : string(c);
+		if(fall!="kanal"&&fall!="kugel"&&fall!="fahrzeug_dd")
+			print_error("CFD_TIMER_APG=1 mit CFD_CASE="+fall+": dieser Fall fuehrt kein APG (s_fac_apg ist dort konstruktiv 0), "
+				"der Vorkernel fac_apg_ab laeuft nie und der Timer waere ein lautloser No-Op. APG gibt es in kanal, kugel und fahrzeug_dd.");
+	}
 	// ★ Hygiene E7b: hier fehlte das `else` -- das trug nur, weil fernfeld immer per _exit endet.
 	// Kehrte es je normal zurueck, liefe zusaetzlich der Kugelfall (Default-Zweig).
 	if(c!=nullptr && string(c)=="kanal") main_setup_kanal();
@@ -10811,4 +10831,20 @@ void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeu
 	else if(c!=nullptr && string(c)=="fahrzeug_dd") main_setup_fahrzeug_dd();
 	else if(c!=nullptr && string(c)=="fahrzeug") main_setup_fahrzeug();
 	else main_setup_kugel();
+	// ★ ZWEITES NETZ (die erste Ansage steht VOR der Fallauswahl, s. o.). Dieses hier erreicht nur
+	// Faelle, die REGULAER zurueckkehren -- facetten_test und fernfeld enden per _exit(0). Es faengt
+	// den Fall "Fall fuehrt APG, hat es aber diesmal nicht eingeschaltet" bzw. einen kuenftigen Fall,
+	// der berichte_apg_zeit nicht ruft, und haengt dafuer an der BERICHTSSTELLE statt an einer Fallliste.
+	// Die drei frueh feuernden Pruefungen sitzen in kanal, kugel und fahrzeug_dd -- also dort, wo es
+	// ueberhaupt APG gibt. In fahrzeug, fernfeld und facetten_test ist s_fac_apg konstruktiv 0: der
+	// Timer misst nichts, berichtet nichts und meldete bisher auch nichts. Schlimmer noch, lbm.cpp
+	// druckt beim Domaenenbau trotzdem "CFD_TIMER_APG=1: DIAGNOSEARM" -- der Leser bekam also eine
+	// BESTAETIGUNG, dass der Arm laeuft, waehrend er ein No-Op war. Genau die Klasse, die dieses
+	// Projekt als harten Fehler fuehrt ("ein Schalter ohne feuernden Zaehler").
+	// Diese Marke haengt an der BERICHTSSTELLE, nicht an einer Fallliste: ein kuenftiger Fall, der
+	// berichte_apg_zeit nicht ruft, faellt hier ebenfalls auf, ohne dass jemand daran denken muss.
+	if(env_u("CFD_TIMER_APG", 0u)>0u && !g_apg_zeit_berichtet)
+		print_error("CFD_TIMER_APG=1 gesetzt, aber in diesem Fall wurde nie eine Vorkernelzeit berichtet -- CFD_CASE="
+			+string(c==nullptr?"(nicht gesetzt, Kugel)":c)+" kennt kein APG, der Schalter war ein lautloser No-Op. "
+			"Fruehe Ansagen gibt es in kanal, kugel und fahrzeug_dd; dieser Fall hat keine.");
 }
