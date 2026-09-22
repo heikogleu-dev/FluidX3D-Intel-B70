@@ -75,7 +75,7 @@ Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 
 | 4 | **Offene Entscheide** | (a) 4-mm-Bezug MIT Versatz gegen `p4_register` (nur nach Go — „kein eigener Bezugsarm"); (b) SGS-Band bei 3,75 mm verwerfen (Cz nicht Richtung OF13); (c) T_WARMUP a/b/c (Punkt 1 Abschnitt 2) | — |
 | 5 | Performance-Rest (Abschnitt 4b) | X messen (Facettenpfad-Kosten → B2), D1/D2, C1, Remesh-Gatter, Prüfpunkt-Plan | nach 1–3 |
 
-**Stand der Standards seit 16.09.:** `CFD_POSITIV=2`, `CFD_U_KLEMME=1`, `CFD_Y_VERSATZ=1` (Basis), Schrittschalter auf allen Sprossen als 4-mm-Werte (dx-Umrechnung automatisch), jede dd-Zeile trägt `CFD_FAR_LX`. APG geparkt (`CFD_FAC_APG=0`); 22.09.: Mozaffari-Formeltausch `CFD_FAC_APG_MOZ` gebaut und auditiert, 8-mm-Arm offen (Abdeckung/Rückfall/H am Dach, nicht Cd/Cz). Bezug bleibt `p4_register` (ohne Versatz — Neuerzeugung nur nach Go).
+**Stand der Standards seit 16.09.:** `CFD_POSITIV=2`, `CFD_U_KLEMME=1`, `CFD_Y_VERSATZ=1` (Basis), Schrittschalter auf allen Sprossen als 4-mm-Werte (dx-Umrechnung automatisch), jede dd-Zeile trägt `CFD_FAR_LX`. APG geparkt (`CFD_FAC_APG=0`); 22.09.: Mozaffari-Formeltausch `CFD_FAC_APG_MOZ` gebaut, auditiert (2 Durchgänge) und bei 8 mm gemessen (Commit 21e3d57, Protokoll B22): 63 % der APG-Besuche gesättigt, 37 % im empfindlichen Band, Abnahme hält — aber Rückfall/Rang bis 10⁻³ identisch zu κ=0 und linear, H am Dach in der Zeitstreuung. Bleibt Messarm, Default 0. Bezug bleibt `p4_register` (ohne Versatz — Neuerzeugung nur nach Go).
 
 ## 1 · Reihenfolge (Heiko, 16.09.2026)
 
