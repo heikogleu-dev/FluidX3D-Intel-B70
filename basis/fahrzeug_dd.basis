@@ -62,6 +62,11 @@
 #   VORBEDINGUNG: CFD_F_NUR_SOLID (Default AN). Im Kugelfall NICHT verdrahtet (Waechter setup.cpp:4619).
 #   NACHGEHOLT: der Schalter war seit dem 03.09. abgenommen, stand aber in keiner Basis und keiner
 #     Serie -- 1,7 GB lagen fuenf Tage brach. Erneut am Stand 54af4af bitgleich geprueft (Serie vs_cpu).
+# STANDARD GEAENDERT (Heiko-Entscheid 22.09.2026, 12:30): CFD_FAC_APG 1.0 -> 0. Das tau_w-Ziel ist bei 8 mm in JEDER Form (linear kappa=1,
+#   Mozaffari CFD_FAC_APG_MOZ=1, aus) ohne Wirkung auf Rueckfall/Rang (23,97 % / 2,545 % bis 1e-3 identisch) und auf H am Dach (in der
+#   Zeitstreuung); Tagesprotokoll 2026-09-22 B22. Gemessener Preis von APG: -17,6 % Durchsatz (8 mm, 16.09.), -14,6 % Durchsatz und
+#   +55 MB VRAM (4 mm, PLAN-APG-2026-09-16.md). CFD_FAC_NACHBAR 1 bleibt (unabhaengig von APG). Der 8-mm-Bezug OHNE APG auf der
+#   heutigen Zeile ist m0_apg0_rang_8 (22.09.); der 4-mm-Bezug mit APG 0 steht aus (Heiko-Go noetig).
 # STANDARD GEAENDERT (Heiko-Entscheid 03.09.2026): CFD_SGS_FDWAND 1 und CFD_FAC_NACHBAR 1 sind Basis.
 #   FDWAND (Geistermoden-Fix, B70): 4-mm-Messung p4_fdwand gegen p4_ref, gepaart 235 Punkte --
 #     cd_druck_rest +0,0105 +-0,0030 (3,45 sigma), cz_druck_rest -0,0264 +-0,0046 (5,69 sigma),
@@ -134,7 +139,7 @@ CFD_FACETTEN_KANTE_KOH 1 modus
 CFD_FACETTEN_NORMQUELLE 1 modus
 CFD_FACETTEN_YWKLEMME 1 modus
 CFD_FAC_ALPHA 2 modus
-CFD_FAC_APG 1.0 modus
+CFD_FAC_APG 0 modus
 CFD_FAC_CD_EVERY 1 ausgabe
 CFD_FAC_DETEPS 16 modus
 CFD_FAC_ELIBB 1 modus
