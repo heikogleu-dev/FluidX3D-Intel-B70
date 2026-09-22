@@ -16,11 +16,46 @@ Heiko-Entscheid 21.09.: dieser Weg wird geplant. D3Q27 ist geschlossen.
 | „vor `store_f` wird nichts geschrieben" | Gilt **innerhalb `stream_collide`**, nicht für den Zeitschritt: danach schreiben `schale_blend`, `boden_eq`, `einlass_eq` und `transfer__insert_fi` noch in `fi` | `lbm.cpp:3217-3262`, Kopplungsnotiz `:3244-3258` |
 | `Σ Δm == 0` als Leck-Instrument | **identisch null per Konstruktion** (Σf_eq = ρ in beiden Termen) — es kann nicht ausschlagen | nachgerechnet |
 | Der Zirkel gehöre SISM | Er gehört **`CFD_SGS_FDWAND`**: nu_t kommt aus \|S\|_FD des u-Felds. Unter Rekonstruktion ist dieses u gesetzt — der Zirkel besteht schon ohne SISM | `kernel.cpp:5473-5507` |
-| `CFD_FAC_KRAFT=1` sei ein „Doppelkanal" und damit erledigt | Es ist **Kuwata & Sugas IVW**, eine von Korbs vier Klassen: `R = Ziel − P`, nicht „der ganze Tangentialimpuls". Die echten Einwände (zweites Moment, Populationsstruktur, Buchhaltung) sind **dieselben**, die §4 gegen den eigenen Vorschlag erhebt. Am Fahrzeug **nie gemessen**. | `kernel.cpp:2592`, `korb.txt:432-435`, `logs/herleiter_2026-09-06.md:187` |
+| `CFD_FAC_KRAFT=1` sei ein „Doppelkanal" und damit erledigt | Es ist **Kuwata & Sugas IVW**, eine von Korbs vier Klassen: `R = Ziel − P`, nicht „der ganze Tangentialimpuls". Die echten Einwände (zweites Moment, Populationsstruktur, Buchhaltung) sind **dieselben**, die §4 gegen den eigenen Vorschlag erhebt. ~~Am Fahrzeug **nie gemessen**.~~ — **dieser Satz ist selbst falsch, siehe §0b** | `kernel.cpp:2592`, `korb.txt:432-435`, `logs/herleiter_2026-09-06.md:187` |
 
 **Folge: es gibt für Rekonstruktion an einer Voxeltreppe keinen publizierten Zahlenwert** — weder für
 Reibung noch für Druck. `AUDIT-BEFUNDE.md:2626-2631` sagt es selbst: *„Eine systematische Konvergenzstudie
 ‚WMLES-Reibung auf Voxeltreppe' existiert nicht (Literaturlücke)."*
+
+---
+
+## 0b · Was in Fassung 2 falsch war (22.09.2026)
+
+**`CFD_FAC_KRAFT=1` ist am Fahrzeug gemessen.** Der Satz „am Fahrzeug nie gemessen" in der letzten
+Zeile von §0 ist falsch, und er hat Schritt 1 in §11 erzeugt.
+
+Gepaart, identisches Binär, eine Variable: `export/w_ref` gegen `export/w_kraft1`, Commit `53d6c65`,
+30.08.2026, 8 mm `fahrzeug_dd`, 151 Messpunkte ab t ≥ 0,2 s, nachgerechnet aus `cd_facetten.csv`:
+
+| Größe | `w_ref` | `w_kraft1` | Δ ± SEM | σ | Urteil |
+|---|---|---|---|---|---|
+| `cd_druck_rest` | 1,0568 | 1,2880 | **+0,2313 ± 0,0102** (gepaart, r=0,497) | 22,7 | unterscheidbar |
+| `cz_druck_rest` | −0,1199 | −0,0906 | +0,0293 ± 0,0275 (ungepaart, r=0,176) | 1,06 | **nicht von Rauschen zu trennen** |
+
+Der Speicher führt das als `messung_kraftleiter` (provenance `messung`) mit dem Verdikt **„Weg F ist
+ein validiertes NEGATIV"**: das Modellziel an Rückfallzellen exakt durchzusetzen *erhöht* die
+Reibung, reines Bounce-Back lag näher am Ziel als das Modell.
+
+**Zwei Vorbehalte, die die Zahl einordnen, aber nicht entwerten:**
+
+1. Beide Arme fuhren `CFD_KRAFT_ZBAND=2` und tragen die Deckellage im Rest
+   (`BAND-ARTEFAKT-8MM.md:52`). Wieviel der Armdifferenz Keil-/Deckelkraft ist, ist **ungeklärt** —
+   derselbe Vorbehalt, den das Dokument für den D3Q27-A/B notiert.
+2. Zwischen `w_ref` und heute liegen APG, DETEPS, NACHBAR (ersetzt das damalige
+   `CFD_FAC_UTKORR=1.5`), PINV, P-TRT 1,90, POSITIV=2, U_KLEMME=1, SISM, `CFD_Y_VERSATZ=1` und die
+   korrigierte ZBAND-Regel. Der Befund gilt für den Stand vom 30.08.
+
+**Der Arm, der wirklich offen ist:** `CFD_FAC_KRAFT` hat zwei Stufen (`lbm.hpp:403`) — **1 = an
+Rückfallzellen, 2 = an allen Facettenzellen**. Zensus über alle 779 `export/*/code/LAUF.txt`: Stufe 2
+existiert **nur am Kanal** (`x0_kipp0_kraft2`, `x26_kraft2`, `x45_kraft2`, `jit_kipp26_kraft2`,
+`jit_igpu_kipp26_kraft2`, `vt_kdiag_kraft2`), am Fahrzeug nie. Da §3.1 den Umfang der Rekonstruktion
+auf `Rang≤1 / Rang≤2 / **alle**` schaltbar auslegt, ist **KRAFT=2 die passende Obergrenze für den
+Umfang „alle"** — KRAFT=1 ist es nur für `Rang≤1`.
 
 ---
 
@@ -342,9 +377,10 @@ Kernel. **Die echten Argumente gegen S4 sind Reichweite und tote Tiles, nicht di
 3. `boden_eq` × Rekonstruktion: Wächter oder bezifferte Ausnahme.
 4. `fac_tau_cnt`-Politik: erhöht die Rekonstruktion ihn? Davon hängt der ganze Druckpfad ab.
 5. Abgriffpunkt von `f_load` relativ zu ELIBB festlegen.
-6. `CFD_FAC_KRAFT=1` am Fahrzeug messen — ein vorhandener Schalter, eine Variable, 8 mm. Er ist
-   literaturgedeckt (Kuwata & Suga IVW) und wurde in Fassung 1 zu schnell abgeräumt. **Das ist die
-   billigste offene Messung im ganzen Feld und sollte vor dem Bau stehen.**
+6. ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ — **erledigt, 30.08.2026, siehe §0b**: cd_druck_rest
+   +0,2313 ± 0,0102 (22,7 σ), cz_druck_rest 1,06 σ. Offen ist statt dessen **`CFD_FAC_KRAFT=2`**
+   (alle Facettenzellen statt nur Rückfallzellen) — das ist die Obergrenze für den Umfang „alle"
+   aus §3.1 und am Fahrzeug nie gemessen.
 
 ---
 
@@ -427,7 +463,7 @@ ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwor
 
 | # | Schritt | Warum zuerst | Kosten |
 |---|---|---|---|
-| **1** | **`CFD_FAC_KRAFT=1` am Fahrzeug messen**, 8 mm, eine Variable | vorhandener Schalter, literaturgedeckt (Kuwata & Suga IVW), **nie gemessen**. Die billigste offene Messung im ganzen Feld — und sie entscheidet mit, ob der Rekonstruktionsbau überhaupt nötig ist. Vorbehalt: `object_force` sieht die Guo-Kraft nicht, der Reibanteil steht allein in der `fac_tau`-Buchung | ein 8-mm-Lauf |
+| **1** | ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ → **entfällt (§0b)**. Ersatz, falls Heiko einen 8-mm-Lauf freigibt: **`CFD_FAC_KRAFT=2`** (alle Facettenzellen), gepaart gegen eine frische Basiszeile, `CFD_KRAFT_ZBAND=3` | KRAFT=1 ist **gemessen** (30.08.): cd_druck_rest +0,2313 ± 0,0102 = 22,7 σ, cz_druck_rest 1,06 σ — ein validiertes Negativ. KRAFT=2 ist am Fahrzeug nie gemessen und ist die Obergrenze für den Umfang „alle" aus §3.1. Vorbehalt unverändert: `object_force` sieht die Guo-Kraft nicht, der Reibanteil steht allein in der `fac_tau`-Buchung | ein 8-mm-Lauf, **nur mit Freigabe** |
 | **2** | **Timer um `fac_apg_ab`** | zerlegt die 17 %, bevor irgendetwas optimiert wird | Zweizeiler + 8-mm-A/B |
 | **3** | **FP16S-Rauschlast auf f_neq** beziffern (Histogramm \|f_neq\|/f_eq an Facettenzellen) | entscheidet zwischen Rekonstruktions-Variante A und B, **bevor** gebaut wird | Host-Auswertung, keine GPU |
 | **4** | **S−1**: `hits_n` 320 → 384, `scratch_gate`-Arm | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
