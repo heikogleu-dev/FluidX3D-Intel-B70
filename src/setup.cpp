@@ -1723,6 +1723,40 @@ static KlemmUrteil berichte_klemmbilanz(KlemmBilanz& K, const char* wo, Units u,
 	}
 	return U;
 }
+// ★★ 22.09.2026 CFD_TIMER_APG -- Bericht + Wirkpfadwaechter (REKONSTRUKTION-PLAN.md §10 Hebel 1 = Plan-Schritt 2).
+// WOFUER: APG kostet gemessen +17,0 % Zeitschleife (16.09., 4 mm), das Datenvolumen erklaert davon nur 2,6 %.
+// Diese Zahl sagt, wieviel davon der VORKERNEL fac_apg_ab ist -- der Rest ist der APG-Zweig in stream_collide.
+// Ohne sie ist jede Optimierung geraten, und Hebel 3 (rho-Region statt DDF-Rekonstruktion) fasst einen teuer
+// erkaempften Determinismus an (lbm.cpp, 03.09.) und darf erst danach drankommen.
+//
+// ★ BERICHTET WERDEN ABSOLUTE ZAHLEN, KEIN PROZENTWERT (Pruefagent 22.09., Befunde 4 und 5).
+// Ich hatte hier zuerst "Summe / Wanduhr dieses Laufs" in Prozent gedruckt und das eine UNTERE Schranke
+// genannt. Das ist falsch, und zwar in beiden Faktoren:
+//  ZAEHLER zu gross: die Queue ist IN-ORDER (opencl.hpp, keine OUT_OF_ORDER-Eigenschaft), Kernel derselben
+//    Queue ueberlappen also nie. Die Spanne enthaelt clEnqueueNDRangeKernel, Treiber-Submission, die
+//    GPU-Ausfuehrung UND das Aufwachen aus clFinish -- also Kernelzeit plus eine volle Start-/Abschlusslatenz.
+//  NENNER zu gross: der Arm serialisiert, und die Wanduhr am Berichtsort trug zusaetzlich den VTK-Enddump.
+// Zwei gleichgerichtet nach oben verzerrte Groessen ergeben einen Quotienten, der in KEINE Richtung eine
+// Schranke ist. Die absoluten Millisekunden sind brauchbar, der Prozentwert war es nie -- also steht er nicht
+// mehr da. Wer den Anteil will, setzt die Summe ins Verhaeltnis zur Wanduhr eines NORMALEN Laufs ohne Timer.
+//
+// ★ MITTELFRISTIG BESSER, und der Baum kann es schon fast: OpenCL-Event-Profiling statt Serialisierung.
+// enqueue_run nimmt bereits einen Event entgegen; noetig waere allein CL_QUEUE_PROFILING_ENABLE bei der
+// Queue-Erzeugung. Das liefert START/END auf der GPU-Uhr, ohne Pipeline-Stillstand und ohne Startlatenz im
+// Messwert -- dann bliebe der Arm sogar ein Leistungsmass. Nicht heute gebaut, bewusst notiert.
+static void berichte_apg_zeit(LBM_Domain* d, const char* wo) {
+	if(d==nullptr||d->timer_apg==0u) return;
+	if(d->apg_t_n==0ull) { print_error(string("CFD_TIMER_APG=1 (")+wo+"): KEIN Vorkernelaufruf gemessen (apg_t_n = 0) -- lautloser No-Op."); return; }
+	const double sum_ = d->apg_t_summe, mit_ = sum_/(double)d->apg_t_n;
+	print_info(string("[APG-ZEIT] ")+wo+": Vorkernel fac_apg_ab isoliert (CFD_TIMER_APG=1): Mittel "+to_string((float)(mit_*1e3),3u)
+		+" ms ueber "+to_string(d->apg_t_n)+" feine Schritte, Spanne "+to_string((float)(d->apg_t_min*1e3),3u)+" .. "
+		+to_string((float)(d->apg_t_max*1e3),3u)+" ms, Summe "+to_string((float)sum_,1u)+" s.");
+	print_warning(string("[APG-ZEIT] ")+wo+": die Spanne enthaelt eine Kernel-Startlatenz und UEBERSCHAETZT den Vorkernel; "
+		"der Arm serialisiert ausserdem (ein zusaetzliches finish_queue je feinem Schritt). Wanduhr, MLUPs und Durchsatz "
+		"dieses Laufs sind KEIN Leistungsmass. Die Zuordnung zu den +17,0 % vom 16.09. braucht den A/B gegen "
+		"CFD_FAC_APG=0 bei sonst gleicher Zeile. Der Hoechstwert traegt zudem die t%%zaehl_takt-Atomics des Vorkernels "
+		"und ist kein Jittermass.");
+}
 static // ---------------------------------------------------------------------------- Dichte-Klemme berichten
 // ★★ Heikos Einwand 2026-08-09: "rho clamp ist doch auch nur ne Kruecke die man benoetigt wenn der
 // Code falsch ist oder etwas falsch parametrisiert ist." Richtig -- in einem korrekten Low-Mach-LBM
@@ -4476,6 +4510,7 @@ void main_setup_kanal() {
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv (16.09.): tw-Ziel = Spalding - kappa*y_ab*dp/ds, dp/ds = (grad rho . t1)/3 aus dem Vorkernel fac_apg_ab (6 Achsnachbarn aus den DDFs), kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Zaehler [306..316], Klemmen getrennt [309]/[310] (Slot 19 = Summe).");
+	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_TIMER_APG", 0u)>0u) print_error("CFD_TIMER_APG ohne CFD_FAC_APG -- der Vorkernel fac_apg_ab laeuft gar nicht, der Timer waere ein lautloser No-Op (Ansage-Doktrin). Die Pruefung steht HIER und nicht im Domaenen-Konstruktor: den durchlaeuft auch das APG-freie Fernfeld, und dort wuerde sie jeden fahrzeug_dd-Lauf toeten (eigener Fehler 22.09., Muster CFD_FAC_APG_HAKEN vom 16.09.).");
 	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_FAC_APG_HAKEN", 0u)>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin; Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld durchlaeuft).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(LBM_Domain::s_fac_ema>0.0f) print_warning("CFD_FAC_EMA (Loesungs-Filterung) ist in J3 WIDERLEGT -- nur noch als A/B-Arm sinnvoll.");
@@ -4684,6 +4719,7 @@ void main_setup_kanal() {
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
 	berichte_apg(lbm, "Kanal");
+	berichte_apg_zeit(lbm.lbm_domain[0], "Kanal"); // ★ 22.09.2026 (Pruefagent, Befund 3): der Bericht stand NUR im dd-Fall -- hier haette der Timer jeden Schritt serialisiert und nie eine Zahl gedruckt
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Kanal", h, Ub_ziel); dichteklemme_fazit(h); }
 	if(env_u("CFD_WANDFUNKTION", 0u)>0u) { // Wirkpfad-Nachweis: Zaehler auslesen
 		lbm.lbm_domain[0]->rho_clamp_hits.read_from_device();
@@ -5665,6 +5701,7 @@ void main_setup_kugel() {
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv (16.09.): tw-Ziel = Spalding - kappa*y_ab*dp/ds, dp/ds = (grad rho . t1)/3 aus dem Vorkernel fac_apg_ab (6 Achsnachbarn aus den DDFs), kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Zaehler [306..316], Klemmen getrennt [309]/[310] (Slot 19 = Summe).");
+	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_TIMER_APG", 0u)>0u) print_error("CFD_TIMER_APG ohne CFD_FAC_APG -- der Vorkernel fac_apg_ab laeuft gar nicht, der Timer waere ein lautloser No-Op (Ansage-Doktrin). Die Pruefung steht HIER und nicht im Domaenen-Konstruktor: den durchlaeuft auch das APG-freie Fernfeld, und dort wuerde sie jeden fahrzeug_dd-Lauf toeten (eigener Fehler 22.09., Muster CFD_FAC_APG_HAKEN vom 16.09.).");
 	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_FAC_APG_HAKEN", 0u)>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin; Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld durchlaeuft).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+(LBM_Domain::s_fac_alpha==2u?string(" (Masse + Momenten-Downdate: Impulsziel inkl. alpha exakt)"):string(" (NUR Masse -- injiziert alpha*S1-Impuls, reiner Messarm)"))+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc>0u&&env_f("CFD_FACETTEN_YWMIN",0.2f)>=0.187f) print_warning("Kugel: der K4-Ring liegt bei y_w=0,188 -- Default-YWMIN 0,2 schliesst ihn stumm aus (J4-Befund #2). Fuer volle Abdeckung CFD_FACETTEN_YWMIN=0.15 setzen (deklarierter Messarm).");
@@ -6016,6 +6053,7 @@ void main_setup_kugel() {
 		print_info("FELD-HASH(u) = "+to_string(h));
 	}
 	berichte_apg(lbm, "Gitter");
+	berichte_apg_zeit(lbm.lbm_domain[0], "Kugel"); // ★ 22.09.2026 (Pruefagent, Befund 3)
 	{ ulong h=0ull; berichte_dichteklemme(lbm, "Gitter", h, u_lat); dichteklemme_fazit(h, kb_kugel.init&&klemm_budget_modus()>0u); }
 	{ const KlemmUrteil ku_ = berichte_klemmbilanz(kb_kugel, "Gitter", units, (double)q_inf*(double)A_nom, u_lat, Ny, Nz, block_sem(cd_w, 4u), "sigma(Cd der Kugel aus object_force, Block-SEM 4)");
 	  if(kb_kugel.init) klemm_budget_bewerten("Gitter", ku_, block_sem(cd_w, 4u), block_sem(cz_w, 4u), out_dir+"klemm_budget.csv", true); } // ★ Z2c // ★ 15.09.2026 Klemmen S0c (Pruefpass S0c N4: Kugel hat kein cd_rest)
@@ -7106,6 +7144,7 @@ static void main_setup_fahrzeug_dd() {
 	  LBM_Domain::s_fac_apg = (fc>=3u) ? env_f("CFD_FAC_APG", 0.0f) : 0.0f;
 	  if(LBM_Domain::s_fac_apg!=0.0f&&LBM_Domain::s_fac_pema>0.0f) print_error("CFD_FAC_APG + CFD_FAC_PEMA sind noch NICHT kombiniert (gefilterte Kette braucht eigenen APG-Zweig -- eigener Bauabschnitt).");
 	  if(LBM_Domain::s_fac_apg!=0.0f) print_info("APG-Messarm aktiv (16.09.): tw-Ziel = Spalding - kappa*y_ab*dp/ds, dp/ds = (grad rho . t1)/3 aus dem Vorkernel fac_apg_ab (6 Achsnachbarn aus den DDFs), kappa = "+to_string(LBM_Domain::s_fac_apg,4u)+" -- Zaehler [306..316], Klemmen getrennt [309]/[310] (Slot 19 = Summe).");
+	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_TIMER_APG", 0u)>0u) print_error("CFD_TIMER_APG ohne CFD_FAC_APG -- der Vorkernel fac_apg_ab laeuft gar nicht, der Timer waere ein lautloser No-Op (Ansage-Doktrin). Die Pruefung steht HIER und nicht im Domaenen-Konstruktor: den durchlaeuft auch das APG-freie Fernfeld, und dort wuerde sie jeden fahrzeug_dd-Lauf toeten (eigener Fehler 22.09., Muster CFD_FAC_APG_HAKEN vom 16.09.).");
 	  if(LBM_Domain::s_fac_apg==0.0f&&env_u("CFD_FAC_APG_HAKEN", 0u)>0u) print_error("CFD_FAC_APG_HAKEN ohne CFD_FAC_APG -- wirkungslos (Ansage-Doktrin; Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld durchlaeuft).");
 	  if(LBM_Domain::s_fac_alpha>0u) print_info(string("iMEM-alpha-Massenkorrektur Stufe ")+to_string(LBM_Domain::s_fac_alpha)+" -- Slot 18 zaehlt alpha>u_t.");
 	  if(fc==3u&&(LBM_Domain::s_fac_alpha<2u||!LBM_Domain::s_fac_satgate)) print_warning("Arm 3 ohne SATGATE+ALPHA2 an gekruemmter Geometrie -- Kugel-J4-Lehre: nur als bewusster Messarm fahren.");
@@ -9841,28 +9880,7 @@ static void main_setup_fahrzeug_dd() {
 	}
 	if(stop_angefordert) print_info("[STOPP] Lauf regulaer beendet bei t = "+to_string((float)t_si_letzt,4u)+" s statt der geplanten "
 		+to_string((float)n_outer*dt_c,4u)+" s. Alle Ausgaben sind vollstaendig; die Mittelwerte unten beziehen sich auf das VERKUERZTE Fenster.");
-	// ★★ 22.09.2026 CFD_TIMER_APG: Bericht + Wirkpfadwaechter (REKONSTRUKTION-PLAN.md §10 Hebel 1 = Plan-Schritt 2).
-	// WOFUER: APG kostet gemessen +17,0 % Zeitschleife (16.09., 4 mm), das Datenvolumen erklaert davon nur 2,6 %.
-	// Diese Zahl sagt, wieviel davon der VORKERNEL fac_apg_ab ist -- der Rest ist der APG-Zweig in stream_collide.
-	// Ohne sie ist jede Optimierung geraten, und Hebel 3 (rho-Region statt DDF-Rekonstruktion) fasst einen teuer
-	// erkaempften Determinismus an (lbm.cpp:1716, 03.09.) und darf erst danach drankommen.
-	{
-		LBM_Domain* d_apg = lbm_f.lbm_domain[0];
-		if(d_apg->timer_apg>0u) {
-			if(d_apg->apg_t_n==0ull) print_error("CFD_TIMER_APG=1 gesetzt, aber KEIN Vorkernelaufruf gemessen (apg_t_n = 0) -- lautloser No-Op.");
-			else {
-				const double sum_ = d_apg->apg_t_summe, mit_ = sum_/(double)d_apg->apg_t_n;
-				const double wall_ = std::chrono::duration<double>(t_now()-lauf_wall0).count();
-				print_info("[APG-ZEIT] Vorkernel fac_apg_ab isoliert (CFD_TIMER_APG=1): Mittel "+to_string((float)(mit_*1e3),3u)+" ms ueber "
-					+to_string(d_apg->apg_t_n)+" feine Schritte, Spanne "+to_string((float)(d_apg->apg_t_min*1e3),3u)+" .. "
-					+to_string((float)(d_apg->apg_t_max*1e3),3u)+" ms, Summe "+to_string((float)sum_,1u)+" s = "
-					+to_string((float)(100.0*sum_/(wall_>0.0?wall_:1.0)),2u)+" % der Wanduhr DIESES Laufs.");
-				print_warning("[APG-ZEIT] Der Prozentwert ist gegen die SERIALISIERTE Wanduhr gerechnet und deshalb eine UNTERE Schranke "
-					"fuer den Anteil im normalen Lauf -- dort verdeckt die Pipeline einen Teil des Vorkernels. Er ist NICHT mit den +17,0 % "
-					"aus dem A/B vom 16.09. gleichzusetzen; die Zuordnung braucht den A/B gegen CFD_FAC_APG=0 bei sonst gleicher Zeile.");
-			}
-		}
-	}
+	berichte_apg_zeit(lbm_f.lbm_domain[0], "Nahfeld"); // ★ 22.09.2026, s. Helfer oben
 	// ★ 16.09.2026 iGPU-Leistungsleiter: Bericht + Wirkpfadwaechter (Iron Rule: ein Schalter ohne feuernden Zaehler ist ein harter Fehler)
 	if(timer_fern>0u) {
 		if(tf_n==0ull) print_error("CFD_TIMER_FERN=1 gesetzt, aber KEIN Fernfeldschritt gemessen (tf_n = 0) -- lautloser No-Op.");

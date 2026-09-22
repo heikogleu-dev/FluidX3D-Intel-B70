@@ -173,7 +173,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Die Wanduhr, die MLUPs und der Durchsatz dieses Arms sind KEIN Leistungsmass.
 	s_timer_apg = env_u("CFD_TIMER_APG", 0u);
 	if(s_timer_apg>1u) print_error("CFD_TIMER_APG kennt nur 0 (aus) und 1 (Vorkernel fac_apg_ab isoliert messen).");
-	if(s_timer_apg>0u&&s_fac_apg==0.0f) print_error("CFD_TIMER_APG=1 ohne CFD_FAC_APG: der Vorkernel laeuft gar nicht, der Timer waere ein lautloser No-Op.");
+	// ★★ 22.09.2026, EIGENER FEHLER, vom Pruefagenten gefunden: hier stand
+	//   if(s_timer_apg>0u&&s_fac_apg==0.0f) print_error(...)
+	// Das toetet fahrzeug_dd. Reihenfolge: setup.cpp setzt s_fac_apg, baut lbm_f (Konstruktor laeuft, alles gut),
+	// NULLT DANN die Statik fuer die Symmetrie und baut lbm_c -- der Fernfeld-Konstruktor laeuft ERNEUT durch
+	// diese Zeile, sieht s_fac_apg==0 und ruft exit(1), bevor ein einziger Zeitschritt lief. Genau der Fehler,
+	// den derselbe Baum am 16.09. fuer CFD_FAC_APG_HAKEN schon einmal behoben hat (setup.cpp:7109 sagt es
+	// woertlich: "Pruefung seit 16.09. hier statt im Domaenen-Konstruktor, den auch das APG-freie Fernfeld
+	// durchlaeuft"). Die Ansage-Pruefung steht jetzt ebenfalls dort, je Fall, NACH dem Setzen von s_fac_apg.
+	// Und das Vorbild CFD_TIMER_FERN liegt aus demselben Grund als LOKALE Variable in setup.cpp, nicht als Statik.
 	if(s_timer_apg>0u) print_warning("CFD_TIMER_APG=1: DIAGNOSEARM. Zwei finish_queue() um fac_apg_ab serialisieren die Pipeline -- Wanduhr und Durchsatz dieses Laufs sind NICHT mit anderen Armen vergleichbar. Gehoert NIE in eine Produktionszeile (Lehre vom 21.09.2026, CFD_TIMER_FERN, +101 Prozent Wanduhr).");
 	if(s_fac_messnur>0u&&s_fac_apg!=0.0f) print_error("CFD_FAC_MESSNUR + CFD_FAC_APG: im Mess-Nur-Modus greift kein tw-Ziel in die Physik, APG waere ein stiller No-Op (Ansage-Doktrin).");
 	if(s_fac_apg!=0.0f&&s_fac_nachbar==0u) print_error("CFD_FAC_APG braucht CFD_FAC_NACHBAR=1: dp/ds kommt seit 16.09. aus dem Vorkernel fac_apg_ab (nach fac_nachbar_ab; grad rho in fac_nb[2..4]) und die Korrektur gilt an der Abtasthoehe y_ab.");
@@ -880,7 +888,17 @@ void LBM_Domain::allocate(Device& device) {
 		fac_kdiag_on = s_fac_imem&&s_fac_kdiag>0u; // ★ Klassen-Diagnostik: Konstruktionszustand einfrieren (Signaturposition = nach fac_q)
 		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 16ull); kernel_stream_collide.add_parameters(fac_kd); } // 16 seit 05.09.: [12..15] vorzeichenbehafteter Druckrest A/|A|/B/C (12 seit 04.09.: [10]/[11] = tw und Besuche NUR ueber angewandte Besuche)
 		nachbar_on = s_fac_imem&&s_fac_nachbar>0u; // ★ 03.09. deterministische Nachbarabtastung: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd, VOR fac_wfd)
-		apg_on = nachbar_on&&s_facetten&&s_fac_apg!=0.0f; apg_kappa = apg_on ? s_fac_apg : 0.0f; apg_haken = apg_on ? s_fac_apg_haken : 0u; timer_apg = apg_on ? s_timer_apg : 0u; // ★ 22.09.: timer_apg genau wie apg_haken an die INSTANZ gebunden -- das Fernfeld traegt kein APG und darf den Timer nicht tragen nb_stride = apg_on ? 5ull : 2ull; // ★ 16.09. HOCH-1 (Pruefagent): APG-Zustand je Instanz einfrieren -- fahrzeug_dd nullt die Statik VOR dem Bau von lbm_c, alloc_facetten/Launches/Bericht lasen sie danach (JIT-Stride 5 gegen Host-Stride 2 = stiller Ueberlauf, kein Kernel gebunden, kein Bericht). Bedingung = Emission von FACETTEN_APG und def_nb_stride.
+		apg_on = nachbar_on&&s_facetten&&s_fac_apg!=0.0f; apg_kappa = apg_on ? s_fac_apg : 0.0f; apg_haken = apg_on ? s_fac_apg_haken : 0u;
+		nb_stride = apg_on ? 5ull : 2ull;
+		timer_apg = apg_on ? s_timer_apg : 0u; // ★ 22.09.2026: timer_apg genau wie apg_haken an die INSTANZ gebunden -- das Fernfeld traegt kein APG und darf den Timer nicht tragen.
+		// ★★ 22.09.2026, EIGENER FEHLER, vom Pruefagenten gefunden: der Kommentar oben stand zuerst MITTEN in
+		// dieser Zeile, VOR der nb_stride-Zuweisung. Die Zuweisung lag damit vollstaendig im //-Kommentar,
+		// nb_stride blieb auf dem Header-Default 2ull -- waehrend der JIT weiter def_nb_stride 5ul emittiert
+		// (lbm.cpp, Emissionsblock). fac_nb waere mit 2*aktiv Floats alloziert worden, die Kernel schreiben und
+		// lesen aber bei 5*gid: ab gid >= 0,4*aktiv jeder Zugriff AUSSERHALB des Puffers, 2,5-facher Ueberlauf
+		// ohne Schranke auf der GPU. Das traf AUCH den Timer-AUS-Pfad, also jeden APG-Lauf. Genau die Falle,
+		// die der verschluckte Kommentar selbst beschreibt, und genau die, die im Gedaechtnis steht
+		// ("// mitten in einer Zeile frisst Code"). Deshalb steht hier jede Zuweisung auf einer EIGENEN Zeile. // ★ 16.09. HOCH-1 (Pruefagent): APG-Zustand je Instanz einfrieren -- fahrzeug_dd nullt die Statik VOR dem Bau von lbm_c, alloc_facetten/Launches/Bericht lasen sie danach (JIT-Stride 5 gegen Host-Stride 2 = stiller Ueberlauf, kein Kernel gebunden, kein Bericht). Bedingung = Emission von FACETTEN_APG und def_nb_stride.
 		if(nachbar_on) { fac_nb = Memory<float>(device, 2ull); kernel_stream_collide.add_parameters(fac_nb); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fdwand_on = s_sgs_fdwand>0u; // ★ Geistermoden-Fix: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd)
 		if(fdwand_on) { fac_wfd = Memory<float>(device, 1ull); kernel_stream_collide.add_parameters(fac_wfd); }
@@ -1703,6 +1721,15 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 	}
 	if(nachbar_on) { // ★ 03.09. DETERMINISTISCHE NACHBARABTASTUNG: Puffer bauen, Kernel binden, stream_collide-Rebind (fac_wfd-Muster, B70-bewiesen)
 		const ulong nbs = nb_stride; // ★ 16.09. HOCH-1: Instanzwert, eingefroren in allocate() // ★ 16.09. Stride = def_nb_stride der Emission (2, unter APG 5: grad rho in [2..4])
+		// ★★ 22.09.2026 STRIDE-WAECHTER VOR DEM PUFFERBAU (Pruefagent, Befund 1). Der vorhandene Waechter
+		// (setup.cpp, berichte_apg: st!=5ull) feuert erst am LAUFENDE -- er ist ein Nachruf, kein Schutz: der
+		// ganze Lauf hat dann schon auf korruptem Speicher gerechnet. Hier kostet die Pruefung nichts und
+		// greift, BEVOR der Puffer entsteht. Anlass ist ein eigener Fehler von heute: ein Kommentar hatte
+		// "nb_stride = apg_on ? 5ull : 2ull;" verschluckt, der Puffer waere mit 2*aktiv Floats entstanden,
+		// waehrend der JIT def_nb_stride 5ul emittiert -- ab gid >= 0,4*aktiv jeder Zugriff ausserhalb des
+		// Puffers, 2,5-facher Ueberlauf ohne Schranke auf der GPU (Wedge-Klasse auf der B70).
+		if(nbs != (apg_on ? 5ull : 2ull)) print_error("fac_nb-Stride inkonsistent: nb_stride = "+to_string(nbs)
+			+", erwartet "+to_string(apg_on?(ulong)5ull:(ulong)2ull)+" (apg_on = "+string(apg_on?"true":"false")+"). Der Puffer wuerde nicht zu den Kernelzugriffen passen.");
 		fac_nb = Memory<float>(device, nbs*aktiv);
 		for(ulong q=0ull;q<aktiv;q++) { fac_nb[nbs*q]=-1.0f; fac_nb[nbs*q+1ull]=0.0f; for(ulong g=2ull; g<nbs; g++) fac_nb[nbs*q+g]=0.0f; } // Init = "kein Wert" -> Eigenzelle (zaehlt als Slot 73), grad rho 0; enqueue_initialize fuellt vor dem ersten Schritt
 		fac_nb.write_to_device();

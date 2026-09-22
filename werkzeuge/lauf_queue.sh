@@ -66,6 +66,27 @@ while IFS= read -r zeile; do
 		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Atomik-Testhaken ausserhalb der Kugel ohne CFD_DEV_FINE=0/CFD_DEV_COARSE=0 (Absturzsperre 15.09.; Ausloeser: $([ "$geerbt_haken" = 1 ] && echo "GEERBTE UMGEBUNG" || echo "Zeilenmuster"))" | tee -a "$Q"
 		continue
 	fi
+	# ★★ 22.09.2026 DIAGNOSESPERRE FUER ZEITMESSER. Anlass: am 21.09. stand CFD_TIMER_FERN=1 in einer
+	# PRODUKTIONSZEILE -- +101 % Wanduhr, ein ganzer Lauf verloren. Eine print_warning reicht nachweislich
+	# NICHT: CFD_TIMER_FERN warnt seit dem 16.09., und genau das ist trotzdem passiert. Eine Queue, die
+	# nachts laeuft, liest keine Warnungen.
+	# KEIN Verbot, sondern ein NAMENSZWANG: der Arm darf fahren, wenn der Laufname "timer" traegt. Dann
+	# heisst auch jede Logdatei so, und niemand liest die Wanduhr spaeter als Leistungsmass.
+	# Muster exakt wie die Atomik-Sperre oben, inklusive der Lehren vom 16.09. (Befund B7): '+' und
+	# fuehrende Nullen zulassen ("=01" und "=+1" ergeben in atoi() ebenfalls 1), [[:space:]] als Anker
+	# statt Leerzeichen (ein TAB haette die Sperre sonst umgangen), und die GEERBTE Umgebung mitpruefen,
+	# aber nur, wenn die Zeile die Variable nicht selbst setzt (Befund M4).
+	geerbt_timer=0
+	for V in CFD_TIMER_FERN CFD_TIMER_APG; do
+		if ! echo " $env_teil " | grep -q "[[:space:]]$V="; then
+			eval "w=\${$V:-0}"; [ "$w" != "0" ] && geerbt_timer=1
+		fi
+	done
+	if { echo " $env_teil " | grep -Eq '[[:space:]]CFD_TIMER_(FERN|APG)=\+?0*[1-9]' || [ "$geerbt_timer" = "1" ]; } \
+	   && ! echo "$name" | grep -q 'timer'; then
+		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Diagnose-Zeitmesser (CFD_TIMER_FERN/CFD_TIMER_APG) ohne 'timer' im Laufnamen. Diese Arme SERIALISIEREN, ihre Wanduhr ist kein Leistungsmass (Sperre 22.09.; Anlass CFD_TIMER_FERN am 21.09., +101 Prozent Wanduhr)" | tee -a "$Q"
+		continue
+	fi
 	if [ "${CFD_QUEUE_DEV:-2}" = "1" ] && command -v journalctl >/dev/null 2>&1; then
 		cat_n=$(journalctl -k --since '-3min' --no-pager 2>/dev/null | grep -ac 'Engine memory CAT error')
 		if [ "${cat_n:-0}" -gt 0 ]; then
