@@ -62,6 +62,12 @@
 #   VORBEDINGUNG: CFD_F_NUR_SOLID (Default AN). Im Kugelfall NICHT verdrahtet (Waechter setup.cpp:4619).
 #   NACHGEHOLT: der Schalter war seit dem 03.09. abgenommen, stand aber in keiner Basis und keiner
 #     Serie -- 1,7 GB lagen fuenf Tage brach. Erneut am Stand 54af4af bitgleich geprueft (Serie vs_cpu).
+# STANDARD GEAENDERT (Heiko-Entscheid 22.09.2026, 19:34): CFD_T_END 0.501 -> 0.741. Wortlaut: "Die Basislauflaenge sollte immer
+#   5x Fahrzeuglaenge betragen." Regel und Herleitung stehen seit 21.09. in BOX-REGELWERK.md:295-299: t_min = 5 L / u_inf =
+#   5 * 4,4364 m / 30 m/s = 739 ms; 0,741 wegen der 1-ms-Konvention (sonst faellt der letzte Slice aus). Bis heute standen Regel
+#   (739 ms) und Basiswert (501 ms) auseinander -- p4_bandpi2_4 zeigte warum: die Streuung von cd_rest faellt bis 501 ms noch
+#   monoton (0,114 -> 0,070 -> 0,036), der Lauf ist dort nicht ausgelaufen. FOLGE: jede Zeile mit 0,501 s (alle 8-mm-Screeningarme)
+#   deklariert CFD_T_END=0.501 als Abweichung -- gewollt, weil 8 mm Screening ist und gepaart gegen einen gleich langen Arm laeuft.
 # AUFGENOMMEN 22.09.2026 17:15: CFD_SGS_BAND_PI 0 (Plan C, Commit 5c8d44b+): 1 = Pi-konsistente SISM-EMA im SGS-Band (S_Pi aus dem
 #   Nichtgleichgewichts-Tensor statt FD-Stencil, EMA in stream_collide, kein FD-Bandkernel). Nur mit CFD_SGS_BAND>=2 sinnvoll.
 #   8 mm (s5_bandpi2_12_8 gegen s4_band2_12_8, eine Variable): H Dachplateau 1,715 -> 1,613 (+-0,036, 2,8 sigma), Kraefte im 8-mm-
@@ -179,7 +185,7 @@ CFD_SGS_SISM_AB 15000 schritte_fein
 CFD_SGS_SISM_T 5000 schritte_fein
 CFD_SLICE_NEAR_STEPS 5000 schritte_fein
 CFD_SPONGE_N 64 zellen_grob_laenge
-CFD_T_END 0.501 phys
+CFD_T_END 0.741 phys
 CFD_T_WARMUP 0.201 phys
 CFD_U_KLEMME 1 modus
 CFD_U_SPARSAM 1 modus
