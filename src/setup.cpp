@@ -859,6 +859,38 @@ static void bericht_gdiag(LBM_Domain* D, const std::vector<Facette>& F, const st
 		if(zeilen++<16u) { char z[300]; snprintf(z, sizeof(z), "  %5u  %5.2f  %7lu  %10.1f  %9.3e  %9.3e  %7.2f  %7.3f  %8.3f  %8.3f  %6.2f", e.first.first, 0.01*e.first.second, (unsigned long)g.n, g.v/(double)g.n, sfd, spi, pf, wf, gf, os, ns); print_info(string(z)); } }
 	fk.close(); print_info("  CSV: "+out_dir+"facetten_gdiag.csv ("+to_string((ulong)V.size())+" Klassen). LESART: Pi/FD >> 1 = Geistermoden des Wandmodells im Smagorinsky-Tensor; WALE/FD bzw. Sigma/FD = was die Kandidaten relativ zu Smagorinsky liefern wuerden (Smagorinsky misst |S|); |Om|/|S| = 1 bei reiner Scherung.");
 }
+// ★★ 22.09.2026 BAND-g-DIAGNOSE (Plan B3(b), Protokoll B30/B32): Pi/FD, WALE/FD, Sigma/FD, |Omega|/|S| je BANDLAGE, dazu das
+// Histogramm des ZELLWEISEN Verhaeltnisses |S|_Pi/|S|_FD. Beantwortet, ob der Band-Abzug (Pi-|S| minus FD-Sbar) einen
+// Schaetzer-Mismatch traegt. Ist=Soll: Besuche je Bandzelle == Besuche je Facettenzelle (derselbe Enqueue).
+static void bericht_gdiag_band(LBM_Domain* D, const string& out_dir, const string& ort) {
+	if(D==nullptr) return;
+	if(!D->band_gdiag_on) { if(D->band_on&&D->gdiag_on) print_error("["+ort+"] Band-g-Diagnose: Band gebaut und g-Diagnose angefordert, aber die Band-Instanz ist nicht gebunden -- stiller No-Op."); return; }
+	D->band_gd.read_from_device(); D->fac_gd.read_from_device();
+	const ulong N=D->band_N; double bes_fac=0.0; ulong kf=0ull;
+	for(ulong k=0ull; 8ull*k+7ull<D->fac_gd.length(); k++) { bes_fac+=(double)D->fac_gd[8ull*k+5ull]; kf++; }
+	const double bes_fac_je = kf>0ull ? bes_fac/(double)kf : 0.0;
+	struct Agg { ulong n=0ull; double v=0.0, sfd=0.0, spi=0.0, wa=0.0, si=0.0, om=0.0, ns=0.0; ulong hist[7]={0,0,0,0,0,0,0}; ulong nratio=0ull; };
+	std::map<uint,Agg> M; double bes_band=0.0;
+	static const double grenzen[6]={0.8,1.0,1.2,1.5,2.0,3.0};
+	for(ulong i=0ull; i<N; i++) { const float* a=&D->band_gd[8ull*i]; const uint L=(uint)(i<D->band_lage_h.size()?D->band_lage_h[i]:0u);
+		Agg& g=M[L]; g.n++; g.v+=a[5]; g.sfd+=a[0]; g.spi+=a[1]; g.wa+=a[2]; g.si+=a[3]; g.om+=a[4]; g.ns+=a[6]; bes_band+=a[5];
+		if(a[0]>0.0f&&a[5]>0.0f) { const double r=(double)a[1]/(double)a[0]; uint b=6u; for(uint q=0u;q<6u;q++) if(r<grenzen[q]) { b=q; break; } g.hist[b]++; g.nratio++; } }
+	if(N>0ull&&bes_band<=0.0) { print_error("["+ort+"] BAND-g-DIAGNOSE: "+to_string(N)+" Bandzellen alloziert, Besuchssumme 0 -- der Band-Launch in sgs_gdiag_gpu laeuft nicht (stiller No-Op)."); return; }
+	const double bes_band_je = N>0ull ? bes_band/(double)N : 0.0;
+	print_info("["+ort+"] BAND-g-DIAGNOSE: "+to_string(N)+" Bandzellen, Besuche je Bandzelle "+to_string((float)bes_band_je,1u)+" (Soll = Besuche je Facette "+to_string((float)bes_fac_je,1u)+"). Mittel je Besuch (Gittereinheiten):");
+	print_info("  Lage     n_zellen  |S|_FD     |S|_Pi     Pi/FD   WALE/FD  Sigma/FD  |Om|/|S|   zellweise Pi/FD (Quotient der Zeitmittel je Zelle): <0,8  0,8-1  1-1,2  1,2-1,5  1,5-2  2-3  >=3 (%)  nsolid/Besuch (Soll ~0 ab Lage 2)");
+	std::ofstream fk(out_dir+"band_gdiag.csv"); fk.precision(7);
+	fk << "# Band-g-Diagnose ("<<ort<<", CFD_SGS_GDIAG x CFD_SGS_BAND): Mittel je Besuch je Bandlage; Histogramm des zellweisen |S|_Pi/|S|_FD\n";
+	fk << "lage,n_zellen,besuche_je_zelle,s_fd,s_pi,pi_zu_fd,wale_zu_fd,sigma_zu_fd,omega_zu_s,h_lt0p8,h_0p8_1,h_1_1p2,h_1p2_1p5,h_1p5_2,h_2_3,h_ge3,nsolid_je_besuch\n";
+	for(const auto& e : M) { const Agg& g=e.second; const double v=g.v>0.0?g.v:1.0; const double sfd=g.sfd/v, spi=g.spi/v, wa=g.wa/v, si=g.si/v, om=g.om/v;
+		const double pf=sfd>0.0?spi/sfd:0.0, wf=sfd>0.0?wa/sfd:0.0, gf=sfd>0.0?si/sfd:0.0, os=sfd>0.0?om/sfd:0.0; const double nr=g.nratio>0ull?100.0/(double)g.nratio:0.0;
+		const double ns=g.ns/v;
+		fk << e.first << "," << g.n << "," << g.v/(double)g.n << "," << sfd << "," << spi << "," << pf << "," << wf << "," << gf << "," << os; for(uint q=0u;q<7u;q++) fk << "," << g.hist[q]; fk << "," << ns << "\n";
+		char z[400]; snprintf(z, sizeof(z), "  %4u  %10lu  %9.3e  %9.3e  %7.2f  %7.3f  %8.3f  %8.3f   %5.1f %5.1f %5.1f %5.1f %5.1f %5.1f %5.1f   %6.3f", e.first, (unsigned long)g.n, sfd, spi, pf, wf, gf, os, nr*g.hist[0], nr*g.hist[1], nr*g.hist[2], nr*g.hist[3], nr*g.hist[4], nr*g.hist[5], nr*g.hist[6], ns); print_info(z); }
+	fk.close();
+	if(bes_fac_je>0.0&&fabs(bes_band_je-bes_fac_je)>0.5) print_error("["+ort+"] BAND-g-DIAGNOSE: Besuche je Bandzelle "+to_string((float)bes_band_je,2u)+" != Besuche je Facette "+to_string((float)bes_fac_je,2u)+" -- die beiden Instanzen laufen nicht an derselben Kadenz.");
+	print_info("  CSV: "+out_dir+"band_gdiag.csv. LESART: Pi/FD ~ 1 in Lage 2 = FD-Sbar ist zum Pi-nu_t konsistent; Pi/FD >> 1 = der Band-Abzug (nu_t,Pi - c2*Sbar_FD) ist systematisch zu klein (Protokoll B30/B32).");
+}
 // ★ KLASSEN-DIAGNOSTIK (Weg-1-Plan Stufe 0, 30.08.): fac_kd je Facette -> Mittel je Treppenklasse (eigene_links, y_w).
 // Beantwortet je Klasse: welches u_t geht ins Modell, welches Ziel (tw physikalisch, twe angewandt), wie gross ist
 // der Linkaustausch |P1| dagegen, was wird angewandt (s1) und gebucht (phi1), wie oft faellt die Klasse zurueck.
@@ -4953,6 +4985,7 @@ void main_setup_kanal() {
 		}
 	}
 	if(env_u("CFD_SGS_BAND",0u)>0u) pruefe_band_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kanal"); // ★ 08.09. SGS-BAND
+	if(env_u("CFD_SGS_BAND",0u)>0u) bericht_gdiag_band(lbm.lbm_domain[0], out_dir, "Kanal"); // ★ 22.09. Band-g-Diagnose hinter der Band-Abnahme
 	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kanal"); pruefe_sism_drift("Kanal"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil, WIRKLICH ans Ende des Fallberichts. Nachpruefung der Audit-Schleife 2: der erste Versuch setzte den Aufruf hinter bericht_gdiag und liess im Kanal noch ~170 Berichtszeilen dahinter -- also FRUEHER als vor dem Fix. Die Funktion enthaelt print_error = exit; hier frisst es nichts mehr.
 	if(env_u("CFD_SGS_VANDRIEST",0u)>0u) bericht_vandriest(lbm.lbm_domain[0], LBM_Domain::s_sgs_vd_aplus, "Kanal"); // ★ 08.09. van Driest: Wirkpfad, D^2-Histogramm, Ist=Soll Geraet gegen Host-y+
 	print_info("Kanal fertig: kanal_zeit.csv (U_b+, c_f beide Wege) und kanal_profil.csv (U+, Spannungen).");
@@ -10329,6 +10362,7 @@ static void main_setup_fahrzeug_dd() {
 		print_info("ACHTUNG P8: Fx_far (forces.csv) und der Fernfeld-Fahrzeugkraft-Anker oben sind in diesem Arm PHANTOMBEHAFTET (object_force an facettenbehandelten Links); kraft_facetten bleibt Nahfeld-only -- fuer A/B nur die VERSCHIEBUNG werten.");
 	}
 	if(env_u("CFD_SGS_BAND",0u)>0u) pruefe_band_wirkpfad(lbm_f.lbm_domain[0], lbm_f.get_t(), "Nahfeld"); // ★ 08.09. SGS-BAND
+	if(env_u("CFD_SGS_BAND",0u)>0u&&env_u("CFD_FACETTEN",0u)>0u) bericht_gdiag_band(lbm_f.lbm_domain[0], out_dir, "Nahfeld"); // ★ 22.09. Band-g-Diagnose HINTER der Band-Abnahme (Pruefbefund M1: Abnahmen ans Funktionsende)
 	if(lbm_f.lbm_domain[0]->nut_skal!=1.0f) pruefe_nut_skal_wirkpfad(lbm_f.lbm_domain[0]->rho_clamp_hits.data(), lbm_f.lbm_domain[0]->nut_skal, "Nahfeld"); // ★ 10.09. Diskriminator-Messarm (Konstruktionszustand, nicht env)
 	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm_f.lbm_domain[0]->rho_clamp_hits.data(), lbm_f.get_t(), lbm_f.lbm_domain[0]->sism_ab, lbm_f.lbm_domain[0]->sism_T, lbm_f.lbm_domain[0]->sism_on, "Nahfeld"); pruefe_sism_drift("Nahfeld"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil ans ECHTE Ende des dd-Berichts (Nachpruefung Audit 2: vorher stand der Aufruf vor dem F-Listen-Block und ~90 Berichtszeilen; die Funktion enthaelt print_error = exit).
 	// ★ 08.09. van Driest WIRKLICH ans Ende (Pruefagent, Befund 1): print_error ist exit(1), ein verletzter Ist=Soll darf

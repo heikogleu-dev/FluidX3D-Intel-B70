@@ -541,6 +541,9 @@ public:
 	float nut_skal = 1.0f; // ★ 10.09. Diskriminator-Messarm: Konstruktionszustand, eingefroren wie band_on. Die Abnahme liest IHN, nicht die Umgebungsvariable -- sonst haette sie eine zweite Wahrheitsquelle (Muster pruefe_band_wirkpfad, das D->band_on liest).
 	ulong band_N = 0ull; uint band_lagen = 0u; bool band_on = false; uint band_param_pos = 0u; // Signaturposition von band_idx in stream_collide, in alloc_facetten_domain berechnet (dort sind alle Schalter im Scope)
 	ulong band_n_lage[8] = {0,0,0,0,0,0,0,0}; // Zellzahl je Lage, fuer den Bericht und Ist=Soll
+	// ★ 22.09.2026 BAND-g-DIAGNOSE (Plan B3(b)): zweite Instanz des sgs_gdiag-Kernels ueber band_zellen -- misst |S|_FD und |S|_Pi an DERSELBEN
+	// Bandzelle zur selben Zeit (Pi/FD in Lage 2..N war nie gemessen; der Band-Abzug mischt Pi-|S| mit FD-Sbar). Physikfrei, nur mit CFD_SGS_GDIAG.
+	Memory<float> band_gd; Kernel kernel_band_gdiag; std::vector<uchar> band_lage_h; bool band_gdiag_on = false;
 	Kernel kernel_sgs_band;
 	void alloc_sgs_band(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const uint lagen);
 	uint pruefe_rho_rand_c0(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const bool testhaken); // ★ 15.09. RHO_RAND C0: Host-Waechter (R1-Abdeckung aller rho-Leser) + APG-Zensus; liefert die Zahl der Beanstandungen

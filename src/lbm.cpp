@@ -1211,7 +1211,7 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	// Die Bandpuffer fielen damit ungeprueft NACH dem Facettenwaechter -- bei 4 mm sind das
 	// 118,8 MB, die in keinem Waechter und in keinem Reserveposten standen. Wortgleich zum
 	// Vorbild aufgebaut, damit beide Meldungen gleich zu lesen sind.
-	{	const ulong mb_band = (8ull*FNB + 8ull*band_N + (sism_on ? 24ull*band_N : 4ull)) / 1048576ull;
+	{	const ulong mb_band = (8ull*FNB + 8ull*band_N + (sism_on ? 24ull*band_N : 4ull) + (gdiag_on ? 32ull*band_N : 0ull)) / 1048576ull; // ★ 22.09. + band_gd (8 float je Bandzelle) unter CFD_SGS_GDIAG
 		const ulong belegt = (ulong)device.info.memory_used, kapazitaet = (ulong)device.info.memory;
 		const ulong frei_gemessen = vram_frei_gemessen(kapazitaet);
 		const ulong frei = frei_gemessen>0ull ? frei_gemessen : (kapazitaet>belegt ? kapazitaet-belegt : 0ull);
@@ -1236,6 +1236,11 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	// Die Liste MUSS in derselben Reihenfolge stehen, in der der Kernel sie aus der Maske nummeriert
 	// (Scan ueber fbi aufsteigend), sonst zeigt band_sbar[bid] auf die falsche Zelle.
 	std::vector<ulong> sortiert(liste); std::sort(sortiert.begin(), sortiert.end());
+	if(gdiag_on) { // ★ 22.09. Band-g-Diagnose: Lage je Bandzelle in fbi-Sortierreihenfolge (bisher ging lage_von beim Sortieren verloren); nur unter GDIAG (Pruefbefund N3)
+		std::vector<std::pair<ulong,uint>> paare(liste.size()); for(size_t i=0; i<liste.size(); i++) paare[i]=std::make_pair(liste[i], lage_von[i]);
+		std::sort(paare.begin(), paare.end()); band_lage_h.assign(paare.size(), 0u);
+		for(size_t i=0; i<paare.size(); i++) { if(paare[i].first!=sortiert[i]) { print_error("alloc_sgs_band: Lagenzuordnung und Sortierung laufen auseinander (Index "+to_string((ulong)i)+")."); band_on=false; return; } band_lage_h[i]=(uchar)std::min(255u, paare[i].second); }
+	}
 	// ★★ 22.09.2026 DEFEKT BEHOBEN (Tagesprotokoll B32, seit 2330bd5 am 08.09.): hier stand `band_zellen[i]=(uint)sortiert[i]`,
 	// also der F-BBOX-Index fbi. Der Kernel sgs_fdwand liest gd_zellen[gid] aber als GLOBALEN Zellindex n und ruft
 	// neighbors(n, j) -- genau wie fuer die Facettenliste, die n traegt (gd_zellen[k]=f.n). Am Fahrzeug (F-BBox 564x239x155 im
@@ -1273,6 +1278,15 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	kernel_sgs_band = Kernel(device, band_N, "sgs_fdwand", u, flags, band_zellen, (uint)band_N, band_sbar);
 	if(sism_on) kernel_sgs_band.add_parameters(t, band_sb, rho_clamp_hits, 1u); // sbar_out = 1: der Bandkernel liefert Sbar, kein w
 	if(sparse_on) kernel_sgs_band.add_parameters(tile_slot); // ★ 22.09. Pruefbefund M1: TS_P ist der letzte Parameter von sgs_fdwand -- der Lage-1-Kernel bekam ihn (B-7-Lehre), der Bandkernel nicht; mit CFD_SPARSE_TILES waere der Band-Launch mit CL_INVALID_KERNEL_ARGS gestorben (bisher nie kombiniert)
+	if(gdiag_on) { // ★ 22.09.2026 BAND-g-DIAGNOSE: zweite Instanz desselben Kernels ueber die Bandliste (Liste traegt n, s. o.). Kein Kernel-, kein JIT-Text geaendert.
+		band_gd = Memory<float>(device, 8ull*band_N);
+		for(ulong q8=0ull; q8<8ull*band_N; q8++) band_gd[q8]=0.0f;
+		band_gd.write_to_device();
+		kernel_band_gdiag = Kernel(device, band_N, "sgs_gdiag", fi, u, flags, band_zellen, (uint)band_N, band_gd, t, fx, fy, fz, s_sgs_guo?1u:0u);
+		if(sparse_on) kernel_band_gdiag.add_parameters(tile_slot); // TS_P zuletzt, wie bei kernel_sgs_gdiag (B-7)
+		band_gdiag_on = true;
+		print_info("BAND-g-DIAGNOSE (CFD_SGS_GDIAG x CFD_SGS_BAND): "+to_string(band_N)+" Bandzellen, "+to_string((ulong)(32ull*band_N/1048576ull))+" MB -- misst |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Bandzelle (Lage 2.."+to_string(lagen)+"); Physik unangetastet.");
+	}
 	string je; for(uint L=2u; L<=lagen&&L<8u; L++) je += (L>2u?" + ":"")+to_string(band_n_lage[L])+" (Lage "+to_string(L)+")";
 	print_info("SGS-BAND gebunden: "+to_string(band_N)+" Bandzellen = "+je+"; Speicher "
 		+to_string((float)(band_N*(sism_on?32ull:8ull)+2ull*FNB*4ull)/1048576.0f,1u)+" MB (Liste+w+EMA+Maske) auf "+device.info.name
@@ -1945,7 +1959,8 @@ void LBM_Domain::enqueue_einlass_eq() { // ★ V1-Port apply_inlet_velocity: pos
 }
 void LBM_Domain::sgs_gdiag_gpu() { // ★ g-Diagnose: ein Mess-Launch ueber die Wandzellenliste (31.08.)
 	if(!gdiag_on) return;
-	kernel_sgs_gdiag.set_parameters(6u, t, fx, fy, fz).run(); // t UND fx/fy/fz aktualisieren (Pruefbefund B-6a: der Kanal REGELT fx je Chunk -- der eingefrorene Startwert verfaelschte den Guo-Term unter SGS_GUO=1); run mit finish
+	kernel_sgs_gdiag.set_parameters(6u, t, fx, fy, fz).run();
+	if(band_gdiag_on) kernel_band_gdiag.set_parameters(6u, t, fx, fy, fz).run(); // ★ 22.09. Band-g-Diagnose an derselben Kadenz (Besuche je Bandzelle == Besuche je Facette, Ist=Soll im Bericht) // t UND fx/fy/fz aktualisieren (Pruefbefund B-6a: der Kanal REGELT fx je Chunk -- der eingefrorene Startwert verfaelschte den Guo-Term unter SGS_GUO=1); run mit finish
 }
 void LBM_Domain::enqueue_update_fields() { // update fields (rho, u, T) manually
 #ifndef UPDATE_FIELDS
