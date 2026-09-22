@@ -2055,7 +2055,82 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%def_zaehl_takt==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
-	if(ut<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); } // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
+	if(ut<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); }
+)+"#ifdef FAC_REK"+R(
+	{
+		const float rek_marke = fac_geo[b+7ul];
+		const float rek_eps = fac_geo[b+6ul];
+		if(rek_marke>0.5f) {
+			if(t%def_zaehl_takt==0ul) atomic_inc(&hits[328]);
+			if(t%def_zaehl_takt==0ul) atomic_inc(&hits[331]);
+			const float rek_inv = 1.0f/ut;
+			const float dux = rek_eps*utx*rek_inv;
+			const float duy = rek_eps*uty*rek_inv;
+			const float duz = rek_eps*utz*rek_inv;
+			const float sx = fma(2.0f, uxn, dux);
+			const float sy = fma(2.0f, uyn, duy);
+			const float sz = fma(2.0f, uzn, duz);
+			const float dc3 = -3.0f*fma(sx, dux, fma(sy, duy, sz*duz));
+			const float wr_s = def_ws*rhon;
+			const float wr_e = def_we*rhon;
+			const float d3x = 3.0f*dux;
+			const float d3y = 3.0f*duy;
+			const float d3z = 3.0f*duz;
+			const float s3x = 3.0f*sx;
+			const float s3y = 3.0f*sy;
+			const float s3z = 3.0f*sz;
+			const float h3 = 0.5f*dc3;
+			fhn[0] += def_w0*rhon*h3;
+			fhn[1] += wr_s*fma(d3x, fma(0.5f, s3x, 1.0f), h3);
+			fhn[2] += wr_s*fma(-d3x, fma(-0.5f, s3x, 1.0f), h3);
+			fhn[3] += wr_s*fma(d3y, fma(0.5f, s3y, 1.0f), h3);
+			fhn[4] += wr_s*fma(-d3y, fma(-0.5f, s3y, 1.0f), h3);
+			fhn[5] += wr_s*fma(d3z, fma(0.5f, s3z, 1.0f), h3);
+			fhn[6] += wr_s*fma(-d3z, fma(-0.5f, s3z, 1.0f), h3);
+			const float dxy = d3x+d3y;
+			const float sxy = s3x+s3y;
+			const float dxz = d3x+d3z;
+			const float sxz = s3x+s3z;
+			const float dyz = d3y+d3z;
+			const float syz = s3y+s3z;
+			const float dxmy = d3x-d3y;
+			const float sxmy = s3x-s3y;
+			const float dxmz = d3x-d3z;
+			const float sxmz = s3x-s3z;
+			const float dymz = d3y-d3z;
+			const float symz = s3y-s3z;
+			fhn[7] += wr_e*fma(dxy, fma(0.5f, sxy, 1.0f), h3);
+			fhn[8] += wr_e*fma(-dxy, fma(-0.5f, sxy, 1.0f), h3);
+			fhn[9] += wr_e*fma(dxz, fma(0.5f, sxz, 1.0f), h3);
+			fhn[10] += wr_e*fma(-dxz, fma(-0.5f, sxz, 1.0f), h3);
+			fhn[11] += wr_e*fma(dyz, fma(0.5f, syz, 1.0f), h3);
+			fhn[12] += wr_e*fma(-dyz, fma(-0.5f, syz, 1.0f), h3);
+			fhn[13] += wr_e*fma(dxmy, fma(0.5f, sxmy, 1.0f), h3);
+			fhn[14] += wr_e*fma(-dxmy, fma(-0.5f, sxmy, 1.0f), h3);
+			fhn[15] += wr_e*fma(dxmz, fma(0.5f, sxmz, 1.0f), h3);
+			fhn[16] += wr_e*fma(-dxmz, fma(-0.5f, sxmz, 1.0f), h3);
+			fhn[17] += wr_e*fma(dymz, fma(0.5f, symz, 1.0f), h3);
+			fhn[18] += wr_e*fma(-dymz, fma(-0.5f, symz, 1.0f), h3);
+			float rr, rux, ruy, ruz;
+			calculate_rho_u(fhn, &rr, &rux, &ruy, &ruz);
+			const float wx = rux-uxn;
+			const float wy = ruy-uyn;
+			const float wz = ruz-uzn;
+			const float wbetrag = sqrt(wx*wx+wy*wy+wz*wz);
+			const float ubetrag = sqrt(uxn*uxn+uyn*uyn+uzn*uzn);
+			if(t%def_zaehl_takt==0ul&&wbetrag>1e-6f*fmax(ubetrag, 1e-12f)) atomic_inc(&hits[329]);
+			const float soll_x = uxn+dux;
+			const float soll_y = uyn+duy;
+			const float soll_z = uzn+duz;
+			const float rx = rux-soll_x;
+			const float ry = ruy-soll_y;
+			const float rz = ruz-soll_z;
+			const float rbetrag = sqrt(rx*rx+ry*ry+rz*rz);
+			if(t%def_zaehl_takt==0ul&&rbetrag>1e-6f*fmax(ubetrag, 1e-12f)) atomic_inc(&hits[330]);
+		}
+	}
+)+"#endif"+R(
+ // Slot 9: iMEM modifiziert bei ut~0 GAR NICHT (t-Basis undefiniert; dokumentierte Abweichung vom Paararm, der den Tausch trotzdem macht)
 	// ★★ NACHBARABTASTUNG (CFD_FAC_NACHBAR, 30.08.2026, Weg-1 Stufe 3). BEFUND, der sie ausloest
 	// (Klassen-Diagnostik CFD_FAC_KDIAG am 26-Grad-Kanal, V3b-Konfiguration): die konkave Eckzelle
 	// (8 eigene Solid-Links, y_w 0,18) tastet u_t = 0,0051 ab, die freie Zelle ueber derselben

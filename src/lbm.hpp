@@ -413,6 +413,7 @@ public:
 	static uint s_sgs_sism; static uint s_sgs_sism_T; static ulong s_sgs_sism_ab; // ★ 07.09.2026 SHEAR-IMPROVED SMAGORINSKY (CFD_SGS_SISM=1, Leveque/Toschi/Shao/Bertoglio JFM 570, 2007) im FD-Kernel sgs_fdwand: nu_t = c2*max(0, |S|_FD - |<S>|), <S> = EMA der SECHS S-Komponenten je Facette (fac_sb; die billige Form <|S|> waere ein anderes Modell -- im Zeitmittel nu_t = 0 = WANDFREI). T = EMA-Zeitkonstante in SCHRITTEN (alpha = 1/T erst im Kernel, Muster def_fac_nu: keine Festkomma-Quantisierung), ab = Warmlaufsperre in Schritten (bis dahin klassische FDWAND-Formel WORTGLEICH, EMA laeuft ab 0 mit). Braucht CFD_SGS_FDWAND=1 und Facetten. Wirkpfad Slots 126 (Abzug aktiv) / 127 (Klemme |S|<Sbar); Zeitreihe sism_sbar.csv
 	static uint s_sgs_gdiag;   // ★ 31.08. g-DIAGNOSE (CFD_SGS_GDIAG=1): sparser Messkernel ueber die Facettenzellen -- |S|_FD, |S|_Pi, D_WALE, D_Sigma, |Omega| je Zelle akkumuliert; fasst Physik nicht an
 	static uint s_fac_messnur; // ★ 30.08. CFD_FAC_MESSNUR: Facetten bauen und MESSEN, im Kernel aber NICHTS anwenden -- BB-Physik mit Facetten-Instrument (Aepfel-mit-Aepfeln-Bezug fuer BB-Vergleiche)
+	static uint s_fac_rek; // ★ 22.09.2026 S0/S1 WANDZELL-REKONSTRUKTION (CFD_FAC_REK): 0 = aus, 1 = Umfang Rang 0 (REKONSTRUKTION-PLAN.md §12). Marke in fac_geo[8i+7], Amplitude in [8i+6] -- beide Laufzeitladungen, KEIN JIT-Define fuer die Amplitude (sonst optimiert IGC die Identitaet weg).
 	static uint s_fac_pinv; // ★ 04.09. CFD_FAC_PINV: Moore-Penrose-Pseudoinverse statt achsenparalleler Skalarleiter im gekoppelten Zweig
 	static uint s_fac_idx_voll; // ★ 03.09. CFD_FAC_IDX_VOLL: fac_idx wieder als volles uint-Feld (Rueckschalter fuer das A/B gegen die Bitmaske)
 	static float s_sgs_nut_skal; // ★ 10.09.2026 DISKRIMINATOR-MESSARM (CFD_SGS_NUT_SKAL, Default 1,0 = aus = bitgleich): nu_t am KLASSISCHEN Modell wird an Facettenzellen mit diesem Faktor skaliert. KEIN Produktionsschalter und KEIN Stellknopf -- der Faktor wird aus dem SISM-Lauf ABGELESEN (Lagenmessung 08.09.: SISM senkt nu_t in Lage 1 um 85,2 %, also Faktor 0,148). Beantwortet, ob SISMs Kraftgewinn Modellphysik ist oder nur die fehlende Wanddaempfung. Wirkpfad Slots 188 (besucht, == Slot 76) / 189 (nu_t > 0) / 190 (w wirklich geaendert), Histogramm nu_t/nu_mol 191..198.
@@ -523,6 +524,8 @@ public:
 	// Praefixsumme. Das LETZTE Wort (Index 2*ceil(FBN/32)) traegt die Slotzahl = den Stride von F,
 	// weil der erst nach dem Maskenbau feststeht und deshalb kein Compile-Define sein kann.
 	Memory<uint> f_maske;
+	ulong fac_rek_marken = 0ull; float fac_rek_eps = 0.0f; // ★ 22.09. S0: Zahl der gesetzten Marken und die Amplitude -- Vergleichsgroessen fuer die Abnahme
+	bool fac_rek_on = false; bool fac_rek_jit = false; // ★ 22.09. S0: Hostzustand und der aus dem JIT-Text gelesene Kernelzustand -- alloc vergleicht sie (Pruefbefund M2 vom selben Tag)
 	bool fac_pinv_on = false; // Konstruktionszustand eingefroren
 	bool fac_idx_voll_on = false; // Konstruktionszustand eingefroren; true = alte Vollfeld-Bauform von fac_idx
 	bool f_liste_on = false; // Konstruktionszustand eingefroren (Statik-Lebensdauer-Lehre 02.09.)
