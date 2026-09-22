@@ -364,7 +364,13 @@ S5 vor den Entscheid ziehen** — dort ist der Azimut wirklich frei.
 * **Erhaltende Klemme:** Projektionsform erhält Masse und Impuls (`kernel.cpp:3999`), also verträglich. Aber
   die K0-Ausnahme mit Begründung „Wandschub-Weitergabe" (`:4000-4004`) **entfällt** unter Rekonstruktion —
   neu entscheiden, nicht erben. Die Rekonstruktion kann f_i < 0 erzeugen → Zähler (Muster Slot 285) und
-  Entscheid, ob `CFD_POSITIV_FACETTE=1` Pflicht wird.
+  Entscheid, ob `CFD_POSITIV_FACETTE=1` Pflicht wird. **GEMESSEN 22.09.2026 — ja, Pflicht,
+  und der Preis ist null.** 8 mm, gepaart, identisches Binär: `CFD_POSITIV_FACETTE=1` allein bewegt
+  die Kräfte **nicht** (280 Abtastungen ab 0,201 s, r = 0,984: `cd_druck_rest` −0,0035 ± 0,0019
+  = 1,8 σ, `cz_druck_rest` +0,0021 ± 0,0068 = 0,31 σ), verschiebt aber die Divergenzgrenze des
+  verwandten Arms `CFD_FAC_KRAFT=2` von t = 0,033 s auf t = 0,269 s — **Faktor 8,1**. Die
+  K0-Ausnahme ist damit als *mitwirkende* Instabilitätsursache belegt, nicht als einzige: der Arm
+  stirbt trotzdem.
 * **P-TRT:** f_neq aus `f_load` (Variante A) ⇒ Geistmoden bleiben, P-TRT greift normal. Variante B baut
   regularisiert auf ⇒ Geistmoden konstruktiv null, Slots 201/203 sähen wie ein No-Op aus und wären korrekt
   — **vorher deklarieren**.
@@ -570,7 +576,7 @@ ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwor
 
 | # | Schritt | Warum zuerst | Kosten |
 |---|---|---|---|
-| **1** | ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ → **entfällt (§0b)**. Ersatz, falls Heiko einen 8-mm-Lauf freigibt: **`CFD_FAC_KRAFT=2`** (alle Facettenzellen), gepaart gegen eine frische Basiszeile, `CFD_KRAFT_ZBAND=3` | KRAFT=1 ist **gemessen** (30.08.): cd_druck_rest +0,2313 ± 0,0102 = 22,7 σ, cz_druck_rest 1,06 σ — ein validiertes Negativ. KRAFT=2 ist am Fahrzeug nie gemessen und ist die Obergrenze für den Umfang „alle" aus §3.1. Vorbehalt unverändert: `object_force` sieht die Guo-Kraft nicht, der Reibanteil steht allein in der `fac_tau`-Buchung | ein 8-mm-Lauf, **nur mit Freigabe** |
+| **1** | ~~`CFD_FAC_KRAFT=1`~~ und ~~`CFD_FAC_KRAFT=2`~~ — **beide erledigt, beide NEGATIV.** Stufe 1 war am 30.08. gemessen (§0b). Stufe 2 am 22.09. gemessen (Heiko-Freigabe für 8-mm-Läufe): **der Arm ist am 8-mm-Fahrzeug numerisch instabil** — NaN bei t = 0,033 s, mit `CFD_POSITIV_FACETTE=1` erst bei t = 0,269 s. Im Fenster 0,201–0,269 s gegen den Kontrollarm: `cd_druck_rest` **+0,0670 ± 0,0116 = 5,76 σ (+21,6 %)**, `cz_druck_rest` +0,0941 ± 0,0342 = 2,75 σ (**weniger** Abtrieb). Deckungsgleich mit Stufe 1 (+21,9 %) | **Die Obergrenze für den Umfang „alle" aus §3.1 ist damit gemessen — und sie zeigt in die falsche Richtung.** Vorbehalte: Werte aus einem kippenden Lauf, für cz nur 7,2 unabhängige Beobachtungen, Mindestlauflänge 739 ms gerissen. Für ein Negativ reicht es | erledigt, 4 Läufe à 6 min |
 | **2** | **Timer um `fac_apg_ab`** | zerlegt die 17 %, bevor irgendetwas optimiert wird | Zweizeiler + 8-mm-A/B |
 | **3** | ~~FP16S-Rauschlast auf f_neq beziffern~~ — **erledigt 22.09.2026, siehe §2b.** Das Histogramm war auf f_eq normiert statt auf die Störform f − w_i und damit um Faktor ≈ 55 zu pessimistisch. Die Frage ist überdies zweimal GEMESSEN beantwortet (`AUDIT-BEFUNDE.md:940-945`: FP16S gegen FP32, cz_druck_rest 0,70 σ) | entscheidet **nicht** zwischen A und B — der Unterschied ist eine Modellfrage (§2) | erledigt, null Kosten |
 | **4** | ~~**S−1**: `hits_n` 320 → 384~~ — **erledigt 22.09.2026**, Commit s. Tagesprotokoll. Der `scratch_gate`-Arm rutscht nach S0 (kein Define in S−1). Dabei gefunden und mitbehoben: `setup.cpp:1425` führte die Slotzahl hart als 320 | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
