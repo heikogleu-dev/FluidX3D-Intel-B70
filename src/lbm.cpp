@@ -129,7 +129,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// vier Zeilen weiter oben bereits beschreibt.
 	f_liste_on = s_f_liste>0u;
 	band_lagen = s_sgs_band; band_on = s_sgs_band>0u; // ★ 08.09. Konstruktionszustand einfrieren (read-once-Doktrin)
-	band_pi_on = band_on&&s_sgs_band_pi>0u; // ★ 22.09. Plan C: Pi-Modus je Instanz einfrieren
+	band_pi_on = band_on&&s_sgs_band_pi>0u&&s_sgs_sism>0u; // ★ 22.09. Plan C: Pi-Modus je Instanz einfrieren; Durchgang 2 N-1: dieselbe Bedingung wie die JIT-Emission (SISM noetig), sonst meldet der Kohaerenzwaechter eine Fehlkonfiguration als H1-Klasse
 	nut_skal = s_sgs_nut_skal; // ★ 10.09. dito fuer den Diskriminator-Messarm
 	fac_idx_voll_on = s_fac_idx_voll>0u;
 	fac_pinv_on = s_fac_pinv>0u; // ★ 04.09.: Rang-1-Pseudoinverse statt Skalarleiter (JIT-Define, muss vor der ersten Kernel-Erzeugung stehen)
@@ -371,6 +371,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 #else // GRAPHICS
 	opencl_c_code = device_defines(device_info)+get_opencl_c_code();
 #endif // GRAPHICS
+	band_pi_jit = opencl_c_code.find("#define SGS_BAND_PI")!=string::npos; // ★ 22.09. Pruefbefund A-M2: Kernel-Modus aus dem JIT-Text einfrieren, alloc_sgs_band vergleicht ihn mit dem Host-Modus (H1-Klasse: Host FD, Kernel Pi -> 6x Ueberlauf; war nur ueber Symptome zu finden). Durchgang 2 N-2: HINTER dem #endif, damit auch ein GRAPHICS-Bau ihn setzt.
 	// ★ C2 (aus V1 portiert, 2026-08-15): CFD_DUMP_DEFINES druckt die tatsaechlich emittierte
 	// Define-Liste (schliesst die Fehlerklasse "Host-Define != OpenCL-Define" -- ein #define in
 	// defines.hpp wirkt NUR host-seitig, ein Kernel-#ifdef braucht die Emission ZUSAETZLICH).
@@ -1221,7 +1222,7 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	// Die Bandpuffer fielen damit ungeprueft NACH dem Facettenwaechter -- bei 4 mm sind das
 	// 118,8 MB, die in keinem Waechter und in keinem Reserveposten standen. Wortgleich zum
 	// Vorbild aufgebaut, damit beide Meldungen gleich zu lesen sind.
-	{	const ulong mb_band = (8ull*FNB + 8ull*band_N + (sism_on ? 24ull*band_N : 4ull) + (gdiag_on ? 32ull*band_N : 0ull)) / 1048576ull; // ★ 22.09. + band_gd (8 float je Bandzelle) unter CFD_SGS_GDIAG
+	{	const ulong mb_band = (8ull*FNB + (band_pi_on ? 4ull*band_N+4ull : 8ull*band_N) + (sism_on ? 24ull*band_N : 4ull) + (gdiag_on ? 32ull*band_N : 0ull)) / 1048576ull; // ★ 22.09. + band_gd (8 float je Bandzelle) unter CFD_SGS_GDIAG
 		const ulong belegt = (ulong)device.info.memory_used, kapazitaet = (ulong)device.info.memory;
 		const ulong frei_gemessen = vram_frei_gemessen(kapazitaet);
 		const ulong frei = frei_gemessen>0ull ? frei_gemessen : (kapazitaet>belegt ? kapazitaet-belegt : 0ull);
@@ -1273,7 +1274,8 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 		print_info("SGS-BAND Liste: "+to_string(band_N)+" Bandzellen fbi -> n umgerechnet (F-BBox-Ursprung "+to_string(fbx0)+"/"+to_string(fby0)+"/"+to_string(fbz0)+", "+to_string(fbnx)+"x"+to_string(fbny)+"x"+to_string(fbnz)+" im Gitter "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+"); Selbstpruefung: 0 Solid/E-Zellen, 0 ausserhalb"+(fbx0==0u&&fby0==0u&&fbz0==0u&&fbnx==Nx&&fbny==Ny ? string(" -- F-BBox = Gitter, fbi == n (dieser Fall haette den Defekt B32 NICHT gezeigt)") : string(" -- F-BBox ist eine Teilbox, fbi != n (hier wirkte der Defekt B32)"))+".");
 	}
 	band_zellen.write_to_device();
-	band_sbar=Memory<float>(device,band_N); // Start 0 = kein Abzug; der erste Schritt ist damit bitgleich zum Bezugsarm
+	if(band_pi_jit!=band_pi_on) { print_error("alloc_sgs_band: KOHAERENZ Host/Kernel verletzt -- Kernel-Text "+string(band_pi_jit?"MIT":"OHNE")+" SGS_BAND_PI, Host band_pi_on = "+to_string(band_pi_on?1u:0u)+". Genau das war Pruefbefund H1 (22.09.): Host bindet band_sbar (N float), der Kernel schreibt 6 float je Bandzelle."); band_on=false; return; } // ★ 22.09. Pruefbefund A-M2
+	band_sbar=Memory<float>(device, band_pi_on ? 1ull : band_N); // Start 0 = kein Abzug; im Pi-Modus ungenutzt (Pruefbefund A-N4: 4*band_N B toter Speicher, 4 mm ~10 MiB) -> Platzhalter
 	band_sbar.write_to_device();
 	band_sb=Memory<float>(device, sism_on ? 6ull*band_N : 1ull);
 	band_sb.write_to_device();

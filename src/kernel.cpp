@@ -3642,7 +3642,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const ulong k6b_ = 6ul*(ulong)band_bid;
 			const float sb0=band_sbar[k6b_], sb1=band_sbar[k6b_+1ul], sb2=band_sbar[k6b_+2ul], sb3=band_sbar[k6b_+3ul], sb4=band_sbar[k6b_+4ul], sb5=band_sbar[k6b_+5ul];
 			const float sbar_pi = sqrt(2.0f*(sq(sb0)+sq(sb1)+sq(sb2)+2.0f*(sq(sb3)+sq(sb4)+sq(sb5))));
-			const float nut_n = t<def_sgs_sism_ab ? nut_b : fmax(0.0f, nut_b-0.030021f*sbar_pi); // Klemme ZWINGEND (wie Lage 1)
+			const float nut_n = t<def_sgs_sism_ab ? fmax(0.0f, nut_b) : fmax(0.0f, nut_b-0.030021f*sbar_pi); // Klemme ZWINGEND (wie Lage 1); Phase 1 wie der FD-Zweig geklemmt (Pruefbefund A-N1: nut_b kann an Q~0-Zellen 1 ulp negativ sein)
 			const float a_pi = 1.0f/(float)def_sgs_sism_T;
 			band_sbar[k6b_]     = fma(a_pi, Sp0-sb0, sb0);
 			band_sbar[k6b_+1ul] = fma(a_pi, Sp1-sb1, sb1);

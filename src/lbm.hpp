@@ -540,7 +540,7 @@ public:
 	Memory<float> band_sbar;  // ★ 08.09. NACH dem Kipptest: Sbar (Betrag des zeitgemittelten Scherratentensors) je Bandzelle. Frueher war das ein fertiges w -- der w-ERSATZ kippte am 8-mm-Stressarm bei Schritt 392, auch ohne SISM.
 	Memory<float> band_sb;    // EMA der 6 S-Komponenten je Bandzelle (nur unter SISM belegt)
 	float nut_skal = 1.0f; // ★ 10.09. Diskriminator-Messarm: Konstruktionszustand, eingefroren wie band_on. Die Abnahme liest IHN, nicht die Umgebungsvariable -- sonst haette sie eine zweite Wahrheitsquelle (Muster pruefe_band_wirkpfad, das D->band_on liest).
-	ulong band_N = 0ull; uint band_lagen = 0u; bool band_on = false; bool band_pi_on = false; uint band_param_pos = 0u; // Signaturposition von band_idx in stream_collide, in alloc_facetten_domain berechnet (dort sind alle Schalter im Scope)
+	ulong band_N = 0ull; uint band_lagen = 0u; bool band_on = false; bool band_pi_on = false; bool band_pi_jit = false; /* ★ 22.09. A-M2: Kernel-Modus aus dem JIT-Text */ uint band_param_pos = 0u; // Signaturposition von band_idx in stream_collide, in alloc_facetten_domain berechnet (dort sind alle Schalter im Scope)
 	ulong band_n_lage[8] = {0,0,0,0,0,0,0,0}; // Zellzahl je Lage, fuer den Bericht und Ist=Soll
 	// ★ 22.09.2026 BAND-g-DIAGNOSE (Plan B3(b)): zweite Instanz des sgs_gdiag-Kernels ueber band_zellen -- misst |S|_FD und |S|_Pi an DERSELBEN
 	// Bandzelle zur selben Zeit (Pi/FD in Lage 2..N war nie gemessen; der Band-Abzug mischt Pi-|S| mit FD-Sbar). Physikfrei, nur mit CFD_SGS_GDIAG.

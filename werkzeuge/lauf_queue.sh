@@ -35,6 +35,12 @@ while IFS= read -r zeile; do
 	[ -n "$name" ] || { echo "UEBERSPRUNGEN (leerer Name): $zeile" | tee -a "$Q"; continue; }
 	[ "${zeile#*::}" = "${zeile##*::}" ] || { echo "UEBERSPRUNGEN (mehrfaches '::'): $zeile" | tee -a "$Q"; continue; }
 	n=$((n+1))
+	# ★ 22.09.2026 Pruefbefund A-M1: CFD_QUEUE_DEV stand bisher nur als TEXT in env_teil (Umgebung des Binaries), das
+	# Geraete-ARGUMENT "${CFD_QUEUE_DEV:-2}" kam aber aus der Shell der Queue -> fuer Einzeldomaenen-Faelle (kanal, kugel:
+	# Geraet = argv[1]) lief JEDE Serienzeile auf Geraet 2 (iGPU), egal was in der Zeile stand; nur fahrzeug_dd waehlt sein
+	# Geraet im Code (most flops -> B70). Alle "CPU"- und "B70"-Kanalsprossen vom 22.09. waren iGPU-Laeufe. Jetzt: Zeile > Shell > 2.
+	dev="$(printf '%s' "$env_teil" | tr -s '[:space:]' '\n' | grep '^CFD_QUEUE_DEV=' | tail -1 | cut -d= -f2)"
+	dev="${dev:-${CFD_QUEUE_DEV:-2}}"
 	# ★★ 06.09.2026 GPU-ZUSTANDSWAECHTER VOR DEM START. Zweimal belegt (05.09. 20:01 -> wp_x_bud2,
 	# 06.09. 11:02 -> xc_frei_mittig): endet der Teardown des VORIGEN Laufs mit "Engine memory CAT
 	# error", haengt der NAECHSTE Lauf auf der B70 nach "Allocating memory" -- ein Thread bei 100 %,
@@ -87,7 +93,7 @@ while IFS= read -r zeile; do
 		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Diagnose-Zeitmesser (CFD_TIMER_FERN/CFD_TIMER_APG) ohne 'timer' im Laufnamen. Diese Arme SERIALISIEREN, ihre Wanduhr ist kein Leistungsmass (Sperre 22.09.; Anlass CFD_TIMER_FERN am 21.09., +101 Prozent Wanduhr)" | tee -a "$Q"
 		continue
 	fi
-	if [ "${CFD_QUEUE_DEV:-2}" = "1" ] && command -v journalctl >/dev/null 2>&1; then
+	if [ "$dev" = "1" ] && command -v journalctl >/dev/null 2>&1; then
 		cat_n=$(journalctl -k --since '-3min' --no-pager 2>/dev/null | grep -ac 'Engine memory CAT error')
 		if [ "${cat_n:-0}" -gt 0 ]; then
 			echo "[$(date +%H:%M:%S)] GPU-WAECHTER: $cat_n CAT-Error(s) in den letzten 3 min -- warte 60 s vor $name (Haengegefahr, 2x belegt)" | tee -a "$Q"
@@ -120,7 +126,7 @@ while IFS= read -r zeile; do
 	# in den Code, wo Gittergroesse, CFD_VTK_DT und CFD_T_END bekannt sind und der Bedarf exakt ist.
 	frei_vor=$(df --output=avail . 2>/dev/null | tail -1 | tr -d " ")
 	t_vor=$(date +%s)
-	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name (Binary $BIN, frei $(( ${frei_vor:-0} / 1048576 )) GB)" | tee -a "$Q"
+	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name (Binary $BIN, Geraet-Arg $dev, frei $(( ${frei_vor:-0} / 1048576 )) GB)" | tee -a "$Q"
 	# ★★ 06.09.2026 FORTSCHRITTSWAECHTER. Der Herzschlag bezeugt nur, dass der PROZESS lebt, nicht
 	# dass er RECHNET. Am 06.09. stand xf_elibb_pur 2 h 10 min nach "Allocating memory" bei 100 % auf
 	# einem Thread, waehrend die Statusdatei im Zweiminutentakt "LAEUFT" schrieb -- zwei Stunden
@@ -132,7 +138,7 @@ while IFS= read -r zeile; do
 	versuch=0; rc=0
 	while :; do
 		versuch=$((versuch+1))
-		env $env_teil CFD_RUN_NAME="$name" "$BIN" "${CFD_QUEUE_DEV:-2}" < /dev/null > "logs/$name.log" 2>&1 &
+		env $env_teil CFD_RUN_NAME="$name" "$BIN" "$dev" < /dev/null > "logs/$name.log" 2>&1 &
 		pid=$!
 		gestartet=0
 		for _ in $(seq 1 $HANG_S); do

@@ -722,7 +722,7 @@ static void sgs_sism_selbsttest() {
 static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
 	if(D==nullptr||!D->band_on||D->band_N==0ull) return;
 	const ulong wp=(ulong)D->rho_clamp_hits.data()[186];
-	const ulong slots=(t_ende>0ull?(t_ende-1ull)/zaehl_takt():0ull)+1ull; // Kernel-t laeuft 1..t_ende-1; Slots sind 0,100,200,...
+	const ulong slots=(t_ende>0ull?(t_ende-1ull)/zaehl_takt():0ull)+1ull; // Kernel-t laeuft 0..t_ende-1 (t=0 wird gezaehlt: Kanal 3720 x 2667 bei t_ende = 266666); Slots sind 0,100,200,...
 	const ulong soll=D->band_N*slots;
 	string je; for(uint L=2u; L<8u; L++) if(D->band_n_lage[L]>0ull) je += (je.empty()?"":" + ")+to_string(D->band_n_lage[L])+" (Lage "+to_string(L)+")";
 	if(wp==0ull) { print_error("["+ort+"] SGS-BAND angefordert ("+to_string(D->band_N)+" Bandzellen), aber Slot 186 = 0 -- STILLER NO-OP. Emission? Rebind der Signaturposition? WANDFREI davor?"); return; }
@@ -739,8 +739,28 @@ static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string
 		if(D->band_pi_on) { // ★ 22.09. Plan C: Sbar_band(Pi) aus dem EMA-Zustand (Iron Rule 3: der Mechanismus zeigt seinen Zwischenwert)
 			D->band_sb.read_from_device(); double s_=0.0, mx=0.0; ulong nz=0ull;
 			for(ulong i=0ull; i<D->band_N; i++) { const float* b=&D->band_sb[6ull*i]; const double v=sqrt(2.0*((double)b[0]*b[0]+(double)b[1]*b[1]+(double)b[2]*b[2]+2.0*((double)b[3]*b[3]+(double)b[4]*b[4]+(double)b[5]*b[5]))); s_+=v; if(v>mx) mx=v; if(v<=0.0) nz++; }
-			print_info("["+ort+"] SGS-BAND Pi-Modus: Sbar_band_Pi = Betrag EMA(S_Pi), Mittel "+to_string((float)(s_/(double)D->band_N),7u)+", Maximum "+to_string((float)mx,7u)+", exakt 0 an "+to_string(nz)+" von "+to_string(D->band_N)+" Bandzellen (Soll 0 -- sonst hat die EMA dort nie geschrieben).");
+			// ★ 22.09. 17:05 (8-mm-Lauf s5_bandpi2_12_8): "exakt 0" an 1174 von 624 342 Bandzellen -- das sind GENAU die Zellen, die der Leserzweig nie
+			// erreicht (Slot-186-Defizit 59 874 = 1174 x 51 Slots; am Kanal 0). Soll ist also nicht 0, sondern das Slot-186-Defizit: nz == band_N - wp/slots.
+			const ulong unerreicht = (slots>0ull && wp<soll) ? (soll-wp)/slots : 0ull;
+			print_info("["+ort+"] SGS-BAND Pi-Modus: Sbar_band_Pi = Betrag EMA(S_Pi), Mittel "+to_string((float)(s_/(double)D->band_N),7u)+", Maximum "+to_string((float)mx,7u)+", exakt 0 an "+to_string(nz)+" von "+to_string(D->band_N)+" Bandzellen (Soll = vom Leserzweig unerreichte Zellen aus Slot 186: "+to_string(unerreicht)+(nz==unerreicht?" -- konsistent).":" -- INKONSISTENT: EMA-Nullzellen und Slot-186-Defizit decken sich nicht)."));
+			if(nz>0ull) { // ★ 22.09. Durchgang 2 M-2: die unerreichten Bandzellen physikalisch aufschluesseln, nicht nur buchhalterisch (8 mm: 1174 von 624 342)
+				D->flags.read_from_device(); D->band_zellen.read_from_device();
+				ulong k_s=0ull, k_e=0ull, k_ms=0ull, k_fluid=0ull;
+				for(ulong i=0ull; i<D->band_N; i++) { const float* b=&D->band_sb[6ull*i]; if(b[0]!=0.0f||b[1]!=0.0f||b[2]!=0.0f||b[3]!=0.0f||b[4]!=0.0f||b[5]!=0.0f) continue;
+					const uchar f=D->flags[D->band_zellen[i]]; if((f&(TYPE_S|TYPE_E))==(TYPE_S|TYPE_E)) k_ms++; else if(f&TYPE_S) k_s++; else if(f&TYPE_E) k_e++; else k_fluid++; }
+				print_info("["+ort+"] SGS-BAND Pi-Modus: EMA-Nullzellen nach Flag am Laufende -- TYPE_MS (S|E) "+to_string(k_ms)+", TYPE_S "+to_string(k_s)+", TYPE_E "+to_string(k_e)+", Fluid "+to_string(k_fluid)+" (Fluid > 0 hiesse: Liste und Kernel-Maske decken sich an Fluidzellen nicht -- dann band_fid/f_bbox pruefen).");
+			}
+			if(nz!=unerreicht) print_warning("["+ort+"] SGS-BAND Pi-Modus: "+to_string(nz)+" Bandzellen ohne EMA-Schreibvorgang, aber Slot 186 fehlt an "+to_string(unerreicht)+" Zellen -- entweder schreibt stream_collide an erreichten Zellen nicht, oder eine unerreichte Zelle traegt einen Fremdwert.");
 			if(nz==D->band_N) print_error("["+ort+"] SGS-BAND Pi-Modus: der EMA-Zustand ist an ALLEN Bandzellen 0 -- stream_collide hat band_sb nie geschrieben (Bindung/Emission?).");
+			// ★ 22.09. Pruefbefund A-M2: im Pi-Modus darf KEIN FD-Bandkernel laufen. Der zaehlt (sbar_out = 1) ebenfalls Slot 126 -- im Defektzustand H1
+			// stand 126 auf dem DOPPELTEN Lage-1-Soll (Kanal: 19 098 480 statt 9 549 240), und kein Bericht las das. Soll = fac_N x Phase-2-Slots.
+			{	const ulong s126=(ulong)D->rho_clamp_hits.data()[126]; const ulong ab=D->sism_ab, takt=zaehl_takt();
+				const ulong erste=((ab+takt-1ull)/takt)*takt, letzte=(t_ende>0ull?(t_ende-1ull)/takt:0ull)*takt;
+				const ulong slots_ab=(t_ende>ab&&letzte>=erste)?(letzte-erste)/takt+1ull:0ull; const ulong soll126=D->fac_N*slots_ab;
+				if(soll126>0ull&&(double)s126>1.02*(double)soll126) print_error("["+ort+"] SGS-BAND Pi-Modus: Slot 126 = "+to_string(s126)+" liegt UEBER dem Lage-1-Soll "+to_string(soll126)+" = "+to_string(D->fac_N)+" Facetten x "+to_string(slots_ab)+" Phase-2-Slots -- ein zweiter sgs_fdwand-Start (FD-Bandkernel) zaehlt mit: Host- und Kernel-Modus laufen auseinander (H1-Klasse).");
+				else if(soll126>0ull&&(double)s126<0.98*(double)soll126) print_warning("["+ort+"] SGS-BAND Pi-Modus: Slot 126 = "+to_string(s126)+" liegt UNTER dem Lage-1-Soll "+to_string(soll126)+" -- Facettenzellen erreichen den Abzug nicht vollstaendig (Durchgang 2 N-4: Untergrenze).");
+				else print_info("["+ort+"] SGS-BAND Pi-Modus: Slot 126 = "+to_string(s126)+" = 1 x Lage-1-Soll "+to_string(soll126)+" ("+to_string(D->fac_N)+" Facetten x "+to_string(slots_ab)+" Phase-2-Slots) -- kein FD-Bandkernel im Pi-Modus.");
+			}
 		}
 	}
 }
@@ -10896,6 +10916,7 @@ void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeu
 			print_error("CFD_TIMER_APG=1 mit CFD_CASE="+fall+": dieser Fall fuehrt kein APG (s_fac_apg ist dort konstruktiv 0), "
 				"der Vorkernel fac_apg_ab laeuft nie und der Timer waere ein lautloser No-Op. APG gibt es in kanal, kugel und fahrzeug_dd.");
 	}
+	if(env_u("CFD_SGS_BAND_PI", 0u)>0u&&env_u("CFD_SGS_SISM", 0u)==0u) print_error("CFD_SGS_BAND_PI=1 braucht CFD_SGS_SISM=1 -- die Pi-EMA ist die SISM-Mittelung (def_sgs_sism_T/ab); ohne SISM gibt es weder Define noch Pi-Modus (Durchgang 2 N-1)."); // ★ 22.09.
 	if(env_u("CFD_SGS_BAND_PI", 0u)>0u&&env_u("CFD_SGS_BAND", 0u)<2u) // ★ 22.09. Plan C: Ansage VOR der Fallauswahl (nicht im Domaenen-Konstruktor -- den durchlaeuft das Band-freie Fernfeld von fahrzeug_dd mit genullter Statik; Lauf s5_bandpi2_12_8 starb daran)
 		print_error("CFD_SGS_BAND_PI=1 ohne CFD_SGS_BAND >= 2 -- es gibt keine Bandzellen, der Pi-Modus waere ein stiller No-Op (Ansage-Doktrin).");
 	if(env_u("CFD_FAC_APG_MOZ", 0u)>0u) { // ★ 22.09. MOZ dieselbe Klasse (Pruefbefund B, stille No-Op-Kombinationen): in fahrzeug/fernfeld/facetten_test ist s_fac_apg konstruktiv 0
