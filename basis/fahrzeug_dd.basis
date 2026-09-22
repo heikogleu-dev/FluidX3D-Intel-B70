@@ -68,7 +68,12 @@
 #   BELEG fuer die drei Schalter: das Pi-Band ist der erste Arm seit Wochen, der die Dachgrenzschicht bewegt --
 #   H Dachplateau 2,019 (kein Band) -> 1,715 (FD-Band) -> 1,613 (Pi-Band), Zeitstreuung 0,159 -> 0,074;
 #   cd_reib 0,044924 -> 0,037348 = -16,9 % (8 mm, Dreiervergleich s4_ref12_8 / s4_band2_12_8 / s5_bandpi2_12_8).
-#   Bei 4 mm bestaetigt: alle Abnahmen gruen, Wanduhr 75 min gegen 90,4 min der alten Baseline, Bandpuffer 108 MB.
+#   Bei 4 mm bestaetigt: alle Abnahmen gruen, Bandpuffer 108 MB, VRAM frei 2153 MB.
+#   LEISTUNG, BERICHTIGT 22.09. 21:40: die Wanduhr (75 min) ist NICHT mit p4_register/p4_neu (48,9 bzw. 90,4 min)
+#   vergleichbar -- jene liefen auf 519,1 M Zellen, der Anker auf 654,9 M (+26 %, Kasten-Regelwerk vom 21.09.).
+#   Je Zelle: p4_register 0,758 ms je Mio. Zellen und Grobschritt, Anker 0,860 -> +13,4 %. Das ist der Preis
+#   von Band + U_SPARSAM=0, und er ist bezahlt: unabhaengige Referenz OpenFOAM 13 (y = 0,025 m, 200 118 Zellen,
+#   gepaart) RMS 5,4020 -> 4,8677 m/s = -9,9 %, Clip |dU| > 15 m/s 3,59 -> 2,06 % = -42,5 %.
 #   U_SPARSAM 0 gehoert dazu, weil der Waechter U_SPARSAM x BAND sonst greift (setup.cpp:7257); bitneutral belegt (s3_us0_8).
 # STANDARD GEAENDERT (Heiko-Entscheid 22.09.2026, 19:34): CFD_T_END 0.501 -> 0.741. Wortlaut: "Die Basislauflaenge sollte immer
 #   5x Fahrzeuglaenge betragen." Regel und Herleitung stehen seit 21.09. in BOX-REGELWERK.md:295-299: t_min = 5 L / u_inf =

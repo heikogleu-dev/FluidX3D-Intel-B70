@@ -1,7 +1,15 @@
 # FluidX3D — Intel Arc Pro B70: Vehicle Aerodynamics (LBM-WMLES vs. OpenFOAM)
 
+> **Anchor as of 2026-09-22:** the standard configuration is the 4 mm run `p4_bandpi2_4`, secured as
+> git tag `anker-p4-bandpi2-4` on commit `f0e9c4c` (the run states its own commit and a clean tree; the
+> code snapshot it carries is byte-identical to `src/`). It adds the Π-consistent multi-layer band
+> (`CFD_SGS_BAND=2 CFD_SGS_BAND_PI=1 CFD_U_SPARSAM=0`) and drops the wall-shear correction
+> (`CFD_FAC_APG=0`). Forces at 501 ms: **cd_rest 0.5446 ± 0.0361, cz_rest −1.0653 ± 0.0828** on
+> 654.9 M fine cells. The table below still shows `p4_register` (2026-09-12) — a **different and 26 %
+> smaller grid**, so its wall clock is not comparable with the anchor's; see the 2026-09-22 section.
+
 **Performance & results at a glance** *(every number measured on this rig. Forces from the 4 mm
-production run `p4_register` (2026-09-12), the current baseline: facet SISM wall model, ghost-mode
+production run `p4_register` (2026-09-12), the previous baseline: facet SISM wall model, ghost-mode
 purification (P-TRT, ω_g = 1.90), the det-ε rank guard, `rho` and `u` in two bytes, sparse field
 writes, and 8 steps per cell. N = 300, window t ≥ 0.201 s, uncertainty = standard error over six
 50 ms window means. Cd/Cz are the **rest** figures — the moving z-band around the wheel contact is
@@ -33,6 +41,127 @@ so that no number here can be confused with another:
 | **`cz_druck_rest`** | **−1.0423** | pressure without the band. **This is the quantity every model comparison in this document is measured on** |
 | `cz_reib` | +0.0720 | friction, and it works *against* downforce |
 | **Cz total** | **−0.9704** | `cz_druck_rest + cz_reib` — the row in the table above |
+
+---
+
+## 2026-09-22 — a defect that had been hiding behind a correct counter
+
+This day is worth reading even if you care nothing for this car, because the central finding is a
+methodological one: **a mechanism whose action-path counter matches its target to the last digit can
+still be computing in the wrong place.**
+
+### The index defect
+
+The multi-layer band (`CFD_SGS_BAND`) extends the wall-cell subgrid model outward from the first cell
+layer. Its cell list is built on the host and handed to the kernel. From 2026-09-08 the list carried
+**F-bounding-box indices** while the kernel dereferenced them as **global grid indices**.
+
+On the channel case the bounding box *is* the grid, so the two index spaces coincide and every test
+passed. On the vehicle they differ, and the band was computing its mean strain at arbitrary other
+cells. The action-path counter was correct throughout — it counted visits, and the visits happened;
+it simply could not see *where*. Two weeks of band measurements were void, and the switch had been
+turned off in the standard on 2026-09-11 on the strength of one of them.
+
+The defect was found by taking the null result seriously instead of believing it: a mechanism that
+provably runs, provably costs memory, and provably changes nothing is either physically irrelevant or
+structurally broken, and those two are distinguishable. The fix carries a host-side self-check that
+rejects any list entry that is not genuine fluid.
+
+### What the band does once it computes where it should
+
+Three 8 mm arms, one variable each, 12 time points per arm, evaluated on the boundary-layer shape
+factor **H = δ\*/θ** at the roof — not on Cd/Cz, which 8 mm cannot resolve:
+
+| | no band | FD band | Π band |
+|---|---|---|---|
+| **H**, roof plateau | 2.019 ± 0.159 | 1.715 ± 0.101 | **1.613 ± 0.074** |
+| **cd_reib** | 0.044924 | 0.038183 | **0.037348** |
+| layer-1 clamp, absolute | 9 016 317 | 8 748 854 | 8 649 473 |
+| band clamp | — | 6.31 % | 13.53 % |
+| **rank fallback** | 24.0 % | 24.0 % | 24.0 % |
+
+The lever is **friction, −16.9 %**, and the shape of the roof boundary layer. It is *not* the rank
+fallback — the band works in layer 2, the fallback is a rank property of layer 1.
+
+### The Π-consistent estimator
+
+The subgrid model subtracts a running mean strain from the instantaneous strain. In layer 1 both come
+from the same source. In the band they did not: the instantaneous value came from the non-equilibrium
+tensor Π inside `stream_collide`, the mean from a finite-difference stencil on `u` in a second kernel.
+A diagnostic built for the purpose measured the two estimators against each other in layer 2 and found
+them apart by a factor **1.53** — so the band was removing about 62 % of what it was meant to remove.
+
+`CFD_SGS_BAND_PI=1` forms the mean from the same Π source, as an exponential moving average of the six
+tensor components per band cell, directly in `stream_collide`. The second kernel launch disappears.
+Cost: **0 MB VRAM, 0 bytes per cell and step** — the buffer already existed and only its contents change.
+
+### Validated against an independent reference
+
+Internal comparisons cannot decide this; a fork of one's own code can share its own error. Two
+diff slices against a converged **OpenFOAM 13** RANS sample, same plane, same 200 118 evaluable cells,
+paired, one variable:
+
+| | no band | Π band | Δ |
+|---|---|---|---|
+| RMS \|u\|_OF13 − \|u\|_FX | 5.4020 m/s | **4.8677 m/s** | **−9.9 %** |
+| mean | +0.2402 | −0.2262 | sign flip |
+| share \|dU\| > 15 m/s | 3.59 % | **2.06 %** | **−42.5 %** |
+
+Images: `docs/diff_s4_ref12_8_vs_of13_500ms.png`, `docs/diff_s5_bandpi2_12_8_vs_of13_500ms.png`.
+
+### Three lines closed the same day, each with data rather than opinion
+
+**The wall-shear target (`CFD_FAC_APG`, and the Mozaffari form of it).** An adverse-pressure-gradient
+correction modulates the wall shear stress. Measured on 2026-09-16 as having no effect on pressure
+drag; the obvious objection was that this was measured on a near-wall state produced by a band that
+was silently broken. So it was re-measured on the repaired state, where the roof boundary layer is
+demonstrably different (H 2.019 → 1.613). The switch fires at full authority — the clamp is hit at
+**97.1 % of 36 596 164 facet visits**, i.e. the largest modulation the model can produce — and still:
+H −0.010 ± 0.036 (0.3 σ), forces in the noise, **only friction moves, +1.2 %**. Two independent
+near-wall states, same answer. The path is closed at this cell layer.
+
+**The sub-voxel wall distance q.** A planning pass corrected two assumptions that had been carried in
+notes: q does **not** come from the STL — the Taubin remesh runs over the final flags field, i.e. the
+voxel body — and q = 0.5000 holds not merely on stair treads but on **all 15 114 078 raw solid links**,
+which is a geometric identity rather than a peculiarity. 56.2 % of links sit in the bin where the
+interpolated bounce-back is bit-identical to plain bounce-back. A secant-wall reconstruction of q was
+scoped, costed (0 MB, host-only) and given an abort criterion that needs no time step at all — and then
+closed as not worth building.
+
+**The rank fallback.** See below; the census was already in the code and had been printing before every
+first time step.
+
+### The fallback census — and why resolution is not the answer
+
+At every facet the wall model solves a 2×2 tangential system. Where the system is rank-deficient the
+model falls back to a static slot. The runtime fallback rate is **24.5 %**. The static census — which
+runs before the first time step and bounds what the runtime can ever reach — says:
+
+| dx | active facets | rank 2 | rank 1 | **rank 0 (never solvable)** |
+|---|---|---|---|---|
+| 8 mm | 717 873 | 46.92 % | 33.97 % | **19.11 %** |
+| 4 mm | 3 127 618 | 50.79 % | 30.66 % | **18.56 %** |
+| 3.75 mm | 3 624 353 | 50.53 % | 31.07 % | **18.40 %** |
+
+**Halving the cell size moves the never-solvable share by 0.55 points.** The share is effectively
+scale-invariant, which is what one should expect: the voxel staircase on a smooth surface looks the
+same at every resolution, only smaller. Roughly **92 % of the rank-0 facets have exactly one wall
+link** (4 mm: 533 136 of 580 335, median wall distance 1.09 cells, median inclination 28.5° — the convex
+staircase corners), and one link cannot span two tangential directions. That is algebra, not a
+shortcoming of the solver.
+
+D3Q27 would add links, but the facet wall model is built for D3Q19 only (`lbm.cpp:149`); the velocity
+set is a build define and the D3Q27 binary runs **without** the wall model. Enabling it needs the pair
+table for the 27-neighbourhood first. What remains is reconstruction: treat the one-link cell by
+something other than the tangential solve.
+
+### A note on comparing wall clocks
+
+The anchor run is 26 % larger than the runs it is often compared with (654.9 M fine cells against
+519.1 M, a consequence of the box rule adopted 2026-09-21). Wall clocks across different grids say
+nothing. Normalized: **0.758 ms per million cells and coarse step** for `p4_register` against **0.860**
+for the anchor — the band and the dense `u` writes cost **13.4 %**, and the OpenFOAM comparison above is
+what was bought with it.
 
 ---
 
@@ -231,7 +360,7 @@ than believed — each was built, accepted bit-identically in its control arm, a
 |---|---|---|
 | `CFD_SGS_VANDRIEST` — D = 1 − exp(−y⁺/A⁺), ν_t ← ν_t·D², y⁺ from the wall model's own τ_w running mean rather than from the local strain | rejected | 4 mm, paired, N = 300: **cz_druck_rest −0.0004 ± 0.0035 (0.1 σ)**, despite lowering ν_t by 23.6 % on average. Its criterion is the viscous sublayer; the first fluid cell sits at a median y⁺ of 75 (4 mm) / 141 (8 mm), so it damps where the layer is thin and does nothing where separation decides lift |
 | **`CFD_FAC_DETEPS`** — noise floor in the full-rank test of the coupled Schur branch (2026-09-09) | **the fallback was largely a rounding artefact** | For the flat voxel link set, `G'` after the ALPHA2 downdate is exactly `(1/3)(I − m mᵀ)`, the Schur complement has rank 1 and `dett` is **analytically zero**; the relative threshold `1e-4·Gt11·Gt22` falls *below* the float noise as `Gt11 = (1/3)sin²ψ → 0`. The cell then takes a full-rank branch that does not exist and divides by noise (s1 becomes 1e4…1e7 times u_t), so both gates fire — correctly. Three independent proofs: 93.34 % of all gate fallbacks come from that branch (rate 45.82 % against 2.79 % in the PINV branch below it); the fallback rate against tilt angle **jumps from 1.5 % to 92.7 % at exactly 1°**, where the cancellation guard `kernel.cpp:2193` stops protecting; and the branch migration is exact (−8,686,532 out of [79], +8,686,532 into [80]). 8 mm coverage of real wall cells **70.51 → 81.83 % (PINV) → 95.03 %**, target class (tilted 5-link cells: roof, bonnet, rear deck) 46.81 → **1.98 %** fallback. Cost: 5 operations, 0 MB. Default 0 = bit-identical. **Forces not yet cleared — the 4 mm run carries an unresolved defect (isolated velocity spikes at the nose, absent at 8 mm).** |
-| `CFD_SGS_BAND` — SISM extended to wall layers 2 and 3 over a dedicated cell list | **no gain, settled on both rungs** | 8 mm, paired against layer 1, N = 129: **cz +0.0093 ± 0.0077 (1.2 σ)**. 4 mm, paired against layer 1, N = 300 (`vd4_band3` vs `km_s4_sism`, 2026-09-09): **cz_druck_rest +0.0059 ± 0.0038 (1.5 σ)**, cd_druck_rest +0.0011 ± 0.0036 (0.3 σ) — same sign, same insignificance, so the coarse rung did **not** mislead here. Against no model at all the two are indistinguishable: layer 1 alone −0.1013 ± 0.0107 (9.4 σ), all three layers −0.0954 ± 0.0123 (7.7 σ). The effect path fires exactly (slot 186 = 5,191,900 band cells × 501 count slots, 0.10 % deviation), so this is not a silent no-op. **Why it does nothing is visible in the clamp**: SISM's ν_t=0 clamp fires 343,598,618 times with the band against 348,029,393 without it — a factor of 0.987, even though 2.66× as many cells are in the denominator. Outside the first wall cell \|S\| almost never falls below ⟨\|S\|⟩, so the model has nothing to subtract there |
+| `CFD_SGS_BAND` — SISM extended to wall layers 2+ over a dedicated cell list | **in the standard since 2026-09-22 — the earlier "no gain" verdict was measuring a defect, not the band** | From 2026-09-08 to 2026-09-22 the band list carried **box indices** while the kernel read **global** ones (`alloc_sgs_band`). On the channel the two coincide (box = grid), so the channel ladder looked healthy; on the vehicle the band computed its mean strain **at the wrong cells**. Every band measurement in that window is void as a band measurement — including the two quoted here before. Fixed 2026-09-22 (host self-check: 0 solid/E cells in the list). First valid measurement, 8 mm, 12 time points: roof-plateau **H = δ*/θ 2.019 ± 0.159 → 1.715 ± 0.101** (−0.304 ± 0.054, 5.6 σ); layers 3–5 add nothing. |
 | WALE, Sigma, Vreman, AMD | not built | Ω is not a moment of the local distribution (the D3Q19 Π-tensor is symmetric by construction), so each needs central differences, a separate launch and a field per cell (519 MB at 4 mm). Measured offline on identical fields, their ratio is spatially white noise (stride-1 correlation 0.13–0.40 against 0.92 for \|S\| itself) and ν_t would jump by more than a decade against the face neighbour in 30 % of interior cells |
 
 > **A warning about the coarse rung.** At 8 mm, SISM appears to halve the pressure drag
@@ -483,7 +612,8 @@ no wall-model switch fixes that.
 - **Subgrid chain on the facet architecture** — the finite-difference wall ν_t (baseline), the
   shear-improved Smagorinsky on wall cells (`CFD_SGS_SISM`, the one model measured to help), the
   van Driest damping fed from the wall model's own τ_w (`CFD_SGS_VANDRIEST`, measured and rejected),
-  and the multi-layer band (`CFD_SGS_BAND`, built, accepted, no gain at 8 mm). Each with its own
+  and the multi-layer band (`CFD_SGS_BAND` + `CFD_SGS_BAND_PI`, in the standard since 2026-09-22 — its
+  earlier "no gain" verdict was measuring an index defect, see below). Each with its own
   effect-path counters, self-tests against literature values, and a host-side is=should report;
   the rejected ones are kept switchable so the measurement can be repeated rather than believed.
 - **Measurement instruments in the code** — force decomposition wheel-contact/body with a moving
@@ -771,17 +901,20 @@ measurements in [`TODO.md`](TODO.md) (appendix; formerly PERFORMANCE.md).
 | Switch | Value | Why |
 |---|---|---|
 | `CFD_SGS_SISM=1` + `_T=5000` `_AB=15000` | facet SISM on the wall cell | the wall-cell subgrid model; shear-improved Smagorinsky subtracts the mean strain |
-| `CFD_SGS_BAND=0` | **off since 2026-09-11** | the band applied SISM to wall layer 2 as well. It was *applied* — the action-path counter matches (layer 1 + band) × phase-2 slots to the last digit — but measured **without effect** on forces or field, because outside the first wall cell the instantaneous strain almost never falls below its time mean. It cost 118.8 MB for nothing. |
-| `CFD_SGS_BAND_PI` (built 2026-09-22, default 0) | Π-consistent band estimator | the band's mean-strain subtraction uses the same estimator as its numerator (S_Π from the non-equilibrium tensor, EMA of the six components per band cell in `stream_collide`) instead of the FD stencil, which overestimated |S| in layer 2 by 1.53×. Note the band itself only became effective on 2026-09-22 (index defect since 09-08: the band list carried box indices, the kernel read global ones). 8 mm, 12 time points: roof plateau H 2.019 (no band) → 1.715 (FD band) → **1.613 (Π band)**; forces unchanged within the 8-mm error bars. Candidate for the standard together with `CFD_SGS_BAND=2`; awaiting the 4-mm confirmation |
+| `CFD_SGS_BAND=2` + `CFD_SGS_BAND_PI=1` | **standard since 2026-09-22** | the band applies the wall-cell subgrid model to layer 2 as well, and since 2026-09-22 it does so with a **Π-consistent** mean-strain estimator: the subtrahend now comes from the same non-equilibrium tensor as the numerator, instead of a finite-difference stencil on `u` in a second kernel — those two disagreed by a factor **1.53** in layer 2, so the old band removed only ≈ 62 % of what it was meant to remove. The Π form needs no second kernel launch. 8 mm, 12 time points, one variable per arm: roof-plateau **H 2.019 → 1.715 (FD band) → 1.613 (Π band)**, time scatter 0.159 → 0.101 → 0.074; **friction cd_reib 0.044924 → 0.037348 = −16.9 %**. 4 mm confirmed (`p4_bandpi2_4`, the anchor): all acceptances green, band buffer 108 MB. |
+
 | `CFD_PTRT=1.90` | ghost-mode purification | relaxes the ghost part of the even non-equilibrium at its own rate. Removes the accumulating velocity outliers: 6 270 → 91 free cells above 60 m/s |
 | `CFD_FAC_DETEPS=16` | det-ε rank guard | lifts wall-model coverage 82.5 % → 93.85 %. Costs ≈ +0.011 downforce on `cz_druck_rest`, a deliberate trade |
 | `CFD_FAC_PINV=1` | rank-1 pseudo-inverse | part of the standard since 2026-09-09 |
 | `CFD_T_END=0.501`, `CFD_T_WARMUP=0.201` | run protocol | slices every 50 ms; the runs are **not** converged at 501 ms and this is a known, open conflict |
 
-**Caveat, stated rather than hidden:** the baseline run `p4dt_deteps` still carried
-`CFD_SGS_BAND=2`. The band is switched off *after* that run on the strength of the paired
-measurement that showed it without effect. The combination "standard minus band" has therefore not
-itself been run yet.
+**Caveat, stated rather than hidden — and it turned out to matter.** The band was switched off on
+2026-09-11 on the strength of a paired measurement "that showed it without effect". That measurement
+was invalid: from 2026-09-08 the band list carried box indices while the kernel read global ones, so
+on the vehicle the band was computing at the wrong cells. The defect was found on 2026-09-22 by asking
+why a mechanism with a perfectly matching action-path counter moved nothing — **a counter that fires is
+not proof that it fires in the right place.** Both the counter and the fix are now backed by a host-side
+self-check that rejects any list entry that is not genuine fluid.
 
 ---
 
