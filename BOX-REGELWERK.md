@@ -52,7 +52,7 @@ Fahrzeug, skalierte STL: L 4,4364 m, B 1,83855 m, H 1,20833 m
 
 | | Gitter (Knoten) | Box | Zellspanne |
 |---|---|---|---|
-| Nahfeld (dx 4 mm) | 1917 × 693 × 473 = **628,4 Mio** | 7,664 × 2,768 × 1,888 m | 1916 × 692 × 472 |
+| Nahfeld (dx 4 mm) | 1917 × 693 × **493** = **654,9 Mio** ★ berichtigt 22.09.2026 abends gegen den Ankerlauf `p4_bandpi2_4` (die 473/628,4 Mio dieser Zeile stammten aus der Fassung vor dem Kasten-Regelwerk) | 7,664 × 2,768 × 1,888 m | 1916 × 692 × 472 |
 | Fernfeld (dx 16 mm) | 800 × 636 × 608 = **309,4 Mio** | 12,784 × 10,160 × 9,712 m | 799 × 635 × 607 |
 
 Weltlage: `far_x0 = −2,77275 m`, `NF_OX = 145`, `near_x0 = −0,45275 m`, `NF_OY = 201`, `NF_OZ = 0`.
