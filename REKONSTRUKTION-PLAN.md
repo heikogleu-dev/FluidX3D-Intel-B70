@@ -208,6 +208,31 @@ Die Menge wird **einmal beim Facettenbau** festgelegt, Marke in `fac_geo[8i+7]` 
 heute 0.0f geschrieben `lbm.cpp:1542`, kein Leser im Baum). Schalter zieht den Umfang auf:
 `Rang≤1` / `Rang≤2` / `alle`.
 
+**★ 22.09.2026 abends — die Umfänge sind jetzt BEZIFFERT (Protokoll B50/B51), und das entscheidet die Wahl.**
+Statischer Klassenzensus, dieselbe Codefassung, drei Auflösungen:
+
+| dx | Rang 2 | Rang 1 | **Rang 0 (nie lösbar)** |
+|---|---|---|---|
+| 8 mm | 46,92 % | 33,97 % | **19,11 %** |
+| 4 mm | 50,79 % | 30,66 % | **18,56 %** |
+| 3,75 mm | 50,53 % | 31,07 % | **18,40 %** |
+
+Daraus folgen drei Dinge für diesen Plan:
+1. **Der Umfang `alle` ist gemessen und NEGATIV** (§11 Punkt 1: `CFD_FAC_KRAFT=2`, cd_druck_rest **+21,6 %**, falsche Richtung).
+   Er ist damit kein Kandidat mehr, sondern die belegte Obergrenze.
+2. **Der Umfang `Rang 0` ist der einzige, bei dem die Rekonstruktion nichts Funktionierendes ersetzt.** Dort ist der
+   Tangentialsolve *beweisbar* unmöglich: **92 % dieser Facetten haben genau einen Wandlink** (4 mm: 533 136 von
+   580 335; ein Link kann zwei Tangentialrichtungen nicht aufspannen). Bei Rang 2 würde die Rekonstruktion einen
+   arbeitenden Solve überschreiben — das ist der Weg, der schon einmal +21,6 % gekostet hat.
+3. **Auflösung ist kein Ausweg und D3Q27 heute keiner.** Der Rang-0-Anteil ist über 8 → 3,75 mm praktisch konstant
+   (−0,71 Punkte insgesamt); D3Q27 bricht am Wandmodell ab (`lbm.cpp:149`, `CFD_FACETTEN ist nur fuer D3Q19 gebaut`).
+   Die Rekonstruktion ist damit **nicht eine von drei Optionen, sondern die einzige verbliebene.**
+
+**Empfehlung für §3.1:** Schalter mit Umfang `Rang 0` als ERSTEM und einzigem Bauziel; `Rang≤1` und `alle` bleiben im
+Schalter, aber ungebaut/ungemessen. Die `fac_nb`-Falle unten entschärft sich dabei von selbst — bei 18,6 % Belegung
+ist die Wahrscheinlichkeit, dass die zweite Fluidzelle in die gesetzte Menge fällt, klein, aber der `print_error`
+bleibt trotzdem Pflicht.
+
 **Falle:** `zensus_statische_klassen` läuft an jeder Aufrufstelle **nach** `alloc_facetten`
 (`setup.cpp:4525` vs `4527`, `7584` vs `7594`), und dort ist `fac_geo` schon hochgeladen (`lbm.cpp:1673`).
 Die Klassifikation muss **vor** `alloc_facetten` in den `Facette`-Vektor, oder es braucht einen zweiten
