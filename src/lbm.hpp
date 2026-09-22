@@ -417,6 +417,7 @@ public:
 	static uint s_fac_idx_voll; // ★ 03.09. CFD_FAC_IDX_VOLL: fac_idx wieder als volles uint-Feld (Rueckschalter fuer das A/B gegen die Bitmaske)
 	static float s_sgs_nut_skal; // ★ 10.09.2026 DISKRIMINATOR-MESSARM (CFD_SGS_NUT_SKAL, Default 1,0 = aus = bitgleich): nu_t am KLASSISCHEN Modell wird an Facettenzellen mit diesem Faktor skaliert. KEIN Produktionsschalter und KEIN Stellknopf -- der Faktor wird aus dem SISM-Lauf ABGELESEN (Lagenmessung 08.09.: SISM senkt nu_t in Lage 1 um 85,2 %, also Faktor 0,148). Beantwortet, ob SISMs Kraftgewinn Modellphysik ist oder nur die fehlende Wanddaempfung. Wirkpfad Slots 188 (besucht, == Slot 76) / 189 (nu_t > 0) / 190 (w wirklich geaendert), Histogramm nu_t/nu_mol 191..198.
 	static uint s_sgs_band; // ★ 08.09. CFD_SGS_BAND: Zahl der zusaetzlichen Wandlagen (0 = aus, 2 = Lage 2, 3 = Lage 2+3)
+	static uint s_sgs_band_pi; // ★ 22.09. CFD_SGS_BAND_PI (Plan C): 0 = FD-Modus (Bandkernel liefert Sbar_FD), 1 = Pi-konsistente EMA in stream_collide (kein Bandkernel, kein u-Lesen)
 	static uint s_f_liste; // ★ 03.09. CFD_F_LISTE: F nur noch an Wandsolidzellen (Markerliste statt BBox-Vollfeld)
 	static uint s_fac_nachbar; // ★ 30.08. CFD_FAC_NACHBAR: Wandmodell-EINGANG aus der zweiten Fluidzelle entlang der Normale (Stufenschatten-Fix, Weg-1 Stufe 3)
 	static uint s_fac_kdiag;   // ★ 30.08. KLASSEN-DIAGNOSTIK (CFD_FAC_KDIAG=1): 16 float je Facette akkumuliert (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, u_t_abtast, y_abtast, tw_angewandt, besuche_angewandt, 05.09.: Druckrest A, |A|, Ziel B, Geometrie C); Host-Tabelle je Treppenklasse
@@ -539,7 +540,7 @@ public:
 	Memory<float> band_sbar;  // ★ 08.09. NACH dem Kipptest: Sbar (Betrag des zeitgemittelten Scherratentensors) je Bandzelle. Frueher war das ein fertiges w -- der w-ERSATZ kippte am 8-mm-Stressarm bei Schritt 392, auch ohne SISM.
 	Memory<float> band_sb;    // EMA der 6 S-Komponenten je Bandzelle (nur unter SISM belegt)
 	float nut_skal = 1.0f; // ★ 10.09. Diskriminator-Messarm: Konstruktionszustand, eingefroren wie band_on. Die Abnahme liest IHN, nicht die Umgebungsvariable -- sonst haette sie eine zweite Wahrheitsquelle (Muster pruefe_band_wirkpfad, das D->band_on liest).
-	ulong band_N = 0ull; uint band_lagen = 0u; bool band_on = false; uint band_param_pos = 0u; // Signaturposition von band_idx in stream_collide, in alloc_facetten_domain berechnet (dort sind alle Schalter im Scope)
+	ulong band_N = 0ull; uint band_lagen = 0u; bool band_on = false; bool band_pi_on = false; uint band_param_pos = 0u; // Signaturposition von band_idx in stream_collide, in alloc_facetten_domain berechnet (dort sind alle Schalter im Scope)
 	ulong band_n_lage[8] = {0,0,0,0,0,0,0,0}; // Zellzahl je Lage, fuer den Bericht und Ist=Soll
 	// ★ 22.09.2026 BAND-g-DIAGNOSE (Plan B3(b)): zweite Instanz des sgs_gdiag-Kernels ueber band_zellen -- misst |S|_FD und |S|_Pi an DERSELBEN
 	// Bandzelle zur selben Zeit (Pi/FD in Lage 2..N war nie gemessen; der Band-Abzug mischt Pi-|S| mit FD-Sbar). Physikfrei, nur mit CFD_SGS_GDIAG.

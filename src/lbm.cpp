@@ -129,6 +129,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// vier Zeilen weiter oben bereits beschreibt.
 	f_liste_on = s_f_liste>0u;
 	band_lagen = s_sgs_band; band_on = s_sgs_band>0u; // ★ 08.09. Konstruktionszustand einfrieren (read-once-Doktrin)
+	band_pi_on = band_on&&s_sgs_band_pi>0u; // ★ 22.09. Plan C: Pi-Modus je Instanz einfrieren
 	nut_skal = s_sgs_nut_skal; // ★ 10.09. dito fuer den Diskriminator-Messarm
 	fac_idx_voll_on = s_fac_idx_voll>0u;
 	fac_pinv_on = s_fac_pinv>0u; // ★ 04.09.: Rang-1-Pseudoinverse statt Skalarleiter (JIT-Define, muss vor der ersten Kernel-Erzeugung stehen)
@@ -257,6 +258,14 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	if(s_sgs_nut_skal!=1.0f&&s_sgs_nut_skal<5e-7f&&s_sgs_nut_skal>0.0f) print_error("CFD_SGS_NUT_SKAL = "+to_string(s_sgs_nut_skal,9u)+" liegt unter 5e-7 und wird von to_string(...,6u) als Festkomma zu 0.000000f emittiert -- nu_t an Wandzellen waere dann EXAKT null, also der WANDFREI-Zustand, und zwar am Waechter unten vorbei (Muster s_fac_ema/s_fac_pema/s_fac_apg). Groesseren Faktor waehlen.");
 	if(s_sgs_nut_skal<=0.0f) print_error("CFD_SGS_NUT_SKAL <= 0 setzt nu_t an Wandzellen auf null oder negativ -- das IST der WANDFREI-Zustand, der am 8-mm-Fahrzeug nach 175 Schritten divergierte. Positiv waehlen.");
 	if(s_sgs_nut_skal>1.0f) print_warning("CFD_SGS_NUT_SKAL > 1 ERHOEHT die Wanddaempfung. Als Diskriminator gegen SISM ist der Arm nur mit einem Faktor < 1 sinnvoll, und zwar mit dem ABGELESENEN (Lage 1, 4 mm: 0,148).");
+	// ★ 22.09. 14:40 Pruefbefund H1: hier stand `s_sgs_band_pi = env_u("CFD_SGS_BAND_PI", 0u)` -- 129 Zeilen NACH `band_pi_on = band_on&&s_sgs_band_pi>0u` (oben). band_pi_on war damit IMMER false:
+	// der Host band den FD-Modus (band_sbar der Laenge band_N, FD-Bandkernel gestartet), der Kernel war mit SGS_BAND_PI uebersetzt und schrieb 6 float je Bandzelle -> 6-facher Pufferueberlauf
+	// (CPU nichtdeterministisch, B70 CL_OUT_OF_RESOURCES). Die Statik wird jetzt in setup.cpp NEBEN s_sgs_band gesetzt (vor dem Konstruktor), wie jeder andere JIT-relevante Schalter.
+	if(s_sgs_band_pi>1u) print_error("CFD_SGS_BAND_PI kennt nur 0 (FD-Modus) und 1 (Pi-konsistente EMA).");
+	// ★ 22.09. 14:04 EIGENER FEHLER (Lauf s5_bandpi2_12_8 starb vor dem ersten Schritt): hier stand `if(s_sgs_band_pi>0u&&s_sgs_band==0u) print_error(...)`.
+	// fahrzeug_dd nullt s_sgs_band vor dem Fernfeld-Konstruktor, s_sgs_band_pi bleibt 1 -> der Fernfeld-Konstruktor starb -- exakt die CFD_TIMER_APG-Falle von heute frueh
+	// (lbm.cpp, Kommentar bei s_timer_apg). Die Ansage-Pruefung steht jetzt in setup.cpp VOR der Fallauswahl (liest nur die Umgebung, laeuft genau einmal).
+	if(s_sgs_band_pi>0u&&s_sgs_band>0u) print_info("SGS-BAND im Pi-MODUS (CFD_SGS_BAND_PI=1, Plan C, 22.09.2026): nu_t = c2*max(0, |S_Pi| - |EMA(S_Pi)|) in stream_collide, EMA ueber T = "+to_string((ulong)s_sgs_sism_T)+" Schritte ab 0, Abzug ab Schritt "+to_string(s_sgs_sism_ab)+"; KEIN FD-Bandkernel, KEIN u-Lesen an Lage 2..N. Wirkpfad Slot 186, Klemme Slot 187, Sbar_band(Pi) im Bericht.");
 	if(s_sgs_band>3u) print_warning("CFD_SGS_BAND = "+to_string(s_sgs_band)+": mehr als drei Lagen sind ungemessen. Die Lagenmessung reicht bis Lage 6 (Absenkung 85,2/80,0/75,9/72,1/69,1/67,9 % bei 4 mm), aber der Klemm-Verbund ueber viele Lagen ist der WANDFREI-Pfad.");
 	if(s_sgs_sism>0u&&s_sgs_fdwand==0u) print_error("CFD_SGS_SISM braucht CFD_SGS_FDWAND=1 -- der Sbar-Abzug lebt im FD-Kernel sgs_fdwand; ohne ihn gaebe es keinen Kernel (stiller No-Op).");
 	if(s_sgs_sism>0u&&!s_facetten) print_error("CFD_SGS_SISM ohne CFD_FACETTEN: keine Facettenzellen, kein FD-Kernel.");
@@ -540,6 +549,7 @@ uint LBM_Domain::s_fac_pinv = 0u; // ★ 04.09. CFD_FAC_PINV: Rang-1-Pseudoinver
 uint LBM_Domain::s_fac_idx_voll = 0u; // ★ 03.09. Rueckschalter auf die fac_idx-Vollfeldform (A/B gegen die Bitmaske)
 float LBM_Domain::s_sgs_nut_skal = 1.0f; // ★ 10.09. Diskriminator-Messarm, 1,0 = aus = bitgleich
 uint LBM_Domain::s_sgs_band = 0u; // ★ 08.09. CFD_SGS_BAND
+uint LBM_Domain::s_sgs_band_pi = 0u; // ★ 22.09. CFD_SGS_BAND_PI (Plan C)
 uint LBM_Domain::s_f_liste = 0u; // ★ 03.09. CFD_F_LISTE: F nur an Wandsolidzellen
 uint LBM_Domain::s_fac_nachbar = 0u; // ★ 30.08. Nachbarabtastung des Wandmodell-Eingangs
 uint LBM_Domain::s_fac_kdiag = 0u; // ★ 30.08. Klassen-Diagnostik (CFD_FAC_KDIAG)
@@ -1274,10 +1284,15 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	// den gleich darauf zerstoerten Platzhalter, CL -52 beim ersten Enqueue). Die Position stammt aus
 	// alloc_facetten_domain, wo alle Schalter im Scope sind.
 	if(band_param_pos==0u) { print_error("alloc_sgs_band: band_param_pos ist 0 -- alloc_facetten_domain lief nicht oder FDWAND war aus. Das Band braucht den FDWAND-Zweig in stream_collide."); band_on=false; return; }
+	if(band_pi_on) { // ★ 22.09. Plan C: stream_collide bekommt den EMA-ZUSTAND band_sb (6 float je Bandzelle) an der Sbar-Position; kein FD-Bandkernel
+		if(!sism_on||band_sb.length()<6ull*band_N) { print_error("alloc_sgs_band: Pi-Modus braucht den SISM-EMA-Puffer band_sb (6 float je Bandzelle) -- CFD_SGS_SISM=1 fehlt oder Puffer zu klein."); band_on=false; return; }
+		kernel_stream_collide.set_parameters(band_param_pos, band_idx, band_sb);
+	} else {
 	kernel_stream_collide.set_parameters(band_param_pos, band_idx, band_sbar);
 	kernel_sgs_band = Kernel(device, band_N, "sgs_fdwand", u, flags, band_zellen, (uint)band_N, band_sbar);
 	if(sism_on) kernel_sgs_band.add_parameters(t, band_sb, rho_clamp_hits, 1u); // sbar_out = 1: der Bandkernel liefert Sbar, kein w
 	if(sparse_on) kernel_sgs_band.add_parameters(tile_slot); // ★ 22.09. Pruefbefund M1: TS_P ist der letzte Parameter von sgs_fdwand -- der Lage-1-Kernel bekam ihn (B-7-Lehre), der Bandkernel nicht; mit CFD_SPARSE_TILES waere der Band-Launch mit CL_INVALID_KERNEL_ARGS gestorben (bisher nie kombiniert)
+	}
 	if(gdiag_on) { // ★ 22.09.2026 BAND-g-DIAGNOSE: zweite Instanz desselben Kernels ueber die Bandliste (Liste traegt n, s. o.). Kein Kernel-, kein JIT-Text geaendert.
 		band_gd = Memory<float>(device, 8ull*band_N);
 		for(ulong q8=0ull; q8<8ull*band_N; q8++) band_gd[q8]=0.0f;
@@ -1937,7 +1952,7 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 	felder_voll_h = rho_bit|u_bit;
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz, felder_voll_h).enqueue_run();
 	if(fdwand_on&&fac_N>0ull) { if(sism_on) kernel_sgs_fdwand.set_parameters(5u, t); kernel_sgs_fdwand.enqueue_run(); }
-	if(band_on&&band_N>0ull) { if(sism_on) kernel_sgs_band.set_parameters(5u, t); kernel_sgs_band.enqueue_run(); } // ★ 08.09. SGS-BAND: zweiter Launch desselben Kernels ueber die Bandzellen, dieselbe In-Order-Queue -> derselbe Determinismus wie Lage 1 // ★ Audit-Befund 11 (07.09.): Waechter auf fac_N statt fac_wfd.length()>1 -- bei GENAU EINER aktiven Facette ist die Laenge 1 und der FD-Kernel wurde still uebersprungen (Platzhalter und Einzelfacette nicht unterscheidbar; dieselbe Falle wie fac_nb 03.09.). fac_N wird nur in alloc_facetten_domain gesetzt. // ★ 07.09. SISM: t je Schritt nachfuehren (Muster sgs_gdiag/boden_eq), Position 5 = erstes SGS_SISM-Argument; der FD-Kernel sieht dasselbe t wie der eben gerechnete Schritt (increment_time_step folgt erst danach)
+	if(band_on&&band_N>0ull&&!band_pi_on) { if(sism_on) kernel_sgs_band.set_parameters(5u, t); kernel_sgs_band.enqueue_run(); } // ★ 22.09. Plan C: im Pi-Modus kein FD-Bandkernel // ★ 08.09. SGS-BAND: zweiter Launch desselben Kernels ueber die Bandzellen, dieselbe In-Order-Queue -> derselbe Determinismus wie Lage 1 // ★ Audit-Befund 11 (07.09.): Waechter auf fac_N statt fac_wfd.length()>1 -- bei GENAU EINER aktiven Facette ist die Laenge 1 und der FD-Kernel wurde still uebersprungen (Platzhalter und Einzelfacette nicht unterscheidbar; dieselbe Falle wie fac_nb 03.09.). fac_N wird nur in alloc_facetten_domain gesetzt. // ★ 07.09. SISM: t je Schritt nachfuehren (Muster sgs_gdiag/boden_eq), Position 5 = erstes SGS_SISM-Argument; der FD-Kernel sieht dasselbe t wie der eben gerechnete Schritt (increment_time_step folgt erst danach)
 	if(nachbar_on&&fac_N>0ull) { kernel_fac_nachbar.enqueue_run();
 		if(apg_on) { kernel_fac_apg.set_parameters(5u, t);
 			if(timer_apg>0u) { // ★ 22.09.2026 CFD_TIMER_APG: fac_apg_ab ISOLIERT. Erst alles Vorherige einholen (sonst misst die Uhr den Rueckstau von stream_collide und fac_nachbar_ab mit), dann den Vorkernel allein.
@@ -2489,7 +2504,8 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_vandriest>1u) ? (string)"\n	#define SGS_VANDRIEST_ANWENDEN" : (string)"") // Modus 2 legt erst hier die Wirkung auf w um; Modus 1 bleibt bitgleich
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_nut_skal!=1.0f) ? (string)"\n	#define SGS_NUT_SKAL"
 	"\n	#define def_sgs_nut_skal "+to_string(s_sgs_nut_skal,6u)+"f" : (string)"") // ★ 10.09. Diskriminator: nu_t am klassischen Modell skaliert. Ohne Schalter kein Define -> Kontrollarm bitgleich. Sechs Nachkommastellen reichen (Faktor der Groessenordnung 0,1; Pruefbefund M3 betraf Groessen ~1e-6).
-	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_band>0u) ? (string)"\n	#define SGS_BAND" : (string)"") // ★ 08.09. SGS-BAND: Wandlagen 2..N ueber eine eigene Zellenliste; KEINE neue Kernelfunktion, nur zwei Argumente und ein Leserzweig
+	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_band>0u) ? (string)"\n	#define SGS_BAND" : (string)"")
+	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_band>0u&&s_sgs_sism>0u&&s_sgs_band_pi>0u) ? (string)"\n	#define SGS_BAND_PI" : (string)"") // ★ 22.09. Plan C: Pi-konsistente EMA im Band (braucht SGS_SISM fuer def_sgs_sism_T/ab) // ★ 08.09. SGS-BAND: Wandlagen 2..N ueber eine eigene Zellenliste; KEINE neue Kernelfunktion, nur zwei Argumente und ein Leserzweig
 	+((s_facetten&&s_sgs_fdwand>0u&&s_sgs_sism>0u) ? (string)"\n	#define SGS_SISM"
 	"\n	#define def_sgs_sism_T "+to_string((ulong)s_sgs_sism_T)+"u" // T in SCHRITTEN als uint; alpha = 1.0f/(float)def_sgs_sism_T erst im Kernel (Pruefbefund M3: to_string(float) ist Festkomma -- alpha ~1e-4 wuerde auf 0,4 % quantisiert)
 	"\n	#define def_sgs_sism_ab "+to_string(s_sgs_sism_ab)+"ul" : (string)"") // ★ 07.09.2026 SHEAR-IMPROVED SMAGORINSKY im FD-Kernel (Leveque 2007); ab wie def_sgs_diag_ab. Ohne Schalter: kein Define, keine Signaturaenderung -> Kontrollarm bitgleich

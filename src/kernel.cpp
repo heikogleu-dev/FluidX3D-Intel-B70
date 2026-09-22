@@ -3031,7 +3031,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	, const global float* fac_wfd // ★ Geistermoden-Fix: w je Facettenzelle aus |S|_FD des Vorschritts (Position = nach fac_kd)
 )+"#endif"+R( // SGS_FDWAND
 )+"#ifdef SGS_BAND"+R(
-	, const global uint* band_idx, const global float* band_sbar // ★ 08.09. SGS-BAND: Maske und Sbar (Betrag des zeitgemittelten Scherratentensors) der Wandlagen 2..N (Position = NACH fac_wfd, Host-add-Reihenfolge in alloc_sgs_band)
+	, const global uint* band_idx, global float* band_sbar // ★ 22.09. (Plan C, SGS_BAND_PI): im Pi-Modus ist das der EMA-ZUSTAND (6 float je Bandzelle, wird hier geschrieben), sonst read-only Sbar. ★ 08.09. SGS-BAND: Maske und Sbar (Betrag des zeitgemittelten Scherratentensors) der Wandlagen 2..N (Position = NACH fac_wfd, Host-add-Reihenfolge in alloc_sgs_band)
 )+"#endif"+R( // SGS_BAND
 )+"#endif"+R( // FACETTEN
 )+R( TS_P
@@ -3627,7 +3627,32 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// Der Bandkernel liefert also nur noch Sbar je Bandzelle (band_sbar), nicht mehr ein fertiges w.
 		if(band_bid!=0xFFFFFFFFu) {
 			const float nut_b = (1.0f/w-tau0)*(1.0f/3.0f);            // nu_t aus dem eben gerechneten Smagorinsky-w
-			const float nut_n = fmax(0.0f, nut_b-0.030021f*band_sbar[band_bid]); // Klemme wie in Lage 1 ZWINGEND
+)+"#ifdef SGS_BAND_PI"+R(
+			// ★★ 22.09.2026 PLAN C -- Pi-KONSISTENTE EMA (Tagesprotokoll B30/B32/B38). Gemessen am 8-mm-Fahrzeug (d5_band2_gdiag_8):
+			// |S|_Pi/|S|_FD = 1,53 in Lage 2 (87 % der Zellen zwischen 1,2 und 3). Der FD-Modus zieht c2*Sbar_FD von c2*|S|_Pi ab und
+			// entfernt damit nur ~60 % der mittleren Scherung (Klemme 6 % statt ~40 %). Hier: derselbe Schaetzer auf beiden Seiten.
+			// S_ij = -3 Pi_ij / (2 rho tau_eff) mit tau_eff = 1/w des eben gerechneten Smagorinsky-w -- damit ist
+			// c2*|S_Pi| EXAKT nut_b (Herleitung: tau_eff (tau_eff - tau0) = 0,76421222 sqrt(Q)/(4 rho); (tau_eff-tau0)/3 = 0,0636843 sqrt(Q)/(rho tau_eff)
+			// = 0,030021 * 3 sqrt(2 Q)/(2 rho tau_eff)). EMA ueber T Schritte (alpha = 1/def_sgs_sism_T), Start 0 (kein Warmstart, wie Lage 1),
+			// Phase 1 (t < def_sgs_sism_ab): kein Abzug, EMA laeuft mit. Reihenfolge: ALTES sb lesen -> nu_t bilden -> EMA schreiben.
+			// Racefrei: band_bid ist je Zelle eindeutig (Maske+Praefixsumme), nur dieses Work-Item liest/schreibt band_sbar[6 bid..].
+			// Kein u-Lesen an Lage 2..N mehr (der FD-Bandkernel entfaellt) -- der U_SPARSAM-Ausschluss gilt im Pi-Modus nicht.
+			const float kS_ = -3.0f*w/(2.0f*rhon);
+			const float Sp0=kS_*Hxx, Sp1=kS_*Hyy, Sp2=kS_*Hzz, Sp3=kS_*Hxy, Sp4=kS_*Hxz, Sp5=kS_*Hyz;
+			const ulong k6b_ = 6ul*(ulong)band_bid;
+			const float sb0=band_sbar[k6b_], sb1=band_sbar[k6b_+1ul], sb2=band_sbar[k6b_+2ul], sb3=band_sbar[k6b_+3ul], sb4=band_sbar[k6b_+4ul], sb5=band_sbar[k6b_+5ul];
+			const float sbar_pi = sqrt(2.0f*(sq(sb0)+sq(sb1)+sq(sb2)+2.0f*(sq(sb3)+sq(sb4)+sq(sb5))));
+			const float nut_n = t<def_sgs_sism_ab ? nut_b : fmax(0.0f, nut_b-0.030021f*sbar_pi); // Klemme ZWINGEND (wie Lage 1)
+			const float a_pi = 1.0f/(float)def_sgs_sism_T;
+			band_sbar[k6b_]     = fma(a_pi, Sp0-sb0, sb0);
+			band_sbar[k6b_+1ul] = fma(a_pi, Sp1-sb1, sb1);
+			band_sbar[k6b_+2ul] = fma(a_pi, Sp2-sb2, sb2);
+			band_sbar[k6b_+3ul] = fma(a_pi, Sp3-sb3, sb3);
+			band_sbar[k6b_+4ul] = fma(a_pi, Sp4-sb4, sb4);
+			band_sbar[k6b_+5ul] = fma(a_pi, Sp5-sb5, sb5);
+)+"#else"+R(
+			const float nut_n = fmax(0.0f, nut_b-0.030021f*band_sbar[band_bid]); // Klemme wie in Lage 1 ZWINGEND (FD-Modus: Sbar_FD vom Bandkernel)
+)+"#endif"+R(
 			w = 1.0f/(tau0+3.0f*nut_n);
 			if(t%def_zaehl_takt==0ul) {
 				if(rho_clamp_hits[186]<0xF0000000u) atomic_inc(&rho_clamp_hits[186]); // Wirkpfad: Bandzelle behandelt
