@@ -75,6 +75,8 @@ Damit ist die alte Lesart „Kraftdifferenzen sind Einzelrealisierungen bei 1,7 
 | 4 | **Offene Entscheide** | (a) 4-mm-Bezug MIT Versatz gegen `p4_register` (nur nach Go — „kein eigener Bezugsarm"); (b) SGS-Band bei 3,75 mm verwerfen (Cz nicht Richtung OF13); (c) T_WARMUP a/b/c (Punkt 1 Abschnitt 2) | — |
 | 5 | Performance-Rest (Abschnitt 4b) | X messen (Facettenpfad-Kosten → B2), D1/D2, C1, Remesh-Gatter, Prüfpunkt-Plan | nach 1–3 |
 
+**22.09. 13:40 — SGS-BAND funktioniert erst seit heute** (Index-Defekt B32 seit 08.09.: Bandliste fbi, Kernel las n; am Fahrzeug nie an den Bandzellen gerechnet; Fix 6e37ef1). Erste echte Bandmessung 8 mm: `CFD_SGS_BAND=2` (+`CFD_U_SPARSAM=0`) H Dachplateau 2,019 → 1,715 (−0,304 ± 0,054, 5,6 σ, 12 Zeitpunkte), Lage 3–5 ohne Zusatz (B35/B36). **Kandidat für den Standard nach 4-mm-Go.** Alle Band-Läufe 08.–22.09. sind als Bandmessungen ungültig (B33), die 4-mm-A/Bs anderer Variablen bleiben gültig.
+
 **Stand der Standards seit 16.09.:** `CFD_POSITIV=2`, `CFD_U_KLEMME=1`, `CFD_Y_VERSATZ=1` (Basis), Schrittschalter auf allen Sprossen als 4-mm-Werte (dx-Umrechnung automatisch), jede dd-Zeile trägt `CFD_FAR_LX`. APG **seit 22.09. 12:30 wieder AUS im Standard** (Heiko; Basis `CFD_FAC_APG 0`, war seit 21.09. 1.0) — 8-mm-Bezug ohne APG: `m0_apg0_rang_8`, 4-mm-Bezug mit APG 0 steht aus (Go); 22.09.: Mozaffari-Formeltausch `CFD_FAC_APG_MOZ` gebaut, auditiert (2 Durchgänge) und bei 8 mm gemessen (Commit 21e3d57, Protokoll B22): 63 % der APG-Besuche gesättigt, 37 % im empfindlichen Band, Abnahme hält — aber Rückfall/Rang bis 10⁻³ identisch zu κ=0 und linear, H am Dach in der Zeitstreuung. Bleibt Messarm, Default 0. Bezug bleibt `p4_register` (ohne Versatz — Neuerzeugung nur nach Go).
 
 ## 1 · Reihenfolge (Heiko, 16.09.2026)
