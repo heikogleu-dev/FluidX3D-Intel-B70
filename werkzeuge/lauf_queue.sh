@@ -134,7 +134,10 @@ while IFS= read -r zeile; do
 	# (beim Lauf davor schon). Deshalb: Lauf im Hintergrund starten, nach $HANG_S Sekunden pruefen, ob
 	# das Log die Gitterzeile traegt. Fehlt sie, ist es die bekannte Haengesignatur (nur export/<lauf>/code
 	# vorhanden, ein Thread Rl) -- dann toeten, laenger warten und EINMAL wiederholen.
-	HANG_S=${CFD_QUEUE_HANG_S:-150}
+	# ★ 22.09.2026 17:58: dieselbe Falle wie CFD_QUEUE_DEV (Pruefbefund A-M1) -- CFD_QUEUE_HANG_S in der Serienzeile war nur Umgebung des
+	# Binaries, der Waechter las die Queue-Shell (Default 150 s) und toetete den 4-mm-Lauf p4_bandpi2_4 in der Allokation (21.09. p4_regel1 ebenso). Zeile > Shell > 150.
+	hang_z="$(printf '%s' "$env_teil" | tr -s '[:space:]' '\n' | grep '^CFD_QUEUE_HANG_S=' | tail -1 | cut -d= -f2)"
+	HANG_S=${hang_z:-${CFD_QUEUE_HANG_S:-150}}
 	versuch=0; rc=0
 	while :; do
 		versuch=$((versuch+1))
