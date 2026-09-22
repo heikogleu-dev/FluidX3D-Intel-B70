@@ -166,6 +166,30 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Statik-Nullung gebaut und darf weder den Haken tragen noch an "HAKEN ohne APG" sterben (die Ansage-Pruefung steht in setup.cpp neben CFD_FAC_APG).
 	s_fac_apg_haken = (s_fac_apg!=0.0f) ? env_u("CFD_FAC_APG_HAKEN", 0u) : 0u;
 	if(s_fac_apg_haken>3u) print_error("CFD_FAC_APG_HAKEN kennt nur 0 (aus), 1 (grad-rho-Statistik), 2 (Konstantgradient) und 3 (analytischer Lineargradient).");
+	// ★★ 22.09.2026 MOZAFFARI (CFD_FAC_APG_MOZ). Der Zweig haengt an FACETTEN_APG -- ohne APG wird er
+	// gar nicht emittiert, ein gesetztes MOZ waere dann ein lautloser No-Op. Und kappa hat unter MOZ
+	// KEINE Physikwirkung mehr (nur noch Zaehlerbezug [313..316]/[326]/[327]), deshalb ist jedes kappa != 1
+	// eine stille Falschangabe. BEIDE Ansage-Waechter stehen NICHT hier, sondern in setup.cpp je Fall
+	// NACH dem Setzen von s_fac_apg (apg_moz_ansage): dieser Konstruktor laeuft auch fuer das APG-freie
+	// Fernfeld von fahrzeug_dd durch (Statik genullt) -- dieselbe Falle wie CFD_TIMER_APG/CFD_FAC_APG_HAKEN.
+	// Die erste Fassung BEHAUPTETE die Waechter hier und hatte sie nicht (Pruefbefund A-4/B-H1).
+	// Hier stehen nur die Pruefungen, die AUSSCHLIESSLICH die Umgebung lesen.
+	s_fac_apg_moz = env_u("CFD_FAC_APG_MOZ", 0u);
+	if(s_fac_apg_moz>1u) print_error("CFD_FAC_APG_MOZ kennt nur 0 (lineare Form, bitgleich) und 1 (Mozaffari).");
+	s_fac_apg_c   = env_f("CFD_FAC_APG_C",   0.4f);
+	s_fac_apg_ap0 = env_f("CFD_FAC_APG_AP0", 0.005f);
+	if(s_fac_apg_moz==0u&&(getenv("CFD_FAC_APG_C")!=nullptr||getenv("CFD_FAC_APG_AP0")!=nullptr))
+		print_error("CFD_FAC_APG_C / CFD_FAC_APG_AP0 ohne CFD_FAC_APG_MOZ=1 -- wirkungslos (Ansage-Doktrin).");
+	if(s_fac_apg_moz>0u&&!(s_fac_apg_c>0.0f))
+		print_error("CFD_FAC_APG_MOZ=1 mit CFD_FAC_APG_C <= 0: f waere identisch 1, der Tausch ein No-Op.");
+	if(s_fac_apg_moz>0u&&s_fac_apg_c>1.0f)
+		print_error("CFD_FAC_APG_C > 1: f wuerde negativ, tw = tw_Spalding*f^2 verliert das Vorzeichen und STEIGT ab f = 0 wieder -- die Abbildung waere nicht mehr monoton, das f-Histogramm [318..325] nicht mehr lesbar (Pruefbefund A-7/B-M3). Zulaessig ist 0 < C <= 1, Paperwert 0,4.");
+	if(s_fac_apg_moz>0u&&s_fac_apg_c<5e-7f)
+		print_error("CFD_FAC_APG_C unter der 6-Stellen-Emissionsquantisierung (to_string 6u) -- wuerde still zu 0.000000f, f identisch 1, No-Op-Arm am Waechter vorbei (Muster s_fac_apg/s_sgs_nut_skal; Pruefbefund A-6).");
+	if(s_fac_apg_moz>0u&&!(s_fac_apg_ap0>0.0f))
+		print_error("CFD_FAC_APG_AP0 muss > 0 sein -- bei 0 ist f = 1 - C KONSTANT fuer jedes alpha_p > 0 (kein Druckgradientenbezug mehr, pauschales tw*(1-C)^2).");
+	if(s_fac_apg_moz>0u&&s_fac_apg_ap0<5e-7f)
+		print_error("CFD_FAC_APG_AP0 unter der 6-Stellen-Emissionsquantisierung -- wuerde still zu 0.000000f und damit f = 1 - C konstant (Pruefbefund A-6).");
 	// ★★ 22.09.2026 CFD_TIMER_APG (REKONSTRUKTION-PLAN.md §10 Hebel 1 = Plan-Schritt 2).
 	// PREIS, ausdruecklich angesagt -- dieselbe Lehre, die CFD_TIMER_FERN am 21.09. einen ganzen Lauf
 	// gekostet hat (+101 % Wanduhr, weil der Diagnoseschalter in einer PRODUKTIONSZEILE stand):
@@ -687,6 +711,9 @@ bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefu
 // durch. Braucht einen eigenen Messarm mit eigener Begruendung, nicht den Rang eines Defaults.
 float LBM_Domain::s_fac_apg = 0.0f;
 uint LBM_Domain::s_fac_apg_haken = 0u; // ★ 16.09.2026 CFD_FAC_APG_HAKEN (gelesen im Konstruktor)
+uint  LBM_Domain::s_fac_apg_moz = 0u;   // ★ 22.09.2026 CFD_FAC_APG_MOZ
+float LBM_Domain::s_fac_apg_c   = 0.4f;  // Paperwert C
+float LBM_Domain::s_fac_apg_ap0 = 0.005f;// Paperwert alpha_p0
 uint LBM_Domain::s_timer_apg = 0u; // ★ 22.09.2026 CFD_TIMER_APG (gelesen im Konstruktor)
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
@@ -763,7 +790,7 @@ void LBM_Domain::allocate(Device& device) {
 	// [0,5;0,75) [0,75;0,95) [0,95;1] (s = 1 durch Rundung moeglich, Modus 2 wendet dann nichts an) | [285] nach load_f negativ (Nicht-E) | [286] Kandidat und rho-Klemme | [287] Kandidat und u-Klemme | [288] H1-Zellen im Eimer [0,25;0,5)
 	// | [289] Nachladeprobe t == zaehl_takt+3 | [290] Haken: Selbstpruefung Sum(f**-f*), Sum c(f**-f*) ueber Toleranz | [291] TYPE_E-Kandidaten (f_eq_i + w_i < tau_i) | [292]/[293] Sum-q (1-s), Sum-q Sum|df_i|
 	// (Festkomma, wickeln ABSICHTLICH mod 2^32) | [294] Kappung zu 293. Klemmen Z2b: [295] u-Komponentenhuelle |u_a| >= c_s vor der Klemme (Soll = [28] unter der Komponentenklemme)
-	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [298]/[299] (nur CFD_RHO_HUELLE) rho unter/ueber der Konsistenzhuelle 0,5/1,5 | [300] Lift-rho ausserhalb der GESCHLOSSENEN Bildhuelle [0,21875; 1,78125], Soll 0 (Haken 5: > 0). Audit 16.09.2026 (B1): [301]/[302] KONSTANTENSPIEGEL der uebersetzten Torgrenzen def_tor_gate_lo/hi als Festkomma (S = def_klemm_s), Ist=Soll gegen die Host-Rechnung -- der Wirkpfadbeleg fuer CFD_TOR_HUELLE, das sonst nur eine Null vorzuweisen hatte. [303] (nur CFD_POSITIV_FACETTE) K0-Facettenzelle WIRKLICH begrenzt, Stichprobe wie [273] -- Wirkpfadbeleg des Schalters (Befund B3; [273] allein zaehlt in beiden Stellungen gleich). [304]/[305] KONSTANTENSPIEGEL der uebersetzten Waechterhuelle def_w210_lo/hi (Befund M3, zweite Haelfte von CFD_TOR_HUELLE), ein Schritt je Zaehltakt. APG 16.09.2026 (PLAN-APG-2026-09-16.md §A5, alle nur an Zaehlschritten, saettigend): [306] Vorkernel-Besuche (Soll = [7]) | [307] entartet (eine Achse ohne Fluidnachbar) | [308] APG-Zweig besucht (Soll = [7]-[9]) | [309]/[310] Klemme unten 0 / oben 2*tw (Summe = [19]) | [311]/[312] dp/ds > 0 (APG) / < 0 (FPG) | [313..316] Autoritaet |kappa*y_ab*dp/ds|/tw in <0,1 / 0,1-0,5 / 0,5-1 / >=1. NAECHSTER FREIER SLOT: 317 (Puffer hits_n = 384 seit 22.09.2026, S-1; 317..383 frei). DIESE LEGENDE IST DIE EINZIGE QUELLE DER SLOTVERGABE.
+	// | [296] u-Betragshuelle |u|^2 >= c_s^2 | [297] 296 ohne 295 (Diagonalluecke) | [298]/[299] (nur CFD_RHO_HUELLE) rho unter/ueber der Konsistenzhuelle 0,5/1,5 | [300] Lift-rho ausserhalb der GESCHLOSSENEN Bildhuelle [0,21875; 1,78125], Soll 0 (Haken 5: > 0). Audit 16.09.2026 (B1): [301]/[302] KONSTANTENSPIEGEL der uebersetzten Torgrenzen def_tor_gate_lo/hi als Festkomma (S = def_klemm_s), Ist=Soll gegen die Host-Rechnung -- der Wirkpfadbeleg fuer CFD_TOR_HUELLE, das sonst nur eine Null vorzuweisen hatte. [303] (nur CFD_POSITIV_FACETTE) K0-Facettenzelle WIRKLICH begrenzt, Stichprobe wie [273] -- Wirkpfadbeleg des Schalters (Befund B3; [273] allein zaehlt in beiden Stellungen gleich). [304]/[305] KONSTANTENSPIEGEL der uebersetzten Waechterhuelle def_w210_lo/hi (Befund M3, zweite Haelfte von CFD_TOR_HUELLE), ein Schritt je Zaehltakt. APG 16.09.2026 (PLAN-APG-2026-09-16.md §A5, alle nur an Zaehlschritten, saettigend): [306] Vorkernel-Besuche (Soll = [7]) | [307] entartet (eine Achse ohne Fluidnachbar) | [308] APG-Zweig besucht (Soll = [7]-[9]) | [309]/[310] Klemme unten 0 / oben 2*tw (Summe = [19]) | [311]/[312] dp/ds > 0 (APG) / < 0 (FPG) | [313..316] Autoritaet |kappa*y_ab*dp/ds|/tw in <0,1 / 0,1-0,5 / 0,5-1 / >=1. MOZAFFARI 22.09.2026 (nur unter FACETTEN_APG_MOZ, alle an Zaehlschritten, saettigend): [317] Entartung (u_tau <= 0 oder alpha_p nicht endlich -> f := 1 erzwungen, Soll 0) | [318..325] f-HISTOGRAMM, Grenzen f >= 0,99 / 0,95 / 0,90 / 0,80 / 0,70 / 0,65 / 0,62 / darunter -- in alpha_p umgerechnet (C = 0,4, a0 = 0,005): 1,282e-4 / 7,143e-4 / 1,667e-3 / 5,000e-3 (= a0, natuerliche Mitte) / 1,500e-2 / 3,500e-2 / 9,500e-2. [318] enthaelt auch den gesamten FPG-Ast (f konstruktiv 1) UND die Besuche mit dp/ds exakt 0. Bezug ist das GEKLEMMTE Spalding-tw (Klemme tw_max im Spalding-Block), tw_neu = tw*f^2. ABNAHME: Summe [317..325] == [308] (jeder Besuch genau ein Fach; NICHT [311]+[312], die zaehlen dp/ds == 0 nicht mit -- Pruefbefund A-5/B-M1); [318] < [308], sonst ist der Tausch ein No-Op; [317] == 0 | [326]/[327] SCHATTEN der entfallenen Klemme: korr > tw bzw. -korr > tw (geklemmtes Spalding-tw), also genau die Bedingung, die unter der linearen Form [309]/[310] gezaehlt hat. ABNAHME unter MOZ: [19] = [309] = [310] = 0 UND |[326]+[327] - [316]| <= 1e-3*[316]+16 (symmetrisch: Strikt-/Nichtstrikt-Kante |korr| == tw und GPU-Divisionsrundung 2,5 ulp in [316]; Pruefbefund A-10/B-N1/2A-M1). Slot 8 (Endklemme tw*faca > tw_max) feuert unter MOZ NUR bei faca > 1 (tw <= tw_Spalding <= tw_max), also seltener als linear (dort tw bis 2*tw_Spalding) -- kein Widerspruch zu "keine Klemme mehr", die Endklemme ist die alte Stabilitaetsklemme (2A-N1). NAECHSTER FREIER SLOT: 328 (Puffer hits_n = 384 seit 22.09.2026, S-1; 328..383 frei). DIESE LEGENDE IST DIE EINZIGE QUELLE DER SLOTVERGABE.
 	kernel_stream_collide = Kernel(device, N, "stream_collide", fi, rho, u, flags, t, fx, fy, fz, felder_voll_h, rho_clamp_hits); // ★ TODO 2: rho_voll HINTER fz, damit set_parameters(4u, t, fx, fy, fz, rho_voll) zusammenhaengend bleibt; absolute Indizes gibt es nur fuer 0 und 4..7
 	kernel_update_fields = Kernel(device, N, "update_fields", fi, rho, u, flags, t, fx, fy, fz);
 	kernel_boden_eq = Kernel(device, N, "boden_eq", fi, flags, t, 0.0f, 0u, 0u, 0u, 0u, rho_clamp_hits); // Parameter t/u/nz/nz_down/x_split/abstand je Enqueue
@@ -888,7 +915,7 @@ void LBM_Domain::allocate(Device& device) {
 		fac_kdiag_on = s_fac_imem&&s_fac_kdiag>0u; // ★ Klassen-Diagnostik: Konstruktionszustand einfrieren (Signaturposition = nach fac_q)
 		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 16ull); kernel_stream_collide.add_parameters(fac_kd); } // 16 seit 05.09.: [12..15] vorzeichenbehafteter Druckrest A/|A|/B/C (12 seit 04.09.: [10]/[11] = tw und Besuche NUR ueber angewandte Besuche)
 		nachbar_on = s_fac_imem&&s_fac_nachbar>0u; // ★ 03.09. deterministische Nachbarabtastung: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd, VOR fac_wfd)
-		apg_on = nachbar_on&&s_facetten&&s_fac_apg!=0.0f; apg_kappa = apg_on ? s_fac_apg : 0.0f; apg_haken = apg_on ? s_fac_apg_haken : 0u;
+		apg_on = nachbar_on&&s_facetten&&s_fac_apg!=0.0f; apg_kappa = apg_on ? s_fac_apg : 0.0f; apg_haken = apg_on ? s_fac_apg_haken : 0u; apg_moz = apg_on ? s_fac_apg_moz : 0u; apg_moz_c = apg_moz ? s_fac_apg_c : 0.0f; apg_moz_ap0 = apg_moz ? s_fac_apg_ap0 : 0.0f; // ★ 22.09. MOZ wie kappa/haken an die INSTANZ gebunden (Bericht gatet auf den Instanzzustand)
 		nb_stride = apg_on ? 5ull : 2ull;
 		timer_apg = apg_on ? s_timer_apg : 0u; // ★ 22.09.2026: timer_apg genau wie apg_haken an die INSTANZ gebunden -- das Fernfeld traegt kein APG und darf den Timer nicht tragen.
 		// ★★ 22.09.2026, EIGENER FEHLER, vom Pruefagenten gefunden: der Kommentar oben stand zuerst MITTEN in
@@ -2438,7 +2465,13 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_kraft>0u) ? (string)"\n	#define FACETTEN_KRAFT\n	#define def_fac_kraft "+to_string(min(2u,s_fac_kraft))+"u" : (string)"") // ★ 30.08. Zellkraft statt Slip (Weg F) // ★ 2026-08-25 Querimpuls-Gate, Slot 64 // ★ 2026-08-25 kleinste Quadrate statt Skalar-Rueckfall (CFD_FAC_LSQ, Default 1)
 	+((s_facetten&&s_fac_imem&&s_fac_rdiag>0u) ? (string)"\n	#define FACETTEN_RDIAG" : (string)"") // ★ 07.09. Rueckfall-Diagnose, bitneutral
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f) ? (string)"\n	#define FACETTEN_APG"
-	"\n	#define def_fac_apg "+to_string(s_fac_apg,6u)+"f" : (string)"") // APG-Messarm: Emission nur bei kappa != 0 (Kommentar-Verklebung R2 geloest) /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
+	"\n	#define def_fac_apg "+to_string(s_fac_apg,6u)+"f"
+	+((s_fac_apg_moz>0u)
+	  ? (string)"\n	#define FACETTEN_APG_MOZ"
+	    "\n	#define def_fac_apg_c "+to_string(s_fac_apg_c,6u)+"f"
+	    "\n	#define def_fac_apg_ap0 "+to_string(s_fac_apg_ap0,6u)+"f"
+	  : (string)"")
+	: (string)"") // APG-Messarm: Emission nur bei kappa != 0 (Kommentar-Verklebung R2 geloest) /* ALPHA2 setzt ALPHA voraus (S0/alph undeklariert sonst) -- die >1/>0-Paarung hier ist die einzige Garantie (Audit 1/3) */ // J4-alpha Stufe 2: Momenten-Downdate (Impuls-Projektion)
 	+((s_facetten&&s_fac_imem&&s_fac_pema>0.0f) ? (string)"\n	#define FACETTEN_PEMA"
 	"\n	#define def_fac_pema "+to_string(s_fac_pema,6u)+"f" : (string)"") // PEMA (Weg A): Eingangs-Filterung
 	+((s_facetten&&s_fac_imem&&s_fac_diagz>=0l) ? (string)"\n	#define FACETTEN_DIAGZ" : (string)"") // Ziel-fid zur Laufzeit in fac_diag[16]

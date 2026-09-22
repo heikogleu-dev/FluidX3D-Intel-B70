@@ -2142,11 +2142,60 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(tw>0.0f) { const float r_ = fabs(korr)/tw; const uint hb_ = r_<0.1f ? 313u : (r_<0.5f ? 314u : (r_<1.0f ? 315u : 316u)); // Autoritaet |kappa*y*dp/ds|/tw
 				if(hits[hb_]<0xF0000000u) atomic_inc(&hits[hb_]); }
 		}
+)+"#ifdef FACETTEN_APG_MOZ"+R(
+		// ★★ 22.09.2026 MOZAFFARI-JACOB-SAGAUT 2024 (Flow Turbulence Combust 106:3) statt der linearen
+		// Duennschichtkorrektur. ANLASS, gemessen am 22.09. (Tagesprotokoll B15): die lineare Form hat
+		// Autoritaet |kappa*y_ab*dp/ds|/tau_w >= 1 in 97,1 % der Besuche, und 97,06 % werden geklemmt --
+		// sie ist ein Vorzeichendetektor, keine Korrektur.
+		// WARUM DIESE FORM TRAEGT, und es ist NICHT die Saettigung: mit A = |korr|/tw gilt exakt
+		//   alpha_p = nu*(dp/ds)/(rho*u_tau^3) = A*nu/(y_ab*u_tau) = A / y+_ab.
+		// Die gemessene Autoritaet wird also durch y+_ab geteilt (Facetten-y+ Median 148 an y_w, an y_ab
+		// ~150-450). Die 97,1 % mit A >= 1 landen damit im EMPFINDLICHEN Band von f, nicht in der Saettigung.
+		// OB das so ist, ist bis heute UNBELEGT -- das oberste Autoritaetsfach [316] ist nach oben offen.
+		// Genau deshalb sind die Faecher 318..325 unten kein Beiwerk, sondern der Befund.
+		// ALGEBRAISCH UMGESTELLT: f = 1 - C/(1 + a0/ap) statt 1 - C*ap/(ap+a0). Gleiche Funktion, aber
+		// total auf (0, inf]: kein inf/inf bei ap -> inf (u_tau -> 0), keine Ausloeschung im Nenner.
+		// FPG-AST DEKLARIERT f == 1: die Paperform hat bei ap = -a0 = -0,005 eine POLSTELLE, und mit
+		// 18,5 Mio FPG-Besuchen (gemessen) ist ihr Umfeld sicher besetzt -- in float32 waere |f| dort bis
+		// 4,3e6. Physikalisch ist der Fit an APG kalibriert (NACA-4412, Ahmed); unter FPG unterschaetzt
+		// das Loggesetz tau_w, eine Daempfung haette dort das falsche Vorzeichen. Die symmetrische
+		// Fortsetzung waere polfrei, saettigt im FPG-Ast aber bei f^2 = 1,95 -- also fast exakt auf der
+		// Obenklemme 2*tw, die wir gerade als Artefakt verabschieden. Deshalb NICHT als Vorgabe.
+		// KEINE Klemme mehr: f liegt in [1-C, 1] = [0,6; 1], also tw/tw_Spalding in [0,36; 1] (Waechter 0 < C <= 1 in lbm.cpp).
+		// Die Endklemme unten (Slot 8, tw*faca > 0,5*rhon*ut) bleibt -- sie feuert unter MOZ nur bei faca > 1, seltener als linear (2A-N1).
+		// Die alte Klemme KANN konstruktiv nicht mehr feuern; ihr Nachweis laeuft ueber die
+		// Schattenzaehler 326/327, die dieselbe Bedingung zaehlen, ohne die Physik anzufassen.
+		// ★ BEZUG (Pruefbefund A-1/B-M7, 22.09.): tw ist hier das GEKLEMMTE Spalding-tw (Klemme tw_max steht oben im
+		// Spalding-Block, VOR diesem Zweig). Die erste Fassung baute tw aus dem UNGEKLEMMTEN u_tau neu auf und hob damit
+		// die Klemme fuer den MOZ-Arm still auf -- zwei Aenderungen in einem Arm. Jetzt: u_tau = sqrt(tw/rho) aus dem
+		// geklemmten tw, und tw_neu = tw*f^2 -- auf dem FPG-Ast (f == 1) damit BITGLEICH zum Spalding-Wert.
+		{	const float nu_mol = 0.5f/def_fac_Y; // ★ NICHT def_fac_nu: das wird nur unter FACETTEN_UW emittiert (lbm.cpp), in der Standardzeile gibt es das Makro GAR NICHT -- JIT-Fehler statt falscher Zahl.
+			const float tw_sp_ = tw; // geklemmtes Spalding-tw: Bezug von f, der Schattenzaehler [326]/[327] und (oben) der Autoritaet [313..316]
+			const float utau_c = sqrt(tw_sp_/rhon); // u_tau aus dem geklemmten tw
+			float fm = 1.0f; uint fb_ = 318u;
+			const float u3 = utau_c*utau_c*utau_c;
+			const float ap = (u3>0.0f) ? nu_mol*fac_dpds/(rhon*u3) : 0.0f;
+			if(u3<=0.0f||(as_uint(ap)&0x7F800000u)==0x7F800000u) { fm = 1.0f; fb_ = 317u; } // Entartung, Soll 0 -- NaN/Inf-Bit-Test statt isfinite (unter -cl-finite-math-only toter Code, Gross-Audit M / Pruefbefund A-3)
+			else if(ap>0.0f) {
+				fm = 1.0f - def_fac_apg_c/(1.0f + def_fac_apg_ap0/ap);
+				fb_ = fm>=0.99f ? 318u : (fm>=0.95f ? 319u : (fm>=0.90f ? 320u : (fm>=0.80f ? 321u
+				    : (fm>=0.70f ? 322u : (fm>=0.65f ? 323u : (fm>=0.62f ? 324u : 325u))))));
+			}
+			tw = tw_sp_*(fm*fm);
+			if(zt) {
+				if(hits[fb_]<0xF0000000u) atomic_inc(&hits[fb_]);
+				// Schatten der ENTFALLENEN Klemme: exakt die Bedingung, die 309/310 zaehlten.
+				if(tw_sp_>0.0f&&korr>tw_sp_)  { if(hits[326]<0xF0000000u) atomic_inc(&hits[326]); } // haette unten geklemmt
+				if(tw_sp_>0.0f&&-korr>tw_sp_) { if(hits[327]<0xF0000000u) atomic_inc(&hits[327]); } // haette oben geklemmt
+			}
+		}
+)+"#else"+R(
 		float tw1 = tw-korr;
 		// RELATIVE Kappung [0, 2*tw] (Lauf-4-Befund: 46 % 0-Klemmen). Slot 19 = beide Klemmen zusammen (alt, Bericht), 309/310 getrennt (neu).
 		if(tw1<0.0f) { tw1=0.0f; if(zt) { atomic_inc(&hits[19]); if(hits[309]<0xF0000000u) atomic_inc(&hits[309]); } }
 		else if(tw1>2.0f*tw) { tw1=2.0f*tw; if(zt) { atomic_inc(&hits[19]); if(hits[310]<0xF0000000u) atomic_inc(&hits[310]); } }
 		tw = tw1;
+)+"#endif"+R(
 		if(tw*faca>0.5f*rhon*ut&&zt) atomic_inc(&hits[8]); // Tiefen-Audit A1-B2: Klemme der NACH-APG-Kette zaehlen (Kopf zaehlte die verworfene Vor-APG-Kette)
 		twe = fmin(tw*faca, 0.5f*rhon*ut);
 	}
