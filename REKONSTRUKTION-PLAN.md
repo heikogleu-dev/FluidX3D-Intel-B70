@@ -300,7 +300,7 @@ Bestandsgarantie in jeder Stufe: Schalter aus ⇒ kein Define emittiert (`lbm.cp
 
 | Stufe | Inhalt | Abnahmekriterium | Kosten |
 |---|---|---|---|
-| **S−1** | `hits_n` 320 → 384, Legende an der **einen** Stelle (`lbm.cpp:748`) nachziehen; `scratch_gate.sh` um einen Arm für das neue Define erweitern | eigener Commit, bitgleich. **Ohne das schreibt ein Kernel still ins Nichts** — es gibt kein JIT-Define und keine Kernel-Schranke | Host, Minuten |
+| **S−1** | `hits_n` 320 → 384, Legende an der **einen** Stelle (`lbm.cpp:748`) nachziehen. **Der `scratch_gate.sh`-Arm gehört NICHT hierher, sondern nach S0** — S0/S1 steuert laut derselben Tabelle über einen *Laufzeit*-Parameter, es gibt in S−1 also kein Define, für das ein Arm zu bauen wäre (Prüfagent 22.09., Befund 2). | eigener Commit, bitgleich. **Ohne das schreibt ein Kernel still ins Nichts** — es gibt kein JIT-Define und keine Kernel-Schranke | Host, Minuten |
 | **S0+S1** | volle Formel mit `u_rek := u_lok`, gesteuert über einen **Laufzeit**-Kernelparameter (alpha/modus-Muster `lbm.cpp:995`), **nicht** über ein JIT-Define | `f_rek = f_load` wäre `fhn[i]=fhn[i]` — eine Compilezeit-Identität, die IGC entfernt. Der Laufzeitparameter erzwingt, dass der Kernel **läuft**. FELD-HASH kipp0 bitgleich; Wirkpfad **und** Wirkungszähler; relativer Rundungszähler | CPU N=38/316 |
 | **S1b** | `u_rek := u_lok + ε·t1`, ε klein und bekannt | ΔP **analytisch bekannt**, Δm exakt 0, K2 gibt den eingespeisten Impuls exakt wieder, ΔP·n̂-Histogramm geeicht. **Ohne diese Stufe sind ein Buchungs-Vorzeichenfehler und ein Wandmodellfehler in S2 nicht unterscheidbar** (FAC_UW-Lehre, `kernel.cpp:2546`: r = −1281) | CPU |
 | **S2** | Physik, kipp0. **Zwei Arme: (A) f_neq übernommen, (B) f_neq aus Ziel-τ_w.** Image Point = vorhandene `fac_nb`-Abtastung | c_f gegen **2,9149e-3** (nicht gegen „validiert"); K2 im deklarierten Band; Phasentest gegen die Periode-2-Mode; ΔP_t/twe-Histogramm. **`CFD_SGS_FDWAND` AUS** (nicht nur SISM) | iGPU Kanal |
@@ -340,10 +340,10 @@ S5 vor den Entscheid ziehen** — dort ist der Azimut wirklich frei.
 
 ## 7 · Diagnostik und Registerfrage
 
-**Slots:** nächster freier ist 317, Puffer `hits_n = 320` (`lbm.cpp:748`, `lbm.hpp:382`) — **drei frei, der
-Plan braucht 12–14** (Wirkpfad, Wirkung, 4–5 ΔP·n̂-Eimer, negative f, 2 Rundung, 2 Umfang/Klasse,
+**Slots:** nächster freier ist 317, Puffer `hits_n = **384** seit 22.09.2026 (S−1 erledigt, `lbm.cpp:748`, `lbm.hpp:382`) — **317..383 frei**, der
+Plan braucht 12–14 (Wirkpfad, Wirkung, 4–5 ΔP·n̂-Eimer, negative f, 2 Rundung, 2 Umfang/Klasse,
 Δm-Überlauf, ΔP_t/twe). Erhöhen ist reine Hostarbeit (`lbm.hpp:382` + Allokation `lbm.cpp:727`; Leser
-`setup.cpp:1477/1505/1521/1531/1697-1698`, 384 Slots = 9,2 kB Stack). **S−1.**
+`setup.cpp:1477/1505/1521/1531/1697-1698`, 384 Slots = 7680 B Arrays bzw. 8800 B je KlemmBilanz-Instanz, Zuwachs 1280 B je Instanz — die fruehere Angabe „9,2 kB" rechnete mit 24 B je Slot statt 20). **S−1 am 22.09.2026 erledigt.**
 
 **Registerdruck ist das eigentliche Scratch-Risiko — nicht Laufzeitindizes.** `stream_collide` hält schon
 **sieben** 19-Float-Arrays (fhn, feq, fhb, feb, Fin, j, j2), und die Rang-1-Remat-Notiz (`kernel.cpp:4120-4126`)
@@ -466,7 +466,7 @@ ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwor
 | **1** | ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ → **entfällt (§0b)**. Ersatz, falls Heiko einen 8-mm-Lauf freigibt: **`CFD_FAC_KRAFT=2`** (alle Facettenzellen), gepaart gegen eine frische Basiszeile, `CFD_KRAFT_ZBAND=3` | KRAFT=1 ist **gemessen** (30.08.): cd_druck_rest +0,2313 ± 0,0102 = 22,7 σ, cz_druck_rest 1,06 σ — ein validiertes Negativ. KRAFT=2 ist am Fahrzeug nie gemessen und ist die Obergrenze für den Umfang „alle" aus §3.1. Vorbehalt unverändert: `object_force` sieht die Guo-Kraft nicht, der Reibanteil steht allein in der `fac_tau`-Buchung | ein 8-mm-Lauf, **nur mit Freigabe** |
 | **2** | **Timer um `fac_apg_ab`** | zerlegt die 17 %, bevor irgendetwas optimiert wird | Zweizeiler + 8-mm-A/B |
 | **3** | **FP16S-Rauschlast auf f_neq** beziffern (Histogramm \|f_neq\|/f_eq an Facettenzellen) | entscheidet zwischen Rekonstruktions-Variante A und B, **bevor** gebaut wird | Host-Auswertung, keine GPU |
-| **4** | **S−1**: `hits_n` 320 → 384, `scratch_gate`-Arm | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
+| **4** | ~~**S−1**: `hits_n` 320 → 384~~ — **erledigt 22.09.2026**, Commit s. Tagesprotokoll. Der `scratch_gate`-Arm rutscht nach S0 (kein Define in S−1). Dabei gefunden und mitbehoben: `setup.cpp:1425` führte die Slotzahl hart als 320 | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
 | **5** | **S0+S1** der Rekonstruktion (Laufzeitparameter, kein JIT-Define) | beweist Einbauort und Zählung, bevor Physik dazukommt | CPU, Minuten |
 | **6** | offene Punkte §8 abarbeiten (Volltexte, `boden_eq`-Wächter, `fac_tau_cnt`-Politik, ELIBB-Abgriffpunkt) | alles Lesearbeit, keine GPU | — |
 

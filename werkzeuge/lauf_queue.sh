@@ -91,7 +91,15 @@ while IFS= read -r zeile; do
 		echo "[$(date +%H:%M:%S)] VERWEIGERT $n/$gesamt: $name -- Binary $BIN fehlt oder ist nicht ausfuehrbar" | tee -a "$Q"
 		continue
 	fi
-	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name (Binary $BIN)" | tee -a "$Q"
+	# ★★ 22.09.2026 PLATTENPLATZ. Anlass: am 21.09. lief die Platte auf 0 Bytes, p4_regel6 rechnete
+	# danach 28 min normal weiter und schrieb KEINE einzige Kraft mehr -- std::ofstream setzt bei
+	# ENOSPC badbit und verwirft danach still jeden Schreibvorgang, bis clear() gerufen wird. Das ruft
+	# niemand. 15 von 17 CSV standen still, waehrend der Lauf lief. Hier wird der Stand nur FESTGEHALTEN
+	# (Vorher/Nachher, und der Nachher-Wert traegt den Verdachtstest unten); die harte SCHRANKE gehoert
+	# in den Code, wo Gittergroesse, CFD_VTK_DT und CFD_T_END bekannt sind und der Bedarf exakt ist.
+	frei_vor=$(df -P --output=avail . 2>/dev/null | tail -1 | tr -d " ")
+	t_vor=$(date +%s)
+	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name (Binary $BIN, frei $(( ${frei_vor:-0} / 1048576 )) GB)" | tee -a "$Q"
 	# ★★ 06.09.2026 FORTSCHRITTSWAECHTER. Der Herzschlag bezeugt nur, dass der PROZESS lebt, nicht
 	# dass er RECHNET. Am 06.09. stand xf_elibb_pur 2 h 10 min nach "Allocating memory" bei 100 % auf
 	# einem Thread, waehrend die Statusdatei im Zweiminutentakt "LAEUFT" schrieb -- zwei Stunden
@@ -141,12 +149,37 @@ while IFS= read -r zeile; do
 	if [ "$n_err" -gt 0 ]; then
 		printf '%s' "$ent" | grep 'Error:' | sed 's/.*Error: */          ! /' | cut -c1-100 | tee -a "$Q"
 	fi
+	# ★★ 22.09.2026 VERDACHTSTEST AUF STILLEN AUSGABEVERLUST (Uebergabe 21.09. §5, Punkt 2).
+	# Der ENOSPC-Fall vom 21.09. war von aussen UNSICHTBAR: rc=0, keine Errors, Log lief weiter, nur die
+	# CSVs standen. Er ist aber an einer Groesse zu erkennen, die kein Laufparameter braucht -- dem
+	# ABSTAND zwischen dem letzten Schreiben einer CSV und dem Laufende. Schwelle deklariert: 10 % der
+	# Laufdauer. Wer laenger als ein Zehntel des Laufs nichts mehr geschrieben hat, hat aufgehoert zu
+	# schreiben, waehrend gerechnet wurde. Kein Abbruch, eine ANSAGE -- die Zahl steht in der Statusdatei.
+	frei_nach=$(df -P --output=avail . 2>/dev/null | tail -1 | tr -d " ")
+	t_nach=$(date +%s); dauer=$(( t_nach - t_vor ))
+	echo "          Platte: $(( ${frei_vor:-0} / 1048576 )) -> $(( ${frei_nach:-0} / 1048576 )) GB frei (verbraucht $(( (${frei_vor:-0} - ${frei_nach:-0}) / 1048576 )) GB)" | tee -a "$Q"
+	if [ "${frei_nach:-1}" -eq 0 ]; then
+		echo "          !! PLATTE VOLL nach $name -- jede weitere CSV-Zeile geht STILL verloren (ofstream badbit). Kette pruefen, bevor der naechste Lauf startet." | tee -a "$Q"
+	fi
+	# ★ 22.09.2026 VERWORFEN, und der Grund gehoert hierher: ich hatte hier einen mtime-Waechter
+	# ("CSV, die mehr als 10 % der Laufdauer vor dem Laufende zuletzt geschrieben wurde"). Er faengt den
+	# Schadensfall p4_regel6 vom 21.09. sauber (14 CSV standen 2083 s vor der letzten Ausgabe still),
+	# ABER er schlaegt am GESUNDEN Lauf p4_regel7 falsch an: facetten_histogramme.csv wird EINMAL beim
+	# Facettenaufbau geschrieben und liegt dort 8426 s vor Laufende. Ein Waechter, der am guten Lauf
+	# meldet, wird weggesehen -- und dann meldet er auch beim schlechten umsonst. Die tragfaehige
+	# Pruefung ist der STREAM-ZUSTAND im Code (ofstream fail/bad nach jedem Schreibblock), nicht die
+	# Dateizeit von aussen. Siehe Uebergabe 21.09. §5 Punkt 2.
 	# ★★ 10.09.2026 KRAFTVERLAUF ALS STANDBILD-SERIE (Heiko-Vorgabe): alle 100 ms physikalisch
 	# ein Bild nach export/<lauf>/kraftverlauf_000300ms.png usw., dazu kraftverlauf.png ueber den
 	# ganzen Lauf. Laeuft NACH dem Lauf im SELBEN Kettenglied -- kein eigener Waechterprozess,
 	# Iron Rule 4 bleibt gewahrt. Die Bilder entstehen aus cd_facetten.csv, also nachtraeglich
 	# genau so, wie sie waehrend des Laufs entstanden waeren. Fehler hier duerfen die Kette NICHT
 	# abbrechen: es ist Auswertung, nicht Messung.
+	# ★ 22.09.2026: die Gatterung war STILL -- bei leerer oder fehlender cd_facetten.csv blieben die
+	# Kraftbilder kommentarlos aus (Uebergabe 21.09. §5). Jetzt sagt sie, warum sie nichts tut.
+	if [ "${CFD_QUEUE_KRAFTBILD:-1}" != "0" ] && [ ! -s "export/$name/cd_facetten.csv" ]; then
+		echo "          HINWEIS: keine Kraftbilder -- export/$name/cd_facetten.csv fehlt oder ist leer (Kraftausgabe hat nie oder nicht mehr geschrieben)." | tee -a "$Q"
+	fi
 	if [ "${CFD_QUEUE_KRAFTBILD:-1}" != "0" ] && [ -s "export/$name/cd_facetten.csv" ]; then
 		if python3 werkzeuge/kraftverlauf.py "$name" --serie "${CFD_QUEUE_KRAFTBILD_MS:-100}" > "logs/$name.kraftverlauf.log" 2>&1; then
 			echo "          Kraftverlauf: $(grep -c 'geschrieben:' "logs/$name.kraftverlauf.log") Bilder in export/$name/" | tee -a "$Q"

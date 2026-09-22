@@ -1422,7 +1422,7 @@ static void berichte_apg(LBM& L, const char* wo) {
 	if(st!=5ull) { print_warning(string("APG ")+wo+": nb_stride "+to_string(st)+" != 5 unter APG -- Stride-Einfrieren verletzt."); apg_verletzt = true; return; }
 	if(!d->nachbar_on||d->fac_N==0ull) { print_warning(string("APG ")+wo+": kein Facetten-/Nachbarpfad in dieser Domaene -- CFD_FAC_APG ist hier wirkungslos (Wirkpfad 0, kein Befund)."); return; }
 	d->finish_queue(); d->rho_clamp_hits.read_from_device();
-	ulong v[320]; for(uint k=0u; k<320u; k++) v[k] = (ulong)d->rho_clamp_hits[k];
+	ulong v[LBM_Domain::hits_n]; for(uint k=0u; k<LBM_Domain::hits_n; k++) v[k] = (ulong)d->rho_clamp_hits[k]; // ★ 22.09.2026 S-1: hier stand die Slotzahl HART als 320, obwohl lbm.hpp:382 sie "an EINER Stelle" fuehrt -- nach der Erhoehung auf 384 haette dieser Leser 64 Slots stumm uebergangen. Zweite Fundstelle derselben Klasse wie Pruefbefund 3-E.
 	const ulong soll308 = v[7]>=v[9] ? v[7]-v[9] : 0ull;
 	print_info(string("APG ")+wo+" (kappa = "+to_string(d->apg_kappa,4u)+", Vorkernel fac_apg_ab, grad rho aus 6 Achsnachbarn): Vorkernel-Besuche [306] "+to_string(v[306])+" (Soll [7] = "+to_string(v[7])+"), entartet [307] "+to_string(v[307])+", APG-Zweig besucht [308] "+to_string(v[308])+" (Soll [7]-[9] = "+to_string(soll308)+"), dp/ds > 0 (APG) [311] "+to_string(v[311])+" / < 0 (FPG) [312] "+to_string(v[312])+", Klemme unten [309] "+to_string(v[309])+" / oben [310] "+to_string(v[310])+" (Slot 19 beide "+to_string(v[19])+").");
 	const ulong hs = v[313]+v[314]+v[315]+v[316];
