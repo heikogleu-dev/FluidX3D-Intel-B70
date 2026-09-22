@@ -147,9 +147,44 @@ auch **keine Kollision mit `CFD_U_SPARSAM` und `SPARSE_TILES`**, die §3.3/§8 a
 B nimmt dem FDWAND-Zirkel den Spannungskanal weg, weil die Spannung dann aus der Wandfunktion kommt statt
 aus gemessenem u.
 
-**Entscheid: B ist gleichrangiger Arm ab S2, nicht Fußnote.** Offen: FP16S-Rauschlast auf f_neq (f_neq ist
-eine kleine Differenz zweier O(w_i)-Zahlen; die ~4,9e-4 landen vollständig auf dem spannungstragenden
-Anteil). Billig messbar als Histogramm |f_neq|/f_eq an Facettenzellen — **vor** S2 erledigen.
+**Entscheid: B ist gleichrangiger Arm ab S2, nicht Fußnote.** ~~Offen: FP16S-Rauschlast auf f_neq …
+Histogramm |f_neq|/f_eq an Facettenzellen~~ — **erledigt 22.09.2026, und die Begründung war falsch
+gerechnet. Siehe §2b.**
+
+### 2b · FP16S-Rauschlast — erledigt 22.09.2026, entscheidet NICHT zwischen A und B
+
+**Der Nenner im Plan war falsch.** FP16S speichert nicht f, sondern die **Störform** (f_i − w_i)·2^15 als
+IEEE-half (`lbm.cpp:2409-2413`; `defines.hpp:27` FP16S an, `:80` FP16C auskommentiert). Das Quantum ist
+also relativ zu |f_i − w_i|, **nicht** zu f_eq ≈ w_i. Der Satz „die ~4,9e-4 landen vollständig auf dem
+spannungstragenden Anteil" gälte nur, wenn |f − w_i| ≈ |f_neq| wäre.
+
+Stichprobe (1800 Facettenzellen aus `facetten_histogramme.csv`, u/ρ/flags aus
+`export/p4_regel7/feld_nah_001001ms.vtk`, f_neq per Chapman-Enskog):
+
+| | Median | q10 |
+|---|---|---|
+| R = \|f_neq\|/\|f − w_i\| | **0,265** | 0,020 |
+| Rauschlast 2^−11/R | **0,18 %** | 2,4 % |
+| Rauschlast nach der Plan-Norm | 10,2 % | — |
+
+**Die Plan-Norm ist um Faktor ≈ 55 zu pessimistisch** — sie hätte aus einem Rechenfehler heraus für
+Variante B gesprochen. Die CE-Schätzung lässt die Geistermoden des Wandmodells weg, das wahre |f_neq| ist
+also größer und die Rauschlast noch kleiner: der Fehler geht in die sichere Richtung.
+
+**Und es gibt zwei GEMESSENE Antworten, die kein Histogramm braucht:**
+- `AUDIT-BEFUNDE.md:940-945` — Dreiarm-A/B FP32/FP16C/FP16S, 8 mm, 150 gepaarte Stichproben: gegen den
+  FP32-Arm ist `cz_druck_rest` unter **FP16S +0,0038 bei 0,70 σ**, Vorzeichentest 69/150 = Zufall. Das
+  gesamte FP16S-Rauschen **abzuschalten** bewegt den wandmodelldominierten Koeffizienten nicht messbar.
+- `WANDMODELL.md:219` — Kanal, Hypothese „FP16C-Quantisierung", Test „FP32-Build, gleicher Lauf":
+  **tot, −3 %** auf c_f. (Anderes Format als heute gebaut — deshalb als Zweitbeleg, nicht als Hauptbeleg.)
+
+**Was A von B trennt, ist eine Modell-, keine Numerikfrage** und steht bereits in §2: A prägt keine
+Spannung auf und trägt den BB-Spannungsfehler (~1,5×) unverändert in den gesetzten Zustand.
+
+**Wenn doch eine Zahl mit den Wandmodell-Geistermoden gewünscht ist** (das Einzige, was der Host
+prinzipiell nicht sehen kann): `sgs_gdiag` rechnet `f_neq,i = fhn[i] − feq[i]` schon linkweise an jeder
+Facettenzelle (`kernel.cpp:5412`), und `fac_gd[k8+7]` ist frei (`:5340`). Zwei Akkumulatoren als
+Beifahrer eines ohnehin freigegebenen Laufs — **kein eigener Lauf**.
 
 ### Präzedenzfall `schale_blend` — trägt die Form, nicht den Beweis
 
@@ -465,7 +500,7 @@ ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwor
 |---|---|---|---|
 | **1** | ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ → **entfällt (§0b)**. Ersatz, falls Heiko einen 8-mm-Lauf freigibt: **`CFD_FAC_KRAFT=2`** (alle Facettenzellen), gepaart gegen eine frische Basiszeile, `CFD_KRAFT_ZBAND=3` | KRAFT=1 ist **gemessen** (30.08.): cd_druck_rest +0,2313 ± 0,0102 = 22,7 σ, cz_druck_rest 1,06 σ — ein validiertes Negativ. KRAFT=2 ist am Fahrzeug nie gemessen und ist die Obergrenze für den Umfang „alle" aus §3.1. Vorbehalt unverändert: `object_force` sieht die Guo-Kraft nicht, der Reibanteil steht allein in der `fac_tau`-Buchung | ein 8-mm-Lauf, **nur mit Freigabe** |
 | **2** | **Timer um `fac_apg_ab`** | zerlegt die 17 %, bevor irgendetwas optimiert wird | Zweizeiler + 8-mm-A/B |
-| **3** | **FP16S-Rauschlast auf f_neq** beziffern (Histogramm \|f_neq\|/f_eq an Facettenzellen) | entscheidet zwischen Rekonstruktions-Variante A und B, **bevor** gebaut wird | Host-Auswertung, keine GPU |
+| **3** | ~~FP16S-Rauschlast auf f_neq beziffern~~ — **erledigt 22.09.2026, siehe §2b.** Das Histogramm war auf f_eq normiert statt auf die Störform f − w_i und damit um Faktor ≈ 55 zu pessimistisch. Die Frage ist überdies zweimal GEMESSEN beantwortet (`AUDIT-BEFUNDE.md:940-945`: FP16S gegen FP32, cz_druck_rest 0,70 σ) | entscheidet **nicht** zwischen A und B — der Unterschied ist eine Modellfrage (§2) | erledigt, null Kosten |
 | **4** | ~~**S−1**: `hits_n` 320 → 384~~ — **erledigt 22.09.2026**, Commit s. Tagesprotokoll. Der `scratch_gate`-Arm rutscht nach S0 (kein Define in S−1). Dabei gefunden und mitbehoben: `setup.cpp:1425` führte die Slotzahl hart als 320 | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
 | **5** | **S0+S1** der Rekonstruktion (Laufzeitparameter, kein JIT-Define) | beweist Einbauort und Zählung, bevor Physik dazukommt | CPU, Minuten |
 | **6** | offene Punkte §8 abarbeiten (Volltexte, `boden_eq`-Wächter, `fac_tau_cnt`-Politik, ELIBB-Abgriffpunkt) | alles Lesearbeit, keine GPU | — |

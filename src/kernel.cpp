@@ -3880,7 +3880,16 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		//      Geistmoment 3,1e-18, nach EINEM FP16S-Speicherumlauf steht dort 1,08e-6. Jede Zelle
 		//      meldet also Geistanteil, und 201 == 200 ist eine Tautologie. Slot 203 prueft
 		//      stattdessen, ob der Abzug die SPEICHERRUNDUNG ueberlebt: relative FP16S-Aufloesung
-		//      9,8e-4 auf der Stoerform f^ = f - w_i (gemessen, AUDIT-BEFUNDE B77). Bleibt 203
+		//      9,8e-4 auf der Stoerform f^ = f - w_i. BERICHTIGT 22.09.2026: hier stand die Angabe
+		//      gemessen, AUDIT-BEFUNDE B77 -- das ist eine falsche Herkunftsangabe. B77 misst etwas anderes
+		//      [AUDIT-BEFUNDE.md:5499-5520: cz_druck_rest unter FP16C, -0,0119 bei 2,17 sigma]; die
+		//      9,8e-4 sind dort hergeleitet, nicht gemessen. Rechnerisch ist FP16S die IEEE-half
+		//      1-5-10 [lbm.cpp:2409-2413, defines.hpp:27; FP16C ist auskommentiert, defines.hpp:80],
+		//      also 10 Mantissenbits: volle ULP 2^-10 = 9,8e-4, halbe ULP = echter Worst-Case-
+		//      Rundungsfehler = 2^-11 = 4,9e-4. Die Schwelle hier ist damit um Faktor 2 zu scharf,
+		//      Slot 203 UNTERTREIBT also. Sie bleibt trotzdem stehen: eine Aenderung wuerde die
+		//      Vergleichbarkeit zu allen bisherigen Laeufen brechen, ohne etwas zu entscheiden.
+		//      Die Gegenstelle kernel.cpp:5107-5109 nennt richtig 2^-11 = 4,9e-4. Bleibt 203
 		//      nahe null, ist der Abzug kleiner als das Speicherquantum und wirkungslos --
 		//      genau die Regression, die 199..201 nicht sehen.
 		if(n%1024u==0u) {

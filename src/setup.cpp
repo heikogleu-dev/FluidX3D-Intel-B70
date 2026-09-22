@@ -5,6 +5,30 @@
 #include <cstdio>
 #include <set> // ★ P9c N2F-SCHALE: Deduplizierung der Schalen-Zellliste
 #include <map> // ★ Gradient-Blend: Zelle -> (Gewicht, Lage), max-Gewicht bei Lagen-Duplikaten
+#include <sys/statvfs.h> // ★ 22.09.2026 Plattenplatz-Waechter (Uebergabe 21.09. §5)
+
+// ★★ 22.09.2026 AUSGABE-WAECHTER (Uebergabe 21.09.2026 §5 Punkt 2).
+// ANLASS, und er ist teuer bezahlt: am 21.09. lief die Platte auf 0 Bytes. p4_regel6 rechnete danach
+// 28 MINUTEN normal weiter und schrieb KEINE einzige Kraft mehr. std::ofstream setzt bei ENOSPC das
+// badbit und verwirft danach STILL jeden weiteren Schreibvorgang, bis clear() gerufen wird -- das ruft
+// niemand. 15 von 17 CSV standen still, waehrend der Lauf lief, rc war 0, das Log lief weiter, und von
+// aussen war nichts zu sehen. Die PNG-Schreiber erholten sich nur, weil sie je Bild neu oeffnen.
+// Das ist dieselbe Krankheit wie ein Schalter ohne feuernden Zaehler: ein stiller No-Op.
+// print_error beendet den Lauf (utilities.hpp:4074/4159, endet auf exit(1)). Das ist hier RICHTIG:
+// ein Lauf, der nicht mehr schreibt, erzeugt keine Messung mehr -- weiterzurechnen kostet nur
+// Kartenzeit. Der Zaehler sorgt dafuer, dass die Meldung genau EINMAL kommt und die Ursache nennt.
+static ulong g_schreibfehler = 0ull;
+static void pruefe_schreibzustand(std::ofstream& s, const char* name, const string& out_dir) {
+	if(s.good()||g_schreibfehler>0ull) return; // good() falsch = failbit oder badbit gesetzt
+	g_schreibfehler++;
+	string frei = "unbekannt";
+	struct statvfs vfs;
+	if(statvfs(out_dir.c_str(), &vfs)==0) frei = to_string((double)vfs.f_bavail*(double)vfs.f_frsize/1073741824.0, 2u)+" GB";
+	print_error(string("AUSGABE GESCHEITERT: ")+name+" nimmt keine Zeilen mehr an (ofstream fail/bad). Freier Platz unter "
+		+out_dir+": "+frei+". Ab hier geht JEDE weitere Zeile still verloren -- der Lauf wird beendet, statt ohne Messung weiterzurechnen. "
+		+"Anlass: p4_regel6 am 21.09.2026, 28 min ohne Kraftausgabe bei rc=0.");
+}
+
 
 
 void pruefe_ptrt(LBM_Domain* d, const char* ort); // ★ 10.09.2026: Definition steht weiter unten, der Kanal-Aufruf davor
@@ -1255,6 +1279,20 @@ static void schreibe_vtk_feld(LBM& L, const uint Nx, const uint Ny, const uint N
 		}
 	}
 	f.close();
+	// ★★ 22.09.2026 (Pruefagent, Befund 4 MITTEL): hier stand NUR die Oeffnungspruefung oben, nie eine
+	// Schreibpruefung. Die Kosten stehen im Schadenslauf p4_regel6 vom 21.09.: feld_nah_000150ms.vtk
+	// ist 6,97 GB statt 11,13 GB, feld_fern_000150ms.vtk 0 B, feld_{nah,fern}_000300ms.vtk 0 B --
+	// alles LAUTLOS, und die Erfolgsmeldung unten wurde trotzdem gedruckt. Sie war eine Luege ueber
+	// eine halbe Datei. Der CSV-Waechter greift erst sieben Minuten spaeter; dies ist der erste
+	// Verlustzeitpunkt ueberhaupt. Geprueft wird NACH close(), weil der letzte Block erst dort faellt.
+	if(!f) {
+		std::error_code ec; const auto ist = std::filesystem::file_size(datei, ec);
+		print_error("VTK-DUMP UNVOLLSTAENDIG: "+datei+" -- der Strom meldet fail/bad nach dem Schreiben. "
+			+"Soll "+to_string((float)(np*17ull)/1048576.0f,1u)+" MB, auf Platte "
+			+(ec ? string("nicht lesbar") : to_string((float)ist/1048576.0f,1u)+" MB")
+			+". Die Datei ist ABGESCHNITTEN und darf nicht ausgewertet werden. Haeufigste Ursache: Platte voll. "
+			+"ANLASS: p4_regel6 am 21.09.2026 schrieb drei solche Dateien lautlos, zwei davon mit 0 Bytes.");
+	}
 	const ulong bytes = np*(3ull*4ull+4ull+1ull);
 	g_vtk_dateien++; g_vtk_bytes += bytes;
 	print_info("[VTK] "+datei+": "+to_string(Sx)+"x"+to_string(Sy)+"x"+to_string(Sz)+" = "+to_string(np)+" Punkte, "
@@ -4585,6 +4623,7 @@ void main_setup_kanal() {
 		const double cf_k = 2.0*tau_kraft/fmax(1e-30,Ub*Ub), cf_m = 2.0*tau_mem/fmax(1e-30,Ub*Ub);
 		zcsv << (step+chunk) << "," << (double)(step+chunk)/(double)T_ett << "," << Ub << "," // R2: gelaufene Schritte, nicht nominelle (letzter Chunk ist gekappt)
 		     << Ub_plus << "," << f_akt << "," << cf_k << "," << cf_m << "\n" << std::flush;
+		pruefe_schreibzustand(zcsv, "kanal_zeit.csv", out_dir); // ★ 22.09.2026 (Pruefagent, Befund 6): der Waechter deckte nur fahrzeug_dd
 		// Statistik erst nach dem Warmlauf akkumulieren
 		if(step>=n_warm) { for(uint z=0u;z<Nz;z++){su[z]+=pu[z];suu[z]+=puu[z];sww[z]+=pww[z];suw[z]+=puw[z];suz[z]+=pz_[z];} n_stat+=(ulong)Nx*Ny; }
 		// Iron Rule 3: Diagnose-Facette je Chunk in CSV sampeln
@@ -5904,6 +5943,7 @@ void main_setup_kugel() {
 				fac_px+=FS.px; fac_py+=FS.py; fac_pz+=FS.pz; fac_pn++;
 				if(!fac_csv.is_open()) { fac_csv.open(out_dir+"cd_facetten.csv"); fac_csv << "# Druck-Zeitreihe des projizierten Cd-Pfads (Reibung: exaktes Fenster-Delta im Endreport)\nt_si,cd_druck_x,cd_druck_z\n"; }
 				fac_csv << ts.back() << "," << (double)units.si_F((float)FS.px)/((double)q_inf*(double)A_nom) << "," << (double)units.si_F((float)FS.pz)/((double)q_inf*(double)A_nom) << "\n" << std::flush;
+				pruefe_schreibzustand(fac_csv, "cd_facetten.csv (Kugel)", out_dir); // ★ 22.09.2026 (Pruefagent, Befund 6): der Waechter deckte nur fahrzeug_dd
 			}
 		}
 		// ★ Cd-Pfad: Akkumulator-Snapshot beim ersten Sample im Mittelungsfenster
@@ -8648,6 +8688,56 @@ static void main_setup_fahrzeug_dd() {
 			+(vtk_ende?string("EIN Dump am Laufende"):string("kein Dump am Laufende"))
 			+(vtk_dt>0.0f?", zusaetzlich alle "+to_string(vtk_dt*1000.0f,0u)+" ms":"")
 			+". ORIGIN/SPACING sind die ECHTE Weltlage beider Gitter -- die Dateien liegen im Betrachter deckungsgleich uebereinander.");
+		// ★★ 22.09.2026 PLATTENPLATZ-SCHRANKE VOR DEM ERSTEN ZEITSCHRITT (Uebergabe 21.09.2026 §5 Punkt 1).
+		// Hier ist der Bedarf EXAKT bekannt -- Gittergroesse, Abtastung, CFD_VTK_DT, CFD_T_END und die
+		// Rotation stehen alle in dieser Funktion. Die Queue kann das nicht: sie kennt das Gitter nicht.
+		// Gerechnet wird die HOECHSTZAHL GLEICHZEITIG liegender Dumps, nicht die Summe aller je geschriebenen:
+		//   CFD_VTK_BEHALTE = 0 -> keine Rotation, alle Dumps bleiben liegen  -> n_dump
+		//   CFD_VTK_BEHALTE > 0 -> vtk_rotiere() haengt an BEIDEN Dumppfaden (:9662 Kadenz, :9675 CFD_VTK_DT)
+		//                          und loescht nach dem Schreiben auf behalte herunter; der Enddump
+		//                          (CFD_VTK_ENDE) laeuft daneben. Spitze = behalte + 1.
+		// EMPIRISCH BESTAETIGT an p4_regel7 (21.09.2026): CFD_VTK_DT=0.15, CFD_T_END=1.001, CFD_VTK_ENDE=1,
+		// CFD_VTK_BEHALTE beim Default 2 -> 6 Kadenzdumps geschrieben, auf Platte liegen 3 Dateien
+		// (750 ms + 900 ms rotiert, 1001 ms Enddump). Die Groessenformel trifft dort auf zwei Stellen:
+		// nah 1917x693x493 x 17 B = 10,37 GB (Datei 10,37 GB), fern 800x636x608 x 17 B = 4,90 GB (Datei 4,90 GB).
+		{
+			const double je_dump_mb = (double)mb(fNx,fNy,fNz)+(double)mb(cNx,cNy,cNz);
+			const double n_dump = (vtk_dt>0.0f ? floor((double)t_end/(double)vtk_dt) : 0.0) + (vtk_ende?1.0:0.0);
+			// ★ BERICHTIGT 22.09.2026 (Pruefagent, Befund 2 HOCH): n_dump zaehlt NUR die CFD_VTK_DT-Uhr.
+			// Der Near-Step-Pfad (CFD_VTK_JEDE, Schreibstelle weiter unten) schreibt eigene Doppeldumps, und
+			// bei CFD_VTK_BEHALTE=0 loescht vtk_rotiere nichts -- die blieben ungezaehlt liegen. Im Extremfall
+			// CFD_VTK_JEDE>0, CFD_VTK_DT=0, CFD_VTK_ENDE=0, BEHALTE=0 haette die Schranke "0 Dumps = 0,0 GB"
+			// gemeldet und JEDEN Lauf durchgelassen -- eine falsche Entwarnung, also genau der stille No-Op,
+			// gegen den diese Schranke gebaut ist. Die Zahl lag drei Zeilen weiter unten bereits vor.
+			const double n_kadenz = (slice_ns>0ull&&vtk_jede>0u) ? (double)(((ulong)n_outer*(ulong)ratio/slice_ns)/(ulong)vtk_jede) : 0.0;
+			const double gleichzeitig = (vtk_behalte>0u) ? (double)(vtk_behalte+1u) : (n_dump+n_kadenz);
+			// ★ RESERVE (Pruefagent, Befund 3): die Schranke sah nur VTK. Slices als PNG, die uebrigen CSV und
+			// die Abschlussberichte entstehen NACH ihr. GEMESSEN an den beiden 4-mm-Laeufen vom 21.09.:
+			// p4_regel7 188,4 MB in 95 Dateien, p4_regel6 176,1 MB in 61 Dateien (alles ausser *.vtk).
+			// Angesetzt wird 1,0 GB -- gut das Fuenffache des Gemessenen, damit ein Lauf mit mehr Slices nicht
+			// knapp durchfaellt, und klein gegen einen einzelnen Dump (15,3 GB bei 4 mm). Deklarierter Wert,
+			// keine geschaetzte Groesse: er steht hier mit seiner Messgrundlage.
+			const double reserve_gb = 1.0;
+			const double bedarf_gb = gleichzeitig*je_dump_mb/1024.0 + reserve_gb;
+			struct statvfs vfs;
+			if(statvfs(out_dir.c_str(), &vfs)==0) {
+				const double frei_gb = (double)vfs.f_bavail*(double)vfs.f_frsize/1073741824.0;
+				print_info("PLATTENBEDARF: "+to_string(gleichzeitig,0u)+" Dump(s) gleichzeitig a "+to_string((float)je_dump_mb,0u)
+					+" MB"+(n_kadenz>0.0?" (davon "+to_string(n_kadenz,0u)+" aus CFD_VTK_JEDE)":"")+" + "+to_string((float)reserve_gb,1u)
+					+" GB Reserve fuer CSV/PNG/Berichte = "+to_string((float)bedarf_gb,1u)+" GB; frei unter "+out_dir+": "+to_string((float)frei_gb,1u)+" GB.");
+				if(bedarf_gb>frei_gb) print_error("PLATTE REICHT NICHT: der VTK-Export braucht "+to_string((float)bedarf_gb,1u)
+					+" GB, frei sind "+to_string((float)frei_gb,1u)+" GB. Lauf nicht gestartet. Entweder Platz schaffen, CFD_VTK_DT groesser waehlen, "
+					+"CFD_VTK_BEHALTE setzen (Rotation) oder CFD_VTK_STRIDE erhoehen. ANLASS: am 21.09.2026 lief die Platte waehrend p4_regel6 auf 0 Bytes, "
+					+"danach rechnete der Lauf 28 min weiter und schrieb still KEINE Kraft mehr (ofstream badbit).");
+			} else print_warning("Plattenplatz unter "+out_dir+" nicht ermittelbar (statvfs) -- die Bedarfsschranke ist in diesem Lauf AUS.");
+			// ★ WARUM DIESE SCHRANKE VOR DEM LAUF WICHTIGER IST ALS JEDE MELDUNG WAEHREND DES LAUFS
+			// (Pruefagent 22.09., Befund 5): print_error schreibt ueber println nach std::cout, und std::cout
+			// nimmt bei ENOSPC SELBST badbit. Belegt an logs/p4_regel6.log: die Datei steht bei 2 142 208 B
+			// mit mtime 16:43, waehrend der Lauf bis 17:18 weiterlief -- und sie erholte sich auch nicht,
+			// als wieder Platz da war. Bei voller Platte ist rc=1 das EINZIGE Signal, das nach aussen kommt
+			// (die Queue macht daraus " FEHLER"). Der Meldetext ist dann schon verloren. Deshalb: lieber gar
+			// nicht erst starten, als sich auf eine Meldung im Schadensfall zu verlassen.
+		}
 		if(slice_ns>0ull&&vtk_jede>0u) {
 			const ulong kp = ((ulong)n_outer*(ulong)ratio/slice_ns)/(ulong)vtk_jede;
 			print_info("VTK AN DER KADENZ (CFD_VTK_JEDE="+to_string(vtk_jede)+", CFD_VTK_BEHALTE="+to_string(vtk_behalte)+"): voraussichtlich "+to_string(kp)+" Doppeldumps a "+to_string(mb(fNx,fNy,fNz)+mb(cNx,cNy,cNz),0u)+" MB"
@@ -9424,6 +9514,7 @@ static void main_setup_fahrzeug_dd() {
 			ts.push_back(t_si); fx.push_back(Fx_si); fz.push_back(Fz_si); fx_c.push_back(Fx_far);
 			fcsv << t_si << "," << Fx_si << "," << Fz_si << "," << Fx_si/((double)q_inf*A_ref) << ","
 			     << Fz_si/((double)q_inf*A_ref) << "," << Fx_far << "\n" << std::flush; // sofort auf Platte, siehe oben
+			pruefe_schreibzustand(fcsv, "forces.csv", out_dir); // ★ 22.09.2026: der Waechter sitzt an der Kadenz, nicht am Laufende -- der 21.09.-Fall verlor 28 min, weil niemand hinsah
 			if(fac_an_zs && t_si>=(double)t_warmup && (++fac_smp)%fac_cd_every==0ull) { // ★ Stufe 5 (PCIe ~2,5 GB je Aufruf -- Kadenz!)
 				LBM_Domain* df = lbm_f.lbm_domain[0];
 				if(fac_snap.empty()) { // Reibungs-Snapshot am Fensteranfang (erst ab Warmup)
@@ -9458,6 +9549,7 @@ static void main_setup_fahrzeug_dd() {
 					fac_csv << t_si << "," << cdg << "," << czg << ","
 					        << (double)units_fine.si_F((float)FK.rx)/qA << "," << (double)units_fine.si_F((float)FK.rz)/qA << "," << fac_dm << "," << fac_rest
 					        << "," << cdb << "," << (cdg-cdb) << "," << czb << "," << (czg-czb) << "\n" << std::flush;
+					pruefe_schreibzustand(fac_csv, "cd_facetten.csv", out_dir); // ★ 22.09.2026, s. o.
 					if(LBM_Domain::s_fac_elibb&&fabs(fac_dm)>1e-4*(double)df->fac_N) { static bool dm_einmal=false; if(!dm_einmal) { dm_einmal=true; print_info("Delta-m traegt unter ELIBB den REALEN Blenden-Massenfluss (B3) -- Gelb-Band-Schwelle gilt dort nicht; Fenster-Delta = "+to_string((float)fac_dm,6u)+" (einmalige Ansage, weiter in der CSV)."); } }
 					else if(fabs(fac_dm)>1e-4*(double)df->fac_N&&!LBM_Domain::s_fac_elibb) print_warning("Delta-m Gelb-Band gerissen: "+to_string((float)fac_dm,6u)+" bei fac_N = "+to_string(df->fac_N)+" (provisorische Schwelle 1e-4*fac_N auf das FENSTER-Delta -- Arm-4-Eichung: Rauschbett ~0,12 kumulativ, Schwelle ~1 vormerken)."); // Torus lief mit -14,9 UNBEWACHT -- nie wieder
 				}

@@ -97,7 +97,7 @@ while IFS= read -r zeile; do
 	# niemand. 15 von 17 CSV standen still, waehrend der Lauf lief. Hier wird der Stand nur FESTGEHALTEN
 	# (Vorher/Nachher, und der Nachher-Wert traegt den Verdachtstest unten); die harte SCHRANKE gehoert
 	# in den Code, wo Gittergroesse, CFD_VTK_DT und CFD_T_END bekannt sind und der Bedarf exakt ist.
-	frei_vor=$(df -P --output=avail . 2>/dev/null | tail -1 | tr -d " ")
+	frei_vor=$(df --output=avail . 2>/dev/null | tail -1 | tr -d " ")
 	t_vor=$(date +%s)
 	echo "[$(date +%H:%M:%S)] START $n/$gesamt: $name (Binary $BIN, frei $(( ${frei_vor:-0} / 1048576 )) GB)" | tee -a "$Q"
 	# ★★ 06.09.2026 FORTSCHRITTSWAECHTER. Der Herzschlag bezeugt nur, dass der PROZESS lebt, nicht
@@ -149,15 +149,13 @@ while IFS= read -r zeile; do
 	if [ "$n_err" -gt 0 ]; then
 		printf '%s' "$ent" | grep 'Error:' | sed 's/.*Error: */          ! /' | cut -c1-100 | tee -a "$Q"
 	fi
-	# ★★ 22.09.2026 VERDACHTSTEST AUF STILLEN AUSGABEVERLUST (Uebergabe 21.09. §5, Punkt 2).
+	# ★★ 22.09.2026 PLATTENSTAND NACH DEM LAUF (Uebergabe 21.09. §5).
 	# Der ENOSPC-Fall vom 21.09. war von aussen UNSICHTBAR: rc=0, keine Errors, Log lief weiter, nur die
-	# CSVs standen. Er ist aber an einer Groesse zu erkennen, die kein Laufparameter braucht -- dem
-	# ABSTAND zwischen dem letzten Schreiben einer CSV und dem Laufende. Schwelle deklariert: 10 % der
-	# Laufdauer. Wer laenger als ein Zehntel des Laufs nichts mehr geschrieben hat, hat aufgehoert zu
-	# schreiben, waehrend gerechnet wurde. Kein Abbruch, eine ANSAGE -- die Zahl steht in der Statusdatei.
-	frei_nach=$(df -P --output=avail . 2>/dev/null | tail -1 | tr -d " ")
-	t_nach=$(date +%s); dauer=$(( t_nach - t_vor ))
-	echo "          Platte: $(( ${frei_vor:-0} / 1048576 )) -> $(( ${frei_nach:-0} / 1048576 )) GB frei (verbraucht $(( (${frei_vor:-0} - ${frei_nach:-0}) / 1048576 )) GB)" | tee -a "$Q"
+	# CSVs standen. Was die Queue dazu beitragen kann, ist der Plattenstand vorher/nachher; die
+	# eigentliche Erkennung sitzt im Code (ofstream-Zustand an der Sample-Kadenz, setup.cpp).
+	frei_nach=$(df --output=avail . 2>/dev/null | tail -1 | tr -d " ")
+	t_nach=$(date +%s)
+	echo "          Platte: $(( ${frei_vor:-0} / 1048576 )) -> $(( ${frei_nach:-0} / 1048576 )) GB frei (verbraucht $(( (${frei_vor:-0} - ${frei_nach:-0}) / 1048576 )) GB), Wanduhr $(( (t_nach - t_vor) / 60 )) min" | tee -a "$Q"
 	if [ "${frei_nach:-1}" -eq 0 ]; then
 		echo "          !! PLATTE VOLL nach $name -- jede weitere CSV-Zeile geht STILL verloren (ofstream badbit). Kette pruefen, bevor der naechste Lauf startet." | tee -a "$Q"
 	fi
