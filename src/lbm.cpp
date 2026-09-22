@@ -166,6 +166,15 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	// Statik-Nullung gebaut und darf weder den Haken tragen noch an "HAKEN ohne APG" sterben (die Ansage-Pruefung steht in setup.cpp neben CFD_FAC_APG).
 	s_fac_apg_haken = (s_fac_apg!=0.0f) ? env_u("CFD_FAC_APG_HAKEN", 0u) : 0u;
 	if(s_fac_apg_haken>3u) print_error("CFD_FAC_APG_HAKEN kennt nur 0 (aus), 1 (grad-rho-Statistik), 2 (Konstantgradient) und 3 (analytischer Lineargradient).");
+	// ★★ 22.09.2026 CFD_TIMER_APG (REKONSTRUKTION-PLAN.md §10 Hebel 1 = Plan-Schritt 2).
+	// PREIS, ausdruecklich angesagt -- dieselbe Lehre, die CFD_TIMER_FERN am 21.09. einen ganzen Lauf
+	// gekostet hat (+101 % Wanduhr, weil der Diagnoseschalter in einer PRODUKTIONSZEILE stand):
+	// der Timer setzt zwei finish_queue() um den Vorkernel und serialisiert damit die Pipeline.
+	// Die Wanduhr, die MLUPs und der Durchsatz dieses Arms sind KEIN Leistungsmass.
+	s_timer_apg = env_u("CFD_TIMER_APG", 0u);
+	if(s_timer_apg>1u) print_error("CFD_TIMER_APG kennt nur 0 (aus) und 1 (Vorkernel fac_apg_ab isoliert messen).");
+	if(s_timer_apg>0u&&s_fac_apg==0.0f) print_error("CFD_TIMER_APG=1 ohne CFD_FAC_APG: der Vorkernel laeuft gar nicht, der Timer waere ein lautloser No-Op.");
+	if(s_timer_apg>0u) print_warning("CFD_TIMER_APG=1: DIAGNOSEARM. Zwei finish_queue() um fac_apg_ab serialisieren die Pipeline -- Wanduhr und Durchsatz dieses Laufs sind NICHT mit anderen Armen vergleichbar. Gehoert NIE in eine Produktionszeile (Lehre vom 21.09.2026, CFD_TIMER_FERN, +101 Prozent Wanduhr).");
 	if(s_fac_messnur>0u&&s_fac_apg!=0.0f) print_error("CFD_FAC_MESSNUR + CFD_FAC_APG: im Mess-Nur-Modus greift kein tw-Ziel in die Physik, APG waere ein stiller No-Op (Ansage-Doktrin).");
 	if(s_fac_apg!=0.0f&&s_fac_nachbar==0u) print_error("CFD_FAC_APG braucht CFD_FAC_NACHBAR=1: dp/ds kommt seit 16.09. aus dem Vorkernel fac_apg_ab (nach fac_nachbar_ab; grad rho in fac_nb[2..4]) und die Korrektur gilt an der Abtasthoehe y_ab.");
 	if(s_fac_elibb_pur&&s_fac_apg!=0.0f) print_error("CFD_FAC_ELIBB=2 (PUR) mit APG: der Pur-Arm steigt vor dem Wandmodell aus, APG waere ein stiller No-Op.");
@@ -670,6 +679,7 @@ bool LBM_Domain::s_fac_lsq = false; // ★ 2026-08-25 Default AUS nach Pruefbefu
 // durch. Braucht einen eigenen Messarm mit eigener Begruendung, nicht den Rang eines Defaults.
 float LBM_Domain::s_fac_apg = 0.0f;
 uint LBM_Domain::s_fac_apg_haken = 0u; // ★ 16.09.2026 CFD_FAC_APG_HAKEN (gelesen im Konstruktor)
+uint LBM_Domain::s_timer_apg = 0u; // ★ 22.09.2026 CFD_TIMER_APG (gelesen im Konstruktor)
 long LBM_Domain::s_fac_diagz = -1l;
 float LBM_Domain::s_fac_tau = 1.0f;
 float LBM_Domain::s_fac_budget = 1.0f;    // CFD_FAC_BUDGET (1a-B4t), Default bitidentisch
@@ -870,7 +880,7 @@ void LBM_Domain::allocate(Device& device) {
 		fac_kdiag_on = s_fac_imem&&s_fac_kdiag>0u; // ★ Klassen-Diagnostik: Konstruktionszustand einfrieren (Signaturposition = nach fac_q)
 		if(fac_kdiag_on) { fac_kd = Memory<float>(device, 16ull); kernel_stream_collide.add_parameters(fac_kd); } // 16 seit 05.09.: [12..15] vorzeichenbehafteter Druckrest A/|A|/B/C (12 seit 04.09.: [10]/[11] = tw und Besuche NUR ueber angewandte Besuche)
 		nachbar_on = s_fac_imem&&s_fac_nachbar>0u; // ★ 03.09. deterministische Nachbarabtastung: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd, VOR fac_wfd)
-		apg_on = nachbar_on&&s_facetten&&s_fac_apg!=0.0f; apg_kappa = apg_on ? s_fac_apg : 0.0f; apg_haken = apg_on ? s_fac_apg_haken : 0u; nb_stride = apg_on ? 5ull : 2ull; // ★ 16.09. HOCH-1 (Pruefagent): APG-Zustand je Instanz einfrieren -- fahrzeug_dd nullt die Statik VOR dem Bau von lbm_c, alloc_facetten/Launches/Bericht lasen sie danach (JIT-Stride 5 gegen Host-Stride 2 = stiller Ueberlauf, kein Kernel gebunden, kein Bericht). Bedingung = Emission von FACETTEN_APG und def_nb_stride.
+		apg_on = nachbar_on&&s_facetten&&s_fac_apg!=0.0f; apg_kappa = apg_on ? s_fac_apg : 0.0f; apg_haken = apg_on ? s_fac_apg_haken : 0u; timer_apg = apg_on ? s_timer_apg : 0u; // ★ 22.09.: timer_apg genau wie apg_haken an die INSTANZ gebunden -- das Fernfeld traegt kein APG und darf den Timer nicht tragen nb_stride = apg_on ? 5ull : 2ull; // ★ 16.09. HOCH-1 (Pruefagent): APG-Zustand je Instanz einfrieren -- fahrzeug_dd nullt die Statik VOR dem Bau von lbm_c, alloc_facetten/Launches/Bericht lasen sie danach (JIT-Stride 5 gegen Host-Stride 2 = stiller Ueberlauf, kein Kernel gebunden, kein Bericht). Bedingung = Emission von FACETTEN_APG und def_nb_stride.
 		if(nachbar_on) { fac_nb = Memory<float>(device, 2ull); kernel_stream_collide.add_parameters(fac_nb); } // Platzhalter; alloc_facetten_domain baut und rebindet
 		fdwand_on = s_sgs_fdwand>0u; // ★ Geistermoden-Fix: Konstruktionszustand einfrieren (Emission haengt an derselben Statik; Signaturposition = nach fac_kd)
 		if(fdwand_on) { fac_wfd = Memory<float>(device, 1ull); kernel_stream_collide.add_parameters(fac_wfd); }
@@ -1840,7 +1850,14 @@ void LBM_Domain::enqueue_stream_collide() { // call kernel_stream_collide to per
 	kernel_stream_collide.set_parameters(4u, t, fx, fy, fz, felder_voll_h).enqueue_run();
 	if(fdwand_on&&fac_N>0ull) { if(sism_on) kernel_sgs_fdwand.set_parameters(5u, t); kernel_sgs_fdwand.enqueue_run(); }
 	if(band_on&&band_N>0ull) { if(sism_on) kernel_sgs_band.set_parameters(5u, t); kernel_sgs_band.enqueue_run(); } // ★ 08.09. SGS-BAND: zweiter Launch desselben Kernels ueber die Bandzellen, dieselbe In-Order-Queue -> derselbe Determinismus wie Lage 1 // ★ Audit-Befund 11 (07.09.): Waechter auf fac_N statt fac_wfd.length()>1 -- bei GENAU EINER aktiven Facette ist die Laenge 1 und der FD-Kernel wurde still uebersprungen (Platzhalter und Einzelfacette nicht unterscheidbar; dieselbe Falle wie fac_nb 03.09.). fac_N wird nur in alloc_facetten_domain gesetzt. // ★ 07.09. SISM: t je Schritt nachfuehren (Muster sgs_gdiag/boden_eq), Position 5 = erstes SGS_SISM-Argument; der FD-Kernel sieht dasselbe t wie der eben gerechnete Schritt (increment_time_step folgt erst danach)
-	if(nachbar_on&&fac_N>0ull) { kernel_fac_nachbar.enqueue_run(); if(apg_on) { kernel_fac_apg.set_parameters(5u, t); kernel_fac_apg.enqueue_run(); } } // ★ 16.09. APG: t (Position 5 in fac_apg_ab) je Schritt -- der Vorkernel liest load_f(t+1), das rho des naechsten Schritts. // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
+	if(nachbar_on&&fac_N>0ull) { kernel_fac_nachbar.enqueue_run();
+		if(apg_on) { kernel_fac_apg.set_parameters(5u, t);
+			if(timer_apg>0u) { // ★ 22.09.2026 CFD_TIMER_APG: fac_apg_ab ISOLIERT. Erst alles Vorherige einholen (sonst misst die Uhr den Rueckstau von stream_collide und fac_nachbar_ab mit), dann den Vorkernel allein.
+				finish_queue(); Clock c_apg; kernel_fac_apg.enqueue_run(); finish_queue();
+				const double dt_ = c_apg.stop();
+				apg_t_summe += dt_; apg_t_n++; if(dt_<apg_t_min) apg_t_min = dt_; if(dt_>apg_t_max) apg_t_max = dt_;
+			} else kernel_fac_apg.enqueue_run(); // ★ AUS = bitgleich: kein finish_queue, kein Clock, kein veraenderter Aufrufpfad
+		} } // ★ 16.09. APG: t (Position 5 in fac_apg_ab) je Schritt -- der Vorkernel liest load_f(t+1), das rho des naechsten Schritts. // ★ 03.09. Nachbarabtastung fuer den NAECHSTEN Schritt (Waechter fac_N>0: Platzhalter hat Laenge 2, Pruefagent Pass 2), in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter // ★ Geistermoden-Fix: FD-w fuer den NAECHSTEN Schritt, in-order nach stream_collide (deterministisch); length-Guard = nie auf dem Platzhalter
 }
 void LBM_Domain::enqueue_boden_eq() { // ★ V1-Port: post-stream Boden-Equilibrium (Staggered-Mode-Kur); No-Op bei n==0
 	if(boden_eq_n==0u) return;

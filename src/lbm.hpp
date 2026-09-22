@@ -429,6 +429,7 @@ public:
 	static bool s_fac_quergate; // ★ 2026-08-25 Querimpuls-Gate im iMEM-Solve
 	static bool s_fac_lsq; // ★ 2026-08-25 kleinste-Quadrate-Rueckfall im iMEM-Solve // J4-Massenkorrektur 0/1/2 (CFD_FAC_ALPHA)
 	static float s_fac_apg; // APG-Messarm (Duennschicht-Term, NICHT die Mozaffari-Formel -- PLAN-APG-2026-09-16.md §A): kappa auf y_ab*dp/ds im tw-Ziel; 0 = aus (bitgleich). Seit 16.09.: dp/ds aus dem Vorkernel fac_nachbar_ab (grad rho in fac_nb[2..4]), braucht CFD_FAC_NACHBAR=1
+	static uint s_timer_apg; // ★ 22.09.2026 CFD_TIMER_APG: 0 = aus (bitgleich, kein finish_queue), 1 = Vorkernel fac_apg_ab isoliert messen. SERIALISIERT -- Wanduhr dieses Arms ist KEIN Leistungsmass.
 	static uint s_fac_apg_haken; // ★ 16.09.2026 CFD_FAC_APG_HAKEN (3 = analytischer Lineargradient rho = 1 + x/1024 im Vorkernel, Host prueft gx exakt, gz traegt kx): 0 aus, 1 = fac_nb am Ende zuruecklesen und grad-rho-Statistik berichten (Host-Puffer bleibt), 2 = Konstantgradient (1e-3,0,0) im Vorkernel -> Ist=Soll bitgenau
 	Memory<float> fac_pu;    // PEMA-Zustand 6 float je Facette
 	bool fac_pema_on = false;
@@ -449,6 +450,13 @@ public:
 	Memory<float> fac_diag;  // 19-float-Kettenprotokoll ([16] Selektor, [17] alpha, [18] dp_ds)
 	bool fac_diagz_on = false; uint fac_diag_fid = 0xFFFFFFFFu;
 	bool fac_elibb_on = false; // ★ B2: ELIBB-Konstruktionszustand (eingefroren wie diagz)
+	// ★★ 22.09.2026 CFD_TIMER_APG (REKONSTRUKTION-PLAN.md §10 Hebel 1, Plan-Schritt 2). APG kostet
+	// GEMESSEN +17,0 % Zeitschleife (16.09., 4 mm), das Datenvolumen erklaert davon nur 2,6 % --
+	// Faktor 6,5 Luecke. Ohne diesen Timer ist jede Zuordnung geraten: der Verlust verteilt sich auf
+	// den VORKERNEL fac_apg_ab (133 Streuzugriffe je Facette) und den APG-Zweig IN stream_collide,
+	// und nur der Vorkernel ist isoliert messbar. Instanzkopie, weil fahrzeug_dd die Statik vor dem
+	// Bau des Fernfelds nullt -- dieselbe Falle wie bei apg_on (Pruefbefund HOCH-1 vom 16.09.).
+	uint timer_apg = 0u; double apg_t_summe = 0.0, apg_t_min = 1.0e30, apg_t_max = 0.0; ulong apg_t_n = 0ull;
 	Memory<float> fac_nb; Kernel kernel_fac_nachbar; Kernel kernel_fac_apg; bool nachbar_on = false; bool apg_on = false; float apg_kappa = 0.0f; uint apg_haken = 0u; ulong nb_stride = 2ull; // ★ 16.09. HOCH-1 (Pruefagent): APG-Zustand je INSTANZ eingefroren (allocate), weil fahrzeug_dd die Statik vor dem Bau des Fernfelds nullt; // ★ 16.09. kernel_fac_apg: APG-Vorkernel (grad rho in fac_nb[2..4]), nur unter s_fac_apg != 0 gebunden // ★ 03.09. deterministische Nachbarabtastung: (u_t_abt, y_abt) je Facette (2 float) aus eigenem Kernel nach stream_collide, ein Schritt Versatz (fac_wfd-Muster); Konstruktionszustand eingefroren
 	Memory<float> fac_wfd; Kernel kernel_sgs_fdwand; bool fdwand_on = false; // ★ Geistermoden-Fix: w je Facettenzelle (1 float), Konstruktionszustand eingefroren (Emission + Platzhalter im ctor); alloc rebindet ueber den env-Parameter
 	bool vandriest_on = false; uint vandriest_modus = 0u; ulong vandriest_ab = 0ull; // ★ 08.09. van Driest: Konstruktionszustand eingefroren (Statik-Lebensdauer-Lehre 02.09.)

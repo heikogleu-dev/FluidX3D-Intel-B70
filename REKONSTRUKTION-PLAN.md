@@ -409,7 +409,35 @@ Kernel. **Die echten Argumente gegen S4 sind Reichweite und tote Tiles, nicht di
    und der einzige vermeintliche Treppen-Zahlenwert hat sich als falsch belegt erwiesen (§0).
 2. FP16S-Rauschlast auf f_neq beziffern (Histogramm |f_neq|/f_eq an Facettenzellen) — entscheidet mit
    zwischen Variante A und B.
-3. `boden_eq` × Rekonstruktion: Wächter oder bezifferte Ausnahme.
+3. ~~`boden_eq` × Rekonstruktion: Wächter oder bezifferte Ausnahme.~~ — **erledigt 22.09.2026,
+   bezifferte Ausnahme. Am Standard ist die Kollision LEER.** Zensus über alle 3 275 271
+   Facettenzellen von `p4_regel7` (4 mm, `facetten_histogramme.csv` Spalte `n` gegen den
+   flags-Block von `feld_nah_001001ms.vtk`, `boden_eq`-Parameter aus `logs/p4_regel7.log`:
+   z = 1..2, ab Nase DOWN = 1, split-Voxel 113, ABSTAND = 2):
+
+   | `CFD_BODEN_EQ_ABSTAND` | von `boden_eq` überschriebene Facettenzellen |
+   |---|---|
+   | 0 | **2 910** (0,089 % aller Facetten), alle bei z = 1, x 342..987 |
+   | 1 | **0** |
+   | 2 (Standard) | **0** |
+
+   2910 Facettenzellen liegen in der `boden_eq`-Zone, und **alle** werden von der
+   ABSTAND-Aussparung erfasst (`kernel.cpp:4335-4342`, Slot 117) — eine Facettenzelle hat per
+   Definition einen Solid-Nachbarn, und der Scan dz ∈ [0,a] × dx,dy ∈ [−a,a] findet ihn schon
+   bei a = 1. Die Aussparung ist also nicht knapp.
+
+   **Und der Worst Case trifft die harmloseste Stelle:** die 2910 Zellen sitzen sämtlich bei
+   z = 1 im Radkontaktbereich. Bei 4 mm gilt `CFD_KRAFT_ZBAND = 4`, ihre Kraft wird also ohnehin
+   ins **Band** gebucht und aus `cd_rest`/`cz_rest` herausgerechnet.
+
+   **Folge für den Bau:** kein Konstruktor-Wächter nötig, der die Rekonstruktion an `boden_eq`
+   hindert. Was hineingehört, ist ein **Zensus zur Bauzeit** statt einer Annahme: beim
+   Facettenbau zählen, wieviele Facettenzellen in der `boden_eq`-Zone liegen UND nicht
+   ausgespart werden, und bei > 0 unter Rekonstruktion `print_error`. Damit trägt die Zahl sich
+   selbst, auch wenn jemand ABSTAND senkt oder die Geometrie wechselt.
+
+   **Fassungsvorbehalt:** gemessen am 4-mm-Gitter mit `CFD_Y_VERSATZ=1`. Bei 8 mm und 3,75 mm
+   ist der Zensus ungemessen — deshalb gehört er in den Code und nicht in dieses Dokument.
 4. `fac_tau_cnt`-Politik: erhöht die Rekonstruktion ihn? Davon hängt der ganze Druckpfad ab.
 5. Abgriffpunkt von `f_load` relativ zu ELIBB festlegen.
 6. ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ — **erledigt, 30.08.2026, siehe §0b**: cd_druck_rest

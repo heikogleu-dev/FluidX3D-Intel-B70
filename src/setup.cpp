@@ -9841,6 +9841,28 @@ static void main_setup_fahrzeug_dd() {
 	}
 	if(stop_angefordert) print_info("[STOPP] Lauf regulaer beendet bei t = "+to_string((float)t_si_letzt,4u)+" s statt der geplanten "
 		+to_string((float)n_outer*dt_c,4u)+" s. Alle Ausgaben sind vollstaendig; die Mittelwerte unten beziehen sich auf das VERKUERZTE Fenster.");
+	// ★★ 22.09.2026 CFD_TIMER_APG: Bericht + Wirkpfadwaechter (REKONSTRUKTION-PLAN.md §10 Hebel 1 = Plan-Schritt 2).
+	// WOFUER: APG kostet gemessen +17,0 % Zeitschleife (16.09., 4 mm), das Datenvolumen erklaert davon nur 2,6 %.
+	// Diese Zahl sagt, wieviel davon der VORKERNEL fac_apg_ab ist -- der Rest ist der APG-Zweig in stream_collide.
+	// Ohne sie ist jede Optimierung geraten, und Hebel 3 (rho-Region statt DDF-Rekonstruktion) fasst einen teuer
+	// erkaempften Determinismus an (lbm.cpp:1716, 03.09.) und darf erst danach drankommen.
+	{
+		LBM_Domain* d_apg = lbm_f.lbm_domain[0];
+		if(d_apg->timer_apg>0u) {
+			if(d_apg->apg_t_n==0ull) print_error("CFD_TIMER_APG=1 gesetzt, aber KEIN Vorkernelaufruf gemessen (apg_t_n = 0) -- lautloser No-Op.");
+			else {
+				const double sum_ = d_apg->apg_t_summe, mit_ = sum_/(double)d_apg->apg_t_n;
+				const double wall_ = std::chrono::duration<double>(t_now()-lauf_wall0).count();
+				print_info("[APG-ZEIT] Vorkernel fac_apg_ab isoliert (CFD_TIMER_APG=1): Mittel "+to_string((float)(mit_*1e3),3u)+" ms ueber "
+					+to_string(d_apg->apg_t_n)+" feine Schritte, Spanne "+to_string((float)(d_apg->apg_t_min*1e3),3u)+" .. "
+					+to_string((float)(d_apg->apg_t_max*1e3),3u)+" ms, Summe "+to_string((float)sum_,1u)+" s = "
+					+to_string((float)(100.0*sum_/(wall_>0.0?wall_:1.0)),2u)+" % der Wanduhr DIESES Laufs.");
+				print_warning("[APG-ZEIT] Der Prozentwert ist gegen die SERIALISIERTE Wanduhr gerechnet und deshalb eine UNTERE Schranke "
+					"fuer den Anteil im normalen Lauf -- dort verdeckt die Pipeline einen Teil des Vorkernels. Er ist NICHT mit den +17,0 % "
+					"aus dem A/B vom 16.09. gleichzusetzen; die Zuordnung braucht den A/B gegen CFD_FAC_APG=0 bei sonst gleicher Zeile.");
+			}
+		}
+	}
 	// ★ 16.09.2026 iGPU-Leistungsleiter: Bericht + Wirkpfadwaechter (Iron Rule: ein Schalter ohne feuernden Zaehler ist ein harter Fehler)
 	if(timer_fern>0u) {
 		if(tf_n==0ull) print_error("CFD_TIMER_FERN=1 gesetzt, aber KEIN Fernfeldschritt gemessen (tf_n = 0) -- lautloser No-Op.");
