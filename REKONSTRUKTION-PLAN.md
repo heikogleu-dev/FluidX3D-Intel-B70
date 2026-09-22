@@ -407,6 +407,11 @@ Kernel. **Die echten Argumente gegen S4 sind Reichweite und tote Tiles, nicht di
 
 1. Volltexte Malaspinas & Sagaut 2014 und Maeyama 2021/2022 beschaffen — **der Bestand hat nur Abstracts**,
    und der einzige vermeintliche Treppen-Zahlenwert hat sich als falsch belegt erwiesen (§0).
+   **Stand 22.09.2026: bestätigt und NICHT von hier aus zu schließen.** Zensus über `logs/literatur/`:
+   vier Textdateien nennen Malaspinas (`korb.txt` 11×, `o3j79i.txt` 5×, `hznpjd.txt` 3×, `0eu3gg.txt`),
+   aber **ausschließlich als Sekundärzitat** — kein Volltext im Baum. Beschaffung braucht
+   Zeitschriftenzugang (JCP 275 (2014), CAMWA 93 (2021), C&F 233 (2022)); das ist eine Aufgabe für
+   Heiko, nicht für diese Sitzung. **Der einzige verbliebene offene Punkt aus §8.**
 2. FP16S-Rauschlast auf f_neq beziffern (Histogramm |f_neq|/f_eq an Facettenzellen) — entscheidet mit
    zwischen Variante A und B.
 3. ~~`boden_eq` × Rekonstruktion: Wächter oder bezifferte Ausnahme.~~ — **erledigt 22.09.2026,
@@ -469,7 +474,16 @@ Kernel. **Die echten Argumente gegen S4 sind Reichweite und tote Tiles, nicht di
    **Was daraus für S0/S1 folgt:** der Wirkungszähler (|Δu|/|u| > 1e-6) und die ΔP-Eimer müssen
    stehen, **bevor** irgendetwas in `acc[1..3]` gebucht wird. Sonst ist in S2 ein
    Buchungs-Vorzeichenfehler nicht von einem Wandmodellfehler zu trennen — die FAC_UW-Lehre.
-5. Abgriffpunkt von `f_load` relativ zu ELIBB festlegen.
+5. ~~Abgriffpunkt von `f_load` relativ zu ELIBB festlegen.~~ — **entschieden, §3.2 trug die Antwort
+   schon: DANACH.** `elibb_rekonstruiere` läuft **innerhalb** `apply_facette_imem`
+   (`kernel.cpp:2044`) und verändert `fhn`, bevor das Wandmodell abtastet (Reihenfolge-Fix 25.08.,
+   `:2033-2038`). Nimmt die Rekonstruktion ihr `f_load` **davor**, ist ELIBB an diesen Zellen ein
+   No-Op — und ELIBB ist am Fahrzeug der Unterschied zwischen richtiger und **zehnfacher** Reibung
+   (gemessen 11.09.; ein Arm ohne ELIBB ist zusätzlich 2,46 % langsamer). Haussmann macht den
+   interpolierten Bounce-Back ebenfalls zuerst und die Korrektur danach (`korb.txt:400-406`).
+   **Kein Ermessen: der Abgriff liegt hinter `elibb_rekonstruiere`.** In S0 als Ist=Soll absichern
+   (ELIBB-Wirkpfad Slot 67 muss unter Rekonstruktion weiter feuern), sonst ist es wieder ein
+   stiller No-Op.
 6. ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ — **erledigt, 30.08.2026, siehe §0b**: cd_druck_rest
    +0,2313 ± 0,0102 (22,7 σ), cz_druck_rest 1,06 σ. Offen ist statt dessen **`CFD_FAC_KRAFT=2`**
    (alle Facettenzellen statt nur Rückfallzellen) — das ist die Obergrenze für den Umfang „alle"
@@ -560,7 +574,7 @@ ehrlich neben die drei Hebel gestellt, auch wenn es nicht die gewünschte Antwor
 | **2** | **Timer um `fac_apg_ab`** | zerlegt die 17 %, bevor irgendetwas optimiert wird | Zweizeiler + 8-mm-A/B |
 | **3** | ~~FP16S-Rauschlast auf f_neq beziffern~~ — **erledigt 22.09.2026, siehe §2b.** Das Histogramm war auf f_eq normiert statt auf die Störform f − w_i und damit um Faktor ≈ 55 zu pessimistisch. Die Frage ist überdies zweimal GEMESSEN beantwortet (`AUDIT-BEFUNDE.md:940-945`: FP16S gegen FP32, cz_druck_rest 0,70 σ) | entscheidet **nicht** zwischen A und B — der Unterschied ist eine Modellfrage (§2) | erledigt, null Kosten |
 | **4** | ~~**S−1**: `hits_n` 320 → 384~~ — **erledigt 22.09.2026**, Commit s. Tagesprotokoll. Der `scratch_gate`-Arm rutscht nach S0 (kein Define in S−1). Dabei gefunden und mitbehoben: `setup.cpp:1425` führte die Slotzahl hart als 320 | ohne das schreibt jeder neue Zähler still ins Nichts | eigener Commit |
-| **5** | **S0+S1** der Rekonstruktion (Laufzeitparameter, kein JIT-Define) | beweist Einbauort und Zählung, bevor Physik dazukommt | CPU, Minuten |
-| **6** | offene Punkte §8 abarbeiten (Volltexte, `boden_eq`-Wächter, `fac_tau_cnt`-Politik, ELIBB-Abgriffpunkt) | alles Lesearbeit, keine GPU | — |
+| **5** | **S0+S1** der Rekonstruktion (Laufzeitparameter, kein JIT-Define) — **nächster Bau**, Vorbedingungen S−1 und §8.3/§8.4/§8.5 stehen | beweist Einbauort und Zählung, bevor Physik dazukommt | CPU, Minuten |
+| **6** | offene Punkte §8: **3 (`boden_eq`), 4 (`fac_tau_cnt`), 5 (ELIBB-Abgriff) am 22.09. erledigt**; 6 (`CFD_FAC_KRAFT`) durch §0b und den 8-mm-A/B erledigt. **Offen bleibt allein Punkt 1: die Volltexte** Malaspinas & Sagaut 2014 und Maeyama 2021/2022 | Lesearbeit, keine GPU | — |
 
 **Was NICHT morgen passiert:** S2 und später. Erst müssen 1–4 stehen.
