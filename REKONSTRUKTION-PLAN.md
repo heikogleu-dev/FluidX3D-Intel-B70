@@ -438,7 +438,37 @@ Kernel. **Die echten Argumente gegen S4 sind Reichweite und tote Tiles, nicht di
 
    **Fassungsvorbehalt:** gemessen am 4-mm-Gitter mit `CFD_Y_VERSATZ=1`. Bei 8 mm und 3,75 mm
    ist der Zensus ungemessen — deshalb gehört er in den Code und nicht in dieses Dokument.
-4. `fac_tau_cnt`-Politik: erhöht die Rekonstruktion ihn? Davon hängt der ganze Druckpfad ab.
+4. ~~`fac_tau_cnt`-Politik: erhöht die Rekonstruktion ihn?~~ — **beantwortet 22.09.2026: ja, sie MUSS
+   ihn erhöhen, und der Akkumulator muss GETEILT werden.** Die Abhängigkeitskette, vollständig:
+
+   `fac_tau_acc[6·fid+0] += tw` und `[+1..3] += fw_{x,y,z}` stehen in **einer** Zeile
+   (`kernel.cpp:2759`), `fac_tau_cnt[fid] += 1u` folgt bei `:2792`. Daran hängen **vier** Verbraucher:
+
+   | Verbraucher | Stelle | was passiert ohne Zählung |
+   |---|---|---|
+   | `tw = acc[0]/cnt` → y⁺ → **van-Driest-Dämpfung D²** auf nu_t | `kernel.cpp:3469-3472` | `vd_cnt==0` ⇒ der ganze VD-Block wird **übersprungen**: nu_t bleibt an Lage 1 ungedämpft |
+   | Warmstart der u_s-/P-Filter (`cnt==0` ⇒ Momentanwerte übernehmen) | `kernel.cpp:2255` | re-seedet in **jedem** Schritt, der Filter baut nie Historie auf |
+   | Host-y⁺-Spiegel `fac_tau[6i]/fac_tau_n[i]` | `setup.cpp:620-626` | Division durch 0 bzw. y⁺-Reihe tot |
+   | **Reibungsanteil** `K.rx/ry/rz` aus `acc[1..3]`, Fenster-Delta | `setup.cpp:4324-4326` | `cd_reib`/`cz_reib` in `cd_facetten.csv` verlieren ihre Quelle |
+
+   **Folge 1 — Zähler und tw-Summe laufen weiter.** Die Rekonstruktion rechnet das Spalding-Ziel
+   ohnehin (sie braucht es für u_rek). `acc[0] += tw` und `cnt++` bleiben also unverändert, sonst
+   schaltet sich van Driest an genau den Wandzellen **still** ab — eine große, unangesagte
+   Physikänderung, die keine Abnahme heute sehen würde.
+
+   **Folge 2 — `acc[1..3]` darf NICHT das Ziel bekommen, sondern das gemessene ΔP.** Diese drei
+   Slots sind die *Ist*-Wandkraft und gehen direkt in den Reibungsanteil der Kraftbilanz. Bucht die
+   Rekonstruktion dort ihr **Ziel**, wird der Ist=Soll-Detektor tautologisch und die Reibung meldet
+   eine Kraft, die nie aufgeprägt wurde. Das ist derselbe Prüfstein wie §4.
+
+   **Folge 3 — und hier bleibt eine offene Frage, die §4 lösen muss:** das ΔP der Rekonstruktion ist
+   der **gesamte** Impulsübertrag, inklusive wandnormalem Anteil. `acc[1..3]` ist aber der
+   *Reibungs*kanal. Ungeteilt gebucht verschiebt die Rekonstruktion Druck in die Reibung. Die
+   Aufteilung braucht das ΔP·n̂-Histogramm aus §4 — **nicht** eine Annahme „u_n ≈ 0 an der Wand".
+
+   **Was daraus für S0/S1 folgt:** der Wirkungszähler (|Δu|/|u| > 1e-6) und die ΔP-Eimer müssen
+   stehen, **bevor** irgendetwas in `acc[1..3]` gebucht wird. Sonst ist in S2 ein
+   Buchungs-Vorzeichenfehler nicht von einem Wandmodellfehler zu trennen — die FAC_UW-Lehre.
 5. Abgriffpunkt von `f_load` relativ zu ELIBB festlegen.
 6. ~~`CFD_FAC_KRAFT=1` am Fahrzeug messen~~ — **erledigt, 30.08.2026, siehe §0b**: cd_druck_rest
    +0,2313 ± 0,0102 (22,7 σ), cz_druck_rest 1,06 σ. Offen ist statt dessen **`CFD_FAC_KRAFT=2`**
