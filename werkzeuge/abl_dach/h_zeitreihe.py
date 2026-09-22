@@ -8,11 +8,15 @@ ZONEN=[(2.00,2.30,'Saugspitze'),(2.30,2.90,'Dachplateau')]
 tmin=float(sys.argv[3]) if len(sys.argv)>3 else 0.22
 def zeitreihe(lauf):
     E=f"{R}/export/{lauf}"; out={l:[] for _,_,l in ZONEN}; ts=[]
-    for vtk in sorted(glob.glob(f"{E}/feld_nah_*ms.vtk")):
-        t=os.path.basename(vtk)[9:15]; tsec=int(t)/1000.0
+    # Zeitpunkte = Vereinigung aus vorhandenen VTK-Dumps und schon extrahierten Baendern (die VTK werden nach der Extraktion geloescht, B28)
+    ts_alle=sorted(set([os.path.basename(f)[9:15] for f in glob.glob(f"{E}/feld_nah_*ms.vtk")]+[os.path.basename(f)[10:16] for f in glob.glob(f"{E}/dach_band_*ms.npz")]))
+    for t in ts_alle:
+        tsec=int(t)/1000.0
         if tsec<tmin: continue
-        npz=f"{E}/dach_band_{t}ms.npz"
-        if not os.path.exists(npz): subprocess.run([sys.executable,f"{D}/fx_band.py",vtk,npz],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
+        npz=f"{E}/dach_band_{t}ms.npz"; vtk=f"{E}/feld_nah_{t}ms.vtk"
+        if not os.path.exists(npz):
+            if not os.path.exists(vtk): continue
+            subprocess.run([sys.executable,f"{D}/fx_band.py",vtk,npz],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
         prof=f"{D}/prof2_{lauf}_t{t}.npz"
         if not os.path.exists(prof): subprocess.run([sys.executable,f"{D}/fx_profil2.py",f"{lauf}_t{t}",npz],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,env={**os.environ,"CFD_U_LAT":os.environ.get("CFD_U_LAT","0.125")})
         z=np.load(prof); x=z['x']; H=z['H']; ts.append(tsec)

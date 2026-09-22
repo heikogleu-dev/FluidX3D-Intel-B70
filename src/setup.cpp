@@ -731,6 +731,12 @@ static void pruefe_band_wirkpfad(const LBM_Domain* D, const ulong t_ende, const 
 		+" Zaehlslots (Abweichung "+to_string((float)(100.0*abw),1u)+" %, Schranke 2). Maske und Liste laufen auseinander, oder Facetten- und Bandmenge ueberschneiden sich -- die Zuordnung band_w[bid] zeigt dann auf die falsche Zelle.");
 	else print_info("["+ort+"] SGS-BAND Wirkpfad: Slot 186 = "+to_string(wp)+" = "+to_string(D->band_N)+" Bandzellen ("+je+") x "+to_string(slots)
 		+" Zaehlslots, Abweichung "+to_string((float)(100.0*abw),2u)+" %. Die Bandzellen erreichen den Leserzweig vollstaendig und ausschliesslich.");
+	// ★ 22.09.2026 (Planungsagent SISM, Befund B1; Protokoll B32): die BAND-Klemme ist Slot 187 (kernel.cpp, nut_n <= 0 an Bandzellen) --
+	// Slot 127 zaehlt im Bandmodus konstruktiv nur Zelle 1. Bis heute las kein Bericht [187]; der 10.09.-Satz "ausserhalb von Zelle 1
+	// faellt |S| fast nie unter Sbar" war ein Fehllesen von 127. Hier der Band-Klemmanteil als eigene Zahl.
+	{	const ulong kl=(ulong)D->rho_clamp_hits.data()[187];
+		print_info("["+ort+"] SGS-BAND Klemme (Slot 187, nu_t = 0 weil c2*Sbar >= nu_t): "+to_string(kl)+" von "+to_string(wp)+" Bandbesuchen = "+to_string((float)(wp>0ull?100.0*(double)kl/(double)wp:0.0),2u)+" % (Lage-1-Klemme Slot 127 ist davon getrennt; 187 zaehlt nut_n <= 0 ueber den GANZEN Lauf, also auch |S| = 0-Zellen und die Phase vor SISM_AB mit Sbar = 0 -- Pruefbefund N3). 0 % hiesse: das Band zieht nie bis auf null ab; ~100 % waere der WANDFREI-Zustand.");
+	}
 }
 // ★ 10.09.2026 DISKRIMINATOR-MESSARM (CFD_SGS_NUT_SKAL). Abnahme des Wirkpfads, nach dem Muster von
 // pruefe_band_wirkpfad. Drei harte Ist=Soll-Pruefungen, weil dieser Arm eine ZUORDNUNGSFRAGE beantworten

@@ -1172,7 +1172,7 @@ ulong vram_frei_gemessen(const ulong kapazitaet_mib) {
 void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const uint Ny, const uint Nz, const uint lagen) {
 	if(!band_on||lagen<2u) return;
 	if(fac_idx.length()<2ull) { print_error("alloc_sgs_band vor alloc_facetten_domain -- die Facettenmaske fac_idx ist noch nicht gebaut, die Bandlagen haetten keinen Anker."); return; }
-	if((ulong)Nx*(ulong)Ny*(ulong)Nz>0xFFFFFFFFull) { print_error("alloc_sgs_band: Gitter ueberschreitet 2^32 Zellen -- band_zellen traegt fbi als uint."); return; }
+	if((ulong)Nx*(ulong)Ny*(ulong)Nz>0xFFFFFFFFull) { print_error("alloc_sgs_band: Gitter ueberschreitet 2^32 Zellen -- band_zellen traegt den globalen Zellindex n als uint (seit 22.09., B32)."); return; }
 	const ulong FN=(ulong)fbnx*(ulong)fbny*(ulong)fbnz, FNB=(FN+31ull)/32ull;
 	// Zwei Bitfelder: "schon vergeben" (Facette oder eine fruehere Lage) und "aktuelle Front".
 	std::vector<uint> vergeben((size_t)FNB,0u), front((size_t)FNB,0u), neu_((size_t)FNB,0u);
@@ -1236,8 +1236,27 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	// Die Liste MUSS in derselben Reihenfolge stehen, in der der Kernel sie aus der Maske nummeriert
 	// (Scan ueber fbi aufsteigend), sonst zeigt band_sbar[bid] auf die falsche Zelle.
 	std::vector<ulong> sortiert(liste); std::sort(sortiert.begin(), sortiert.end());
+	// ★★ 22.09.2026 DEFEKT BEHOBEN (Tagesprotokoll B32, seit 2330bd5 am 08.09.): hier stand `band_zellen[i]=(uint)sortiert[i]`,
+	// also der F-BBOX-Index fbi. Der Kernel sgs_fdwand liest gd_zellen[gid] aber als GLOBALEN Zellindex n und ruft
+	// neighbors(n, j) -- genau wie fuer die Facettenliste, die n traegt (gd_zellen[k]=f.n). Am Fahrzeug (F-BBox 564x239x155 im
+	// Gitter 961x349x249) rechnete der Bandkernel damit Sbar an Zellen mit n < 20,9 M (z-Index 0..62, Strasse/Raeder) und lieferte
+	// es ueber band_sbar[gid] an die echten Bandzellen (Dach z ~150). Im Kanal ist die F-BBox das ganze Gitter (fbi == n), deshalb
+	// bestand jeder Rauchtest. Alle Band-Befunde seit 08.09. sind als Bandmessungen ungueltig. Die REIHENFOLGE bleibt die der
+	// fbi-Sortierung (= bid-Nummerierung der Maske band_idx in stream_collide); gespeichert wird je Position der globale Index n.
 	band_zellen=Memory<uint>(device,band_N);
-	for(ulong i=0ull; i<band_N; i++) band_zellen[i]=(uint)sortiert[i];
+	{	ulong n_verletzt=0ull, n_ausserhalb=0ull;
+		for(ulong i=0ull; i<band_N; i++) {
+			const ulong fbi=sortiert[i];
+			const uint xb=(uint)(fbi%(ulong)fbnx), yb=(uint)((fbi/(ulong)fbnx)%(ulong)fbny), zb=(uint)(fbi/((ulong)fbnx*(ulong)fbny));
+			const uint x=fbx0+xb, y=fby0+yb, z=fbz0+zb;
+			if(x>=Nx||y>=Ny||z>=Nz) { n_ausserhalb++; band_zellen[i]=0u; continue; }
+			const ulong n=(ulong)x+((ulong)y+(ulong)z*(ulong)Ny)*(ulong)Nx;
+			if((flags_host[n]&(TYPE_S|TYPE_E))!=0u) n_verletzt++; // SELBSTPRUEFUNG (Iron Rule 3): jede Bandzelle muss echtes Fluid sein -- mit dem fbi-Fehler waeren es Strassen-/Radzellen gewesen
+			band_zellen[i]=(uint)n;
+		}
+		if(n_ausserhalb>0ull||n_verletzt>0ull) { print_error("alloc_sgs_band: Bandliste nach fbi->n-Umrechnung fehlerhaft -- "+to_string(n_ausserhalb)+" Zellen ausserhalb des Gitters, "+to_string(n_verletzt)+" Solid/E-Zellen von "+to_string(band_N)+" (Soll 0/0). F-BBox-Ursprung "+to_string(fbx0)+"/"+to_string(fby0)+"/"+to_string(fbz0)+", Groesse "+to_string(fbnx)+"x"+to_string(fbny)+"x"+to_string(fbnz)+"."); band_on=false; return; }
+		print_info("SGS-BAND Liste: "+to_string(band_N)+" Bandzellen fbi -> n umgerechnet (F-BBox-Ursprung "+to_string(fbx0)+"/"+to_string(fby0)+"/"+to_string(fbz0)+", "+to_string(fbnx)+"x"+to_string(fbny)+"x"+to_string(fbnz)+" im Gitter "+to_string(Nx)+"x"+to_string(Ny)+"x"+to_string(Nz)+"); Selbstpruefung: 0 Solid/E-Zellen, 0 ausserhalb"+(fbx0==0u&&fby0==0u&&fbz0==0u&&fbnx==Nx&&fbny==Ny ? string(" -- F-BBox = Gitter, fbi == n (dieser Fall haette den Defekt B32 NICHT gezeigt)") : string(" -- F-BBox ist eine Teilbox, fbi != n (hier wirkte der Defekt B32)"))+".");
+	}
 	band_zellen.write_to_device();
 	band_sbar=Memory<float>(device,band_N); // Start 0 = kein Abzug; der erste Schritt ist damit bitgleich zum Bezugsarm
 	band_sbar.write_to_device();
@@ -1253,6 +1272,7 @@ void LBM_Domain::alloc_sgs_band(const uchar* flags_host, const uint Nx, const ui
 	kernel_stream_collide.set_parameters(band_param_pos, band_idx, band_sbar);
 	kernel_sgs_band = Kernel(device, band_N, "sgs_fdwand", u, flags, band_zellen, (uint)band_N, band_sbar);
 	if(sism_on) kernel_sgs_band.add_parameters(t, band_sb, rho_clamp_hits, 1u); // sbar_out = 1: der Bandkernel liefert Sbar, kein w
+	if(sparse_on) kernel_sgs_band.add_parameters(tile_slot); // ★ 22.09. Pruefbefund M1: TS_P ist der letzte Parameter von sgs_fdwand -- der Lage-1-Kernel bekam ihn (B-7-Lehre), der Bandkernel nicht; mit CFD_SPARSE_TILES waere der Band-Launch mit CL_INVALID_KERNEL_ARGS gestorben (bisher nie kombiniert)
 	string je; for(uint L=2u; L<=lagen&&L<8u; L++) je += (L>2u?" + ":"")+to_string(band_n_lage[L])+" (Lage "+to_string(L)+")";
 	print_info("SGS-BAND gebunden: "+to_string(band_N)+" Bandzellen = "+je+"; Speicher "
 		+to_string((float)(band_N*(sism_on?32ull:8ull)+2ull*FNB*4ull)/1048576.0f,1u)+" MB (Liste+w+EMA+Maske) auf "+device.info.name

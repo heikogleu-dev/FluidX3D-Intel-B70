@@ -535,7 +535,7 @@ public:
 	// (zweites Kernel-Objekt aus demselben Programm) -- damit entfaellt jedes Klammerfallen-Risiko.
 	// Die Bandliste ist DISJUNKT zur Facettenmenge; stream_collide fragt erst fdw_fid, dann band_fid.
 	Memory<uint> band_idx;    // Bitmaske+Praefixsumme ueber die F-BBox (Muster fac_idx), nur Lage 2..N
-	Memory<uint> band_zellen; // fbi je Bandzelle (uint, nicht n als ulong -- die F-BBox passt in 32 Bit)
+	Memory<uint> band_zellen; // ★ 22.09.2026 (B32): GLOBALER Zellindex n je Bandzelle in fbi-Sortierreihenfolge (uint; Gitter < 2^32 Zellen, Waechter in alloc_sgs_band). Bis 22.09. stand hier fbi -- der Kernel liest n; am Fahrzeug (Teil-BBox) rechnete das Band deshalb an fremden Zellen.
 	Memory<float> band_sbar;  // ★ 08.09. NACH dem Kipptest: Sbar (Betrag des zeitgemittelten Scherratentensors) je Bandzelle. Frueher war das ein fertiges w -- der w-ERSATZ kippte am 8-mm-Stressarm bei Schritt 392, auch ohne SISM.
 	Memory<float> band_sb;    // EMA der 6 S-Komponenten je Bandzelle (nur unter SISM belegt)
 	float nut_skal = 1.0f; // ★ 10.09. Diskriminator-Messarm: Konstruktionszustand, eingefroren wie band_on. Die Abnahme liest IHN, nicht die Umgebungsvariable -- sonst haette sie eine zweite Wahrheitsquelle (Muster pruefe_band_wirkpfad, das D->band_on liest).
