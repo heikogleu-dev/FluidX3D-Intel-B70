@@ -227,9 +227,15 @@ reconstructing one by hand once cost a full morning of measurements.
 Drag is closed against the reference; downforce sits at 81 % and is the active work. The current
 line of work is a **wall-cell reconstruction** that imposes the wall-model target on the cells where
 the tangential solve is rank-deficient — roughly a fifth of all wall facets, because a cell with a
-single wall link cannot span two tangential directions. It is built, force-booked and measured; at
-8 mm it moves the pressure path in the right direction, which wall shear stress alone does not.
-Calibration is in progress.
+single wall link cannot span two tangential directions. It is built and force-booked, and the
+momentum balance behind the booking is measured rather than assumed.
+
+The first vehicle measurement points the pressure path in the promising direction — which wall shear
+stress alone provably does not — but it is **not an accepted result yet**: the arm it came from is
+disqualified by one of its own acceptance checks, and a second finding is open (the wall-link part of
+the correction enters the wall force twice, once implicitly and once through the explicit booking).
+Both are in the current audit round. The number is written down here as what it is — a direction, not
+a validated figure — because the alternative is to publish it as one.
 
 Development history, including the measurements behind every claim above and the arms that were
 rejected, is in [HISTORY.md](HISTORY.md).
