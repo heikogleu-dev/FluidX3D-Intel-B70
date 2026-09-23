@@ -615,6 +615,9 @@ static void sgs_vandriest_selbsttest() {
 // Host-Verteilung aus yplus_facetten.csv, rechnet der Kernel mit einem anderen y+ als der Report.
 static void bericht_vandriest(LBM_Domain* D, const float aplus, const string& ort) {
 	if(D==nullptr||!D->vandriest_on) return;
+	// ★ 23.09. abends, M4: selbst zurueckholen statt auf ein fremdes, an CFD_FACETTEN>0
+	// gebundenes Lesen zu vertrauen. berichte_apg macht es genauso.
+	D->finish_queue(); D->rho_clamp_hits.read_from_device();
 	const uint* H = D->rho_clamp_hits.data();
 	const uint modus = D->vandriest_modus;
 	// Host-Spiegel der KERNEL-Formel, aus denselben Puffern: tw = fac_tau[6i]/fac_tau_n[i],
@@ -738,16 +741,22 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		return;
 	}
 	if(LBM_Domain::s_fac_rek>2u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter) und 2 (R3: Gate + Buchung). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
-	if(LBM_Domain::s_fac_rek>=2u) {
+	if(LBM_Domain::s_fac_rek>0u) {
+		// ★★ 23.09. abends, Pruefbefund H2: dieser Block stand auf >=2u. Unter REK=1 waren PEMA und
+		// KRAFT damit STILL zugelassen -- und genau mit REK=1 lief die Bilanzserie a2_bilanz, der
+		// einzige Beleg fuer die Buchung. PEMA steigt zwischen Injektion und Buchung aus (der Impuls
+		// wird eingespeist und im Akkumulator gezaehlt, aber NICHTS in den Reibungspfad gebucht: inj_
+		// waechst, FK.rx nicht -- der Quotient waere still falsch). KRAFT macht die markierten Zellen
+		// zu Kraftzellen, also zwei Aktoren an derselben Zelle. Die gefahrene Serienzeile setzt beide
+		// nicht, die Messung ist also nicht kontaminiert -- die Luecke war es trotzdem.
 		// ★★ R3-ARM (23.09.2026). Unvertraeglichkeiten, die sonst STILL falsch rechnen:
 		// ★★ 23.09. Pruefbefund H1: hier standen zuerst LBM_Domain::s_fac_kraft/s_fac_uw/s_fac_messnur.
 		// Diese Funktion wird EINE Zeile VOR der Zuweisung von s_fac_kraft/s_fac_messnur und neun Zeilen
 		// vor s_fac_uw gerufen -- alle drei standen zum Pruefzeitpunkt noch auf 0, die Waechter
 		// schwiegen in JEDER Kombination. Dieselbe H1-Klasse wie am 22.09. (Statik im Konstruktor).
 		// Jetzt aus der Umgebung gelesen, genau wie die Nachbarzeilen es schon tun.
-		if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_KRAFT schliessen sich aus: unter dem erzwungenen Rueckfall wuerden markierte Zellen zu Kraftzellen (kz = rueckfall || KRAFT==2), das Wandmodell wirkte doch, und R3 waere still ausgehebelt -- ohne dass ein Zaehler es meldet.");
-		if(env_u("CFD_FAC_UW",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_UW schliessen sich aus: das Gate liegt in #ifndef FACETTEN_UW und wird gar nicht emittiert, die BUCHUNG dagegen schon -- Wandmodell UND Buchung zugleich.");
-		if(env_u("CFD_FAC_MESSNUR",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_MESSNUR schliessen sich aus: MESS-NUR steigt VOR dem Block aus, das Gate wird nie erreicht.");
+		if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_KRAFT schliessen sich aus: unter dem erzwungenen Rueckfall wuerden markierte Zellen zu Kraftzellen (kz = rueckfall || KRAFT==2), das Wandmodell wirkte doch, und R3 waere still ausgehebelt -- ohne dass ein Zaehler es meldet.");
+		if(env_u("CFD_FAC_UW",0u)>0u) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_UW schliessen sich aus: das Gate liegt in #ifndef FACETTEN_UW und wird gar nicht emittiert, die BUCHUNG dagegen schon -- Wandmodell UND Buchung zugleich.");
 		// ★ Pruefbefund M4: PEMA hat einen return ZWISCHEN Rekonstruktion und Buchung (utb < 1e-6).
 		// Dort ginge rho*du ungebucht durch, fac_tau_cnt bliebe fuer den Besuch aus, und die
 		// Lueckenlosigkeitsprobe 331+380==370 merkte nichts, weil auch [370] ihn nicht zaehlt.
@@ -756,8 +765,8 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		// (env_f, typischer Wert ein Filterkoeffizient in (0,1)); env_u geht ueber atoi, und
 		// atoi("0.05") ist 0 -- die Sperre haette fuer genau die gebrauchten Werte geschwiegen.
 		// Dieselbe Falle wie H1, eine Ebene tiefer: der Waechter las den falschen Typ.
-		if(env_f("CFD_FAC_PEMA",0.0f)!=0.0f) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_PEMA schliessen sich aus: PEMA steigt bei utb < 1e-6 zwischen Rekonstruktion und Buchung aus -- der eingespeiste Impuls ginge dort UNGEBUCHT durch und kein Zaehler saehe es.");
-		if(env_f("CFD_FAC_EMA",0.0f)!=0.0f) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_EMA schliessen sich aus: der erzwungene Rueckfall friert den fac_us-Filterzustand ein, der Filter misst danach etwas anderes als er meldet.");
+		if(env_f("CFD_FAC_PEMA",0.0f)>0.0f) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_PEMA schliessen sich aus: PEMA steigt bei utb < 1e-6 zwischen Rekonstruktion und Buchung aus -- der eingespeiste Impuls ginge dort UNGEBUCHT durch und kein Zaehler saehe es.");
+		if(env_f("CFD_FAC_EMA",0.0f)>0.0f) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_EMA schliessen sich aus: der erzwungene Rueckfall friert den fac_us-Filterzustand ein, der Filter misst danach etwas anderes als er meldet.");
 	}
 #ifndef D3Q19
 	print_error("["+ort+"] CFD_FAC_REK ist heute NUR fuer D3Q19 gebaut: der Block in kernel.cpp bedient fhn[0..18] und kennt den def_wc-Ast der acht Eckrichtungen 19..26 nicht. Auf dem D3Q27-Binary (werkzeuge/bau_q27.sh, bin_q27/FluidX3D) waere ab eps != 0 weder die Masse noch der Impuls erhalten -- und in S0 (eps = 0) faellt das NICHT auf.");
@@ -824,9 +833,9 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 			if(mk>0.5f) { n_marke_ger++; if(ep!=D->fac_rek_eps) n_eps_falsch++; }
 			else if(ep!=0.0f) n_rest_belegt++;
 		}
-		if(n_marke_ger!=D->fac_rek_marken) print_error("["+ort+"] REKONSTRUKTION: auf dem GERAET stehen "+to_string(n_marke_ger)+" Marken, der Host hat "+to_string(D->fac_rek_marken)+" geschrieben. Der zweite Upload von fac_geo ist nicht angekommen oder wurde ueberschrieben.");
-		else if(n_eps_falsch>0ull) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_eps_falsch)+" markierte Facetten tragen auf dem GERAET eine andere Amplitude als "+to_string(D->fac_rek_eps,9u)+".");
-		else if(n_rest_belegt>0ull) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_rest_belegt)+" UNmarkierte Facetten tragen auf dem Geraet eine Amplitude != 0.");
+		if(n_marke_ger!=D->fac_rek_marken) k_befund("["+ort+"] REKONSTRUKTION: auf dem GERAET stehen "+to_string(n_marke_ger)+" Marken, der Host hat "+to_string(D->fac_rek_marken)+" geschrieben. Der zweite Upload von fac_geo ist nicht angekommen oder wurde ueberschrieben.");
+		else if(n_eps_falsch>0ull) k_befund("["+ort+"] REKONSTRUKTION: "+to_string(n_eps_falsch)+" markierte Facetten tragen auf dem GERAET eine andere Amplitude als "+to_string(D->fac_rek_eps,9u)+".");
+		else if(n_rest_belegt>0ull) k_befund("["+ort+"] REKONSTRUKTION: "+to_string(n_rest_belegt)+" UNmarkierte Facetten tragen auf dem Geraet eine Amplitude != 0.");
 		else print_info("["+ort+"] REKONSTRUKTION Geraetegegenprobe: "+to_string(n_marke_ger)+" Marken mit eps = "+to_string(D->fac_rek_eps,9u)+", alle uebrigen "+to_string(D->fac_N-n_marke_ger)+" Facetten mit eps = 0 -- aus fac_geo ZURUECKGELESEN, nicht aus der Schreibabsicht.");
 	}
 	const uint* H = D->rho_clamp_hits.data();
@@ -880,8 +889,11 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 										print_info("["+ort+"] REKONSTRUKTION RICHTUNGSVERGLEICH: <cos(t_lok, t_nb)> ~ "+to_string((float)cos_m,4u)+" -- 1,0 hiesse beide Richtungen gleich (Stufe B waere ein No-Op), kleine Werte heissen, dass die lokale Richtung von der Blende verdreht wird.");
 					// ★ 23.09. Pruefbefund M-5: zwei Identitaeten, die konstruktiv gelten und den
 					// Lueckenlosigkeitsbeweis des neuen Histogramms liefern. Beide Summen liegen bereits vor.
-					if(nn!=nc) print_error("["+ort+"] REKONSTRUKTION: Richtungshistogramm "+to_string(nn)+" Eintraege, cos-Histogramm "+to_string(nc)+" -- beide haengen am selben Zweig, sie MUESSEN gleich sein.");
-					if(nn+(ulong)H[368]!=wp) print_error("["+ort+"] REKONSTRUKTION: Richtungshistogramm + Rueckfall = "+to_string(nn+(ulong)H[368])+", aber Slot 328 = "+to_string(wp)+" -- jeder markierte Besuch muss in genau einem der beiden landen.");
+					if((nn&0xFFFFFFFFull)!=(nc&0xFFFFFFFFull)) k_befund("["+ort+"] REKONSTRUKTION: Richtungshistogramm "+to_string(nn)+" Eintraege, cos-Histogramm "+to_string(nc)+" -- beide haengen am selben Zweig, sie MUESSEN gleich sein.");
+					// ★ 23.09. abends, H2: maskiert vergleichen. nn/nc sind ulong-Summen aus je acht UNABHAENGIG
+					// wickelnden uint-Eimern, wp ein einzelner wickelnder uint -- ueber 2^32 gilt die Gleichheit
+					// nur modulo 2^32. Der Block weiter unten behandelt genau diesen Fall schon.
+					if(((nn+(ulong)H[368])&0xFFFFFFFFull)!=((ulong)H[328]&0xFFFFFFFFull)) k_befund("["+ort+"] REKONSTRUKTION: Richtungshistogramm + Rueckfall = "+to_string(nn+(ulong)H[368])+", aber Slot 328 = "+to_string(wp)+" -- jeder markierte Besuch muss in genau einem der beiden landen.");
 										if((ulong)H[369]>0ull) k_befund("["+ort+"] REKONSTRUKTION: Slot 369 = "+to_string((ulong)H[369])+" -- die geschriebene Nachbarrichtung ist nicht normiert oder nicht tangential. Stride-Versatz in fac_nb oder Schreibfehler in fac_nachbar_ab.");
 					else print_info("["+ort+"] REKONSTRUKTION: Slot 369 (Bauprobe Nachbarrichtung) = 0 -- normiert und tangential.");
 					if((ulong)H[368]>0ull) print_warning("["+ort+"] REKONSTRUKTION: Slot 368 = "+to_string((ulong)H[368])+" Besuche, an denen die Nachbarabtastung nichts lieferte -- ENTWEDER kein Fluidnachbar (Slot 73) ODER Nachbar still (Slot 74); dort gilt weiter die lokale Richtung. Die Gegenprobe ist Slot 73+74 = "+to_string((ulong)H[73]+(ulong)H[74])+", und sie ist nur eine OBERGRENZE: 368 zaehlt allein die markierten Facetten, 73/74 alle, und 73/74 saettigen.");
@@ -907,7 +919,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	const bool wickelt=soll_roh>=0x100000000ull;
 	const ulong aus = (ulong)H[9]; // Aussteiger am ut-Tor -- MIT DEMSELBEN t%def_zaehl_takt-Gate wie Slot 328 (kernel.cpp:2058). Genau deshalb ist die harte Schranke unten zulaessig.
 	if(wickelt) print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+", Soll "+to_string(soll_roh)+" liegt UEBER 2^32 -- der uint wickelt, die Ist=Soll-Probe ist hier stumpf und wird nicht als Abnahme gewertet.");
-	else if(wp>soll) print_error("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" UEBER dem Soll "+to_string(soll)+" = "+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots. Mehr Besuche als markierte Facetten gibt es nur, wenn der Block an UNMARKIERTEN Facetten feuert -- Baufehler an der Marke oder am fid.");
+	else if(wp>soll) k_befund("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" UEBER dem Soll "+to_string(soll)+" = "+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots. Mehr Besuche als markierte Facetten gibt es nur, wenn der Block an UNMARKIERTEN Facetten feuert -- Baufehler an der Marke oder am fid.");
 	else {
 		// ★ 23.09.2026 Pruefagent Durchgang 2 (NEU-4): eine EINSEITIGE Warnung allein liesse einen
 		// TEILWEISEN No-Op durch -- vorher war der exit(1). Zurueckgeholt als HARTE, aber korrekte
@@ -916,13 +928,13 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// Aussteiger, ist also eine OBERschranke -- wp+aus < soll kann damit nur ein echter Verlust sein.
 		// ★ 23.09.: Slot 9 ist UNGESAETTIGT und wickelt ebenfalls. Die Unterschranke gilt nur, solange
 		// weder Soll noch Aussteigerzahl den uint verlassen koennen -- am 4-mm-Fahrzeug ist das erreichbar.
-		if(!wickelt && aus<0xF0000000ull && wp+aus < soll) print_error("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" plus ut-Tor Slot 9 = "+to_string(aus)+" ergibt "+to_string(wp+aus)+" und bleibt damit UNTER dem Soll "+to_string(soll)+". Jede Marke muss je Zaehlslot in einem der beiden Zaehler auftauchen -- es gehen also Marken verloren (fid-Versatz, Marke nicht hochgeladen, Block teilweise uebersprungen).");
+		if(!wickelt && aus<0xF0000000ull && wp+aus < soll) k_befund("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" plus ut-Tor Slot 9 = "+to_string(aus)+" ergibt "+to_string(wp+aus)+" und bleibt damit UNTER dem Soll "+to_string(soll)+". Jede Marke muss je Zaehlslot in einem der beiden Zaehler auftauchen -- es gehen also Marken verloren (fid-Versatz, Marke nicht hochgeladen, Block teilweise uebersprungen).");
 		const double fehl = soll>0ull ? ((double)soll-(double)wp)/(double)soll : 0.0;
 		if(fehl>0.02) print_warning("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string((float)(100.0*fehl),2u)+" % fehlen). Das ist KEIN Fehler: der Block sitzt hinter dem Frueh-Return ut<1e-6f, und markierte Facetten sind die entarteten. Slot 9 (Aussteiger am ut-Tor) = "+to_string(aus)+" -- wer den Anteil braucht, misst ihn dort.");
 		else print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots), Differenz "+to_string(soll-wp)+", Fehlbetrag "+to_string((float)(100.0*fehl),2u)+" % (ut-Tor).");
 	}
 	if(D->fac_rek_eps==0.0f) {
-		if(wirk>0ull) print_error("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 = "+to_string(wirk)+", Soll EXAKT 0. Die Rekonstruktion hat u veraendert, obwohl die Amplitude null ist -- die Delta-Form ist nicht strukturell null (Entscheid R1) oder eps kommt nicht als echte Null an.");
+		if(wirk>0ull) k_befund("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 = "+to_string(wirk)+", Soll EXAKT 0. Die Rekonstruktion hat u veraendert, obwohl die Amplitude null ist -- die Delta-Form ist nicht strukturell null (Entscheid R1) oder eps kommt nicht als echte Null an.");
 		else print_info("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 (Wirkung) = 0 wie gefordert -- die Delta-Form ist bei du = 0 strukturell +0.");
 	} else {
 		// ★ 23.09.2026 S1b: das Soll ist SCHAERFER als "groesser null". eps = 1e-4 liegt rund
@@ -930,16 +942,16 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// "329 > 0, aber < 328" hiesse: der Hub kommt nicht an allen Marken an -- und genau das
 		// wuerde die alte Bedingung durchwinken.
 		const double vorhersage = (double)D->fac_rek_marken*(double)fabs(D->fac_rek_eps);
-		if(wirk==0ull) print_error("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = 0 -- der Schalter ist ein NO-OP in der Gegenrichtung. Der Nullbeweis ist gescheitert.");
-		else if(wirk!=wp) print_error("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = "+to_string(wirk)+", aber Slot 328 = "+to_string(wp)+". Bei diesem eps liegt der Hub 2e4-fach ueber der Wirkungsschwelle 1e-6*|u| -- JEDER Besuch muss wirken. Die Differenz "+to_string(wp-wirk)+" heisst, dass der Hub an einem Teil der Marken nicht ankommt.");
+		if(wirk==0ull) k_befund("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = 0 -- der Schalter ist ein NO-OP in der Gegenrichtung. Der Nullbeweis ist gescheitert.");
+		else if(wirk!=wp) k_befund("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = "+to_string(wirk)+", aber Slot 328 = "+to_string(wp)+". Bei diesem eps liegt der Hub 2e4-fach ueber der Wirkungsschwelle 1e-6*|u| -- JEDER Besuch muss wirken. Die Differenz "+to_string(wp-wirk)+" heisst, dass der Hub an einem Teil der Marken nicht ankommt.");
 		else print_info("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 (Wirkung) = "+to_string(wirk)+" = Slot 328 -- jeder Besuch wirkt. Vorhersage je Zaehlschritt: |D(rho u)| = rho*eps an "+to_string(D->fac_rek_marken)+" Marken = "+to_string((float)vorhersage,6u)+" (Summe der BETRAEGE ueber alle Marken, rho ~ 1; die Huebe zeigen in verschiedene Tangentialrichtungen, die Vektorsumme ist kleiner).");
 	}
-	if(rund>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Schranke 1e-3*|eps| + 1e-6*|u| (Boden 5e-8), ist also ein BAUFEHLER und keine Rundung (Entscheid R1).");
+	if(rund>0ull) k_befund("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Schranke 1e-3*|eps| + 1e-6*|u| (Boden 5e-8), ist also ein BAUFEHLER und keine Rundung (Entscheid R1).");
 	else print_info("["+ort+"] REKONSTRUKTION: Slot 330 (Ziel getroffen) = 0 -- u_rek landet auf u_lok + du, innerhalb 1e-3*|eps| + 1e-6*|u| (Boden 5e-8). NICHT bitexakt: |du| traegt rund 3 ulp aus Division und Wurzel.");
 	// ★ 23.09.2026 S1b: Massenneutralitaet. Die Delta-Form erhaelt die Masse ANALYTISCH exakt --
 	// Sum w_i = 1 und Sum w_i c_i c_i = c_s^2 I heben den -1,5(s.du)-Term genau auf. Soll also 0 in
 	// JEDER Stufe, nicht nur in S0. Ein Ausschlag heisst: die 19 Beitraege sind nicht mehr die Delta-Form.
-	if(dmasse>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 332 = "+to_string(dmasse)+" -- die Rekonstruktion hat die DICHTE veraendert. In der Delta-Form ist Sum_i Df_i analytisch exakt 0; ein Ausschlag ist ein Baufehler an den Richtungsgewichten.");
+	if(dmasse>0ull) k_befund("["+ort+"] REKONSTRUKTION: Slot 332 = "+to_string(dmasse)+" -- die Rekonstruktion hat die DICHTE veraendert. In der Delta-Form ist Sum_i Df_i analytisch exakt 0; ein Ausschlag ist ein Baufehler an den Richtungsgewichten.");
 	else print_info("["+ort+"] REKONSTRUKTION: Slot 332 (Massenneutralitaet) = 0 -- die Dichte bleibt unberuehrt, wie die Delta-Form es verlangt.");
 	// ★ 23.09.2026 Pruefbefund MITTEL-2: 330 und 332 pruefen nur das erste und nullte Moment und sind
 	// GEMEINSAM blind fuer einen Fehler im s-Vektor -- der s-Term faellt in beiden Momenten analytisch
@@ -968,13 +980,29 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	// uebersprungen worden, und der else-Zweig darunter haette mit der FALSCHEN Aussage "der
 	// Gate-Code laeuft, obwohl der Arm aus ist" den Lauf nach Stunden mit exit(1) getoetet.
 	// Der JIT-Spiegel ist der Instanzzustand und uebersteht die Nullung.
+	// ★★ 23.09. abends, Pruefbefund M6: der Impuls-Akkumulator wurde in JEDEM Fall geschrieben, aber
+	// nur im Kanal gelesen -- ausgerechnet am Fahrzeug, das das Ergebnis liefert, hatte er keinen
+	// feuernden Zaehler. Das ist nach der Iron Rule ein harter Fehler, nicht eine Unschoenheit.
+	// Hier steht er richtig, weil diese Funktion in allen drei Faellen laeuft.
+	// ACHTUNG zur Lesart: die geschlossene BILANZ (Luecke == eingespeister Impuls) gilt nur am
+	// Torus-Kanal, wo x periodisch und die Wand der einzige Nicht-Fluid-Partner ist. Am Fahrzeug
+	// gibt es Ein- und Auslass und einen Druckpfad -- dort ist die Zahl eine GROESSENORDNUNG, mit
+	// der sich die Buchung vergleichen laesst, keine Abnahme.
+	if(D->nachbar_on&&D->fac_N>0ull&&D->fac_nb.length()>=D->nb_stride*D->fac_N&&t_ende>0ull) {
+		D->fac_nb.read_from_device();
+		double imp=0.0;
+		for(ulong i=0ull;i<D->fac_N;i++) imp += (double)D->fac_nb[D->nb_stride*i+D->nb_roff+3ull];
+		const double je_schritt = imp/(double)t_ende;
+		if(D->fac_rek_eps==0.0f&&fabs(je_schritt)>1.0E-12) k_befund("["+ort+"] REKONSTRUKTION: bei eps = 0 wurde x-Impuls "+to_string((float)je_schritt,9u)+" je Schritt eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
+		else print_info("["+ort+"] REKONSTRUKTION Impuls-Akkumulator: "+to_string((float)je_schritt,9u)+" x-Impuls je Schritt ueber den GANZEN Lauf ("+to_string(t_ende)+" Schritte, Warmlauf eingeschlossen). Am Kanal ist das die rechte Seite der Bilanz; an Kugel und Fahrzeug eine Groessenordnung, keine Abnahme -- dort traegt die Torus-Bilanz nicht.");
+	}
 	if(env_u("CFD_FAC_REK",0u)>=2u&&!D->fac_rek_r3_jit) k_befund("["+ort+"] R3: CFD_FAC_REK=2 ist gesetzt, aber '#define FAC_REK_R3' steht NICHT im uebersetzten Kernel -- Gate und Buchung sind tote Zeilen. (env statt Statik gelesen: die Statik ist im dd-Fall genullt.)");
 	if(D->fac_rek_r3_jit) {
 		// Wirkpfad ZUERST: ohne den Beleg, dass der R3-Block ueberhaupt im uebersetzten Kernel steht,
 		// sind alle folgenden Nullen bedeutungslos (Iron Rule: ein Schalter ohne feuernden Zaehler
 		// ist ein HARTER Fehler). Der Spiegel kommt aus dem JIT-TEXT, nicht aus der Statik.
 		const ulong g_alle=(ulong)H[370], g_neu=(ulong)H[331], g_schon=(ulong)H[380], g_durch=(ulong)H[371], g_norm=(ulong)H[372];
-		if(g_alle==0ull) print_error("["+ort+"] R3: Slot 370 = 0 -- das Gate wurde an KEINER markierten Facette erreicht. Entweder steht die Marke nicht, oder der Gate-Ort liegt hinter einem return.");
+		if(g_alle==0ull) k_befund("["+ort+"] R3: Slot 370 = 0 -- das Gate wurde an KEINER markierten Facette erreicht. Entweder steht die Marke nicht, oder der Gate-Ort liegt hinter einem return.");
 		else print_info("["+ort+"] R3 Gate: Slot 370 = "+to_string(g_alle)+" markierte Besuche am Gate, davon "+to_string(g_neu)+" ZUSAETZLICH in den Rueckfall gezwungen (Slot 331) und "+to_string(g_schon)+" ohnehin schon Rueckfall (Slot 380). Der Anteil "+to_string((float)(g_alle>0ull?100.0*(double)g_neu/(double)g_alle:0.0),1u)+" % ist die eigentliche Wirkung von R3 -- der Rest waere auch ohne Gate zurueckgefallen.");
 		// ★ Pruefbefund M3: ohne diesen Zweig ist [331]==0 nur eine Info -- das Gate waere ein No-OP
 		// (die Marken sind der STATISCHE Rang 0, und der ist eine Obergrenze; je nach Kaskadenarm
@@ -985,11 +1013,22 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// der Kaskade. Das Tor ist dort ein vollstaendiger No-Op (Hash identisch zum Anker), und das
 		// ist eine LEGITIME Antwort, kein Defekt: an Rang-0-Zellen kann das Wandmodell nicht loesen,
 		// es faellt ohnehin auf reines Bounce-Back zurueck. Deshalb WARNUNG mit der Zahl statt Befund
-		// -- die Iron Rule verlangt eine erzwungene Antwort, nicht zwingend einen Abbruch. Ein echter
-		// Befund waere das Gegenteil: g_neu > 0 hiesse, es gaebe doch zwei Aktoren an einer Zelle.
+		// -- die Iron Rule verlangt eine erzwungene Antwort, nicht zwingend einen Abbruch.
+		// ★★ 23.09. ABENDS BERICHTIGT, Pruefbefund A3. Hier stand: "Ein echter Befund waere das
+		// Gegenteil: g_neu > 0 hiesse, es gaebe doch zwei Aktoren an einer Zelle." Das ist VERKEHRT
+		// HERUM. g_neu zaehlt markierte Besuche, die am Gate noch NICHT im Rueckfall waren -- das Gate
+		// zwingt sie hinein und VERHINDERT damit den zweiten Aktor. Zwei Aktoren gaebe es an genau
+		// diesen Zellen im Arm OHNE Tor (CFD_FAC_REK=1). g_neu > 0 belegt also, dass das Tor arbeitet.
+		// UND ES HEISST MEHR: die statische Rang-0-Menge war dann nicht die Obergrenze des
+		// Laufzeitrangs, wie der Zensus behauptet. Gemessen am 8-mm-Fahrzeug: 30 335 von 6 995 090,
+		// am kipp26 dagegen 0 von 53 195 580. Das Histogramm 373..377 entscheidet, ob dahinter eine
+		// Linkmengendivergenz Zensus/Kernel steckt oder eine Gleitkommakante im ALPHA2-Downdate.
 		if(g_alle>0ull&&g_neu==0ull) print_warning("["+ort+"] R3: Slot 331 = 0 bei Slot 370 = "+to_string(g_alle)+" -- das Gate hat KEINE Facette zusaetzlich in den Rueckfall gezwungen, alle waren es schon (Slot 380). Das TOR ist hier ein No-Op -- die Kaskade faengt die Rang-0-Marken ohnehin. Die Rekonstruktion ist an diesen Zellen der EINZIGE Aktor, und der eigene Armwert isoliert damit die BUCHUNG, nicht das Tor. Kein Defekt; ein Befund waere der umgekehrte Fall.");
 		// Lueckenlosigkeit: jeder Besuch am Gate landet in genau einem der beiden Faecher.
-		if(g_neu+g_schon!=g_alle) k_befund("["+ort+"] R3: Slot 331 + Slot 380 = "+to_string(g_neu+g_schon)+", aber Slot 370 = "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
+		// ★ 23.09. abends, M2: 370 ist die Summe der beiden anderen und saettigt deshalb ZUERST;
+		// danach wachsen 331+380 weiter und die Identitaet braeche zwangslaeufig.
+		if(g_alle>=0xF0000000ull) print_info("["+ort+"] R3: Slot 370 saettigt ("+to_string(g_alle)+") -- Lueckenlosigkeit nicht pruefbar.");
+		else if(g_neu+g_schon!=g_alle) k_befund("["+ort+"] R3: Slot 331 + Slot 380 = "+to_string(g_neu+g_schon)+", aber Slot 370 = "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
 		// DER Nullbeweis des Gates. 370/331/380 zaehlen die Absicht, dieser hier das Ergebnis.
 		if(g_durch>0ull) k_befund("["+ort+"] R3: Slot 371 = "+to_string(g_durch)+" -- an einer markierten Facette lief Pass 2 TROTZ Gate. Zwei Aktoren an derselben Zelle, der Lauf ist nicht auswertbar.");
 		else print_info("["+ort+"] R3: Slot 371 (Marke trotz Gate angewandt) = 0 -- an keiner markierten Facette lief der Solve. Das Gate greift.");
@@ -1399,7 +1438,12 @@ static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulo
 	const ulong soll = uw_an ? h124 : (h13+h15+h64+(satgate?h10+h16:0ull)+h94+h331);
 	const string formel = uw_an ? string("124 (untere u_w-Klemme = reines BB)") : (string("13+15+64")+(satgate?"+10+16":"")+(h94>0ull?"+94(Schatten)":"")+(h331>0ull?"+331(R3-Gate)":""));
 	if(h69>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung Slot 69 saettigt ("+to_string(h69)+", Soll "+to_string(soll)+") -- Identitaet nicht pruefbar.");
-	else if(h69!=soll) print_error("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" != Soll "+to_string(soll)+" ("+formel+") -- Rueckfall bucht NICHT genau einmal (Doppelzaehlungs-Detektor).");
+	else if(h331>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung: Slot 331 saettigt ("+to_string(h331)+") -- die Identitaet ist nicht pruefbar.");
+	// ★ 23.09. abends, Pruefbefund A2/N3: war print_error und laeuft mehrere tausend Zeilen VOR der
+	// R3-Abnahme -- ein Treffer haette sie komplett gefressen, wie K2 es heute viermal getan hat.
+	// Und dieser Diff hat genau diese Identitaet veraendert (soll += h331). Sammelform; geworfen
+	// wird am Fallende in klemm_bilanz_abschluss, der Lauf endet weiterhin mit rc 1.
+	else if(h69!=soll) k_befund("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" != Soll "+to_string(soll)+" ("+formel+") -- Rueckfall bucht NICHT genau einmal (Doppelzaehlungs-Detektor).");
 	else print_info("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" == Soll ("+formel+") -- jeder Gate-Rueckfall bucht genau einmal (P-only).");
 }
 static void render_yslice(LBM& L, const uint Nx, const uint Ny, const uint Nz, const uint y_slice,
@@ -5477,6 +5521,16 @@ void main_setup_kanal() {
 					" unter u_w ist sie frei. LESART: 1,00 +- 0,01 = Buchung bleibt twe, K2 gilt weiter, cd_reib mit der Basis vergleichbar."
 					" ~3 = gebucht wird der aufgeloeste viskose Fluss nu_eff*A (an kipp0 ist nu_eff*A/twe = 3,106), Buchungskonvention neu entscheiden."
 					" >>10 = P1 ist nicht linear in u_0, die Zerlegung faellt. VORSICHT: cd_reib aus diesem Arm ist bis zur Klaerung NICHT mit Basislaeufen vergleichbar.");
+			}
+			// ★ 23.09. abends, Pruefbefunde M5/M2: der R3-Arm wird jetzt AM JIT-SPIEGEL erkannt, nicht an
+			// der Amplitude. Vorher fiel der R3-Nullarm (eps=0) in den harten Zweig darunter, obwohl das
+			// Tor auch dort eine Physikaenderung sein KANN (am Fahrzeug gemessen 30 335 Zellen) -- und
+			// umgekehrt gab es unter R3 gar keine harte K2-Abnahme mehr, auch nicht in dem Arm, der
+			// gebaut wurde, um K2 wieder zu schliessen (dort haette 1,0008 die 1-%-Schranke bestanden).
+			else if(lbm.lbm_domain[0]->fac_rek_r3_jit) {
+				const double vh3 = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
+				if(soll_rx!=0.0&&fabs(vh3-1.0)>0.01) k_befund("K2 im R3-Arm verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab (Verhaeltnis "+to_string((float)vh3,6u)+"). Die Buchung soll K2 genau schliessen -- eine Abweichung heisst, dass sie unvollstaendig ist.");
+				else print_info("K2 im R3-Arm: Verhaeltnis "+to_string((float)vh3,4u)+" innerhalb 1 % -- die Buchung ist VOLLSTAENDIG. ACHTUNG: das belegt die Buchhaltung, NICHT die Physik. Der Kanalantrieb ist auf U_b geregelt, die Wandsenke damit ohnehin festgenagelt; jede vollstaendige Buchung liefert 1. Der Physikbeweis braucht einen Druckpfad.");
 			}
 			else if(LBM_Domain::s_fac_rek>0u&&env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) {
 				// ★ 23.09.2026 S1b, nach dem Vorbild der CFD_FAC_UW-Behandlung drei Zeilen darueber:

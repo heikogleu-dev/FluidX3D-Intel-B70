@@ -2060,20 +2060,24 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// ★★ R3 (Entscheid REKONSTRUKTION-PLAN.md §12): wo die statische Marke sitzt, setzt die
 	// Rekonstruktion und der Solve wird uebersprungen -- zwei Aktoren an derselben Zelle sind nicht
 	// auswertbar. Diese fuenf Werte tragen den Zustand bis zum Gate (Rueckfall) und zur Buchung.
-	// WARUM EIN EIGENER ARM (CFD_FAC_REK=2) und nicht derselbe Schalter: das Gate ist AUCH bei
-	// eps = 0 eine Physikaenderung, es schaltet den Solve an allen Rang-0-Facetten ab (am kipp26
-	// ein Drittel). Haengte es an CFD_FAC_REK=1, waere der bitgleiche Nullbezug ab dem Bau weg und
-	// Tor-Wirkung und eps-Wirkung waeren vermengt -- ein Fehler, der erst Wochen spaeter als
-	// "die Amplitudenleiter ist nichtlinear" auffiele.
+	// WARUM EIN EIGENER ARM (CFD_FAC_REK=2): damit Tor-Wirkung und eps-Wirkung trennbar bleiben.
+	// ★★ 23.09. abends BERICHTIGT. Hier stand "das Gate ist AUCH bei eps = 0 eine Physikaenderung,
+	// es schaltet den Solve an allen Rang-0-Facetten ab (am kipp26 ein Drittel)". GEMESSEN ist das
+	// am kipp26 FALSCH: Slot 331 = 0 von 53 195 580, der Hash des Tor-Arms ist der Anker.
+	// Am 8-mm-FAHRZEUG dagegen Slot 331 = 30 335 von 6 995 090 -- dort arbeitet das Tor sehr wohl.
+	// Die Trennung lohnt also, aber aus dem umgekehrten Grund: sie zeigt, WO das Tor ueberhaupt
+	// etwas tut. Dass es das am Fahrzeug tut, stellt die Zensus-Invariante "statischer Rang 0 ist
+	// die OBERGRENZE des Laufzeitrangs" in Frage -- offener Punkt, Slot 373 misst dagegen.
 	bool rek_gate = false;
 	float rek_dux = 0.0f;
 	float rek_duy = 0.0f;
 	float rek_duz = 0.0f;
 	float rek_rho = 0.0f;
+	float rek_g11 = 0.0f;
 )+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FAC_REK"+R(
 	{
-		hits[335] = 0x5245464Bu;
+		if(t%def_zaehl_takt==0ul) hits[335] = 0x5245464Bu; // ★ 23.09. abends: gegattet. Vorher ein ungegatterter globaler Store JE Facettenbesuch JE Schritt auf dieselbe Adresse (Cache-Zeile der Atomics 328..343). Der Host braucht den Wert genau einmal.
 		const float rek_marke = fac_geo[b+7ul];
 		const float rek_eps = fac_geo[b+6ul];
 		if(rek_marke>0.5f) {
@@ -2430,7 +2434,16 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// aus der GEOMETRIE kommen (ELIBB, q-gewichteter Wandabstand), nicht aus dem Zuruecknehmen einer
 	// Identitaet. Bestaetigt auch empirisch: ab_45_kontrolle und ab_45_a2fall sind in jeder
 	// gedruckten Zahl gleich.
+)+"#ifdef FAC_REK_R3"+R(
+	// ★ 23.09. abends: G11roh hier einfangen statt spaeter darauf zuzugreifen. Der Gate-Block liegt
+	// mehrere hundert Zeilen und mehrere Praeprozessorzweige weiter; eine Scope-Annahme ueber diese
+	// Distanz ist in einem R()-String nicht beweisbar, und OpenCL C ist C99 -- der Lauf staerbe mit
+	// error -11. Dasselbe Muster wie bei rek_dux/rek_rho.
+)+"#endif"+R( // FAC_REK_R3
 	const float G11roh=G11, G22roh=G22, Snnroh=Snn; // Rohmomente VOR dem ALPHA2-Downdate -- Snnroh (09.09.2026) fuer den Rauschboden des Vollrangtests, s. dort -- fuer den Slot-13-Split (Einzellink-diagonal gegen c-parallel-n; Planungsagent 1a)
+)+"#ifdef FAC_REK_R3"+R(
+	rek_g11 = G11roh;
+)+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FACETTEN_ALPHA2"+R(
 	// ★ J4-alpha Stufe 2 (Plan 2026-08-17): symmetrisches Rang-1-Downdate G' = 6 Sum w (c-cq)(c-cq)^T
 	// mit cq = S1/S0 -- eine Kovarianz, garantiert PSD. Der Solve erreicht sein Impulsziel damit
@@ -2730,6 +2743,21 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		if(rek_gate&&!rueckfall&&hits[331]<0xF0000000u) atomic_inc(&hits[331]);
 		if(rek_gate&&rueckfall&&hits[380]<0xF0000000u) atomic_inc(&hits[380]);
 	}
+	// ★★ DER ZAEHLER, DER DEN DOPPELTERM ENTSCHEIDET (23.09. abends, Pruefbefund H3).
+	// P1 wird in der Momentenschleife aus fhn gebildet -- und fhn traegt an den Marken bereits das
+	// Df der Rekonstruktion. Unter R3 ist phi1 = P1, also enthaelt die Wandkraft den Wandlink-Anteil
+	// des Df EIN ZWEITES MAL, zusaetzlich zur expliziten Buchung fw -= rho*du. Zur fuehrenden
+	// Ordnung ist dieser Zusatzterm dP1 = rho*eps*G11roh. Dieselbe Klasse ist bei ELIBB bekannt und
+	// wird dort mit +2*Dp_tangential korrigiert; fuer REK gibt es bisher nichts.
+	// G11roh ist das ROHmoment VOR dem ALPHA2-Downdate. Am kipp26 sind die Marken laufzeit-rang-0,
+	// dort ist es ~0 und der Term faellt weg (gemessene Restluecke 0,24-1,75 %). Am Fahrzeug laeuft
+	// ALPHA2, und "Rang 0 NACH dem Downdate" heisst ausdruecklich NICHT G11roh ~ 0.
+	// Liegt das Histogramm nicht im untersten Fach, ist die Buchung um diesen Term zu korrigieren.
+	if(rek_gate&&t%def_zaehl_takt==0ul) {
+		const float g11a = fabs(rek_g11);
+		const uint gb = g11a<1.0E-6f ? 0u : (g11a<1.0E-4f ? 1u : (g11a<1.0E-2f ? 2u : (g11a<1.0f ? 3u : 4u)));
+		if(hits[373ul+(ulong)gb]<0xF0000000u) atomic_inc(&hits[373ul+(ulong)gb]);
+	}
 	if(rek_gate) rueckfall=true;
 )+"#endif"+R( // FAC_REK_R3
 	if(rueckfall) { s1=0.0f; s2=0.0f; sn=0.0f; }
@@ -2820,7 +2848,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FACETTEN_UW -- KRAFT braucht R1/R2, die es unter u_w nicht gibt
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
 )+"#ifdef FAC_REK_R3"+R(
-	// ★★ NULLBEWEIS des Gates, VERSETZT am 23.09. (Pruefbefund H4). Er stand zuerst direkt hinter
+	// ★★ BAUREIHENFOLGE-PROBE (NICHT der Nullbeweis des Gates -- berichtigt 23.09. abends nach
+	// Pruefbefund B7/M3). Unter der ERLAUBTEN Schalterschnittmenge ist usx/usy/usz an einer Marke
+	// konstruktiv 0, weil zwischen Gate und hier nur genullt wird; die beiden Wege zu usx != 0
+	// (FACETTEN_UW, FACETTEN_KRAFT) sind beide hart gesperrt. Dieser Zaehler feuert also nur, wenn
+	// das Gate hinter die Nullung wandert, ein Filter u_s neu belegt oder t1 nicht endlich ist --
+	// ein REGRESSIONSWAECHTER. Den Nullbeweis des Tors liefert allein der Hashvergleich Arm 1
+	// gegen Arm 2. VERSETZT am 23.09. (Pruefbefund H4). Er stand zuerst direkt hinter
 	// "pass2_an = !rueckfall" -- dort war er TAUTOLOGISCH: zwischen dem Gate und dieser Zeile wird
 	// rueckfall nur im #else-Zweig von #ifndef FACETTEN_UW neu gesetzt, und in dem wird das Gate gar
 	// nicht emittiert. Der Zaehler konnte konstruktiv nie feuern, und der Host druckte seine Null als
@@ -3237,7 +3271,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	, global float* fac_kd // ★ Klassen-Diagnostik (Position = nach fac_q, Host-add-Reihenfolge)
 )+"#endif"+R( // FACETTEN_KDIAG
 )+"#ifdef FACETTEN_NACHBAR"+R(
-	, const global float* fac_nb // ★ 03.09. deterministische Nachbarabtastung des Vorschritts (Position = nach fac_kd, VOR fac_wfd; Host-add-Reihenfolge im Konstruktor)
+	, global float* fac_nb // ★★ 23.09. abends, Pruefbefund H1: hier stand const, waehrend apply_facette_imem den Parameter seit 3141e35 nicht-const nimmt (der Impuls-Akkumulator schreibt). Das war ein Qualifier-Discard im AUFRUF, und der Bau haengt -w an (opencl.hpp) -- es gab KEINE Diagnose. Der Uebersetzer durfte annehmen, dass durch diese Adresse nicht geschrieben wird, und den Store eliminieren. Der eps=0-Anker kann das PRINZIPIELL nicht fangen: dort ist rho*du exakt 0, ein weggelassener Store schreibt dieselbe Null. // ★ 03.09. deterministische Nachbarabtastung des Vorschritts (Position = nach fac_kd, VOR fac_wfd; Host-add-Reihenfolge im Konstruktor)
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef SGS_FDWAND"+R(
 	, const global float* fac_wfd // ★ Geistermoden-Fix: w je Facettenzelle aus |S|_FD des Vorschritts (Position = nach fac_kd)
@@ -5852,9 +5886,15 @@ float apg_rho_zelle(const uxx nb, const global fpxx* fi, const ulong tt TS_P) { 
 		if(pr>bestp) { bestp=pr; ib=ia; bcx=cxa; bcy=cya; bcz=cza; bnb=j[ia]; }
 	}
 	float utb = -1.0f, ywb = yw;
+)+"#ifdef FAC_REK"+R(
+	// ★ 23.09. abends, Pruefbefund M1: diese drei standen AUSSERHALB jedes #ifdef und wurden auch
+	// bei ausgeschaltetem FAC_REK berechnet und nie gelesen -- toter Code samt einer Division je
+	// Facette und Schritt. Damit war der AUS-Arm nicht mehr quelltextidentisch, obwohl ich genau
+	// das behauptet hatte.
 	float tnx = 0.0f;
 	float tny = 0.0f;
 	float tnz = 0.0f;
+)+"#endif"+R( // FAC_REK
 	if(ib>0u) {
 		const uxx nb = bnb;
 		const float ubx=load_u(u, nb), uby=load_u(u, def_N+(ulong)nb), ubz=load_u(u, 2ul*def_N+(ulong)nb);
@@ -5862,10 +5902,12 @@ float apg_rho_zelle(const uxx nb, const global fpxx* fi, const ulong tt TS_P) { 
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float ut2 = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
 		utb = (ut2>1e-6f) ? ut2 : 0.0f;
+)+"#ifdef FAC_REK"+R(
 		const float rinv = (ut2>1e-6f) ? 1.0f/ut2 : 0.0f;
 		tnx = utxb*rinv;
 		tny = utyb*rinv;
 		tnz = utzb*rinv;
+)+"#endif"+R( // FAC_REK
 		ywb = yw + (bcx*nx+bcy*ny+bcz*nz); // war c(ib)... -- siehe Scratch-Fix oben
 	}
 	fac_nb[def_nb_stride*(ulong)gid] = utb;
