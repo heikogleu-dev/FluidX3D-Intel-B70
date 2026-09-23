@@ -2056,6 +2056,21 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%def_zaehl_takt==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
 	if(ut<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); }
+)+"#ifdef FAC_REK_R3"+R(
+	// ★★ R3 (Entscheid REKONSTRUKTION-PLAN.md §12): wo die statische Marke sitzt, setzt die
+	// Rekonstruktion und der Solve wird uebersprungen -- zwei Aktoren an derselben Zelle sind nicht
+	// auswertbar. Diese fuenf Werte tragen den Zustand bis zum Gate (Rueckfall) und zur Buchung.
+	// WARUM EIN EIGENER ARM (CFD_FAC_REK=2) und nicht derselbe Schalter: das Gate ist AUCH bei
+	// eps = 0 eine Physikaenderung, es schaltet den Solve an allen Rang-0-Facetten ab (am kipp26
+	// ein Drittel). Haengte es an CFD_FAC_REK=1, waere der bitgleiche Nullbezug ab dem Bau weg und
+	// Tor-Wirkung und eps-Wirkung waeren vermengt -- ein Fehler, der erst Wochen spaeter als
+	// "die Amplitudenleiter ist nichtlinear" auffiele.
+	bool rek_gate = false;
+	float rek_dux = 0.0f;
+	float rek_duy = 0.0f;
+	float rek_duz = 0.0f;
+	float rek_rho = 0.0f;
+)+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FAC_REK"+R(
 	{
 		hits[335] = 0x5245464Bu;
@@ -2112,6 +2127,13 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			// derselbe Grund, aus dem fac_tau_acc nicht-atomar akkumulieren darf.
 			fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+3ul] += rhon*dux;
 )+"#endif"+R( // FACETTEN_NACHBAR
+)+"#ifdef FAC_REK_R3"+R(
+			rek_gate = true;
+			rek_dux = dux;
+			rek_duy = duy;
+			rek_duz = duz;
+			rek_rho = rhon;
+)+"#endif"+R( // FAC_REK_R3
 			const float sx = fma(2.0f, uxn, dux);
 			const float sy = fma(2.0f, uyn, duy);
 			const float sz = fma(2.0f, uzn, duz);
@@ -2695,6 +2717,21 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	}
 	if(a2_rueckfall) rueckfall=true; // VOR Nullung, pass2_an, kz und beta3
 )+"#endif"+R( // FACETTEN_MASSE_X
+)+"#ifdef FAC_REK_R3"+R(
+	// ★★ R3-GATE. Die Lage ist zwingend: NACH "if(a2_rueckfall) rueckfall=true" (sonst zaehlt die
+	// MASSE_X-Kreuztabelle darueber falsch) und VOR der Nullung s1/s2/sn (sonst greift der Rueckfall
+	// nicht mehr). KEIN frueher return: seit dem Buchungsschluss vom 27.08. steigen Rueckfallzellen
+	// nicht mehr aus, sondern buchen mit s=0 weiter -- phi = P, also fw = -P_t (+2Dp_t unter ELIBB).
+	// Ein return hier liesse fac_tau_cnt auf 0, der Kontaminationstest schluege in "nicht
+	// kontaminiert" um, und der volle F samt Tangentialanteil wuerde als DRUCK gebucht -- der
+	// Zustand, den der Kommentar oben mit K2 = -7,4 am 26-Grad-Kanal beziffert.
+	if(t%def_zaehl_takt==0ul) {
+		if(rek_gate&&hits[370]<0xF0000000u) atomic_inc(&hits[370]);
+		if(rek_gate&&!rueckfall&&hits[331]<0xF0000000u) atomic_inc(&hits[331]);
+		if(rek_gate&&rueckfall&&hits[380]<0xF0000000u) atomic_inc(&hits[380]);
+	}
+	if(rek_gate) rueckfall=true;
+)+"#endif"+R( // FAC_REK_R3
 	if(rueckfall) { s1=0.0f; s2=0.0f; sn=0.0f; }
 	// ★★ ZELLKRAFT STATT SLIP (CFD_FAC_KRAFT, 30.08.2026, Planungsagent Weg F -- IVW-Hybrid nach
 	// Kuwata & Suga). Befund: das Gate feuert, wenn |P1| > 2*G11*ut -- eine Eigenschaft der
@@ -2782,6 +2819,18 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FACETTEN_KRAFT
 )+"#endif"+R( // FACETTEN_UW -- KRAFT braucht R1/R2, die es unter u_w nicht gibt
 	float usx = s1*t1x+s2*t2x+sn*nx, usy = s1*t1y+s2*t2y+sn*ny, usz = s1*t1z+s2*t2z+sn*nz;
+)+"#ifdef FAC_REK_R3"+R(
+	// ★★ NULLBEWEIS des Gates, VERSETZT am 23.09. (Pruefbefund H4). Er stand zuerst direkt hinter
+	// "pass2_an = !rueckfall" -- dort war er TAUTOLOGISCH: zwischen dem Gate und dieser Zeile wird
+	// rueckfall nur im #else-Zweig von #ifndef FACETTEN_UW neu gesetzt, und in dem wird das Gate gar
+	// nicht emittiert. Der Zaehler konnte konstruktiv nie feuern, und der Host druckte seine Null als
+	// Beleg. Genau die Klasse, fuer die Slot 331 heute frueh von drei Auditoren entfernt wurde.
+	// HIER prueft er etwas Echtes: u_s ist der Additivterm, der auf die Zelle geht. An einer Marke
+	// MUSS er null sein -- sonst steht das Gate hinter der Nullung, oder ein Filter (EMA/PEMA) hat
+	// Soll EXAKT 0. (Der zuerst hier genannte Filterfall EMA/PEMA traegt NICHT: der EMA-Block steht
+	// hinter diesem Zaehler -- Nachpruefung NEU-4. Die drei anderen Nachweise sind der Zweck.)
+	if(rek_gate&&(usx!=0.0f||usy!=0.0f||usz!=0.0f)&&t%def_zaehl_takt==0ul&&hits[371]<0xF0000000u) atomic_inc(&hits[371]);
+)+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FACETTEN_EMA"+R(
 	// LATENT (Audit 1/3): unter EMA x SATGATE prueft das Gate die GELOESTEN s, angewandt wird die
 	// EMA-Mischung -- die bei fallendem ut das Budget ueberschreiten kann. EMA ist widerlegter
@@ -2937,6 +2986,35 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		fwx += 2.0f*(elibb_dp.x-edn_*nx); fwy += 2.0f*(elibb_dp.y-edn_*ny); fwz += 2.0f*(elibb_dp.z-edn_*nz);
 	}
 )+"#endif"+R( // FACETTEN_ELIBB
+)+"#ifdef FAC_REK_R3"+R(
+	// ★★ BUCHUNG DER REKONSTRUKTION (23.09.2026). Der Block traegt der Zelle +rho*du an Impuls ein;
+	// der Akkumulator [1..3] traegt den Impuls, den die WAND dem Fluid NIMMT (Vorzeichenkonvention
+	// belegt an fwx = -(phi1*t1x+phi2*t2x) zwei Zeilen darueber, phi ist der aufgepraegte Impuls).
+	// Also -rho*du. Die Groesse ist EXAKT, keine Naeherung: Summe_i c_i Df_i = rho*du, weil das
+	// dritte Gittermoment von D3Q19 identisch verschwindet und der quadratische Term der Delta-Form
+	// zum ersten Moment nichts beitraegt -- fuer JEDES du und JEDES s.
+	// GEMESSEN vor dem Bau (Serie a2_bilanz, 23.09.): der Kernel-Akkumulator reproduziert die
+	// Bilanzluecke FK.rx - Soll auf 1,2 % (eps +1e-4) und 1,8 % (eps -1e-3). Der einzige Arm, der
+	// verfehlt (-1e-4, 13 %), ist auch der einzige nicht stationaere: seine Antriebskraft driftet
+	// ueber das Fenster um 8,5 %, waehrend -1e-3 bei 0,1 % steht -- die Bilanzvoraussetzung gilt
+	// dort nicht. Die Buchung steht also auf einer GEMESSENEN Bilanz, nicht auf einer Annahme.
+	// rho ist das GEKLEMMTE rhon, dasselbe, das die Gewichte multipliziert hat: an 85 % der
+	// markierten Besuche steht es auf der Klemme, ein roh nachgerechnetes waere bis 43 % zu gross.
+	fwx -= rek_rho*rek_dux;
+	fwy -= rek_rho*rek_duy;
+	fwz -= rek_rho*rek_duz;
+	// Normalprobe: du steht per Konstruktion tangential, also muss die Normalkomponente 0 sein.
+	// Der Block hat sie bisher NICHT geprueft -- Befund 2 des Plans forderte Normal-Neutralitaet,
+	// die Delta-Form erfuellt sie konstruktiv, aber unbelegt. Soll 0.
+	// ★ 23.09. Pruefbefund M2: die Schranke war ABSOLUT (1e-6*rho) fuer eine Groesse, die mit eps
+	// skaliert -- bei eps = 1e-7 haette sie nichts mehr geprueft und ihre Null gelesen sich wie ein
+	// Beleg. Jetzt relativ zu |du|, und dimensionsrein (Geschwindigkeit gegen Geschwindigkeit).
+	// Der unmarkierte Fall (alles 0) bleibt stumm, weil 0 > 0 falsch ist.
+	if(t%def_zaehl_takt==0ul) {
+		const float rek_dl = sqrt(rek_dux*rek_dux+rek_duy*rek_duy+rek_duz*rek_duz);
+		if(fabs(rek_dux*nx+rek_duy*ny+rek_duz*nz)>1.0E-3f*rek_dl&&hits[372]<0xF0000000u) atomic_inc(&hits[372]);
+	}
+)+"#endif"+R( // FAC_REK_R3
 )+R(
 	const uxx a = 6ul*(uxx)fid; // Akkumulator: [1..3] Ist-Wandkraft (ungeklemmt == twe*t1; unter PEMA MODELLKRAFT: P gefiltert, P-Fluktuation laeuft als BB durch -- Audit 1/3)
 	fac_tau_acc[a] += tw; fac_tau_acc[a+1ul] += fwx; fac_tau_acc[a+2ul] += fwy; fac_tau_acc[a+3ul] += fwz;

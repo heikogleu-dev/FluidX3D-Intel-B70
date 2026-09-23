@@ -737,7 +737,28 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		if(env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) print_warning("CFD_FAC_REK_EPS ist gesetzt, aber CFD_FAC_REK=0 -- die Amplitude wirkt NICHT (Ansage-Doktrin).");
 		return;
 	}
-	if(LBM_Domain::s_fac_rek>1u) print_error("CFD_FAC_REK kennt heute nur 0 (aus) und 1 (Umfang Rang 0). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
+	if(LBM_Domain::s_fac_rek>2u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter) und 2 (R3: Gate + Buchung). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
+	if(LBM_Domain::s_fac_rek>=2u) {
+		// ★★ R3-ARM (23.09.2026). Unvertraeglichkeiten, die sonst STILL falsch rechnen:
+		// ★★ 23.09. Pruefbefund H1: hier standen zuerst LBM_Domain::s_fac_kraft/s_fac_uw/s_fac_messnur.
+		// Diese Funktion wird EINE Zeile VOR der Zuweisung von s_fac_kraft/s_fac_messnur und neun Zeilen
+		// vor s_fac_uw gerufen -- alle drei standen zum Pruefzeitpunkt noch auf 0, die Waechter
+		// schwiegen in JEDER Kombination. Dieselbe H1-Klasse wie am 22.09. (Statik im Konstruktor).
+		// Jetzt aus der Umgebung gelesen, genau wie die Nachbarzeilen es schon tun.
+		if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_KRAFT schliessen sich aus: unter dem erzwungenen Rueckfall wuerden markierte Zellen zu Kraftzellen (kz = rueckfall || KRAFT==2), das Wandmodell wirkte doch, und R3 waere still ausgehebelt -- ohne dass ein Zaehler es meldet.");
+		if(env_u("CFD_FAC_UW",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_UW schliessen sich aus: das Gate liegt in #ifndef FACETTEN_UW und wird gar nicht emittiert, die BUCHUNG dagegen schon -- Wandmodell UND Buchung zugleich.");
+		if(env_u("CFD_FAC_MESSNUR",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_MESSNUR schliessen sich aus: MESS-NUR steigt VOR dem Block aus, das Gate wird nie erreicht.");
+		// ★ Pruefbefund M4: PEMA hat einen return ZWISCHEN Rekonstruktion und Buchung (utb < 1e-6).
+		// Dort ginge rho*du ungebucht durch, fac_tau_cnt bliebe fuer den Besuch aus, und die
+		// Lueckenlosigkeitsprobe 331+380==370 merkte nichts, weil auch [370] ihn nicht zaehlt.
+		// EMA friert zusaetzlich den fac_us-Filterzustand ein.
+		// ★ 23.09. Nachpruefung NEU-1: hier stand env_u. PEMA/EMA sind FLIESSKOMMA-Schalter
+		// (env_f, typischer Wert ein Filterkoeffizient in (0,1)); env_u geht ueber atoi, und
+		// atoi("0.05") ist 0 -- die Sperre haette fuer genau die gebrauchten Werte geschwiegen.
+		// Dieselbe Falle wie H1, eine Ebene tiefer: der Waechter las den falschen Typ.
+		if(env_f("CFD_FAC_PEMA",0.0f)!=0.0f) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_PEMA schliessen sich aus: PEMA steigt bei utb < 1e-6 zwischen Rekonstruktion und Buchung aus -- der eingespeiste Impuls ginge dort UNGEBUCHT durch und kein Zaehler saehe es.");
+		if(env_f("CFD_FAC_EMA",0.0f)!=0.0f) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_EMA schliessen sich aus: der erzwungene Rueckfall friert den fac_us-Filterzustand ein, der Filter misst danach etwas anderes als er meldet.");
+	}
 #ifndef D3Q19
 	print_error("["+ort+"] CFD_FAC_REK ist heute NUR fuer D3Q19 gebaut: der Block in kernel.cpp bedient fhn[0..18] und kennt den def_wc-Ast der acht Eckrichtungen 19..26 nicht. Auf dem D3Q27-Binary (werkzeuge/bau_q27.sh, bin_q27/FluidX3D) waere ab eps != 0 weder die Masse noch der Impuls erhalten -- und in S0 (eps = 0) faellt das NICHT auf.");
 #endif
@@ -936,7 +957,39 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	}
 	// ★ 23.09.: die alte Kreuzwarnung auf Slot 331 ist ersatzlos entfallen -- 331 wurde im selben
 	// Gate wie 328 hochgezaehlt und konnte konstruktiv nie abweichen. Ein Zaehler, der nie feuern kann,
-	// ist keine Pruefung, sondern eine Beruhigung. Slot 331 ist bis S2 reserviert.
+	// ist keine Pruefung, sondern eine Beruhigung. Slot 331 traegt seit dem R3-Bau die Kreuztabelle.
+	// ★★ R3-ABNAHME (23.09.2026, CFD_FAC_REK=2): Gate + Buchung.
+	// ★★ 23.09. Pruefbefund H2: hier stand LBM_Domain::s_fac_rek>=2u. Im dd-Fall wird die Statik
+	// vor dem Bau des Nahfelds genullt und nie wiederhergestellt -- der ganze R3-Abnahmeblock waere
+	// uebersprungen worden, und der else-Zweig darunter haette mit der FALSCHEN Aussage "der
+	// Gate-Code laeuft, obwohl der Arm aus ist" den Lauf nach Stunden mit exit(1) getoetet.
+	// Der JIT-Spiegel ist der Instanzzustand und uebersteht die Nullung.
+	if(env_u("CFD_FAC_REK",0u)>=2u&&!D->fac_rek_r3_jit) k_befund("["+ort+"] R3: CFD_FAC_REK=2 ist gesetzt, aber '#define FAC_REK_R3' steht NICHT im uebersetzten Kernel -- Gate und Buchung sind tote Zeilen. (env statt Statik gelesen: die Statik ist im dd-Fall genullt.)");
+	if(D->fac_rek_r3_jit) {
+		// Wirkpfad ZUERST: ohne den Beleg, dass der R3-Block ueberhaupt im uebersetzten Kernel steht,
+		// sind alle folgenden Nullen bedeutungslos (Iron Rule: ein Schalter ohne feuernden Zaehler
+		// ist ein HARTER Fehler). Der Spiegel kommt aus dem JIT-TEXT, nicht aus der Statik.
+		const ulong g_alle=(ulong)H[370], g_neu=(ulong)H[331], g_schon=(ulong)H[380], g_durch=(ulong)H[371], g_norm=(ulong)H[372];
+		if(g_alle==0ull) print_error("["+ort+"] R3: Slot 370 = 0 -- das Gate wurde an KEINER markierten Facette erreicht. Entweder steht die Marke nicht, oder der Gate-Ort liegt hinter einem return.");
+		else print_info("["+ort+"] R3 Gate: Slot 370 = "+to_string(g_alle)+" markierte Besuche am Gate, davon "+to_string(g_neu)+" ZUSAETZLICH in den Rueckfall gezwungen (Slot 331) und "+to_string(g_schon)+" ohnehin schon Rueckfall (Slot 380). Der Anteil "+to_string((float)(g_alle>0ull?100.0*(double)g_neu/(double)g_alle:0.0),1u)+" % ist die eigentliche Wirkung von R3 -- der Rest waere auch ohne Gate zurueckgefallen.");
+		// ★ Pruefbefund M3: ohne diesen Zweig ist [331]==0 nur eine Info -- das Gate waere ein No-OP
+		// (die Marken sind der STATISCHE Rang 0, und der ist eine Obergrenze; je nach Kaskadenarm
+		// faellt dieselbe Facette ohnehin schon zurueck). Dann stuende auch die Begruendung fuer den
+		// eigenen Armwert in Frage. Iron Rule: ein Schalter ohne feuernden Zaehler ist ein HARTER Fehler.
+		if(g_alle>0ull&&g_neu==0ull) k_befund("["+ort+"] R3: Slot 331 = 0 bei Slot 370 = "+to_string(g_alle)+" -- das Gate hat KEINE einzige Facette zusaetzlich in den Rueckfall gezwungen, alle waren es schon (Slot 380). R3 ist an dieser Konfiguration ein No-Op, und der eigene Armwert waere nicht begruendet. Entweder ist die Markenmenge die falsche, oder die Kaskade faengt sie ohnehin.");
+		// Lueckenlosigkeit: jeder Besuch am Gate landet in genau einem der beiden Faecher.
+		if(g_neu+g_schon!=g_alle) k_befund("["+ort+"] R3: Slot 331 + Slot 380 = "+to_string(g_neu+g_schon)+", aber Slot 370 = "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
+		// DER Nullbeweis des Gates. 370/331/380 zaehlen die Absicht, dieser hier das Ergebnis.
+		if(g_durch>0ull) k_befund("["+ort+"] R3: Slot 371 = "+to_string(g_durch)+" -- an einer markierten Facette lief Pass 2 TROTZ Gate. Zwei Aktoren an derselben Zelle, der Lauf ist nicht auswertbar.");
+		else print_info("["+ort+"] R3: Slot 371 (Marke trotz Gate angewandt) = 0 -- an keiner markierten Facette lief der Solve. Das Gate greift.");
+		// Normal-Neutralitaet (Befund 2 des Plans): du steht tangential, also ist die gebuchte
+		// Normalkomponente 0. Die Delta-Form erfuellt das konstruktiv -- bis heute unbelegt.
+		if(g_norm>0ull) k_befund("["+ort+"] R3: Slot 372 = "+to_string(g_norm)+" -- die Buchung traegt einen NORMALANTEIL. du muss tangential stehen; ein Normalanteil ginge in den Druckpfad und waere dort doppelt.");
+		else print_info("["+ort+"] R3: Slot 372 (Normalanteil der Buchung) = 0 -- die Buchung ist normal-neutral, wie die Delta-Form es verlangt.");
+		// ★ Pruefbefund N2/N6: zwei Divergenzen ansagen, die sonst still falsch gelesen werden.
+		print_warning("["+ort+"] R3 ANSAGE: (1) cd_bericht.csv (fac_tau) enthaelt die Rekonstruktionsquelle jetzt HERAUSGERECHNET, forces.csv (object_force ueber update_force_field) dagegen NICHT -- beide weichen um genau Summe rho*du voneinander ab, das ist kein Fehler. (2) Unter CFD_FAC_RDIAG/KDIAG mischen die R3-erzwungenen Zellen unter die echten Rang-0-Rueckfaelle; die Rueckfall-Diagnose ist in diesem Arm NICHT mehr die Einzellink-Klasse.");
+	}
+	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[380]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/380 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
 }
 
 static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
@@ -1322,14 +1375,18 @@ static void bericht_gate_kreuztabelle(const uint* H, const string& ort, const bo
 		if(n95>0ull&&n95<0xF0000000ull) { const double q79=100.0*(double)c79/(double)n95, q78=100.0*(double)c78/(double)n95;
 			print_info("   ARM X [95] nach rohem Zweig: Schur-exakt [79] "+to_string((float)q79,2u)+" % (Klasse C) | 2x2-exakt [78] "+to_string((float)q78,2u)+" % (Klasse B) | Skalar+Rang-0 "+to_string((float)(100.0-q79-q78),2u)+" %"); } }
 }
-static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const ulong h124, const uint uw, const bool satgate, const string& ort, const ulong h94=0ull) {
+static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulong h13, const ulong h15, const ulong h16, const ulong h64, const ulong h124, const uint uw, const bool satgate, const string& ort, const ulong h94=0ull, const ulong h331=0ull) {
 	// ★ ARM X (04.09., Bauplan V2): der Schatten-Rueckfall [94] bucht in 69, zaehlt aber in keinem Kaskaden-/Gate-Slot.
 	// ★★ 06.09.: unter CFD_FAC_UW gibt es weder Kaskade noch Gates -- der EINZIGE Rueckfall ist die
 	// untere u_w-Klemme (Slot 124), und die ist bitgenau reines Bounce-Back. Ohne diesen Zweig meldete
 	// der Waechter "69 != 0" und braeche den Lauf ab.
 	const bool uw_an = uw>0u;
-	const ulong soll = uw_an ? h124 : (h13+h15+h64+(satgate?h10+h16:0ull)+h94);
-	const string formel = uw_an ? string("124 (untere u_w-Klemme = reines BB)") : (string("13+15+64")+(satgate?"+10+16":"")+(h94>0ull?"+94(Schatten)":""));
+	// ★ 23.09. R3: das Gate zwingt markierte Zellen in den Rueckfall, die sonst KEINEN genommen
+	// haetten -- Slot 331 zaehlt genau die. Sie buchen in 69 wie jeder andere Rueckfall, also ist
+	// 331 der Korrekturterm der Identitaet und keine Aufweichung. Ohne ihn braeche der erste
+	// R3-Lauf hier mit exit(1) ab, obwohl er richtig rechnet.
+	const ulong soll = uw_an ? h124 : (h13+h15+h64+(satgate?h10+h16:0ull)+h94+h331);
+	const string formel = uw_an ? string("124 (untere u_w-Klemme = reines BB)") : (string("13+15+64")+(satgate?"+10+16":"")+(h94>0ull?"+94(Schatten)":"")+(h331>0ull?"+331(R3-Gate)":""));
 	if(h69>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung Slot 69 saettigt ("+to_string(h69)+", Soll "+to_string(soll)+") -- Identitaet nicht pruefbar.");
 	else if(h69!=soll) print_error("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" != Soll "+to_string(soll)+" ("+formel+") -- Rueckfall bucht NICHT genau einmal (Doppelzaehlungs-Detektor).");
 	else print_info("["+ort+"] Rueckfall-Buchung Slot 69 = "+to_string(h69)+" == Soll ("+formel+") -- jeder Gate-Rueckfall bucht genau einmal (P-only).");
@@ -5113,16 +5170,21 @@ void main_setup_kanal() {
 				lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull];
 					fac_snap_tw[i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]; fac_snap_n[i]=(ulong)lbm.lbm_domain[0]->fac_tau_n[i]; } }
-			if(!rek_imp_hat&&LBM_Domain::s_fac_rek>0u&&lbm.lbm_domain[0]->nachbar_on&&fac_snap_step==step+chunk) {
+			else { fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk; }
+			// ★★ 23.09. Pruefagent H3: dieser Block stand bis eben ZWISCHEN dem if(fac_snap.empty())
+			// und seinem else -- das else hing damit an IHM. Bei CFD_FAC_REK=0 lief es im
+			// Schnappschuss-Chunk mit, und f_wirk dieses Chunks ging wieder in fac_fsum/fac_fn ein:
+			// exakt der Fehler, den der Kommentar oben als "Audit R3 (MITTEL)" behoben beschreibt,
+			// und er haette die K2-Referenz JEDES Standard-Kanallaufs still verschoben. Der Block
+			// steht jetzt HINTER dem if/else-Paar und als eigenstaendiges if.
+			if(!rek_imp_hat&&LBM_Domain::s_fac_rek>0u&&lbm.lbm_domain[0]->nachbar_on&&!fac_snap.empty()&&fac_snap_step==step+chunk) {
 				LBM_Domain* dr_ = lbm.lbm_domain[0];
 				dr_->fac_nb.read_from_device();
-				const ulong roff_ = dr_->apg_on ? 5ull : 2ull;
 				double sm_ = 0.0;
-				for(ulong i=0ull;i<dr_->fac_N;i++) sm_ += (double)dr_->fac_nb[dr_->nb_stride*i+roff_+3ull];
+				for(ulong i=0ull;i<dr_->fac_N;i++) sm_ += (double)dr_->fac_nb[dr_->nb_stride*i+dr_->nb_roff+3ull];
 				rek_imp_snap = sm_;
 				rek_imp_hat = true;
 			}
-			else { fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk; }
 		}
 	}
 	// ---- Profil + Spannungsbilanz
@@ -5183,7 +5245,7 @@ void main_setup_kanal() {
 			+", u_t~0-Skips "+to_string(sk)+", ohne offenes Paar "+to_string(zu)
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string(s10)+", Skalar-Fallback "+to_string(s12)+", ELIBB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohne Tangential-Link "+to_string(s13)
 			+", 3x3: Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+(lbm.lbm_domain[0]->apg_moz ? string(", APG-Klemme[19]=") : string(", APG-Klemme "))+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+(lbm.lbm_domain[0]->apg_moz ? string(" (MOZ: konstruktiv 0, Schatten im APG-Bericht)") : string(""))):string("")));
-		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw, LBM_Domain::s_fac_rdiag); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw); }
+		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kanal",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull,(ulong)H[331]); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kanal"); pruefe_kaskade(H,"Kanal",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw, LBM_Domain::s_fac_rdiag); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kanal",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kanal",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw); }
 		bericht_klassen(lbm.lbm_domain[0], FF, out_dir, (double)utau_lat*(double)utau_lat, "Kanal");
 		bericht_gdiag(lbm.lbm_domain[0], FF, out_dir, "Kanal");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
@@ -5341,9 +5403,8 @@ void main_setup_kanal() {
 			if(LBM_Domain::s_fac_rek>0u&&rek_imp_hat&&n_steps>fac_snap_step) {
 				LBM_Domain* dr_ = lbm.lbm_domain[0];
 				dr_->fac_nb.read_from_device();
-				const ulong roff_ = dr_->apg_on ? 5ull : 2ull;
 				double sm_ = 0.0;
-				for(ulong i=0ull;i<dr_->fac_N;i++) sm_ += (double)dr_->fac_nb[dr_->nb_stride*i+roff_+3ull];
+				for(ulong i=0ull;i<dr_->fac_N;i++) sm_ += (double)dr_->fac_nb[dr_->nb_stride*i+dr_->nb_roff+3ull];
 				const double fenster_ = (double)(n_steps-fac_snap_step);
 				const double inj_ = (sm_-rek_imp_snap)/fenster_;
 				const double luecke_ = FK.rx-soll_rx;
@@ -5356,6 +5417,20 @@ void main_setup_kanal() {
 				if(eps_==0.0) {
 					if(fabs(inj_)>1.0E-12) k_befund("REKONSTRUKTION BILANZ: bei eps = 0 wurde x-Impuls "+to_string((float)inj_,9u)+" eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
 					else print_info("REKONSTRUKTION BILANZ: bei eps = 0 ist der eingespeiste Impuls exakt 0 -- der Akkumulator ist im Nullarm stumm, wie gefordert.");
+				} else if(lbm.lbm_domain[0]->fac_rek_r3_jit) {
+					// ★★ 23.09. Pruefbefund M1: unter R3 ist die Quelle BEREITS aus FK.rx herausgerechnet.
+					// Die Luecke muss hier also gegen NULL gehen, nicht gegen inj_. Der alte Zweig haette
+					// vh_ ~ 0 gemeldet und dazu den Text "ein Teil des Impulses verschwindet in einer
+					// ungebuchten Senke" gedruckt -- ein Fehlurteil per Konstruktion, und zwar genau im
+					// Arm, der beweisen soll, dass die Buchung stimmt.
+					// Der Prueftest ist die REKONSTRUIERTE Bilanz vor der Buchung: (luecke_ + inj_)/inj_.
+					const double rest_ = -0.0014*soll_rx;
+					const double ber_ = luecke_-rest_;
+					const double vor_ = inj_!=0.0 ? (ber_+inj_)/inj_ : 0.0;
+					print_info("REKONSTRUKTION BILANZ (R3-Arm): Restluecke nach der Buchung = "+to_string((float)ber_,9u)+", eingespeist = "+to_string((float)inj_,9u)
+						+", Verhaeltnis Restluecke/eingespeist = "+to_string((float)(inj_!=0.0?ber_/inj_:0.0),4u)+" (Soll NAHE 0 -- die Buchung hat die Quelle herausgerechnet),"
+						+" rekonstruierte Bilanz VOR der Buchung = "+to_string((float)vor_,4u)+" (Soll nahe 1,00, vergleichbar mit der Serie a2_bilanz vom 23.09.).");
+					print_warning("K2 ist in diesem Arm KEINE unabhaengige Abnahme mehr: der Kanalantrieb ist auf U_b geregelt, die Wandsenke damit ohnehin auf f*V + Injektion festgenagelt. Jede VOLLSTAENDIGE Buchung liefert K2 = 1. K2 belegt hier die Vollstaendigkeit der Buchung, NICHT die Physik. Die belastbaren Kriterien bleiben c_f gegen den ebenen Pfad 2,9149e-3 und das Logprofil -- und die traegt erst die Kugel, weil der Kanal konstruktiv Druck_x = 0 hat.");
 				} else {
 					// Der Bezug ist NICHT 1,0: schon der unmarkierte Kanal traegt einen Buchungsrest (kipp26
 					// gemessen 0,9986, also -0,0014 absolut). Er wird hier abgezogen, sonst wird ein
@@ -6655,7 +6730,7 @@ void main_setup_kugel() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[10])+", Skalar "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[14])
 			+", Rang0-BB "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[15])+", sn-Klemme/Gate "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[18])+(lbm.lbm_domain[0]->apg_moz ? string(", APG-Klemme[19]=") : string(", APG-Klemme "))+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[19])+(lbm.lbm_domain[0]->apg_moz ? string(" (MOZ: konstruktiv 0, Schatten im APG-Bericht)") : string(""))+", ELIBB[67] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)lbm.lbm_domain[0]->rho_clamp_hits[64])):string("")));
-		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw, LBM_Domain::s_fac_rdiag); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw);
+		if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=lbm.lbm_domain[0]->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],LBM_Domain::s_fac_uw,LBM_Domain::s_fac_satgate,"Kugel",LBM_Domain::s_fac_masse_alle==3u?(ulong)H[94]:0ull,(ulong)H[331]); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],LBM_Domain::s_fac_kraft,"Kugel"); pruefe_kaskade(H,"Kugel",LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_pinv>0u,LBM_Domain::s_fac_uw, LBM_Domain::s_fac_rdiag); pruefe_masse_alle(H,LBM_Domain::s_fac_masse_alle>0u,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_kraft,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Kugel",LBM_Domain::s_fac_uw); bericht_gate_kreuztabelle(H,"Kugel",LBM_Domain::s_fac_masse_alle==3u,LBM_Domain::s_fac_satgate,LBM_Domain::s_fac_messnur>0u,LBM_Domain::s_fac_uw);
 			// ★ 05.09. KUGEL: bericht_klassen war hier NIE verdrahtet -- Kanal und Nahfeld rufen es, die Kugel nicht.
 			// Ein Kugelarm mit CFD_FAC_KDIAG=1 haette fac_kd akkumuliert und niemand haette es gelesen (stiller
 			// No-Op, gefunden beim Bau des Druckrest-Akkumulators). tau_ziel = 0: an der Kugel gibt es kein
@@ -10740,7 +10815,7 @@ static void main_setup_fahrzeug_dd() {
 			+(env_u("CFD_FACETTEN",0u)>=3u?(", iMEM: u_s-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[10])+", Skalar "+to_string((ulong)df->rho_clamp_hits[12])
 			+", LSQ-Rueckfall "+to_string((ulong)df->rho_clamp_hits[65])+", ohneTang "+to_string((ulong)df->rho_clamp_hits[13])+" (davon mit rohen Tangentialmomenten [27], NICHT ELIBB-heilbar -- Rang, s. B83: "+to_string((ulong)df->rho_clamp_hits[27])+")"+", Rang2 "+to_string((ulong)df->rho_clamp_hits[14])+", Rang0-BB "+to_string((ulong)df->rho_clamp_hits[15])
 			+", sn-Klemme/Gate "+to_string((ulong)df->rho_clamp_hits[16])+", PEMA-utb "+to_string((ulong)df->rho_clamp_hits[17])+", alpha|beta3>ut "+to_string((ulong)df->rho_clamp_hits[18])+(df->apg_moz ? string(", APG-Klemme[19]=") : string(", APG-Klemme "))+to_string((ulong)df->rho_clamp_hits[19])+(df->apg_moz ? string(" (MOZ: konstruktiv 0, Schatten im APG-Bericht)") : string(""))+", ELIBB[67] "+to_string((ulong)df->rho_clamp_hits[67])+", MLS[68] "+to_string((ulong)df->rho_clamp_hits[68])+", Rueckfall-Buchung[69] "+to_string((ulong)df->rho_clamp_hits[69])+", Quergate[64] "+to_string((ulong)df->rho_clamp_hits[64])):string("")));
-				if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],nahfeld_uw,nahfeld_satgate,"Nahfeld",nahfeld_masse_x?(ulong)H[94]:0ull); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv,nahfeld_uw, nahfeld_rdiag); pruefe_masse_alle(H,nahfeld_alpha3,nahfeld_messnur,nahfeld_kraft,"Nahfeld",nahfeld_masse_x,nahfeld_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld",nahfeld_uw); bericht_gate_kreuztabelle(H,"Nahfeld",nahfeld_masse_x,nahfeld_satgate,nahfeld_messnur,nahfeld_uw); }
+				if(env_u("CFD_FACETTEN",0u)>=3u) { const uint* H=df->rho_clamp_hits.data(); pruefe_rueckfall_buchung(H[69],H[10],H[13],H[15],H[16],H[64],H[124],nahfeld_uw,nahfeld_satgate,"Nahfeld",nahfeld_masse_x?(ulong)H[94]:0ull,(ulong)H[331]); pruefe_kraftpfad(H[70],H[69],H[7],H[9],H[17],H[71],nahfeld_kraft,"Nahfeld"); pruefe_kaskade(H,"Nahfeld",nahfeld_messnur,nahfeld_pinv,nahfeld_uw, nahfeld_rdiag); pruefe_masse_alle(H,nahfeld_alpha3,nahfeld_messnur,nahfeld_kraft,"Nahfeld",nahfeld_masse_x,nahfeld_uw); bericht_zielerfuellung(H,(ulong)H[7],(ulong)H[9],(ulong)H[17],(ulong)H[69],"Nahfeld",nahfeld_uw); bericht_gate_kreuztabelle(H,"Nahfeld",nahfeld_masse_x,nahfeld_satgate,nahfeld_messnur,nahfeld_uw); }
 		bericht_klassen(df, FFn, out_dir, 0.0, "Nahfeld");
 		bericht_gdiag(df, FFn, out_dir, "Nahfeld");
 		// ★ 03.09. NACHBAR-Wirkpfad (Slots 72/73/74) -- bis heute NIRGENDS im Host ausgelesen (Iron Rule: Schalter ohne feuernden Zaehler = harter Fehler).
