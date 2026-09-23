@@ -465,6 +465,12 @@ public:
 	// und nur der Vorkernel ist isoliert messbar. Instanzkopie, weil fahrzeug_dd die Statik vor dem
 	// Bau des Fernfelds nullt -- dieselbe Falle wie bei apg_on (Pruefbefund HOCH-1 vom 16.09.).
 	uint timer_apg = 0u; double apg_t_summe = 0.0, apg_t_min = 1.0e30, apg_t_max = 0.0; ulong apg_t_n = 0ull;
+	// ★ 23.09.2026 EINZIGE QUELLE der fac_nb-Stride-Erweiterung unter CFD_FAC_REK. Die Formel stand bis heute
+	// AUSGESCHRIEBEN an drei Stellen (lbm.cpp Host-Spiegel, lbm.cpp Stride-Waechter, setup.cpp berichte_apg) plus
+	// der JIT-Emission -- die vierte fand erst der Pruefagent (H-1), sie haette den ersten APG+REK-Lauf mit rc=1
+	// beendet. Wer die Zahl aendert, aendert sie HIER; die Nutzer rechnen damit. Stufe A: 3 (Richtung t_nb),
+	// Stufe A2 ab 23.09.: 4 (zusaetzlich der Impuls-Akkumulator Summe rho*du_x je Facette).
+	static constexpr ulong nb_rek_floats = 4ull;
 	Memory<float> fac_nb; Kernel kernel_fac_nachbar; Kernel kernel_fac_apg; bool nachbar_on = false; bool apg_on = false; float apg_kappa = 0.0f; uint apg_haken = 0u; uint apg_moz = 0u; float apg_moz_c = 0.0f, apg_moz_ap0 = 0.0f; ulong nb_stride = 2ull; // ★ 16.09. HOCH-1 (Pruefagent): APG-Zustand je INSTANZ eingefroren (allocate), weil fahrzeug_dd die Statik vor dem Bau des Fernfelds nullt; // ★ 16.09. kernel_fac_apg: APG-Vorkernel (grad rho in fac_nb[2..4]), nur unter s_fac_apg != 0 gebunden // ★ 03.09. deterministische Nachbarabtastung: (u_t_abt, y_abt) je Facette (2 float) aus eigenem Kernel nach stream_collide, ein Schritt Versatz (fac_wfd-Muster); Konstruktionszustand eingefroren
 	Memory<float> fac_wfd; Kernel kernel_sgs_fdwand; bool fdwand_on = false; // ★ Geistermoden-Fix: w je Facettenzelle (1 float), Konstruktionszustand eingefroren (Emission + Platzhalter im ctor); alloc rebindet ueber den env-Parameter
 	bool vandriest_on = false; uint vandriest_modus = 0u; ulong vandriest_ab = 0ull; // ★ 08.09. van Driest: Konstruktionszustand eingefroren (Statik-Lebensdauer-Lehre 02.09.)

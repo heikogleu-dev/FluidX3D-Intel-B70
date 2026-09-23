@@ -1,0 +1,38 @@
+# 23.09.2026 STUFE A2 -- BILANZTEST der Wandzell-Rekonstruktion, VOR dem Buchungsbau.
+#
+# FRAGE, die diese Serie entscheidet: ist die Luecke zwischen gebuchtem Reibungspfad und
+# Antriebskraft VOLLSTAENDIG durch den von der Rekonstruktion eingespeisten Impuls erklaert?
+# Die Torus-Bilanz sagt: x periodisch, Wand einziger Nicht-Fluid-Partner, also muss im
+# stationaeren Zustand gelten   FK.rx - soll_rx == <Summe_Marken rho*du_x je Schritt>.
+# Der neue Kernel-Akkumulator misst die rechte Seite direkt (float je Facette in fac_nb,
+# def_nb_roff+3, ungegatet, racefrei ohne Atomik weil 1 Zelle = 1 Facette).
+#
+# WARUM VOR DEM BAU: trifft die Bilanz zu, ist die Buchung fw = -P_t - rho*du gerechtfertigt.
+# Trifft sie NICHT zu, waere die Buchung nur eine Definition, die K2 tautologisch auf 1 zieht.
+# Elf Aenderungsstellen auf eine ungeprueftte Bilanz zu setzen waere der teure Weg.
+#
+# ABNAHME A2-1 (HART, Arm 1): FELD-HASH muss 7980041572697087411 sein. In diesem Bauschritt ist
+#        dem Kernelparameter fac_nb das const genommen worden. const global ist ein Nur-Lese-
+#        Hinweis, der die Codeerzeugung aendern KANN -- der Anker ist die einzige Abnahme, die
+#        das ausschliesst. Reisst er, ist NICHTS aus dieser Serie verwertbar.
+# ABNAHME A2-2 (HART, Arm 1): eingespeister Impuls bei eps = 0 EXAKT 0 (der Akkumulator darf im
+#        Nullarm nicht sprechen; die Delta-Form ist bei du = 0 strukturell +0).
+# ABNAHME A2-3 (Arm 1): <t1.x> 0,2593 und <t_nb.x> 0,5013 muessen sich reproduzieren.
+#
+# MESSGROESSE (Arme 2-4), KEINE Abnahme: bereinigte Luecke / eingespeister Impuls.
+#        1,00 = Bilanz vollstaendig -> Buchung bauen.
+#        deutlich < 1,00 = ungebuchte Impulssenke -> Buchung ist NICHT der Weg, dann die
+#        impulsneutrale Variante (einspeisen an der Wandzelle, entnehmen an der Abtastzelle).
+#        Bezug ist NICHT 1,0 sondern der gemessene Buchungsrest des unmarkierten kipp26 (0,9986).
+#
+# ARM 4 (eps = -1e-3) IST DER ENTSCHEIDENDE: dort verlangt die Bilanz ein 2,4-fach groesseres
+#        gemeinsames Moment <rho*t1.x> als bei 1e-4, und der gebuchte Reibungspfad ist dort
+#        NEGATIV (-0,381 gegen Soll 1,289) -- die Wand treibt die Stroemung. Reproduziert der
+#        Akkumulator die Luecke auch dort, ist die Bilanz belegt; tut er es nicht, fehlt eine
+#        Senke in der Groesse einer ganzen Antriebskraft.
+#
+# Geraet 2 (iGPU): neuer Kernelcode geht nie zuerst auf die B70 (Desktop).
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: a2_eps0
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0.0001 :: a2_epsp4
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=-0.0001 :: a2_epsm4
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=-0.001 :: a2_epsm3

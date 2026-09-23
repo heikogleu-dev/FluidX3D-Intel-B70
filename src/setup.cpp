@@ -1758,7 +1758,7 @@ static void berichte_apg(LBM& L, const char* wo) {
 	// nb_stride jetzt 8; die harte 5 haette den ganzen APG-Bericht per return verworfen und ueber
 	// apg_verletzt am Fallende rc 1 erzeugt -- in allen fuenf Faellen. Der laufende Messarm hat kein APG,
 	// der erste REK+APG-Arm haette es sofort gesehen.
-	const ulong st_soll = 5ull + (d->fac_rek_on ? 3ull : 0ull);
+	const ulong st_soll = 5ull + (d->fac_rek_on ? LBM_Domain::nb_rek_floats : 0ull);
 	if(st!=st_soll) { print_warning(string("APG ")+wo+": nb_stride "+to_string(st)+" != "+to_string(st_soll)+" unter APG -- Stride-Einfrieren verletzt."); apg_verletzt = true; return; }
 	if(!d->nachbar_on||d->fac_N==0ull) { print_warning(string("APG ")+wo+": kein Facetten-/Nachbarpfad in dieser Domaene -- CFD_FAC_APG ist hier wirkungslos (Wirkpfad 0, kein Befund)."); return; }
 	d->finish_queue(); d->rho_clamp_hits.read_from_device();
@@ -5051,6 +5051,10 @@ void main_setup_kanal() {
 	const float K = env_f("CFD_KANAL_K", 0.05f); // Reglerverstaerkung, bewusst trraege
 	std::vector<double> fac_snap; std::vector<double> fac_snap_tw; std::vector<ulong> fac_snap_n; // ★ 2026-08-25 Pruefbefund C(c): tw (Slot 0) und der Besuchszaehler wurden NIE geschnappt
 	ulong fac_snap_step=0ull; double fac_fsum=0.0, fac_fn=0.0; // Cd-Pfad (K2/K3)
+	// ★ 23.09.2026 Stufe A2: Fensterschnappschuss des Impuls-Akkumulators (Summe rho*du_x je Facette).
+	// Er MUSS dasselbe Fenster tragen wie fac_snap, sonst vergleicht der Bilanztest zwei verschiedene
+	// Mittelungszeitraeume -- genau der Fehler, den Audit R3 am Cd-Pfad-Schnappschuss schon einmal fand.
+	double rek_imp_snap=0.0; bool rek_imp_hat=false;
 	std::ofstream diag_csv; // Iron Rule 3: Diagnose-Facetten-Zeitreihe
 	for(ulong step=0ull; step<n_steps; step+=(ulong)regel_alle) { // Audit-Nacharbeit 18: letzter Chunk gekappt, vorher bis zu 99 Schritte Ueberzug
 		const ulong chunk = min((ulong)regel_alle, n_steps-step); // Re-Audit R2: auch fuers CSV-Etikett verwenden
@@ -5109,6 +5113,15 @@ void main_setup_kanal() {
 				lbm.lbm_domain[0]->fac_tau_n.read_from_device();
 				for(ulong i=0ull;i<lbm.lbm_domain[0]->fac_N;i++){ fac_snap[3ull*i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+1ull]; fac_snap[3ull*i+1ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+2ull]; fac_snap[3ull*i+2ull]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i+3ull];
 					fac_snap_tw[i]=(double)lbm.lbm_domain[0]->fac_tau[6ull*i]; fac_snap_n[i]=(ulong)lbm.lbm_domain[0]->fac_tau_n[i]; } }
+			if(!rek_imp_hat&&LBM_Domain::s_fac_rek>0u&&lbm.lbm_domain[0]->nachbar_on&&fac_snap_step==step+chunk) {
+				LBM_Domain* dr_ = lbm.lbm_domain[0];
+				dr_->fac_nb.read_from_device();
+				const ulong roff_ = dr_->apg_on ? 5ull : 2ull;
+				double sm_ = 0.0;
+				for(ulong i=0ull;i<dr_->fac_N;i++) sm_ += (double)dr_->fac_nb[dr_->nb_stride*i+roff_+3ull];
+				rek_imp_snap = sm_;
+				rek_imp_hat = true;
+			}
 			else { fac_fsum+=(double)f_wirk*(double)chunk; fac_fn+=(double)chunk; }
 		}
 	}
@@ -5315,6 +5328,49 @@ void main_setup_kanal() {
 				+", Verhaeltnis "+to_string((float)(soll_rx!=0.0?FK.rx/soll_rx:0.0),4u)+"), Reibung y = "+to_string((float)FK.ry,9u));
 			print_info("Cd-Pfad Kanal: Druck x = "+to_string((float)FK.px,9u)+" (K3-Soll exakt 0), n_voll "+to_string(FK.n_voll)
 				+", projiziert "+to_string(FK.n_proj)+", unklar "+to_string(FK.n_unklar));
+			// ★★ BILANZTEST DER REKONSTRUKTION (23.09.2026, Stufe A2). Die Frage, die er entscheidet:
+			// ist die Luecke zwischen gebuchtem Reibungspfad und Antriebskraft VOLLSTAENDIG durch den von
+			// der Rekonstruktion eingespeisten Impuls erklaert? Die Bilanz des Torus-Kanals sagt, dass x
+			// periodisch ist und die Wand der einzige Nicht-Fluid-Partner -- dann MUSS im stationaeren
+			// Zustand gelten: Summe fw_x = f*V_fluid + Summe_Marken rho*du_x, also
+			//     FK.rx - soll_rx == <Summe rho*du_x je Schritt>.
+			// Trifft das zu, ist die Buchung fw = -P_t - rho*du gerechtfertigt und vollstaendig.
+			// Trifft es NICHT zu, fehlt eine ungebuchte Impulssenke, und die Buchung waere eine
+			// Definition, die K2 tautologisch auf 1 zieht, statt ein Test zu sein. Deshalb steht dieser
+			// Zaehler VOR dem Buchungsbau, nicht danach.
+			if(LBM_Domain::s_fac_rek>0u&&rek_imp_hat&&n_steps>fac_snap_step) {
+				LBM_Domain* dr_ = lbm.lbm_domain[0];
+				dr_->fac_nb.read_from_device();
+				const ulong roff_ = dr_->apg_on ? 5ull : 2ull;
+				double sm_ = 0.0;
+				for(ulong i=0ull;i<dr_->fac_N;i++) sm_ += (double)dr_->fac_nb[dr_->nb_stride*i+roff_+3ull];
+				const double fenster_ = (double)(n_steps-fac_snap_step);
+				const double inj_ = (sm_-rek_imp_snap)/fenster_;
+				const double luecke_ = FK.rx-soll_rx;
+				const double eps_ = (double)dr_->fac_rek_eps;
+				const double nmk_ = (double)dr_->fac_rek_marken;
+				const double moment_ = (nmk_*eps_!=0.0) ? inj_/(nmk_*eps_) : 0.0;
+				print_info("REKONSTRUKTION BILANZ: eingespeister x-Impuls je Schritt = "+to_string((float)inj_,9u)
+					+" (gemessen im Kernel, Fenster "+to_string(n_steps-fac_snap_step)+" Schritte), Bilanzluecke FK.rx - Soll = "+to_string((float)luecke_,9u)
+					+", gemeinsames Moment <rho*t1.x> = "+to_string((float)moment_,4u)+" (zum Vergleich: das PRODUKT der getrennten Histogramme ueberschaetzt es, wenn rho und t1.x antikorreliert sind).");
+				if(eps_==0.0) {
+					if(fabs(inj_)>1.0E-12) k_befund("REKONSTRUKTION BILANZ: bei eps = 0 wurde x-Impuls "+to_string((float)inj_,9u)+" eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
+					else print_info("REKONSTRUKTION BILANZ: bei eps = 0 ist der eingespeiste Impuls exakt 0 -- der Akkumulator ist im Nullarm stumm, wie gefordert.");
+				} else {
+					// Der Bezug ist NICHT 1,0: schon der unmarkierte Kanal traegt einen Buchungsrest (kipp26
+					// gemessen 0,9986, also -0,0014 absolut). Er wird hier abgezogen, sonst wird ein
+					// vorbestehender Versatz dem Neubau angelastet.
+					const double rest_ = -0.0014*soll_rx;
+					const double ber_ = luecke_-rest_;
+					const double vh_ = inj_!=0.0 ? ber_/inj_ : 0.0;
+					print_info("REKONSTRUKTION BILANZ: bereinigte Luecke "+to_string((float)ber_,9u)+" / eingespeist "+to_string((float)inj_,9u)+" = "+to_string((float)vh_,4u)
+						+" -- 1,00 heisst, die Bilanz ist VOLLSTAENDIG und die Buchung fw = -P_t - rho*du ist gerechtfertigt."
+						+" Deutlich unter 1,00 heisst, ein Teil des eingespeisten Impulses verschwindet in einer ungebuchten Senke"
+						+" (Kandidaten: Dichteklemme, Massenkompensation ueber Wandlinks) -- dann ist die Buchung NICHT der Weg."
+						+" Dies ist eine MESSGROESSE, keine Abnahme: der Kanalantrieb ist auf U_b geregelt, ein Arm ausserhalb des"
+						+" stationaeren Zustands verletzt die Bilanzvoraussetzung und darf den Lauf nicht toeten.");
+				}
+			}
 			// K2 ist ein STATIONARITAETS-Kriterium -- im Transientenfenster (<5000 Schritte) wird es
 			// angesagt uebersprungen statt einen legitimen Kurztest zu killen (R3-Nachschliff).
 			if(n_steps-fac_snap_step<5000ull) print_warning("K2-Pruefung UEBERSPRUNGEN: Fenster "+to_string(n_steps-fac_snap_step)+" Schritte ist transient (hart erst ab 5000) -- dieser Lauf ist KEIN Abnahmelauf.");

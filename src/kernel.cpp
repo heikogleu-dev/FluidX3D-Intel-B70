@@ -2012,7 +2012,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
 )+"#endif"+R( // FACETTEN_ELIBB
 )+"#ifdef FACETTEN_NACHBAR"+R(
-                        , const global float* fac_nb // ★ 03.09. deterministisch: (u_t_abt, y_abt) je Facette aus dem Kernel fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld); -1 = kein Fluidnachbar, 0 = Nachbar still
+                        , global float* fac_nb // ★ 23.09.2026 Stufe A2: const ENTFERNT (nur das Schluesselwort -- Parameterzahl und -reihenfolge unveraendert, KEIN Signatur-Splice, keine Host-Bindung beruehrt). Grund: der Impuls-Akkumulator Summe rho*du_x je Facette schreibt nach def_nb_roff+3. Risiko und Abnahme: const global ist ein Nur-Lese-Hinweis, der die Codeerzeugung aendern KANN -- deshalb ist der eps=0-Anker (FELD-HASH 7980041572697087411) die Pflichtabnahme dieses Bauschritts. // ★ 03.09. deterministisch: (u_t_abt, y_abt) je Facette aus dem Kernel fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld); -1 = kein Fluidnachbar, 0 = Nachbar still
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
                         , global float* fac_kd // ★ Klassen-Diagnostik: 16 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, ut_ab, yw_ab, tw_angewandt, besuche_angewandt, [12..15] 05.09. Druckrest A / |A| / Ziel B / Geometrie C, alle nur ueber angewandte Besuche), racefrei (1 Zelle = 1 Facette)
@@ -2099,6 +2099,19 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float dux = rek_eps*utx*rek_inv;
 			const float duy = rek_eps*uty*rek_inv;
 			const float duz = rek_eps*utz*rek_inv;
+)+"#ifdef FACETTEN_NACHBAR"+R(
+			// ★★ IMPULS-AKKUMULATOR (23.09.2026, Stufe A2). Summiert den von der Rekonstruktion je Schritt
+			// EINGETRAGENEN x-Impuls rho*du_x, ungegatet (jeder Schritt, nicht nur Zaehlschritte) -- die
+			// Kraftbilanz K2 mittelt ebenfalls ueber JEDEN Schritt des Fensters, ein Stichprobenzaehler
+			// waere nicht vergleichbar. rho ist das GEKLEMMTE rhon, dasselbe, das oben wr_s/wr_e bildet:
+			// an 85 % der markierten Besuche steht es auf der Klemme, ein roh nachgerechnetes rho waere
+			// bis 43 % zu gross. du_x ist das TATSAECHLICH angewandte, nicht das beabsichtigte.
+			// Analytisch ist Summe_i c_i Df_i == rho*du EXAKT (das dritte Gittermoment von D3Q19
+			// verschwindet identisch, der quadratische Term traegt zum ersten Moment nichts bei).
+			// Racefrei ohne Atomik, weil 1 Zelle = 1 Facette gilt und das in lbm.cpp bewacht ist --
+			// derselbe Grund, aus dem fac_tau_acc nicht-atomar akkumulieren darf.
+			fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+3ul] += rhon*dux;
+)+"#endif"+R( // FACETTEN_NACHBAR
 			const float sx = fma(2.0f, uxn, dux);
 			const float sy = fma(2.0f, uyn, duy);
 			const float sz = fma(2.0f, uzn, duz);

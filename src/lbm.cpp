@@ -934,7 +934,7 @@ void LBM_Domain::allocate(Device& device) {
 		// ★ 23.09. Stufe A: drei Floats fuer die Nachbar-RICHTUNG, nur wenn die Rekonstruktion laeuft.
 		// Die Formel MUSS zeichengleich zu der in device_defines() sein -- am 22.09. kostete genau diese
 		// Divergenz einen 2,5-fachen Pufferueberlauf auf der GPU. Eigene Zeile, kein Kommentar davor.
-		if(fac_rek_on) nb_stride += 3ull;
+		if(fac_rek_on) nb_stride += nb_rek_floats;
 		timer_apg = apg_on ? s_timer_apg : 0u; // ★ 22.09.2026: timer_apg genau wie apg_haken an die INSTANZ gebunden -- das Fernfeld traegt kein APG und darf den Timer nicht tragen.
 		// ★★ 22.09.2026, EIGENER FEHLER, vom Pruefagenten gefunden: der Kommentar oben stand zuerst MITTEN in
 		// dieser Zeile, VOR der nb_stride-Zuweisung. Die Zuweisung lag damit vollstaendig im //-Kommentar,
@@ -1818,7 +1818,7 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// Puffers, 2,5-facher Ueberlauf ohne Schranke auf der GPU (Wedge-Klasse auf der B70).
 		// ★ 23.09. Stufe A: die Erwartung traegt jetzt auch die drei Richtungsfloats. Wer sie hier vergisst,
 		// baut genau den Ueberlauf vom 22.09. nach -- deshalb steht die Formel an BEIDEN Stellen ausgeschrieben.
-		const ulong nbs_soll = (apg_on ? 5ull : 2ull) + (fac_rek_on ? 3ull : 0ull);
+		const ulong nbs_soll = (apg_on ? 5ull : 2ull) + (fac_rek_on ? nb_rek_floats : 0ull);
 		if(nbs != nbs_soll) print_error("fac_nb-Stride inkonsistent: nb_stride = "+to_string(nbs)
 			+", erwartet "+to_string(nbs_soll)+" (apg_on = "+string(apg_on?"true":"false")+"). Der Puffer wuerde nicht zu den Kernelzugriffen passen.");
 		fac_nb = Memory<float>(device, nbs*aktiv);
@@ -2505,7 +2505,7 @@ string LBM_Domain::device_defines(const Device_Info& device_info) const { return
 	+((s_facetten&&s_fac_imem&&s_fac_messnur>0u) ? (string)"\n	#define FACETTEN_MESSNUR" : (string)"") // ★ 30.08. BB-Physik, nur messen
 	+((s_facetten&&s_fac_imem&&s_fac_nachbar>0u) ? (string)"\n	#define FACETTEN_NACHBAR" : (string)"") // ★ 30.08. Eingang aus der zweiten Fluidzelle
 	+(string)"\n	#define def_nb_roff "+string((s_facetten&&s_fac_imem&&s_fac_nachbar>0u&&s_fac_apg!=0.0f) ? "5ul" : "2ul") // ★ 23.09. Stufe A: Offset der Nachbar-RICHTUNG in fac_nb, HINTER den APG-Gradienten -- so wandert keine bestehende Lesestelle
-	+(string)"\n	#define def_nb_stride "+string((s_facetten&&s_fac_imem&&s_fac_nachbar>0u&&s_fac_apg!=0.0f) ? (fac_rek_on ? "8ul" : "5ul") : (fac_rek_on ? "5ul" : "2ul")) // ★ 16.09. fac_nb: 2 float je Facette, unter APG 5 (grad rho in [2..4]) -- UNBEDINGT emittiert: fac_nachbar_ab steht in JEDER Domaene im Quelltext (Gate-Befund 16.09.: ohne NACHBAR undeclared identifier, das haette das Fernfeld im dd-Fall gekillt); Host-Allokation MUSS mitziehen
+	+(string)"\n	#define def_nb_stride "+string(to_string((ulong)(((s_facetten&&s_fac_imem&&s_fac_nachbar>0u&&s_fac_apg!=0.0f) ? 5ull : 2ull) + (fac_rek_on ? nb_rek_floats : 0ull)))+"ul") // ★ 16.09. fac_nb: 2 float je Facette, unter APG 5 (grad rho in [2..4]) -- UNBEDINGT emittiert: fac_nachbar_ab steht in JEDER Domaene im Quelltext (Gate-Befund 16.09.: ohne NACHBAR undeclared identifier, das haette das Fernfeld im dd-Fall gekillt); Host-Allokation MUSS mitziehen
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f&&s_fac_apg_haken==2u) ? (string)"\n	#define FACETTEN_APG_HAKEN" : (string)"") // ★ 16.09. Testhaken: Konstantgradient im Vorkernel
 	+((s_facetten&&s_fac_imem&&s_fac_apg!=0.0f&&s_fac_apg_haken==3u) ? (string)"\n	#define FACETTEN_APG_HAKEN3" : (string)"") // ★ 16.09. Testhaken 3 (Pruefagent MITTEL-1): analytisches rho = 1 + x/1024 im Vorkernel, gz := kx -- Host prueft gx exakt
 	+((s_facetten&&s_fac_imem&&s_fac_kdiag>0u) ? (string)"\n	#define FACETTEN_KDIAG" : (string)"") // ★ 30.08. Klassen-Diagnostik
@@ -3143,7 +3143,7 @@ void LBM::sanity_checks_constructor(const vector<Device_Info>& device_infos, con
 		ulong b_fac = 60ull;
 		if(LBM_Domain::s_fac_elibb>0u)  b_fac += 18ull;
 		if(LBM_Domain::s_sgs_fdwand>0u) b_fac += 8ull;
-		if(LBM_Domain::s_fac_nachbar>0u)b_fac += (LBM_Domain::s_fac_apg!=0.0f ? 20ull : 8ull) + (LBM_Domain::s_fac_rek>0u ? 12ull : 0ull); // ★ 23.09. Stufe A: +12 B fuer die Nachbar-RICHTUNG, sonst ist der VRAM-Waechter darueber blind (KDIAG-Lehre) // ★ 16.09. MITTEL-2 (Pruefagent): unter APG 5 float je Facette
+		if(LBM_Domain::s_fac_nachbar>0u)b_fac += (LBM_Domain::s_fac_apg!=0.0f ? 20ull : 8ull) + (LBM_Domain::s_fac_rek>0u ? 4ull*LBM_Domain::nb_rek_floats : 0ull); // ★ 23.09. Stufe A: +12 B fuer die Nachbar-RICHTUNG, sonst ist der VRAM-Waechter darueber blind (KDIAG-Lehre) // ★ 16.09. MITTEL-2 (Pruefagent): unter APG 5 float je Facette
 		if(LBM_Domain::s_sgs_sism>0u)   b_fac += 24ull;
 		if(LBM_Domain::s_fac_kdiag>0u)  b_fac += 64ull;
 		const ulong fac_est = (ulong)(0.03*(double)F_N);
