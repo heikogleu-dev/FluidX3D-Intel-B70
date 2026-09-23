@@ -945,7 +945,11 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	// GEMEINSAM blind fuer einen Fehler im s-Vektor -- der s-Term faellt in beiden Momenten analytisch
 	// heraus, fuer JEDES s. Erst das zweite Moment sieht ihn. Ohne diese Probe waeren zwei gruene
 	// Zaehler als Beleg der Delta-Form gelesen worden, obwohl s falsch sein koennte.
-	if(mom2>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 333 = "+to_string(mom2)+" -- das ZWEITE Moment trifft nicht. Summe c_x c_y Df_i weicht von rho*(u_x du_y + du_x u_y + du_x du_y) ab. Das ist die einzige Probe, die den s-Vektor (s = 2u + du) wirklich prueft; 330 und 332 sind dafuer konstruktiv blind.");
+	// ★ 23.09. abends, VIERTES Auftreten derselben Klasse an einem Tag: dieser harte Abbruch hat
+	// im Lauf f8_rek_p3 die GESAMTE R3-Abnahme gefressen (Slots 370/331/371/372 standen nie im Log),
+	// bei 4 Treffern aus rund 7 Mio Besuchen -- also einer Gleitkommakante bei grossem du, nicht
+	// einem Formelfehler. Sammeln statt abbrechen, geworfen wird am Ende.
+	if(mom2>0ull) k_befund("["+ort+"] REKONSTRUKTION: Slot 333 = "+to_string(mom2)+" -- das ZWEITE Moment trifft nicht. Summe c_x c_y Df_i weicht von rho*(u_x du_y + du_x u_y + du_x du_y) ab. Das ist die einzige Probe, die den s-Vektor (s = 2u + du) wirklich prueft; 330 und 332 sind dafuer konstruktiv blind.");
 	else print_info("["+ort+"] REKONSTRUKTION: Slot 333 (zweites Moment, xy) = 0.");
 	// ★ 23.09. Audit-Schleife: [333] hat einen ABSOLUTEN Boden von 1e-8, waehrend mxy_soll ~ 2*rho*eps*u_y ist.
 	// An Facetten mit kleinem |u_y| prueft sie nichts -- und eine gruene Null liest sich dort wie ein Beleg.
