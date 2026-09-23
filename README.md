@@ -105,19 +105,28 @@ This is **arithmetic, not a measurement**. It uses one measured input — the 43
 and two scaling laws: cells go as dx⁻³, and at fixed physical time the step count goes as dx⁻¹, so
 total work goes as **dx⁻⁴**.
 
-| Near-field memory | Fine cells | Resolution | Work vs 4 mm |
-|---|---|---|---|
-| 32 GB — *measured, this rig* | 0.65 G | **4.00 mm** | 1× |
-| 96 GB — RTX 6000 Pro class | 2.19 G | **2.67 mm** | ~5× |
-| 320 GB — 4 × H100 80 GB | 7.30 G | **1.79 mm** | ~25× |
-| 768 GB — 8 × 96 GB node | 17.5 G | **1.34 mm** | ~80× |
+| Near-field memory | Fine cells | Resolution | Work vs 4 mm | Run time *at this rig's throughput* |
+|---|---|---|---|---|
+| 32 GB — *measured, this rig* | 0.65 G | **4.00 mm** | 1× | **1.8 h** |
+| 96 GB — RTX 6000 Pro class | 2.19 G | **2.67 mm** | ~5× | ~9 h |
+| 320 GB — 4 × H100 80 GB | 7.30 G | **1.79 mm** | ~25× | ~46 h |
+| 768 GB — 8 × 96 GB node | 17.5 G | **1.34 mm** | ~80× | ~148 h |
 
-**What this table does not say.** It states no wall clock, no speed-up and no throughput for any
-hardware not in this machine — those would have to be measured, and transferring them from vendor
-specifications is exactly the kind of number this project does not print. What it does say is that
-the memory wall, not the algorithm, is what currently sets the resolution: the code already fits a
-full vehicle at 4 mm into 32 GB, and the cost of the next halving in dx is a factor of sixteen in
-work, on any hardware.
+**Read the last column carefully — it is a counterfactual, not a forecast.** It asks: *if a machine
+of that memory size delivered exactly the per-cell throughput measured on this Arc Pro B70, how long
+would the run take?* It therefore contains no claim whatsoever about H100 or RTX 6000 Pro
+performance. Bigger accelerators are faster per cell, so the real time would be lower — **by how
+much is not something this project can state**, because it would mean transferring vendor bandwidth
+figures into wall clocks, and no such number has been measured here.
+
+The anchor of that column is one measurement: **75 min for 501 ms of physical time** at 4 mm
+(`p4_bandpi2_4`), rescaled to the 739 ms standard run length (5 × vehicle length) and then multiplied
+by the dx⁻⁴ work factor.
+
+**What the table does say** is the useful part: the memory wall, not the algorithm, is what sets the
+resolution today. The code already fits a full vehicle at 4 mm into 32 GB, and the cost of the next
+halving in dx is a factor of sixteen in work — on any hardware, because that factor is physics, not
+silicon.
 
 **One honest caveat for the multi-GPU rows.** Upstream FluidX3D carries a multi-GPU domain
 decomposition; this fork's own decomposition is a *near/far* split across two devices of different
