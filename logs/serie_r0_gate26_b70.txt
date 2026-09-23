@@ -1,0 +1,9 @@
+# 23.09.2026 S0-GATE, DRITTE SPROSSE: B70 (Heiko 23.09. frueh: "B70 ist wieder freigegeben").
+# Reihenfolge der Leiter eingehalten: CPU (22.09., Arm 1 sauber) -> iGPU (23.09. frueh) -> B70 hier.
+# Diese Sprosse ist die entscheidende: die B70 ist das Produktionsgeraet, und Signatur- oder Stride-Fehler
+# zeigen sich auf CPU und iGPU als harmlose Nullen, auf der B70 als falsche Physik oder CL_OUT_OF_RESOURCES.
+# ABNAHME: FELD-HASH beider Arme bitgleich (eps = 0) UND Slot 328 > 0 UND Slot 329 = 0 UND Slot 330 = 0.
+# Verglichen wird B70 gegen B70. Hashes anderer Geraete sind KEINE Vergleichsgroesse.
+# Vor dem Start geprueft: journalctl -k ohne "Engine reset"/"CAT error" in den letzten 30 min.
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=0 :: r0_aus_k26_b70
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 :: r0_an_k26_b70
