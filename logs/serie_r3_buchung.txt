@@ -1,0 +1,40 @@
+# 23.09.2026 R3 -- GATE + KRAFTBUCHUNG der Wandzell-Rekonstruktion.
+#
+# Gebaut als EIGENER Armwert CFD_FAC_REK=2 (JIT-Define FAC_REK_R3). Grund: das Gate ist AUCH bei
+# eps = 0 eine Physikaenderung -- es schaltet den Solve an allen Rang-0-Facetten ab (am kipp26 ein
+# Drittel). Haengte es am selben Schalter wie die Delta-Form, waere der bitgleiche Nullbezug ab dem
+# Bau weg und Tor-Wirkung und eps-Wirkung waeren vermengt. Mit dem eigenen Arm bleiben drei
+# trennbare Stellungen: 0 = aus, 1 = nur Delta (Anker haelt), 2 = Delta + Gate + Buchung.
+#
+# DIE SERIE TRENNT TOR UND BUCHUNG, weil sonst ein Vorzeichenfehler in der Buchung von einem
+# Fehler im Gate nicht zu unterscheiden waere (die FAC_UW-Lehre, r = -1281).
+#
+# ARM 1 (Bezug, CFD_FAC_REK=1, eps=0): der ALTE Anker. MUSS 7980041572697087411 liefern.
+#        Beweist, dass der R3-Bau den Arm 1 nicht angefasst hat.
+# ARM 2 (CFD_FAC_REK=2, eps=0): Gate wirkt, Buchung bucht NULL (du = 0). Isoliert das TOR.
+#        Erwartung: Hash WEICHT AB (der Solve ist an einem Drittel der Facetten aus -- das ist
+#        die Wirkung, nicht ein Fehler). Slot 371 MUSS 0 sein, Slot 331 > 0.
+#        K2 ist hier die Aussage: der Reibungspfad ohne Solve an den Marken.
+# ARM 3 (CFD_FAC_REK=2, eps=-1e-3): Gate + echte Buchung. DER ENTSCHEIDENDE ARM.
+#        Erwartung: K2 kehrt in die Naehe von 1 zurueck (vor dem Bau: -0,2954, also der
+#        Reibungspfad war NEGATIV). Bilanztest-Verhaeltnis bleibt bei rund 1,0.
+# ARM 4 (CFD_FAC_REK=2, eps=+1e-3): Gegenvorzeichen. K2 muss ebenfalls nahe 1 liegen.
+#        Ein Vorzeichenfehler in der Buchung zeigt sich als ANTISYMMETRISCHE Abweichung
+#        zwischen Arm 3 und Arm 4 -- genau das, was ein einzelner Arm nicht sehen kann.
+#
+# HARTE ABNAHMEN (jeder Arm mit REK=2):
+#   Slot 371 (Marke trotz Gate angewandt) == 0            -- sonst zwei Aktoren an einer Zelle
+#   Slot 331 + Slot 380 == Slot 370                        -- Lueckenlosigkeit der Kreuztabelle
+#   Slot 372 (Normalanteil der Buchung) == 0               -- sonst geht Impuls in den Druckpfad
+#   Rueckfall-Buchung Slot 69 == Soll inkl. +331           -- Doppelzaehlungs-Detektor
+#   K3 (Druck_x == 0) unveraendert                         -- sonst bucht der F-Pfad den vollen F
+#
+# MESSGROESSE, keine Abnahme: K2. Nach dem Bau ist K2 TAUTOLOGISCH auf 1 gezogen, weil der
+# Kanalantrieb auf U_b geregelt ist und die Wandsenke ohnehin festnagelt. K2 belegt danach die
+# VOLLSTAENDIGKEIT DER BUCHUNG, nicht die Physik. Der Physikbeweis kommt an der Kugel (Druckpfad).
+#
+# Geraet 2 (iGPU): neuer Kernelcode geht nie zuerst auf die B70 (Desktop).
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: r3_bezug_arm1
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=2 CFD_FAC_REK_EPS=0 :: r3_gate_eps0
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=2 CFD_FAC_REK_EPS=-0.001 :: r3_buch_m3
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=2 CFD_FAC_REK_EPS=0.001 :: r3_buch_p3
