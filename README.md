@@ -82,6 +82,49 @@ errors, and it confirms shared mistakes.
 deficit is the active work item, and it is stated here rather than hidden behind a favourable
 selection of runs.
 
+### The 4 mm production run, measured
+
+Anchor run `p4_bandpi2_4` (git tag `anker-p4-bandpi2-4`), 501 ms physical, on one Arc Pro B70 plus
+the Arrow-Lake iGPU:
+
+| | |
+|---|---|
+| Fine cells @ 4 mm (B70) | **654.9 M** |
+| Coarse cells @ 16 mm (iGPU) | **289.0 M** |
+| Near-field VRAM | **28 698 MB** of 32 655 MB — **43.8 B per cell**, all buffers included |
+| Far-field memory | **12 956 MB system RAM**, no VRAM ceiling |
+| Wall clock | **75 min** |
+| Performance index | **8398** s_wall / s_phys |
+
+The far field living in system RAM is what makes the split worth having: the discrete card's 32 GB
+buys resolution where it matters, and the domain that only has to be *present* costs nothing there.
+
+### What more memory would buy
+
+This is **arithmetic, not a measurement**. It uses one measured input — the 43.8 B per cell above —
+and two scaling laws: cells go as dx⁻³, and at fixed physical time the step count goes as dx⁻¹, so
+total work goes as **dx⁻⁴**.
+
+| Near-field memory | Fine cells | Resolution | Work vs 4 mm |
+|---|---|---|---|
+| 32 GB — *measured, this rig* | 0.65 G | **4.00 mm** | 1× |
+| 96 GB — RTX 6000 Pro class | 2.19 G | **2.67 mm** | ~5× |
+| 320 GB — 4 × H100 80 GB | 7.30 G | **1.79 mm** | ~25× |
+| 768 GB — 8 × 96 GB node | 17.5 G | **1.34 mm** | ~80× |
+
+**What this table does not say.** It states no wall clock, no speed-up and no throughput for any
+hardware not in this machine — those would have to be measured, and transferring them from vendor
+specifications is exactly the kind of number this project does not print. What it does say is that
+the memory wall, not the algorithm, is what currently sets the resolution: the code already fits a
+full vehicle at 4 mm into 32 GB, and the cost of the next halving in dx is a factor of sixteen in
+work, on any hardware.
+
+**One honest caveat for the multi-GPU rows.** Upstream FluidX3D carries a multi-GPU domain
+decomposition; this fork's own decomposition is a *near/far* split across two devices of different
+speed, not an N-way split of the fine domain. Running the fine domain across four cards would use
+the upstream path, which this fork has not exercised — so those two rows describe what the memory
+allows, not a configuration that has been run here.
+
 ### Independent validation rigs
 
 | Rig | What it settles | Result |
