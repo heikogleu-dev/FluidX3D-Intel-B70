@@ -761,18 +761,59 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 	const float rek_eps_w = env_f("CFD_FAC_REK_EPS", 0.0f);
 	const float rek_eps_b = fabs(rek_eps_w);
 	if(!std::isfinite(rek_eps_w)) print_error("CFD_FAC_REK_EPS ist keine endliche Zahl.");
-	if(getenv("CFD_FAC_REK_EPS")!=nullptr&&rek_eps_w==0.0f) print_warning("CFD_FAC_REK_EPS ist gesetzt, wird aber als 0 gelesen. env_f ist atof: ein Dezimalkomma (0,0001) oder ein Tippfehler (1e-4x) ergibt STILL 0 -- der Lauf waere wieder S0. Gemeint war vermutlich 1e-4.");
+	// ★ 23.09.: NICHT auf den Wert 0 pruefen -- die Nullreferenz jedes A/B setzt CFD_FAC_REK_EPS=0
+	// ausdruecklich, und eine Warnung im Sollzustand wird weggelesen (Befund N16, an den eigenen
+	// Logs s1c_eps0_igpu/b70 belegt). Geprueft wird, ob die ZEICHENKETTE vollstaendig als Zahl
+	// gelesen wurde: "0" parst ganz und ist legitim, "0,0001" laesst ",0001" stehen und ist ein Fehler.
+	{
+		const char* eps_txt = getenv("CFD_FAC_REK_EPS");
+		if(eps_txt!=nullptr) {
+			char* ende = nullptr;
+			strtod(eps_txt, &ende);
+			while(ende!=nullptr&&*ende==' ') ende++;
+			if(ende==eps_txt||(ende!=nullptr&&*ende!='\0')) print_error(string("CFD_FAC_REK_EPS=\"")+eps_txt+"\" ist keine vollstaendig lesbare Zahl -- env_f ist atof und liefert hier still "+to_string(rek_eps_w,9u)+". Ein Dezimalkomma (0,0001) oder ein Tippfehler macht aus dem S1b-Arm unbemerkt einen S0-Arm.");
+		}
+	}
 	if(rek_eps_b>1.0E-2f) print_error("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" ist kein Sondierhub mehr: u_t an einer beschatteten Rang-0-Wandzelle ist gemessen 0,0051, der Hub laege in derselben Groessenordnung wie die gestoerte Groesse selbst.");
 	if(rek_eps_b>0.0f&&rek_eps_b<1.0E-6f) print_error("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" liegt unter dem FP16S-Impulsquantum: der Hub ueberlebt store_f nicht. Die Zaehler 328..332 messen registerseitig und blieben trotzdem gruen -- ein getarnter No-Op.");
-	if(rek_eps_b>=1.0E-6f&&rek_eps_b<1.0E-5f) print_warning("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" liegt dicht am FP16S-Impulsquantum. Die Zaehler koennen gruen sein, ohne dass der Hub den naechsten Zeitschritt erreicht. Empfohlen ist 1e-4.");
+	// ★ 23.09. Audit-Schleife Befund M7: das Fenster war in sich widerspruechlich -- die Herleitung
+	// gibt 1e-4 als Messhub, der Kommentar nennt 1e-4 zugleich als praktische Untergrenze, und die
+	// harte Sperre stand zwei Dekaden hoeher. Aufgeloest: 1e-4 ist der MESShub, darueber ist es ein
+	// DIAGNOSEhub (die Amplitudenleiter bei 1e-3 war legitim und hat den s-Vektor erst belegt),
+	// darunter wird es still. Die harte Sperre bleibt bei 1e-2.
+	if(rek_eps_b>0.0f&&rek_eps_b<1.0E-4f) print_warning("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" liegt UNTER dem Messhub 1e-4. Nachgerechnet skaliert das FP16S-Quantum mit dem gespeicherten DDF: bei |f-w| = 1e-2 hat der Hub bei 1e-4 nur noch 2,2 Quanten. Darunter koennen alle Zaehler gruen sein, ohne dass der Hub den naechsten Zeitschritt erreicht -- sie messen registerseitig.");
+	if(rek_eps_b>2.0E-4f) print_warning("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" ist ein DIAGNOSEhub, kein Messhub: er liegt ueber 2 % der gemessenen Tangentialgeschwindigkeit 0,0051 an einer beschatteten Rang-0-Wandzelle. Richtig fuer eine Amplitudenleiter (nur dort wird ein Fehler im s-Vektor sichtbar, er waechst mit eps^2), FALSCH fuer eine Messung.");
 }
 
 static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
 	if(D==nullptr||!D->fac_rek_on) return;
+	// ★ 23.09. Audit-Schleife Befund M6: bis hierher prueften alle Zaehler gegen fac_geo[8i+6], also
+	// gegen ihre EIGENE Eingabe -- "u ist um genau das eps gewandert, das im Puffer steht". Ein Fehler
+	// beim Hineinschreiben oder beim Hochladen waere unsichtbar geblieben. Jetzt liest die Abnahme den
+	// Puffer vom GERAET zurueck und zaehlt nach. Der Lauf ist zu Ende, niemand liest fac_geo danach --
+	// das Ueberschreiben des Hostspiegels ist hier folgenlos.
+	if(D->fac_N>0ull&&D->fac_geo.length()>=8ull*D->fac_N) {
+		D->fac_geo.read_from_device();
+		ulong n_marke_ger=0ull, n_eps_falsch=0ull, n_rest_belegt=0ull;
+		for(ulong q=0ull; q<D->fac_N; q++) {
+			const float mk = D->fac_geo[8ull*q+7ull];
+			const float ep = D->fac_geo[8ull*q+6ull];
+			if(mk>0.5f) { n_marke_ger++; if(ep!=D->fac_rek_eps) n_eps_falsch++; }
+			else if(ep!=0.0f) n_rest_belegt++;
+		}
+		if(n_marke_ger!=D->fac_rek_marken) print_error("["+ort+"] REKONSTRUKTION: auf dem GERAET stehen "+to_string(n_marke_ger)+" Marken, der Host hat "+to_string(D->fac_rek_marken)+" geschrieben. Der zweite Upload von fac_geo ist nicht angekommen oder wurde ueberschrieben.");
+		else if(n_eps_falsch>0ull) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_eps_falsch)+" markierte Facetten tragen auf dem GERAET eine andere Amplitude als "+to_string(D->fac_rek_eps,9u)+".");
+		else if(n_rest_belegt>0ull) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_rest_belegt)+" UNmarkierte Facetten tragen auf dem Geraet eine Amplitude != 0.");
+		else print_info("["+ort+"] REKONSTRUKTION Geraetegegenprobe: "+to_string(n_marke_ger)+" Marken mit eps = "+to_string(D->fac_rek_eps,9u)+", alle uebrigen "+to_string(D->fac_N-n_marke_ger)+" Facetten mit eps = 0 -- aus fac_geo ZURUECKGELESEN, nicht aus der Schreibabsicht.");
+	}
 	const uint* H = D->rho_clamp_hits.data();
-	const ulong wp=(ulong)H[328], wirk=(ulong)H[329], rund=(ulong)H[330], kreuz=(ulong)H[331];
+	const ulong wp=(ulong)H[328], wirk=(ulong)H[329], rund=(ulong)H[330];
 	const ulong dmasse=(ulong)H[332];
-	const ulong mom2=(ulong)H[333]; // ★ 23.09. S1b: Massenneutralitaet, Soll 0 in JEDER Stufe
+	const ulong mom2=(ulong)H[333];
+	const ulong mom2_leer=(ulong)H[334];
+	// ★ 23.09. Befund M3: der Kohaerenzwaechter war tautologisch. DAS hier ist der Beleg, dass der
+	// Block wirklich im uebersetzten Geraetecode steht -- der Kernel schreibt die Kennzahl selbst.
+	if(H[335]!=0x5245464Bu) print_error("["+ort+"] REKONSTRUKTION: der Konstantenspiegel Slot 335 traegt "+to_string((ulong)H[335])+" statt 0x5245464B. Der FAC_REK-Block steht NICHT im uebersetzten Geraetecode, obwohl der Host ihn eingeschaltet hat."); // ★ 23.09.: wie oft hatte [333] gar nichts zu pruefen // ★ 23.09. S1b: Massenneutralitaet, Soll 0 in JEDER Stufe
 	const ulong slots=(t_ende>0ull?(t_ende-1ull)/zaehl_takt():0ull)+1ull;
 	if(wp==0ull) { print_error("["+ort+"] REKONSTRUKTION: Slot 328 = 0 -- der Block wurde NIE erreicht. STILLER NO-OP (Marke nicht gesetzt? Define nicht emittiert? Gate davor?)."); return; }
 	// ★ 23.09.2026 Pruefbefund MITTEL-6, zwei Fehler in einer Zeile:
@@ -794,10 +835,12 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// Schranke: jede markierte Facette landet in jedem Zaehlslot entweder in Slot 328 oder am
 		// ut-Tor in Slot 9, und beide tragen dasselbe Gate. Slot 9 zaehlt zusaetzlich unmarkierte
 		// Aussteiger, ist also eine OBERschranke -- wp+aus < soll kann damit nur ein echter Verlust sein.
-		if(wp+aus < soll) print_error("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" plus ut-Tor Slot 9 = "+to_string(aus)+" ergibt "+to_string(wp+aus)+" und bleibt damit UNTER dem Soll "+to_string(soll)+". Jede Marke muss je Zaehlslot in einem der beiden Zaehler auftauchen -- es gehen also Marken verloren (fid-Versatz, Marke nicht hochgeladen, Block teilweise uebersprungen).");
+		// ★ 23.09.: Slot 9 ist UNGESAETTIGT und wickelt ebenfalls. Die Unterschranke gilt nur, solange
+		// weder Soll noch Aussteigerzahl den uint verlassen koennen -- am 4-mm-Fahrzeug ist das erreichbar.
+		if(!wickelt && aus<0xF0000000ull && wp+aus < soll) print_error("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" plus ut-Tor Slot 9 = "+to_string(aus)+" ergibt "+to_string(wp+aus)+" und bleibt damit UNTER dem Soll "+to_string(soll)+". Jede Marke muss je Zaehlslot in einem der beiden Zaehler auftauchen -- es gehen also Marken verloren (fid-Versatz, Marke nicht hochgeladen, Block teilweise uebersprungen).");
 		const double fehl = soll>0ull ? ((double)soll-(double)wp)/(double)soll : 0.0;
 		if(fehl>0.02) print_warning("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string((float)(100.0*fehl),2u)+" % fehlen). Das ist KEIN Fehler: der Block sitzt hinter dem Frueh-Return ut<1e-6f, und markierte Facetten sind die entarteten. Slot 9 (Aussteiger am ut-Tor) = "+to_string(aus)+" -- wer den Anteil braucht, misst ihn dort.");
-		else print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" = "+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots, Fehlbetrag "+to_string((float)(100.0*fehl),2u)+" % (ut-Tor).");
+		else print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots), Differenz "+to_string(soll-wp)+", Fehlbetrag "+to_string((float)(100.0*fehl),2u)+" % (ut-Tor).");
 	}
 	if(D->fac_rek_eps==0.0f) {
 		if(wirk>0ull) print_error("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 = "+to_string(wirk)+", Soll EXAKT 0. Die Rekonstruktion hat u veraendert, obwohl die Amplitude null ist -- die Delta-Form ist nicht strukturell null (Entscheid R1) oder eps kommt nicht als echte Null an.");
@@ -813,7 +856,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		else print_info("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 (Wirkung) = "+to_string(wirk)+" = Slot 328 -- jeder Besuch wirkt. Vorhersage je Zaehlschritt: |D(rho u)| = rho*eps an "+to_string(D->fac_rek_marken)+" Marken = "+to_string((float)vorhersage,6u)+" (Summe der BETRAEGE ueber alle Marken, rho ~ 1; die Huebe zeigen in verschiedene Tangentialrichtungen, die Vektorsumme ist kleiner).");
 	}
 	if(rund>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Schranke 1e-3*|eps| + 1e-6*|u| (Boden 5e-8), ist also ein BAUFEHLER und keine Rundung (Entscheid R1).");
-	else print_info("["+ort+"] REKONSTRUKTION: Slot 330 (Ziel getroffen) = 0 -- u_rek landet exakt auf u_lok + eps*t1.");
+	else print_info("["+ort+"] REKONSTRUKTION: Slot 330 (Ziel getroffen) = 0 -- u_rek landet auf u_lok + du, innerhalb 1e-3*|eps| + 1e-6*|u| (Boden 5e-8). NICHT bitexakt: |du| traegt rund 3 ulp aus Division und Wurzel.");
 	// ★ 23.09.2026 S1b: Massenneutralitaet. Die Delta-Form erhaelt die Masse ANALYTISCH exakt --
 	// Sum w_i = 1 und Sum w_i c_i c_i = c_s^2 I heben den -1,5(s.du)-Term genau auf. Soll also 0 in
 	// JEDER Stufe, nicht nur in S0. Ein Ausschlag heisst: die 19 Beitraege sind nicht mehr die Delta-Form.
@@ -824,8 +867,18 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	// heraus, fuer JEDES s. Erst das zweite Moment sieht ihn. Ohne diese Probe waeren zwei gruene
 	// Zaehler als Beleg der Delta-Form gelesen worden, obwohl s falsch sein koennte.
 	if(mom2>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 333 = "+to_string(mom2)+" -- das ZWEITE Moment trifft nicht. Summe c_x c_y Df_i weicht von rho*(u_x du_y + du_x u_y + du_x du_y) ab. Das ist die einzige Probe, die den s-Vektor (s = 2u + du) wirklich prueft; 330 und 332 sind dafuer konstruktiv blind.");
-	else print_info("["+ort+"] REKONSTRUKTION: Slot 333 (zweites Moment, xy) = 0 -- auch der s-Vektor stimmt, nicht nur Masse und Impuls.");
-	if(kreuz!=wp) print_warning("["+ort+"] REKONSTRUKTION: Slot 331 = "+to_string(kreuz)+" != Slot 328 = "+to_string(wp)+" -- in S0 muessen beide gleich sein, es wird noch kein Solve uebersprungen.");
+	else print_info("["+ort+"] REKONSTRUKTION: Slot 333 (zweites Moment, xy) = 0.");
+	// ★ 23.09. Audit-Schleife: [333] hat einen ABSOLUTEN Boden von 1e-8, waehrend mxy_soll ~ 2*rho*eps*u_y ist.
+	// An Facetten mit kleinem |u_y| prueft sie nichts -- und eine gruene Null liest sich dort wie ein Beleg.
+	// [334] sagt, an welchem Anteil der Besuche ueberhaupt etwas behauptet wurde.
+	if(wp>0ull) {
+		const double leer_anteil = 100.0*(double)mom2_leer/(double)wp;
+		if(leer_anteil>20.0) print_warning("["+ort+"] REKONSTRUKTION: Slot 334 = "+to_string(mom2_leer)+" von "+to_string(wp)+" Besuchen ("+to_string((float)leer_anteil,1u)+" %) hatten |mxy_soll| <= 1e-7 -- dort prueft Slot 333 NICHTS. Die Null von Slot 333 traegt nur fuer die uebrigen "+to_string((float)(100.0-leer_anteil),1u)+" %.");
+		else print_info("["+ort+"] REKONSTRUKTION: Slot 334 (zweites Moment ohne Signal) = "+to_string(mom2_leer)+" von "+to_string(wp)+" Besuchen = "+to_string((float)leer_anteil,1u)+" % -- an den uebrigen Besuchen hat Slot 333 wirklich etwas geprueft.");
+	}
+	// ★ 23.09.: die alte Kreuzwarnung auf Slot 331 ist ersatzlos entfallen -- 331 wurde im selben
+	// Gate wie 328 hochgezaehlt und konnte konstruktiv nie abweichen. Ein Zaehler, der nie feuern kann,
+	// ist keine Pruefung, sondern eine Beruhigung. Slot 331 ist bis S2 reserviert.
 }
 
 static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
@@ -3018,7 +3071,7 @@ static const int FZ_C[19][3] = {{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1
 // (kernel.cpp:2174-2176) vergleicht gegen die Roh-Diagonale in der Basis t1 -- beide Seiten
 // basisabhaengig -- und kann eine Rang-1-Facette zur Laufzeit auf Rang 0 nullen.
 static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, const uint Nx, const uint Ny,
-                                     const uint Nz, const uchar wand_flag, const bool alpha2_an, const RekMarken rek, const string& ort, const string& out_dir=string("")) {
+                                     const uint Nz, const uchar wand_flag, const bool alpha2_an, const RekMarken rek, const string& ort, const string& out_dir) { // ★ 23.09.: Vorgabewert fuer out_dir GESTRICHEN (Befund N2) -- sonst bindet ein vergessenes ort still an out_dir, und genau diese Verschiebung hat heute frueh schon einmal zugeschlagen
 	const bool rek_an = (rek==RekMarken::an);
 	// ★ 23.09.2026 Pruefbefund HOCH-1: rek_an kommt als PARAMETER, NICHT aus LBM_Domain::s_fac_rek.
 	// Im dd-Fall wird die Statik zwischen Lesestelle (7269) und diesem Aufruf (7874) bei 7405 auf 0
@@ -3032,7 +3085,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 	// D3Q19-Gewichte, Reihenfolge wie FZ_C: [0]=1/3, [1..6]=1/18, [7..18]=1/36.
 	auto wq = [](const uint i) { return i==0u ? 1.0/3.0 : (i<7u ? 1.0/18.0 : 1.0/36.0); };
 	ulong n_rang[3]={0,0,0}, n_entk=0ull, n_gek=0ull, n_uebersprungen=0ull, n_ohne_link=0ull;
-	ulong fid_zaehler=0ull, n_marke=0ull; double yw_rang0_summe=0.0; ulong n_rang0_yw=0ull; // ★ 22.09. S0: Rang-0-Marke + zwei unabhaengige Ist=Soll-Proben (Entscheid R2)
+	ulong fid_zaehler=0ull, n_marke=0ull; double yw_rang0_summe=0.0, yw_rang0_q=0.0; ulong n_rang0_yw=0ull; // ★ 22.09. S0: Rang-0-Marke + zwei unabhaengige Ist=Soll-Proben (Entscheid R2)
 	std::vector<std::pair<ulong,float>> marken; // (fid, 1.0f) -- erst nach der Schleife in fac_geo geschrieben, damit die Schleife unveraendert bleibt
 	ulong n_links[20]; for(uint i=0u;i<20u;i++) n_links[i]=0ull;
 	ulong n_verh[8]; for(uint i=0u;i<8u;i++) n_verh[i]=0ull; // lmin/lmax: <1e-9,<1e-7,<2.5e-5,<1e-3,<1e-2,<0.1,<0.5,>=0.5
@@ -3253,7 +3306,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		if(vtk_an) { vx.push_back((float)x); vy.push_back((float)y); vz.push_back((float)z); vnx.push_back((float)nv[0]); vny.push_back((float)nv[1]); vnz.push_back((float)nv[2]); vverh.push_back((float)(verh>0.0?log10(verh):-12.0)); vrg.push_back((int)rg); vrgroh.push_back((int)rg_roh); vnl.push_back((int)nl_k); ventk.push_back(entkoppelt?1:0); }
 		if(entkoppelt) n_entk++; else n_gek++;
 		n_rang[rg]++;
-		if(rg==0u) { yw_rang0_summe += (double)f.yw; n_rang0_yw++; // ★ 22.09. S0: Vergleichsgroesse fuer die zweite Ist=Soll-Probe
+		if(rg==0u) { yw_rang0_summe += (double)f.yw; yw_rang0_q += (double)f.yw*(double)f.yw; n_rang0_yw++; // ★ 22.09. S0: Vergleichsgroesse fuer die zweite Ist=Soll-Probe
 			if(rek_an) { marken.push_back(std::make_pair(fid_lauf, 1.0f)); n_marke++; } }
 		const double lmax = lmax_e; // ★ D13: echter Eigenwert statt Dummy -- 0 < lmax <= 1e-12 landete sonst im Histogramm, obwohl Rang 0
 		if(lmax>1e-12) {
@@ -3308,6 +3361,12 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			// ein toter Zaehler. Jetzt traegt er die dritte, billigste Probe: in der Schleife gezaehlt gegen
 			// im Puffer geschrieben. Faengt einen Verlust ZWISCHEN Sammeln und Schreiben, den die anderen
 			// beiden Proben nicht sehen (beide vergleichen gegen n_rang[0], nicht gegeneinander).
+			// ★ 23.09. Audit-Schleife Befund M1: eine leere Markenmenge ist KEIN gueltiger Zustand.
+			// Sie lief bisher klaglos durch ("0 von N markiert = 0,00 %, Ist=Soll erfuellt") und fiel
+			// erst am Laufende als Slot 328 = 0 auf -- mit einer Meldung, die Marke, Define und Gate
+			// als Verdaechtige nennt, obwohl die Geometrie schlicht keinen Rang 0 hat. Der ebene
+			// Kanal (CFD_KANAL_KIPP=0) ist genau so ein Fall, am 22.09. gemessen.
+			if(n_gesetzt==0ull) print_error("["+ort+"] REKONSTRUKTION: die Markenmenge ist LEER -- diese Geometrie hat keine Facette mit Tangentialrang 0 und mindestens einem Wandlink. CFD_FAC_REK waere hier ein No-Op; der Fehler faellt JETZT auf und nicht erst nach dem Lauf.");
 			if(n_gesetzt+n_ausserhalb!=n_marke) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_marke)+" Marken gesammelt, aber "+to_string(n_gesetzt)+" geschrieben plus "+to_string(n_ausserhalb)+" ausserhalb -- zwischen Sammeln und Schreiben ist eine Marke verloren gegangen.");
 			if(n_gesetzt!=n_rang[0]) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_gesetzt)+" Marken gesetzt, aber Rang 0 = "+to_string(n_rang[0])+" -- Ist != Soll.");
 			// ABNAHME 2 (unabhaengig): mittleres y_w der markierten Facetten == mittleres y_w der Rang-0-Menge. Faengt einen
@@ -3317,13 +3376,21 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			// gegen den sie laut Plan R2(b) gebaut ist, gar nicht sehen. Jetzt wird das y_w der Marken UEBER DEN
 			// PUFFERINDEX zurueckgelesen (fac_geo[8*fid+3] ist y_w, gesetzt in lbm.cpp:1648). Damit laeuft der fid
 			// wirklich durch die Probe: ein um eine Zelle verschobener Index liefert ein anderes Mittel.
-			double yw_puffer_summe = 0.0; ulong n_puffer = 0ull;
+			double yw_puffer_summe = 0.0, yw_puffer_q = 0.0;
+			ulong n_puffer = 0ull;
 			for(const auto& m : marken) {
 				if(m.first>=D_->fac_N) continue;
-				yw_puffer_summe += (double)D_->fac_geo[8ull*m.first+3ull];
+				const double ywq = (double)D_->fac_geo[8ull*m.first+3ull];
+				yw_puffer_summe += ywq;
+				yw_puffer_q += ywq*ywq;
 				n_puffer++;
 			}
 			const double ywm = n_puffer>0ull ? yw_puffer_summe/(double)n_puffer : 0.0;
+			// ★ 23.09. Befund N18: ein MITTEL faengt einen Versatz, aber keine Permutation innerhalb der
+			// Rang-0-Menge. Das zweite Moment schon -- es kostet eine Summe in derselben Schleife.
+			const double ywm2 = n_puffer>0ull ? yw_puffer_q/(double)n_puffer : 0.0;
+			const double ywr2 = n_rang0_yw>0ull ? yw_rang0_q/(double)n_rang0_yw : 0.0;
+			if(fabs(ywm2-ywr2)>1e-9) print_error("["+ort+"] REKONSTRUKTION: y_w-QUADRATmittel der Marken "+to_string((float)ywm2,6u)+" != das der Rang-0-Menge "+to_string((float)ywr2,6u)+" -- die Markenmenge ist dieselbe Groesse, aber nicht dieselbe Menge (Permutation im fid).");
 			const double ywr = n_rang0_yw>0ull ? yw_rang0_summe/(double)n_rang0_yw : 0.0;
 			if(fabs(ywm-ywr)>1e-9) print_error("["+ort+"] REKONSTRUKTION: y_w-Mittel der Marken "+to_string((float)ywm,6u)+" != y_w-Mittel der Rang-0-Menge "+to_string((float)ywr,6u)+".");
 			print_info("["+ort+"] REKONSTRUKTION (CFD_FAC_REK=1, Umfang Rang 0): "+to_string(n_gesetzt)+" von "+to_string(D_->fac_N)
@@ -5196,8 +5263,23 @@ void main_setup_kanal() {
 				// abweichen. Ein exit(1) haette hier die eigentliche S1b-Abnahme gefressen -- die
 				// Slots 328..333 stehen weiter unten. Warnung mit der Zahl, und der Arm ist
 				// ausdruecklich NICHT abgenommen, sondern messbar.
+				// ★ 23.09. Audit-Schleife Befund H-C und M9: die Herabstufung auf eine blosse Warnung war
+				// mit "konstruktiv" begruendet -- das ist eine Hypothese, keine Rechnung, und der Arm hiess
+				// Vorzeichentest, ohne ein vorzeichenempfindliches Kriterium zu haben. Beides behoben:
+				// (a) das VORZEICHEN ist jetzt eine harte Abnahme. Es braucht keinen Bezugslauf: der Block
+				//     addiert rho*du auf die Wandzelle, du zeigt in +t1, also MUSS der gebuchte
+				//     Reibungspfad bei +eps steigen und bei -eps fallen. Tut er das nicht, ist die
+				//     Buchungsrichtung falsch -- genau der Fehler, der bei FAC_UW r = -1281 ergab.
+				// (b) der BETRAG bekommt eine geschlossene Vergleichsgroesse statt gar keiner:
+				//     Summe_i 2(c_i.t1) Df_i = 6 rho Summe_i w_i (c_i.t1)(c_i.du) = 2 rho (t1.du) = 2 rho eps
+				//     je markierter Facette. Das ist eine Groessenordnung, keine Abnahme -- die Buchung
+				//     laeuft ueber die Wandlinks, nicht ueber alle 19 Richtungen. Es steht hier, damit die
+				//     Zahl vergleichbar ist statt unkommentiert.
 				const double vh2 = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
-				print_warning("K2 unter wirksamer CFD_FAC_REK (eps = "+to_string(env_f("CFD_FAC_REK_EPS", 0.0f),9u)+"): Verhaeltnis Reibungspfad/Kraftbilanz = "+to_string((float)vh2,4u)
+				const float eps_k2 = lbm.lbm_domain[0]->fac_rek_eps;
+				const double dp1_je_facette = 2.0*(double)eps_k2;
+				if((vh2-1.0)*(double)eps_k2<=0.0) print_error("K2 unter wirksamer CFD_FAC_REK: das Verhaeltnis Reibungspfad/Kraftbilanz ist "+to_string((float)vh2,6u)+", die Abweichung vom Einserwert hat damit NICHT das Vorzeichen von eps = "+to_string(eps_k2,9u)+". Der Block addiert rho*du in Richtung +t1; der gebuchte Reibungspfad MUSS bei +eps steigen und bei -eps fallen. Ein anderes Vorzeichen heisst, dass die Buchung in die falsche Richtung laeuft (Lehre FAC_UW).");
+				print_warning("K2 unter wirksamer CFD_FAC_REK (eps = "+to_string(eps_k2,9u)+"): Verhaeltnis Reibungspfad/Kraftbilanz = "+to_string((float)vh2,4u)+", Vorzeichen stimmt mit eps ueberein. Geschlossene Groessenordnung des Einflusses: 2*rho*eps = "+to_string((float)dp1_je_facette,9u)+" je markierter Facette und Zeitschritt"
 					+" -- KEIN Abbruch. Die Abweichung ist konstruktiv, weil der Rekonstruktionsblock vor dem Solve wirkt und R3 noch nicht gebaut ist."
 					" cd_reib, c_f und U_b+ aus diesem Arm sind KEINE Messwerte. Abgenommen wird dieser Arm ueber die Slots 328..333, nicht ueber K2.");
 			}
@@ -11119,6 +11201,18 @@ void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeu
 		print_info("GESCHWINDIGKEITSSATZ: D3Q"+to_string(vs_build)+" (Build), CFD_VELSET="+to_string(vs_soll)+", Binary "+get_exe_path()+"FluidX3D");
 	}
 	const char* c = getenv("CFD_CASE");
+	// ★★ 23.09.2026, Audit-Schleife Befund M2 (Auditor B) -- ANSAGE VOR DER FALLAUSWAHL.
+	// CFD_FAC_REK braucht den statischen Klassenzensus; den rufen nur kanal, kugel und fahrzeug_dd.
+	// In fahrzeug, fernfeld und facetten_test wird s_fac_rek genullt, es gibt keine Marke, kein Define
+	// und keinen Bericht -- pruefe_rek_wirkpfad kehrt wortlos zurueck. Bei facetten_test sind
+	// s_facetten und s_fac_imem sogar true, dort fehlte JEDE Warnung. Ein als REK-Arm gefuehrter Lauf
+	// rechnete also ohne Rekonstruktion und meldete es nicht: genau die Klasse, die hier als harter
+	// Fehler gilt. Dieselbe Bauart wie die CFD_TIMER_APG-Ansage weiter unten.
+	if(env_u("CFD_FAC_REK", 0u)>0u) {
+		const string fall_rek = c!=nullptr ? string(c) : string("kugel");
+		if(fall_rek!="kanal"&&fall_rek!="kugel"&&fall_rek!="fahrzeug_dd")
+			print_error("CFD_FAC_REK=1 gesetzt, aber CFD_CASE="+fall_rek+" kennt die Wandzell-Rekonstruktion nicht: dieser Fall ruft zensus_statische_klassen gar nicht auf, die Markenmenge bliebe leer und der Schalter waere ein vollstaendiger stiller No-Op. Verdrahtet sind kanal, kugel und fahrzeug_dd.");
+	}
 	if(getenv("CFD_RHO_RAND")!=nullptr&&c!=nullptr&&string(c)!="fahrzeug_dd"&&string(c)!="kugel") print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld und am Kugel-Pruefstand angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0/C2c
 	// ★★ 22.09.2026, Pruefrunde 2 Befund B1 (MITTEL) -- ANSAGE VOR DER FALLAUSWAHL.
 	// CFD_TIMER_APG misst den APG-Vorkernel. APG gibt es nur in kanal, kugel und fahrzeug_dd; in

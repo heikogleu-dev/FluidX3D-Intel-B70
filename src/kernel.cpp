@@ -2058,14 +2058,19 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	if(ut<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); }
 )+"#ifdef FAC_REK"+R(
 	{
+		hits[335] = 0x5245464Bu;
 		const float rek_marke = fac_geo[b+7ul];
 		const float rek_eps = fac_geo[b+6ul];
 		if(rek_marke>0.5f) {
-			const float mxy_vor = fhn[7]+fhn[8]-fhn[13]-fhn[14];
-			if(t%def_zaehl_takt==0ul) {
-				atomic_inc(&hits[328]);
-				atomic_inc(&hits[331]);
+			const bool rek_probe = (t%def_zaehl_takt==0ul);
+			const float mxy_vor = rek_probe ? fhn[7]+fhn[8]-fhn[13]-fhn[14] : 0.0f;
+			float rho_roh_vor = 0.0f;
+			if(rek_probe) {
+				rho_roh_vor = fhn[0];
+				for(uint i=1u; i<def_velocity_set; i++) rho_roh_vor += fhn[i];
+				rho_roh_vor += 1.0f;
 			}
+			if(rek_probe) atomic_inc(&hits[328]);
 			const float rek_inv = 1.0f/ut;
 			const float dux = rek_eps*utx*rek_inv;
 			const float duy = rek_eps*uty*rek_inv;
@@ -2114,31 +2119,36 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			fhn[16] += wr_e*fma(-dxmz, fma(-0.5f, sxmz, 1.0f), h3);
 			fhn[17] += wr_e*fma(dymz, fma(0.5f, symz, 1.0f), h3);
 			fhn[18] += wr_e*fma(-dymz, fma(-0.5f, symz, 1.0f), h3);
-			float rr, rux, ruy, ruz;
-			calculate_rho_u(fhn, &rr, &rux, &ruy, &ruz);
-
-			const float wx = rux-uxn;
-			const float wy = ruy-uyn;
-			const float wz = ruz-uzn;
-			const float wbetrag = sqrt(wx*wx+wy*wy+wz*wz);
-			const float ubetrag = sqrt(uxn*uxn+uyn*uyn+uzn*uzn);
-			if(t%def_zaehl_takt==0ul&&wbetrag>1e-6f*fmax(ubetrag, 1e-12f)) atomic_inc(&hits[329]);
-			const float soll_x = uxn+dux;
-			const float soll_y = uyn+duy;
-			const float soll_z = uzn+duz;
-			const float rx = rux-soll_x;
-			const float ry = ruy-soll_y;
-			const float rz = ruz-soll_z;
-			const float rbetrag = sqrt(rx*rx+ry*ry+rz*rz);
-			const float rtol = fma(1.0E-3f, fabs(rek_eps), fmax(1.0E-6f*fmax(ubetrag, 1e-12f), 5.0E-8f));
-			if(t%def_zaehl_takt==0ul&&rbetrag>rtol) atomic_inc(&hits[330]);
-			const float dm = fabs(rr-rhon);
-			if(t%def_zaehl_takt==0ul&&dm>1e-6f*rhon) atomic_inc(&hits[332]);
-			const float mxy_nach = fhn[7]+fhn[8]-fhn[13]-fhn[14];
-			const float mxy_soll = rhon*(fma(uxn, duy, dux*uyn)+dux*duy);
-			const float mxy_rest = fabs((mxy_nach-mxy_vor)-mxy_soll);
-			const float mxy_tol = fma(1.0E-3f, fabs(mxy_soll), 1.0E-8f);
-			if(t%def_zaehl_takt==0ul&&mxy_rest>mxy_tol) atomic_inc(&hits[333]);
+			if(rek_probe) {
+				float rr_roh = fhn[0];
+				for(uint i=1u; i<def_velocity_set; i++) rr_roh += fhn[i];
+				rr_roh += 1.0f;
+				float rr, rux, ruy, ruz;
+				calculate_rho_u(fhn, &rr, &rux, &ruy, &ruz);
+				const float wx = rux-uxn;
+				const float wy = ruy-uyn;
+				const float wz = ruz-uzn;
+				const float wbetrag = sqrt(wx*wx+wy*wy+wz*wz);
+				const float ubetrag = sqrt(uxn*uxn+uyn*uyn+uzn*uzn);
+				if(wbetrag>1e-6f*fmax(ubetrag, 1e-12f)) atomic_inc(&hits[329]);
+				const float soll_x = uxn+dux;
+				const float soll_y = uyn+duy;
+				const float soll_z = uzn+duz;
+				const float rx = rux-soll_x;
+				const float ry = ruy-soll_y;
+				const float rz = ruz-soll_z;
+				const float rbetrag = sqrt(rx*rx+ry*ry+rz*rz);
+				const float rtol = fma(1.0E-3f, fabs(rek_eps), fmax(1.0E-6f*fmax(ubetrag, 1e-12f), 5.0E-8f));
+				if(rbetrag>rtol) atomic_inc(&hits[330]);
+				const float dm = fabs(rr_roh-rho_roh_vor);
+				if(dm>5.0E-7f*rho_roh_vor) atomic_inc(&hits[332]);
+				const float mxy_nach = fhn[7]+fhn[8]-fhn[13]-fhn[14];
+				const float mxy_soll = rhon*(fma(uxn, duy, dux*uyn)+dux*duy);
+				const float mxy_rest = fabs((mxy_nach-mxy_vor)-mxy_soll);
+				const float mxy_tol = fma(1.0E-3f, fabs(mxy_soll), 1.0E-8f);
+				if(mxy_rest>mxy_tol) atomic_inc(&hits[333]);
+				if(fabs(mxy_soll)<=1.0E-7f) atomic_inc(&hits[334]);
+			}
 		}
 	}
 )+"#endif"+R(
