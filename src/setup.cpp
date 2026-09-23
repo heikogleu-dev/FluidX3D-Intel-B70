@@ -742,6 +742,11 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 	}
 	if(LBM_Domain::s_fac_rek>2u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter) und 2 (R3: Gate + Buchung). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
 	if(LBM_Domain::s_fac_rek>0u) {
+		// ★★ 23.09. spaet, Pruefbefund H-N3: hier stand erst >=2u (zu lasch), dann >0u fuer ALLE fuenf
+		// Sperren (zu scharf). Richtig ist die Trennung: Gate und Buchung liegen ausschliesslich unter
+		// FAC_REK_R3, unter REK=1 gibt es also weder erzwungenen Rueckfall noch Buchung. KRAFT, UW und
+		// EMA sind dort legitime Messarme. PEMA dagegen ist AUCH unter REK=1 unvertraeglich, aber aus
+		// einem anderen Grund als dem, den ich zuerst hingeschrieben hatte.
 		// ★★ 23.09. abends, Pruefbefund H2: dieser Block stand auf >=2u. Unter REK=1 waren PEMA und
 		// KRAFT damit STILL zugelassen -- und genau mit REK=1 lief die Bilanzserie a2_bilanz, der
 		// einzige Beleg fuer die Buchung. PEMA steigt zwischen Injektion und Buchung aus (der Impuls
@@ -755,8 +760,8 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		// vor s_fac_uw gerufen -- alle drei standen zum Pruefzeitpunkt noch auf 0, die Waechter
 		// schwiegen in JEDER Kombination. Dieselbe H1-Klasse wie am 22.09. (Statik im Konstruktor).
 		// Jetzt aus der Umgebung gelesen, genau wie die Nachbarzeilen es schon tun.
-		if(env_u("CFD_FAC_KRAFT",0u)>0u) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_KRAFT schliessen sich aus: unter dem erzwungenen Rueckfall wuerden markierte Zellen zu Kraftzellen (kz = rueckfall || KRAFT==2), das Wandmodell wirkte doch, und R3 waere still ausgehebelt -- ohne dass ein Zaehler es meldet.");
-		if(env_u("CFD_FAC_UW",0u)>0u) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_UW schliessen sich aus: das Gate liegt in #ifndef FACETTEN_UW und wird gar nicht emittiert, die BUCHUNG dagegen schon -- Wandmodell UND Buchung zugleich.");
+		if(LBM_Domain::s_fac_rek>=2u&&env_u("CFD_FAC_KRAFT",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_KRAFT schliessen sich aus: unter dem erzwungenen Rueckfall wuerden markierte Zellen zu Kraftzellen (kz = rueckfall || KRAFT==2), das Wandmodell wirkte doch, und R3 waere still ausgehebelt -- ohne dass ein Zaehler es meldet.");
+		if(LBM_Domain::s_fac_rek>=2u&&env_u("CFD_FAC_UW",0u)>0u) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_UW schliessen sich aus: das Gate liegt in #ifndef FACETTEN_UW und wird gar nicht emittiert, die BUCHUNG dagegen schon -- Wandmodell UND Buchung zugleich.");
 		// ★ Pruefbefund M4: PEMA hat einen return ZWISCHEN Rekonstruktion und Buchung (utb < 1e-6).
 		// Dort ginge rho*du ungebucht durch, fac_tau_cnt bliebe fuer den Besuch aus, und die
 		// Lueckenlosigkeitsprobe 331+380==370 merkte nichts, weil auch [370] ihn nicht zaehlt.
@@ -765,8 +770,8 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		// (env_f, typischer Wert ein Filterkoeffizient in (0,1)); env_u geht ueber atoi, und
 		// atoi("0.05") ist 0 -- die Sperre haette fuer genau die gebrauchten Werte geschwiegen.
 		// Dieselbe Falle wie H1, eine Ebene tiefer: der Waechter las den falschen Typ.
-		if(env_f("CFD_FAC_PEMA",0.0f)>0.0f) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_PEMA schliessen sich aus: PEMA steigt bei utb < 1e-6 zwischen Rekonstruktion und Buchung aus -- der eingespeiste Impuls ginge dort UNGEBUCHT durch und kein Zaehler saehe es.");
-		if(env_f("CFD_FAC_EMA",0.0f)>0.0f) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_EMA schliessen sich aus: der erzwungene Rueckfall friert den fac_us-Filterzustand ein, der Filter misst danach etwas anderes als er meldet.");
+		if(env_f("CFD_FAC_PEMA",0.0f)>0.0f) print_error("["+ort+"] CFD_FAC_REK>0 und CFD_FAC_PEMA schliessen sich aus. Tragender Grund (berichtigt 23.09. spaet): der PEMA-Ausstieg bei utb < 1e-6 liegt HINTER der Injektion und hinter dem Impuls-Akkumulator, aber VOR fac_tau_acc -- an diesen Besuchen wird rho*du ins Feld eingespeist und im Akkumulator gezaehlt, waehrend in den Reibungspfad GAR NICHTS geht. Damit waechst der gemessene Einspeisebetrag, die Bilanzluecke aber nicht, und der Quotient, der die Buchung rechtfertigt, wird still falsch. Das gilt schon unter REK=1, wo es noch gar keine Buchung gibt.");
+		if(LBM_Domain::s_fac_rek>=2u&&env_f("CFD_FAC_EMA",0.0f)>0.0f) print_error("["+ort+"] CFD_FAC_REK=2 und CFD_FAC_EMA schliessen sich aus: der erzwungene Rueckfall friert den fac_us-Filterzustand ein, der Filter misst danach etwas anderes als er meldet.");
 	}
 #ifndef D3Q19
 	print_error("["+ort+"] CFD_FAC_REK ist heute NUR fuer D3Q19 gebaut: der Block in kernel.cpp bedient fhn[0..18] und kennt den def_wc-Ast der acht Eckrichtungen 19..26 nicht. Auf dem D3Q27-Binary (werkzeuge/bau_q27.sh, bin_q27/FluidX3D) waere ab eps != 0 weder die Masse noch der Impuls erhalten -- und in S0 (eps = 0) faellt das NICHT auf.");
@@ -838,6 +843,10 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		else if(n_rest_belegt>0ull) k_befund("["+ort+"] REKONSTRUKTION: "+to_string(n_rest_belegt)+" UNmarkierte Facetten tragen auf dem Geraet eine Amplitude != 0.");
 		else print_info("["+ort+"] REKONSTRUKTION Geraetegegenprobe: "+to_string(n_marke_ger)+" Marken mit eps = "+to_string(D->fac_rek_eps,9u)+", alle uebrigen "+to_string(D->fac_N-n_marke_ger)+" Facetten mit eps = 0 -- aus fac_geo ZURUECKGELESEN, nicht aus der Schreibabsicht.");
 	}
+	// ★ 23.09. spaet, Pruefbefund M2: hier fehlte die Ruecklesung -- mein Fix war in
+	// bericht_vandriest gelandet. Der Hostspiegel stammte sonst aus fremden, an CFD_FACETTEN
+	// gebundenen Lesern: genau die unsichtbare Kopplung, die der Befund meinte.
+	D->finish_queue(); D->rho_clamp_hits.read_from_device();
 	const uint* H = D->rho_clamp_hits.data();
 	const ulong wp=(ulong)H[328], wirk=(ulong)H[329], rund=(ulong)H[330];
 	const ulong dmasse=(ulong)H[332];
@@ -994,7 +1003,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		for(ulong i=0ull;i<D->fac_N;i++) imp += (double)D->fac_nb[D->nb_stride*i+D->nb_roff+3ull];
 		const double je_schritt = imp/(double)t_ende;
 		if(D->fac_rek_eps==0.0f&&fabs(je_schritt)>1.0E-12) k_befund("["+ort+"] REKONSTRUKTION: bei eps = 0 wurde x-Impuls "+to_string((float)je_schritt,9u)+" je Schritt eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
-		else print_info("["+ort+"] REKONSTRUKTION Impuls-Akkumulator: "+to_string((float)je_schritt,9u)+" x-Impuls je Schritt ueber den GANZEN Lauf ("+to_string(t_ende)+" Schritte, Warmlauf eingeschlossen). Am Kanal ist das die rechte Seite der Bilanz; an Kugel und Fahrzeug eine Groessenordnung, keine Abnahme -- dort traegt die Torus-Bilanz nicht.");
+		else print_info("["+ort+"] REKONSTRUKTION Impuls-Akkumulator: "+to_string((float)je_schritt,9u)+" x-Impuls je Schritt, gemittelt ueber den GANZEN Lauf ("+to_string(t_ende)+" Schritte, Warmlauf EINGESCHLOSSEN). ★ Das ist NICHT die Groesse der Kanalbilanz -- die mittelt ueber das Fenster ab dem Warmup-Schnappschuss und steht im Cd-Pfad-Block. Hier ist es eine Groessenordnung und der Wirkpfadbeleg des Akkumulators, keine Abnahme. Der float-Akkumulator degradiert zudem ueber lange Laeufe (Zuwachs von der Groessenordnung eines ulp der Summe).");
 	}
 	if(env_u("CFD_FAC_REK",0u)>=2u&&!D->fac_rek_r3_jit) k_befund("["+ort+"] R3: CFD_FAC_REK=2 ist gesetzt, aber '#define FAC_REK_R3' steht NICHT im uebersetzten Kernel -- Gate und Buchung sind tote Zeilen. (env statt Statik gelesen: die Statik ist im dd-Fall genullt.)");
 	if(D->fac_rek_r3_jit) {
@@ -1024,6 +1033,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// am kipp26 dagegen 0 von 53 195 580. Das Histogramm 373..377 entscheidet, ob dahinter eine
 		// Linkmengendivergenz Zensus/Kernel steckt oder eine Gleitkommakante im ALPHA2-Downdate.
 		if(g_alle>0ull&&g_neu==0ull) print_warning("["+ort+"] R3: Slot 331 = 0 bei Slot 370 = "+to_string(g_alle)+" -- das Gate hat KEINE Facette zusaetzlich in den Rueckfall gezwungen, alle waren es schon (Slot 380). Das TOR ist hier ein No-Op -- die Kaskade faengt die Rang-0-Marken ohnehin. Die Rekonstruktion ist an diesen Zellen der EINZIGE Aktor, und der eigene Armwert isoliert damit die BUCHUNG, nicht das Tor. Kein Defekt; ein Befund waere der umgekehrte Fall.");
+		else if(g_neu>0ull) print_warning("["+ort+"] R3: Slot 331 = "+to_string(g_neu)+" von "+to_string(g_alle)+" -- das Tor zwingt Zellen ZUSAETZLICH in den Rueckfall. Zweierlei folgt daraus. (1) Das Tor arbeitet, also ist dieser Arm NICHT mehr bitgleich zum Arm ohne Tor; der Hashvergleich ist die Abnahme. (2) Die statische Rang-0-Menge war hier NICHT die Obergrenze des Laufzeitrangs, wie der Zensus sie deklariert -- entweder stimmt die Invariante nicht, oder Zensus (double, absolutes Kriterium) und Kernel (float, relativer Ausloeschungswaechter) klassifizieren verschieden. Das Histogramm 373..377 unten entscheidet mit. GEMESSEN 23.09.: kipp26 0 von 53 195 580, 8-mm-Fahrzeug 30 335 von 6 995 090.");
 		// Lueckenlosigkeit: jeder Besuch am Gate landet in genau einem der beiden Faecher.
 		// ★ 23.09. abends, M2: 370 ist die Summe der beiden anderen und saettigt deshalb ZUERST;
 		// danach wachsen 331+380 weiter und die Identitaet braeche zwangslaeufig.
@@ -1031,11 +1041,25 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		else if(g_neu+g_schon!=g_alle) k_befund("["+ort+"] R3: Slot 331 + Slot 380 = "+to_string(g_neu+g_schon)+", aber Slot 370 = "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
 		// DER Nullbeweis des Gates. 370/331/380 zaehlen die Absicht, dieser hier das Ergebnis.
 		if(g_durch>0ull) k_befund("["+ort+"] R3: Slot 371 = "+to_string(g_durch)+" -- an einer markierten Facette lief Pass 2 TROTZ Gate. Zwei Aktoren an derselben Zelle, der Lauf ist nicht auswertbar.");
-		else print_info("["+ort+"] R3: Slot 371 (Marke trotz Gate angewandt) = 0 -- an keiner markierten Facette lief der Solve. Das Gate greift.");
+		else print_info("["+ort+"] R3: Slot 371 (Baureihenfolge-Probe) = 0. ACHTUNG, berichtigt 23.09. spaet: das ist KEIN Nullbeweis des Tors -- unter der erlaubten Schalterschnittmenge ist der Wert konstruktiv 0, weil zwischen Gate und Zaehler nur genullt wird. Er feuert nur, wenn das Gate hinter die Nullung wandert oder t1 nicht endlich ist. Den Nullbeweis liefert der Hashvergleich Arm 1 gegen Arm 2.");
 		// Normal-Neutralitaet (Befund 2 des Plans): du steht tangential, also ist die gebuchte
 		// Normalkomponente 0. Die Delta-Form erfuellt das konstruktiv -- bis heute unbelegt.
 		if(g_norm>0ull) k_befund("["+ort+"] R3: Slot 372 = "+to_string(g_norm)+" -- die Buchung traegt einen NORMALANTEIL. du muss tangential stehen; ein Normalanteil ginge in den Druckpfad und waere dort doppelt.");
 		else print_info("["+ort+"] R3: Slot 372 (Normalanteil der Buchung) = 0 -- die Buchung ist normal-neutral, wie die Delta-Form es verlangt.");
+		// ★★ 23.09. spaet, Pruefbefund H-N1: das Histogramm 373..377 war gebaut und hatte KEINEN Leser.
+		// Es ist der Entscheider fuer den Doppelterm: P1 wird aus fhn gebildet, und fhn traegt an den
+		// Marken schon das Df -- unter R3 ist phi1 = P1, die Wandkraft enthaelt den Wandlink-Anteil
+		// also ein ZWEITES Mal, zusaetzlich zur Buchung fw -= rho*du. Der Zusatzterm ist rho*eps*G11roh,
+		// und weil genau rho*eps gebucht wird, IST |G11roh| sein relatives Gewicht.
+		{
+			const ulong g0=(ulong)H[373], g1=(ulong)H[374], g2=(ulong)H[375], g3=(ulong)H[376], g4=(ulong)H[377];
+			const ulong gs=g0+g1+g2+g3+g4;
+			print_info("["+ort+"] R3 DOPPELTERM |G11roh| an den Marken: <1e-6 "+to_string(g0)+" | <1e-4 "+to_string(g1)+" | <1e-2 "+to_string(g2)+" | <1 "+to_string(g3)+" | >=1 "+to_string(g4)+" (Summe "+to_string(gs)+").");
+			if(g_alle>=0xF0000000ull) print_info("["+ort+"] R3 DOPPELTERM: Slot 370 saettigt -- die Lueckenlosigkeit gegen das Histogramm ist nicht pruefbar.");
+			else if(gs!=g_alle) k_befund("["+ort+"] R3 DOPPELTERM: Histogrammsumme "+to_string(gs)+" != Slot 370 "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
+			else if(gs>0ull&&g0!=gs) print_warning("["+ort+"] R3 DOPPELTERM: nur "+to_string((float)(100.0*(double)g0/(double)gs),1u)+" % der markierten Besuche haben |G11roh| < 1e-6. Der Wandlink-Anteil des Df geht dort ein ZWEITES Mal in die Wandkraft -- zusaetzlich zur Buchung und ohne Korrektur. Zur fuehrenden Ordnung ist der ungebuchte Zusatzterm rho*eps*G11roh. Bei ELIBB wird dieselbe Klasse mit +2*Dp_tangential korrigiert; fuer die Rekonstruktion gibt es das noch nicht. SOLANGE DAS SO IST, traegt cd_reib aus diesem Arm den Term.");
+			else if(gs>0ull) print_info("["+ort+"] R3 DOPPELTERM: alle markierten Besuche haben |G11roh| < 1e-6 -- der Wandlink-Anteil ist vernachlaessigbar, die Buchung ist vollstaendig.");
+		}
 		// ★ Pruefbefund N2/N6: zwei Divergenzen ansagen, die sonst still falsch gelesen werden.
 		print_warning("["+ort+"] R3 ANSAGE: (1) cd_bericht.csv (fac_tau) enthaelt die Rekonstruktionsquelle jetzt HERAUSGERECHNET, forces.csv (object_force ueber update_force_field) dagegen NICHT -- beide weichen um genau Summe rho*du voneinander ab, das ist kein Fehler. (2) Unter CFD_FAC_RDIAG/KDIAG mischen die R3-erzwungenen Zellen unter die echten Rang-0-Rueckfaelle; die Rueckfall-Diagnose ist in diesem Arm NICHT mehr die Einzellink-Klasse.");
 	}

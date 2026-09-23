@@ -2012,7 +2012,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
                         , const global uchar* fac_q // ★ B2: q je Link (18 uchar je Facette, B1)
 )+"#endif"+R( // FACETTEN_ELIBB
 )+"#ifdef FACETTEN_NACHBAR"+R(
-                        , global float* fac_nb // ★ 23.09.2026 Stufe A2: const ENTFERNT (nur das Schluesselwort -- Parameterzahl und -reihenfolge unveraendert, KEIN Signatur-Splice, keine Host-Bindung beruehrt). Grund: der Impuls-Akkumulator Summe rho*du_x je Facette schreibt nach def_nb_roff+3. Risiko und Abnahme: const global ist ein Nur-Lese-Hinweis, der die Codeerzeugung aendern KANN -- deshalb ist der eps=0-Anker (FELD-HASH 7980041572697087411) die Pflichtabnahme dieses Bauschritts. // ★ 03.09. deterministisch: (u_t_abt, y_abt) je Facette aus dem Kernel fac_nachbar_ab des VORSCHRITTS (fertiges u-Feld); -1 = kein Fluidnachbar, 0 = Nachbar still
+)+"#ifdef FAC_REK"+R(
+                        , global float* fac_nb // ★ 23.09. spaet, Pruefbefund H-N2: NUR unter FAC_REK nicht-const. Der Akkumulator schreibt nach def_nb_roff+3. Ohne das #ifdef aenderte der Wegfall des const den emittierten Kernel auch bei CFD_FAC_REK=0, und damit war der AUS-Arm nicht mehr quelltextidentisch -- genau das, was ich behauptet hatte.
+)+"#else"+R(
+                        , const global float* fac_nb
+)+"#endif"+R(
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FACETTEN_KDIAG"+R(
                         , global float* fac_kd // ★ Klassen-Diagnostik: 16 float je Facette (u_t, tw, twe, |P1|, s1, phi1, Rueckfall, Besuche, ut_ab, yw_ab, tw_angewandt, besuche_angewandt, [12..15] 05.09. Druckrest A / |A| / Ziel B / Geometrie C, alle nur ueber angewandte Besuche), racefrei (1 Zelle = 1 Facette)
@@ -3271,7 +3275,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	, global float* fac_kd // ★ Klassen-Diagnostik (Position = nach fac_q, Host-add-Reihenfolge)
 )+"#endif"+R( // FACETTEN_KDIAG
 )+"#ifdef FACETTEN_NACHBAR"+R(
-	, global float* fac_nb // ★★ 23.09. abends, Pruefbefund H1: hier stand const, waehrend apply_facette_imem den Parameter seit 3141e35 nicht-const nimmt (der Impuls-Akkumulator schreibt). Das war ein Qualifier-Discard im AUFRUF, und der Bau haengt -w an (opencl.hpp) -- es gab KEINE Diagnose. Der Uebersetzer durfte annehmen, dass durch diese Adresse nicht geschrieben wird, und den Store eliminieren. Der eps=0-Anker kann das PRINZIPIELL nicht fangen: dort ist rho*du exakt 0, ein weggelassener Store schreibt dieselbe Null. // ★ 03.09. deterministische Nachbarabtastung des Vorschritts (Position = nach fac_kd, VOR fac_wfd; Host-add-Reihenfolge im Konstruktor)
+)+"#ifdef FAC_REK"+R(
+	, global float* fac_nb // ★★ 23.09. Pruefbefund H1: ohne dies verwarf der Aufruf an apply_facette_imem den Qualifier, und der Bau haengt -w an -- keine Diagnose. ★ 23.09. spaet H-N2: in #ifdef gezogen, damit der AUS-Arm quelltextidentisch bleibt.
+)+"#else"+R(
+	, const global float* fac_nb
+)+"#endif"+R(
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef SGS_FDWAND"+R(
 	, const global float* fac_wfd // ★ Geistermoden-Fix: w je Facettenzelle aus |S|_FD des Vorschritts (Position = nach fac_kd)
