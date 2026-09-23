@@ -1,0 +1,24 @@
+# 23.09.2026 URSACHE DER DICHTEKLEMME: drei Arme, je EINE Variable gegen s1g_hist_eps0.
+# ANLASS: 85 % der markierten Wandzellen sitzen auf der Klemme 0,5 (heute gemessen, 53 Mio Besuche).
+# Der Rechercheagent hat die Ursache NICHT extern gefunden, sondern im EIGENEN Bestand:
+#   Merkzettel stand-2026-09-05-rang-geometrie.md:99 -- "Massenkompensation NUR ueber die Wandlinks.
+#   Klemmfreier Arm: vs_leiter_x / vq_leiter_x (MASSE_ALLE=3, Produktionskonfig), RHO_CLAMP = 0,
+#   zweimal reproduziert." An einer EIN-LINK-Zelle ist diese Kompensation ein Monopol, also maximal
+#   anisotrop -- genau die Zellklasse, die wir markieren. A/B-Faktor 142 (12,99 Mio gegen 1,84 Mrd).
+# Die Literatur sagt zur Gegenfrage klar NEIN: im inkompressiblen Limit ist drho/rho ~ O(Ma^2)
+#   (He & Luo 1997), ein 50-%-Defizit liegt zwei bis drei Groessenordnungen darueber. Der Code sagt
+#   dasselbe (kernel.cpp:1249: "bei kleiner Machzahl ist rho = 1 +- 0,02").
+#
+# ARM 1  MASSE_ALLE=3: die genannte klemmfreie Konfiguration. VORBEHALT, ausdruecklich: alpha2_an
+#   verlangt MASSE_ALLE==0, der Zensus klassifiziert also anders und die MARKENMENGE aendert sich.
+#   Das ist kein sauberer Ein-Variablen-A/B fuer die Marken -- fuer die Frage "verschwindet die
+#   Klemme" ist er trotzdem gueltig, denn die zaehlt global.
+# ARM 2  ELIBB=0: die Vorhersage von Marson/Thorimbert/Latt/Chopard 2021 (Phys. Rev. E 103, 053308),
+#   wonach die ELI-Familie Masse verletzt, und zwar bei GROBER Aufloesung am staerksten. Sauberer
+#   Ein-Variablen-A/B: alpha2_an haengt nicht an ELIBB.
+# ARM 3  kipp0 statt kipp26: ist es die TREPPE? Hier ist Rang 0 = 0, die Markenmenge also leer und
+#   mein eigener Waechter wuerde abbrechen -- deshalb CFD_FAC_REK=0. Gelesen werden die globalen
+#   Dichteklemmzaehler, die es unabhaengig von der Rekonstruktion gibt.
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_KANAL_KIPP=26.565 CFD_FAC_ALPHA=2 CFD_FAC_MASSE_ALLE=3 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: s1h_masse3
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_KANAL_KIPP=26.565 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=0 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: s1h_elibb0
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_KANAL_KIPP=0 CFD_FAC_ALPHA=2 CFD_FAC_REK=0 :: s1h_kipp0
