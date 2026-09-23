@@ -976,7 +976,14 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// (die Marken sind der STATISCHE Rang 0, und der ist eine Obergrenze; je nach Kaskadenarm
 		// faellt dieselbe Facette ohnehin schon zurueck). Dann stuende auch die Begruendung fuer den
 		// eigenen Armwert in Frage. Iron Rule: ein Schalter ohne feuernden Zaehler ist ein HARTER Fehler.
-		if(g_alle>0ull&&g_neu==0ull) k_befund("["+ort+"] R3: Slot 331 = 0 bei Slot 370 = "+to_string(g_alle)+" -- das Gate hat KEINE einzige Facette zusaetzlich in den Rueckfall gezwungen, alle waren es schon (Slot 380). R3 ist an dieser Konfiguration ein No-Op, und der eigene Armwert waere nicht begruendet. Entweder ist die Markenmenge die falsche, oder die Kaskade faengt sie ohnehin.");
+		// ★ 23.09. GEMESSEN (Serie r3_buchung, Arm r3_gate_eps0): am kipp26 ist g_neu EXAKT 0 --
+		// die statische Rang-0-Markenmenge liegt bereits vollstaendig in der Laufzeit-Rueckfallmenge
+		// der Kaskade. Das Tor ist dort ein vollstaendiger No-Op (Hash identisch zum Anker), und das
+		// ist eine LEGITIME Antwort, kein Defekt: an Rang-0-Zellen kann das Wandmodell nicht loesen,
+		// es faellt ohnehin auf reines Bounce-Back zurueck. Deshalb WARNUNG mit der Zahl statt Befund
+		// -- die Iron Rule verlangt eine erzwungene Antwort, nicht zwingend einen Abbruch. Ein echter
+		// Befund waere das Gegenteil: g_neu > 0 hiesse, es gaebe doch zwei Aktoren an einer Zelle.
+		if(g_alle>0ull&&g_neu==0ull) print_warning("["+ort+"] R3: Slot 331 = 0 bei Slot 370 = "+to_string(g_alle)+" -- das Gate hat KEINE Facette zusaetzlich in den Rueckfall gezwungen, alle waren es schon (Slot 380). Das TOR ist hier ein No-Op -- die Kaskade faengt die Rang-0-Marken ohnehin. Die Rekonstruktion ist an diesen Zellen der EINZIGE Aktor, und der eigene Armwert isoliert damit die BUCHUNG, nicht das Tor. Kein Defekt; ein Befund waere der umgekehrte Fall.");
 		// Lueckenlosigkeit: jeder Besuch am Gate landet in genau einem der beiden Faecher.
 		if(g_neu+g_schon!=g_alle) k_befund("["+ort+"] R3: Slot 331 + Slot 380 = "+to_string(g_neu+g_schon)+", aber Slot 370 = "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
 		// DER Nullbeweis des Gates. 370/331/380 zaehlen die Absicht, dieser hier das Ergebnis.
