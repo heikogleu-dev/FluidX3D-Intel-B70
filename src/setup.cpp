@@ -5278,8 +5278,25 @@ void main_setup_kanal() {
 				const double vh2 = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
 				const float eps_k2 = lbm.lbm_domain[0]->fac_rek_eps;
 				const double dp1_je_facette = 2.0*(double)eps_k2;
-				if((vh2-1.0)*(double)eps_k2<=0.0) print_error("K2 unter wirksamer CFD_FAC_REK: das Verhaeltnis Reibungspfad/Kraftbilanz ist "+to_string((float)vh2,6u)+", die Abweichung vom Einserwert hat damit NICHT das Vorzeichen von eps = "+to_string(eps_k2,9u)+". Der Block addiert rho*du in Richtung +t1; der gebuchte Reibungspfad MUSS bei +eps steigen und bei -eps fallen. Ein anderes Vorzeichen heisst, dass die Buchung in die falsche Richtung laeuft (Lehre FAC_UW).");
-				print_warning("K2 unter wirksamer CFD_FAC_REK (eps = "+to_string(eps_k2,9u)+"): Verhaeltnis Reibungspfad/Kraftbilanz = "+to_string((float)vh2,4u)+", Vorzeichen stimmt mit eps ueberein. Geschlossene Groessenordnung des Einflusses: 2*rho*eps = "+to_string((float)dp1_je_facette,9u)+" je markierter Facette und Zeitschritt"
+				// ★★ 23.09.2026, ZWEIMAL BERICHTIGT. Hier stand seit heute frueh ein HARTER Vorzeichentest
+				// "if((vh2-1.0)*eps <= 0.0) print_error". Der Planungsschritt zu R3 hat zwei Fehler darin
+				// gefunden, beide selbst nachgerechnet:
+				// (1) Bei vh2 == 1,0 EXAKT ist das Produkt 0,0, und 0,0 <= 0,0 ist wahr -- eine Buchung, die
+				//     exakt stimmt, waere abgebrochen. Genau der Zustand, den R3 herstellen SOLL. Der Test
+				//     haette den ersten erfolgreichen R3-Lauf nach 49 min mit exit(1) beendet und alle
+				//     nachgelagerten Abnahmen mitgerissen.
+				// (2) Die Begruendung trug nicht. Ich habe mit "du zeigt in +t1, also muss der Reibungspfad
+				//     steigen" argumentiert -- gebucht und geprueft wird aber die x-KOMPONENTE (FK.rx).
+				//     Zur fuehrenden Ordnung ist dP1 = rho*eps*G11 mit G11 = Sum 6w(c.t1)^2 >= 0, entlang
+				//     +t1 muss der gebuchte Pfad also FALLEN. Dass er entlang +x steigt (gemessen 1,0682),
+				//     heisst entweder, dass an markierten Rang-0-Facetten t1.x < 0 ueberwiegt
+				//     (Stufenschatten-Rezirkulation), oder es steckt ein zweiter Vorzeichenfehler drin.
+				//     Das ist UNBELEGT und wird erst durch einen eigenen Zaehler entschieden (Plan R3).
+				// Bis dahin ist das Vorzeichen eine BEOBACHTUNG, keine Abnahme. Eine Abnahme, deren
+				// Begruendung nicht traegt, ist schlimmer als keine: sie erzeugt Vertrauen, das nichts deckt.
+				const double vz = (vh2-1.0)*(double)eps_k2;
+				const string vz_txt = vz>0.0 ? string("gleichsinnig mit eps") : (vz<0.0 ? string("GEGENSINNIG zu eps") : string("exakt 1,0 -- die Buchung stimmt"));
+				print_warning("K2 unter wirksamer CFD_FAC_REK (eps = "+to_string(eps_k2,9u)+"): Verhaeltnis Reibungspfad/Kraftbilanz = "+to_string((float)vh2,4u)+", Abweichung vom Einserwert ist "+vz_txt+". ACHTUNG: das ist eine BEOBACHTUNG, keine Abnahme -- die Bruecke von der Tangentialrichtung t1 auf die gebuchte x-Komponente ist unbelegt. Geschlossene Groessenordnung des Einflusses: 2*rho*eps = "+to_string((float)dp1_je_facette,9u)+" je markierter Facette und Zeitschritt"
 					+" -- KEIN Abbruch. Die Abweichung ist konstruktiv, weil der Rekonstruktionsblock vor dem Solve wirkt und R3 noch nicht gebaut ist."
 					" cd_reib, c_f und U_b+ aus diesem Arm sind KEINE Messwerte. Abgenommen wird dieser Arm ueber die Slots 328..333, nicht ueber K2.");
 			}
