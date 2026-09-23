@@ -481,7 +481,7 @@ public:
 	static float s_fac_deteps;    // CFD_FAC_DETEPS (09.09.2026): Faktor K des Rauschbodens im Vollrangtest des gekoppelten Schur-Zweigs. det_eps = K*eps*(G11+G22)*Snnroh/Snn. Default 0.0 = bitidentisch. K=16 ist nachgerechnet: echte Rang-2-Linkmengen (Kante, Ecke) liegen 5-6 Dekaden ueber dem Rauschterm, ebene Mengen fallen sauber in den PINV-Zweig durch.
 	bool facetten_on = false, facetten_bound = false; // read-once + Bindungswaechter
 	uint fac_param_pos = 0u; ulong fac_N = 0ull;      // Parameterposition in stream_collide, aktive Facetten
-	Memory<float> fac_geo;   // AoS 8 float je Facette: nx,ny,nz,yw,fac_a(=1/|n_achse|),achse,[6] reserviert (Zband-z, Folgearbeit),[7] frei -- 8 B/Facette ungenutzt, Stride-Umbau vertagt (D9)
+	Memory<float> fac_geo;   // AoS 8 float je Facette: nx,ny,nz,yw,fac_a(=1/|n_achse|),achse,[6] Rekonstruktions-Amplitude eps (CFD_FAC_REK; S0 = 0),[7] Rekonstruktions-Marke (1 = Rang 0) -- seit 22.09.2026 BELEGT, der frueher hier notierte Zband-z-Anspruch ist damit hinfaellig, Stride-Umbau vertagt (D9)
 	Memory<uint>  fac_idx;   // uint je F-BBox-Zelle: Facettenindex oder 0xFFFFFFFF
 	Memory<float> fac_tau;   // Akkumulator 6 float je Facette: [0] Summe tau_w (y+), [1..3] Ist-Wandkraft x/y/z (Cd-Reibung), [4] Delta-m-Leck (iMEM; Paararm 0), [5] Normalkontamination (iMEM; Paararm 0); nur Zellen mit tatsaechlicher Modifikation
 	Memory<uint>  fac_tau_n; // Akkumulator: Anzahl Beitraege

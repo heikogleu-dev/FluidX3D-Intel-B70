@@ -2061,8 +2061,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float rek_marke = fac_geo[b+7ul];
 		const float rek_eps = fac_geo[b+6ul];
 		if(rek_marke>0.5f) {
-			if(t%def_zaehl_takt==0ul) atomic_inc(&hits[328]);
-			if(t%def_zaehl_takt==0ul) atomic_inc(&hits[331]);
+			if(t%def_zaehl_takt==0ul) {
+				atomic_inc(&hits[328]);
+				atomic_inc(&hits[331]);
+			}
 			const float rek_inv = 1.0f/ut;
 			const float dux = rek_eps*utx*rek_inv;
 			const float duy = rek_eps*uty*rek_inv;
