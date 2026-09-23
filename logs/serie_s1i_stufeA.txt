@@ -1,0 +1,22 @@
+# NACHPRUEFUNG nach der Audit-Schleife: H-1 (vierte Stride-Stelle), M-1 (Slot 369 sammelt statt abzubrechen),
+# M-2 (Tangentialschranke 1e-5 -> 1e-3, sonst Fehlalarm ab |u_nb|/|u_t| ~ 30), M-3 (Slot-368-Text), M-4 (Sperre
+# ohne CFD_FAC_NACHBAR), M-5 (zwei Lueckenlosigkeits-Abnahmen), M-6 (cos-Verteilung wird gedruckt), N-2 (NaN).
+# ABNAHME zusaetzlich: der Hash MUSS wieder 7980041572697087411 sein und die beiden Richtungszahlen
+# 0,2593 und 0,5013 muessen sich reproduzieren -- sonst hat eine der Korrekturen die Messung veraendert.
+# 23.09.2026 STUFE A: die Nachbarrichtung MESSEN, noch nicht anwenden.
+# BEFUND, der es ausloest: die ELIBB-Blende auf der Treppe erzeugt an den markierten Ein-Link-Zellen
+#   <t1.x> = 0,2593 und <rho> = 0,5703; ohne Blende sind es 0,9003 und 1,0003 (beides heute gemessen).
+#   Der Rekonstruktionsblock bildet seine Richtung aus GENAU dieser Zelle (kernel.cpp, ut/utx..utz).
+#   Die Nachbarabtastung liest dagegen eine Zelle, die die Blende nicht angefasst hat -- speicherte
+#   bisher aber nur den BETRAG.
+# DIESE STUFE AENDERT DIE PHYSIK NICHT. Sie schreibt die Nachbarrichtung mit und histogrammiert sie
+#   neben der lokalen. Erst der Vergleich entscheidet, ob Stufe B (Hub entlang t_nb) gebaut wird.
+# ABNAHMEN:
+#   A-1  <t_nb.x> und <cos(t_lok,t_nb)> muessen im Bericht stehen. Ist cos nahe 1, waere Stufe B
+#        ein No-Op und wird NICHT gebaut. Das macht die Abnahme nicht-tautologisch.
+#   A-2  Slot 369 (Bauprobe: Richtung normiert UND tangential) = 0. Ohne sie ist ein Stride-Versatz
+#        nicht von echter Streuung zu unterscheiden.
+#   A-3  Slot 368 (kein Fluidnachbar) = 0, Gegenprobe zu Slot 73 = 0 (am kipp26 gemessen).
+#   A-4  BITGLEICHHEIT: FELD-HASH muss 7980041572697087411 sein. Die Stride-Aenderung darf nichts
+#        verschieben -- genau diese Klasse hat am 22.09. einen 2,5-fachen Pufferueberlauf erzeugt.
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: s1i_stufeA2

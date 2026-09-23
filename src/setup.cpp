@@ -745,6 +745,7 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 	if(env_u("CFD_FAC_ZENSUS", 1u)==0u) print_error("CFD_FAC_REK braucht den statischen Klassenzensus (CFD_FAC_ZENSUS=1) -- er setzt die Rang-0-Marke. Mit ZENSUS=0 bliebe die Menge still leer (No-Op).");
 	if(env_u("CFD_FACETTEN", 0u)<3u) print_error("CFD_FAC_REK braucht CFD_FACETTEN>=3 (iMEM): das Host-Flag fac_rek_on traegt s_fac_imem als Bedingung, der Kernel bekaeme den Block also gar nicht -- waehrend der Zensus munter Marken meldet. Stiller No-Op mit Erfolgsmeldung.");
 	if(env_u("CFD_FAC_MESSNUR", 0u)>0u) print_error("CFD_FAC_REK + CFD_FAC_MESSNUR: der Mess-Nur-Modus steigt VOR der ELIBB-Blende und damit vor dem Rekonstruktionsblock aus (kernel.cpp). Slot 328 bliebe 0.");
+	if(env_u("CFD_FAC_NACHBAR", 0u)==0u) print_error("CFD_FAC_REK braucht CFD_FAC_NACHBAR=1: die Richtungsdiagnostik (Slots 352..369) liest fac_nb, und ohne die Nachbarabtastung blieben alle diese Zaehler 0 -- der Bericht schwiege vollstaendig, also ein stiller Mess-No-Op.");
 	if(env_u("CFD_FAC_ELIBB", 0u)==2u) print_error("CFD_FAC_REK + CFD_FAC_ELIBB=2 (PUR-Arm): der Pur-Arm kehrt vor dem Rekonstruktionsblock zurueck. Slot 328 bliebe 0.");
 	// ★ 23.09.2026 S1b: Waechter fuer die Amplitude. Die Grenzen sind HERGELEITET, nicht geraten.
 	// OBEN: u_t an einer beschatteten Rang-0-Wandzelle ist GEMESSEN 0,0051 (KDIAG am 26-Grad-Kanal;
@@ -785,6 +786,7 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 	if(rek_eps_b>2.0E-4f) print_warning("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" ist ein DIAGNOSEhub, kein Messhub: er liegt ueber 2 % der gemessenen Tangentialgeschwindigkeit 0,0051 an einer beschatteten Rang-0-Wandzelle. Richtig fuer eine Amplitudenleiter (nur dort wird ein Fehler im s-Vektor sichtbar, er waechst mit eps^2), FALSCH fuer eine Messung.");
 }
 
+void k_befund(const string& t); // ★ 23.09. Pruefbefund M-1: Vorwaertsdeklaration -- die Definition steht weiter unten, die Sammelform wird hier aber schon gebraucht
 static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
 	if(D==nullptr||!D->fac_rek_on) return;
 	// ★ 23.09. Audit-Schleife Befund M6: bis hierher prueften alle Zaehler gegen fac_geo[8i+6], also
@@ -833,6 +835,37 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 			const double rho_mittel = nr>0ull ? rho_gewicht/(double)nr : 0.0;
 			print_info("["+ort+"] REKONSTRUKTION Hubrichtung t1.x ueber "+to_string(nx)+" Besuche: "+zx);
 			print_info("["+ort+"] REKONSTRUKTION Dichte rhon ueber "+to_string(nr)+" Besuche: "+zr);
+			{	// ★ 23.09. Stufe A: die Nachbarrichtung daneben stellen. Erst diese Zahl entscheidet,
+				// ob Stufe B (Hub entlang t_nb) ueberhaupt gebaut wird -- ist sie gleich der lokalen,
+				// waere der Umbau ein No-Op.
+				ulong nn=0ull, nc=0ull;
+				double tnb_gew=0.0, cos_gew=0.0;
+				const double kn_mitte[8] = {-0.75, -0.30, -0.05, 0.05, 0.30, 0.70, 0.945, 0.995};
+				const double kc_mitte[8] = {-0.75, -0.25, 0.15, 0.45, 0.70, 0.875, 0.975, 0.9995};
+				for(uint b=0u; b<8u; b++) { nn += (ulong)H[352+b]; nc += (ulong)H[360+b]; }
+				if(nn>0ull) {
+					string zn = "";
+					string zc = "";
+					for(uint b=0u; b<8u; b++) {
+						tnb_gew += kn_mitte[b]*(double)H[352+b];
+						cos_gew += kc_mitte[b]*(double)H[360+b];
+						zn += string(b>0u?" | ":"")+to_string((float)(100.0*(double)H[352+b]/(double)nn),1u)+" %";
+						zc += string(b>0u?" | ":"")+to_string((float)(100.0*(double)H[360+b]/(double)(nc>0ull?nc:1ull)),1u)+" %";
+					}
+					const double tnb_m = tnb_gew/(double)nn;
+					const double cos_m = nc>0ull ? cos_gew/(double)nc : 0.0;
+					print_info("["+ort+"] REKONSTRUKTION NACHBARRICHTUNG t_nb.x ueber "+to_string(nn)+" Besuche: "+zn+"  -> <t_nb.x> ~ "+to_string((float)tnb_m,4u));
+					print_info("["+ort+"] REKONSTRUKTION cos-VERTEILUNG (Eimer -0,5/0/0,3/0,6/0,8/0,95/0,999): "+zc+" -- ein Mittelwert allein unterscheidet eine enge Verteilung nicht von einer zweigipfligen.");
+										print_info("["+ort+"] REKONSTRUKTION RICHTUNGSVERGLEICH: <cos(t_lok, t_nb)> ~ "+to_string((float)cos_m,4u)+" -- 1,0 hiesse beide Richtungen gleich (Stufe B waere ein No-Op), kleine Werte heissen, dass die lokale Richtung von der Blende verdreht wird.");
+					// ★ 23.09. Pruefbefund M-5: zwei Identitaeten, die konstruktiv gelten und den
+					// Lueckenlosigkeitsbeweis des neuen Histogramms liefern. Beide Summen liegen bereits vor.
+					if(nn!=nc) print_error("["+ort+"] REKONSTRUKTION: Richtungshistogramm "+to_string(nn)+" Eintraege, cos-Histogramm "+to_string(nc)+" -- beide haengen am selben Zweig, sie MUESSEN gleich sein.");
+					if(nn+(ulong)H[368]!=wp) print_error("["+ort+"] REKONSTRUKTION: Richtungshistogramm + Rueckfall = "+to_string(nn+(ulong)H[368])+", aber Slot 328 = "+to_string(wp)+" -- jeder markierte Besuch muss in genau einem der beiden landen.");
+										if((ulong)H[369]>0ull) k_befund("["+ort+"] REKONSTRUKTION: Slot 369 = "+to_string((ulong)H[369])+" -- die geschriebene Nachbarrichtung ist nicht normiert oder nicht tangential. Stride-Versatz in fac_nb oder Schreibfehler in fac_nachbar_ab.");
+					else print_info("["+ort+"] REKONSTRUKTION: Slot 369 (Bauprobe Nachbarrichtung) = 0 -- normiert und tangential.");
+					if((ulong)H[368]>0ull) print_warning("["+ort+"] REKONSTRUKTION: Slot 368 = "+to_string((ulong)H[368])+" Besuche, an denen die Nachbarabtastung nichts lieferte -- ENTWEDER kein Fluidnachbar (Slot 73) ODER Nachbar still (Slot 74); dort gilt weiter die lokale Richtung. Die Gegenprobe ist Slot 73+74 = "+to_string((ulong)H[73]+(ulong)H[74])+", und sie ist nur eine OBERGRENZE: 368 zaehlt allein die markierten Facetten, 73/74 alle, und 73/74 saettigen.");
+				}
+			}
 			print_info("["+ort+"] REKONSTRUKTION WIRKSAME AMPLITUDE: <t1.x> ~ "+to_string((float)t1x_mittel,4u)+", <rho> ~ "+to_string((float)rho_mittel,4u)+" -> der NETTO-x-Impuls je Schritt ist rund "+to_string((float)(t1x_mittel*rho_mittel*(double)D->fac_rek_marken*(double)fabs(D->fac_rek_eps)),6u)+" statt der Betragssumme "+to_string((float)((double)D->fac_rek_marken*(double)fabs(D->fac_rek_eps)),6u)+". Beides aus Eimermitten geschaetzt, nicht exakt.");
 		}
 	}
@@ -1720,7 +1753,13 @@ static void berichte_apg(LBM& L, const char* wo) {
 	LBM_Domain* d = L.lbm_domain[0];
 	if(!d->apg_on) return; // ★ 16.09. HOCH-1 (Pruefagent): INSTANZZUSTAND, nicht die Statik -- fahrzeug_dd nullt s_fac_apg vor dem Fernfeldbau, die Statik ist am Fallende 0 und der Bericht fiele still aus
 	const ulong st = d->nb_stride;
-	if(st!=5ull) { print_warning(string("APG ")+wo+": nb_stride "+to_string(st)+" != 5 unter APG -- Stride-Einfrieren verletzt."); apg_verletzt = true; return; }
+	// ★ 23.09. Pruefbefund H-1: dies ist die VIERTE Stelle, die den Stride kennt -- der Diff hatte nur
+	// drei nachgezogen (JIT-Emission, Hostspiegel, Waechter in alloc). Unter APG UND Rekonstruktion ist
+	// nb_stride jetzt 8; die harte 5 haette den ganzen APG-Bericht per return verworfen und ueber
+	// apg_verletzt am Fallende rc 1 erzeugt -- in allen fuenf Faellen. Der laufende Messarm hat kein APG,
+	// der erste REK+APG-Arm haette es sofort gesehen.
+	const ulong st_soll = 5ull + (d->fac_rek_on ? 3ull : 0ull);
+	if(st!=st_soll) { print_warning(string("APG ")+wo+": nb_stride "+to_string(st)+" != "+to_string(st_soll)+" unter APG -- Stride-Einfrieren verletzt."); apg_verletzt = true; return; }
 	if(!d->nachbar_on||d->fac_N==0ull) { print_warning(string("APG ")+wo+": kein Facetten-/Nachbarpfad in dieser Domaene -- CFD_FAC_APG ist hier wirkungslos (Wirkpfad 0, kein Befund)."); return; }
 	d->finish_queue(); d->rho_clamp_hits.read_from_device();
 	ulong v[LBM_Domain::hits_n]; for(uint k=0u; k<LBM_Domain::hits_n; k++) v[k] = (ulong)d->rho_clamp_hits[k]; // ★ 22.09.2026 S-1: hier stand die Slotzahl HART als 320, obwohl lbm.hpp:382 sie "an EINER Stelle" fuehrt -- nach der Erhoehung auf 384 haette dieser Leser 64 Slots stumm uebergangen. Zweite Fundstelle derselben Klasse wie Pruefbefund 3-E.
@@ -1774,10 +1813,28 @@ bool klemm_bilanz_verletzt = false; // ★ 15.09.2026 Klemmen S0b: gesammelt ueb
 // der Bericht ueberlebt ihn. Dieselbe Bauform wie klemm_bilanz_verletzt.
 bool dk_verletzt = false; string dk_grund = "";
 void dk_befund(const string& t) { print_warning(t+" ABBRUCH AM FALLENDE (gesammelt, damit der restliche Klemmenbericht noch erscheint)."); dk_verletzt = true; dk_grund += (dk_grund.empty() ? "" : " | ")+t; }
+// ★ 23.09.2026, Audit-Schleife: DIESELBE Fehlerklasse wie H1 vom 16.09., nur am Cd-Pfad.
+// K2 (Reibungspfad gegen Kraftbilanz) ist ein exit(1) und steht VOR pruefe_rek_wirkpfad.
+// HEUTE VIERMAL GEMESSEN, dass das Messwerte kostet: in s1b_eps0_kurz, s1b_epsp_kurz,
+// s1b_epsm_kurz und s1h_masse3 steht der Rekonstruktionsbericht auf NULL Zeilen, weil K2
+// vorher abbrach. Der Versuch, das mit Ausnahmezweigen zu heilen (UW, MESSNUR, REK mit eps!=0),
+// ist die falsche Bauform: die Kette waechst mit jedem Arm und war beim S0-Arm nachweislich
+// lueckenhaft -- eps = 0 faellt durch den !=0-Filter in den harten Zweig, obwohl ELIBB+kipp26
+// allein schon reisst. Jetzt sammelt k_befund(); geworfen wird EINMAL am Fallende.
+// Der Befund bleibt HART (rc 1), der Bericht ueberlebt ihn. Bauform wortgleich zu dk_befund.
+bool k_verletzt = false;
+string k_grund = "";
+void k_befund(const string& t) {
+	print_warning(t+" ABBRUCH AM FALLENDE (gesammelt, damit die nachgelagerten Abnahmen noch laufen).");
+	k_verletzt = true;
+	if(!k_grund.empty()) k_grund += " | ";
+	k_grund += t;
+}
 bool klemm_budget_verletzt = false; // ★ 15.09.2026 Klemmen Z2c (KLEMMEN-STUFE2-PLAN.md §2.4/§3): Budget gerissen -- Abbruch ebenfalls erst am Fallende
 void klemm_bilanz_abschluss(const char* fall) {
 	if(apg_verletzt) print_error(string("APG (")+fall+"): Abnahme des umgebauten APG-Pfads verletzt (Zeilen \"APG ... ABNAHME VERLETZT\" oben). Der Bericht ist vollstaendig, der Abbruch folgt erst hier.");
 	if(dk_verletzt) print_error(string("DICHTEKLEMME-BERICHT (")+fall+"): "+dk_grund+" -- Wirkpfad-/Huellenwaechter verletzt (Iron Rule: Schalter ohne feuernden Zaehler). Der Klemmenbericht oben ist VOLLSTAENDIG; der Abbruch folgt erst hier (Audit 16.09.2026, Befund H1).");
+	if(k_verletzt) print_error(string("CD-PFAD (")+fall+"): "+k_grund+" -- gesammelt am Fallende, damit der Rekonstruktions- und Klemmenbericht noch erscheinen konnte. Der Arm ist DISQUALIFIZIERT.");
 	if(klemm_bilanz_verletzt||klemm_budget_verletzt) print_error(string("KLEMM-BILANZ (")+fall+"): "+string(klemm_bilanz_verletzt ? "Abnahme des Klemmen-Messinstruments verletzt" : "")+string(klemm_bilanz_verletzt&&klemm_budget_verletzt ? " UND " : "")+string(klemm_budget_verletzt ? "Klemm-Budget gerissen (KLEMM-BUDGET-Zeilen)" : "")+" -- siehe Bericht.");
 }
 // ★ 15.09.2026 Klemmen S0c (KLEMMEN-STUFE0-PLAN.md §4/§7): PERIODISCHER LESER der Stufe-0-Slots im Sample-Takt.
@@ -5326,12 +5383,12 @@ void main_setup_kanal() {
 					" cd_reib, c_f und U_b+ aus diesem Arm sind KEINE Messwerte. Abgenommen wird dieser Arm ueber die Slots 328..333, nicht ueber K2.");
 			}
 			else if(LBM_Domain::s_fac_messnur>0u) print_info("K2 im MESS-NUR-Arm uebersprungen (das Wandmodell wendet nichts an, der Reibungspfad ist konstruktiv leer -- 31.08./02.09., gleiche Logik wie der Pur-Guard bei K3).");
-			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");
+			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) k_befund("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab (Verhaeltnis "+to_string((float)(FK.rx/soll_rx),6u)+") -- Abnahmelauf disqualifiziert.");
 			if(LBM_Domain::s_fac_elibb_pur) print_info("K3 im Pur-Arm uebersprungen (fac_tau_n bleibt konstruktiv 0 -> n_voll-Kriterium gilt nicht; B3-Pruefbefund 3)."); // Pur-Guard wie beim Slot-7-Fix
 			else { // ★ Instrumentenfix 30.08. (Freigabe G): exakte double-Gleichheit als Nullkriterium ist falsch -- x26_ref druckte "-0.00000000",
 				// FK.px war ~1e-12 != 0.0 und der Arm endete mit rc=1 "K3 verletzt" (der alte j4q_t26a4a1 hatte zufaellig exakt -0.0). Toleranz relativ zur Reibung.
 				const double tol_px = 1e-6*fabs(FK.rx)+1e-12;
-				if(fabs(FK.px)>tol_px||FK.n_unklar!=0ull||FK.n_voll!=0ull) print_error("K3 verletzt: Druck_x = "+to_string((float)FK.px)+" (|.| > "+to_string((float)tol_px)+") oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
+				if(fabs(FK.px)>tol_px||FK.n_unklar!=0ull||FK.n_voll!=0ull) k_befund("K3 verletzt: Druck_x = "+to_string((float)FK.px)+" (|.| > "+to_string((float)tol_px)+") oder unerwartete Voll-/Unklar-Zellen am parallelen Kanal.");
 				else if(FK.px!=0.0) print_info("K3: Druck_x = "+to_string((float)FK.px)+" innerhalb Toleranz "+to_string((float)tol_px)+" (nicht exakt 0, Rundungsrest der double-Summe)."); }
 		}
 	}

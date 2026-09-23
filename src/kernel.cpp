@@ -2074,6 +2074,25 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 				atomic_inc(&hits[336ul+(ulong)kx]);
 				const uint kr = rhon<0.55f ? 0u : (rhon<0.7f ? 1u : (rhon<0.85f ? 2u : (rhon<0.95f ? 3u : (rhon<1.05f ? 4u : (rhon<1.2f ? 5u : (rhon<1.45f ? 6u : 7u))))));
 				atomic_inc(&hits[344ul+(ulong)kr]);
+)+"#ifdef FACETTEN_NACHBAR"+R(
+				const float nb_ut = fac_nb[def_nb_stride*(ulong)fid];
+				if(nb_ut>1e-6f) {
+					const float tnbx = fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+0ul];
+					const float tnby = fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+1ul];
+					const float tnbz = fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+2ul];
+					const uint kn = tnbx<-0.5f ? 0u : (tnbx<-0.1f ? 1u : (tnbx<0.0f ? 2u : (tnbx<0.1f ? 3u : (tnbx<0.5f ? 4u : (tnbx<0.9f ? 5u : (tnbx<0.99f ? 6u : 7u))))));
+					atomic_inc(&hits[352ul+(ulong)kn]);
+					const float cosw = (utx*tnbx+uty*tnby+utz*tnbz)/ut;
+					const uint kc = cosw<-0.5f ? 0u : (cosw<0.0f ? 1u : (cosw<0.3f ? 2u : (cosw<0.6f ? 3u : (cosw<0.8f ? 4u : (cosw<0.95f ? 5u : (cosw<0.999f ? 6u : 7u))))));
+					atomic_inc(&hits[360ul+(ulong)kc]);
+					const float nlen = sqrt(tnbx*tnbx+tnby*tnby+tnbz*tnbz);
+					const float ntan = tnbx*nx+tnby*ny+tnbz*nz;
+					const bool norm_ok = (fabs(nlen-1.0f)<=1e-5f);
+					const bool tang_ok = (fabs(ntan)<=1e-3f);
+					if(!norm_ok||!tang_ok) atomic_inc(&hits[369]);
+				}
+				else atomic_inc(&hits[368]);
+)+"#endif"+R(
 			}
 			if(rek_probe) atomic_inc(&hits[328]);
 			const float rek_inv = 1.0f/ut;
@@ -5742,6 +5761,9 @@ float apg_rho_zelle(const uxx nb, const global fpxx* fi, const ulong tt TS_P) { 
 		if(pr>bestp) { bestp=pr; ib=ia; bcx=cxa; bcy=cya; bcz=cza; bnb=j[ia]; }
 	}
 	float utb = -1.0f, ywb = yw;
+	float tnx = 0.0f;
+	float tny = 0.0f;
+	float tnz = 0.0f;
 	if(ib>0u) {
 		const uxx nb = bnb;
 		const float ubx=load_u(u, nb), uby=load_u(u, def_N+(ulong)nb), ubz=load_u(u, 2ul*def_N+(ulong)nb);
@@ -5749,9 +5771,20 @@ float apg_rho_zelle(const uxx nb, const global fpxx* fi, const ulong tt TS_P) { 
 		const float utxb=ubx-undb*nx, utyb=uby-undb*ny, utzb=ubz-undb*nz;
 		const float ut2 = sqrt(utxb*utxb+utyb*utyb+utzb*utzb);
 		utb = (ut2>1e-6f) ? ut2 : 0.0f;
+		const float rinv = (ut2>1e-6f) ? 1.0f/ut2 : 0.0f;
+		tnx = utxb*rinv;
+		tny = utyb*rinv;
+		tnz = utzb*rinv;
 		ywb = yw + (bcx*nx+bcy*ny+bcz*nz); // war c(ib)... -- siehe Scratch-Fix oben
 	}
-	fac_nb[def_nb_stride*(ulong)gid] = utb; fac_nb[def_nb_stride*(ulong)gid+1ul] = ywb; // def_nb_stride = 2 (5 unter FACETTEN_APG), JIT-Emission lbm.cpp
+	fac_nb[def_nb_stride*(ulong)gid] = utb;
+	fac_nb[def_nb_stride*(ulong)gid+1ul] = ywb;
+)+"#ifdef FAC_REK"+R(
+	fac_nb[def_nb_stride*(ulong)gid+def_nb_roff+0ul] = tnx;
+	fac_nb[def_nb_stride*(ulong)gid+def_nb_roff+1ul] = tny;
+	fac_nb[def_nb_stride*(ulong)gid+def_nb_roff+2ul] = tnz;
+)+"#endif"+R(
+ // def_nb_stride = 2 (5 unter FACETTEN_APG), JIT-Emission lbm.cpp
 } // fac_nachbar_ab()
 )+"#ifdef FACETTEN_APG"+R(
 kernel void fac_apg_ab(const global uchar* flags, const global uint* gd_zellen, const uint gd_N, global float* fac_nb,
