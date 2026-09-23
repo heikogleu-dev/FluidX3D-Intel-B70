@@ -2061,6 +2061,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float rek_marke = fac_geo[b+7ul];
 		const float rek_eps = fac_geo[b+6ul];
 		if(rek_marke>0.5f) {
+			const float mxy_vor = fhn[7]+fhn[8]-fhn[13]-fhn[14];
 			if(t%def_zaehl_takt==0ul) {
 				atomic_inc(&hits[328]);
 				atomic_inc(&hits[331]);
@@ -2115,6 +2116,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			fhn[18] += wr_e*fma(-dymz, fma(-0.5f, symz, 1.0f), h3);
 			float rr, rux, ruy, ruz;
 			calculate_rho_u(fhn, &rr, &rux, &ruy, &ruz);
+
 			const float wx = rux-uxn;
 			const float wy = ruy-uyn;
 			const float wz = ruz-uzn;
@@ -2128,7 +2130,15 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float ry = ruy-soll_y;
 			const float rz = ruz-soll_z;
 			const float rbetrag = sqrt(rx*rx+ry*ry+rz*rz);
-			if(t%def_zaehl_takt==0ul&&rbetrag>1e-6f*fmax(ubetrag, 1e-12f)) atomic_inc(&hits[330]);
+			const float rtol = fma(1.0E-3f, fabs(rek_eps), fmax(1.0E-6f*fmax(ubetrag, 1e-12f), 5.0E-8f));
+			if(t%def_zaehl_takt==0ul&&rbetrag>rtol) atomic_inc(&hits[330]);
+			const float dm = fabs(rr-rhon);
+			if(t%def_zaehl_takt==0ul&&dm>1e-6f*rhon) atomic_inc(&hits[332]);
+			const float mxy_nach = fhn[7]+fhn[8]-fhn[13]-fhn[14];
+			const float mxy_soll = rhon*(fma(uxn, duy, dux*uyn)+dux*duy);
+			const float mxy_rest = fabs((mxy_nach-mxy_vor)-mxy_soll);
+			const float mxy_tol = fma(1.0E-3f, fabs(mxy_soll), 1.0E-8f);
+			if(t%def_zaehl_takt==0ul&&mxy_rest>mxy_tol) atomic_inc(&hits[333]);
 		}
 	}
 )+"#endif"+R(

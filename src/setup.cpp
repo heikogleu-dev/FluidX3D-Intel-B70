@@ -733,7 +733,10 @@ enum class RekMarken : bool { aus = false, an = true };
 // als exit(1) auffaellt (Befund HOCH-1b, HOCH-2, MITTEL-3, MITTEL-4) -- oder, schlimmer, gar nicht.
 // hat_zensus sagt, ob dieser Fall zensus_statische_klassen ueberhaupt aufruft; nur dort entstehen die Marken.
 static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) {
-	if(LBM_Domain::s_fac_rek==0u) return;
+	if(LBM_Domain::s_fac_rek==0u) {
+		if(env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) print_warning("CFD_FAC_REK_EPS ist gesetzt, aber CFD_FAC_REK=0 -- die Amplitude wirkt NICHT (Ansage-Doktrin).");
+		return;
+	}
 	if(LBM_Domain::s_fac_rek>1u) print_error("CFD_FAC_REK kennt heute nur 0 (aus) und 1 (Umfang Rang 0). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
 #ifndef D3Q19
 	print_error("["+ort+"] CFD_FAC_REK ist heute NUR fuer D3Q19 gebaut: der Block in kernel.cpp bedient fhn[0..18] und kennt den def_wc-Ast der acht Eckrichtungen 19..26 nicht. Auf dem D3Q27-Binary (werkzeuge/bau_q27.sh, bin_q27/FluidX3D) waere ab eps != 0 weder die Masse noch der Impuls erhalten -- und in S0 (eps = 0) faellt das NICHT auf.");
@@ -743,12 +746,33 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 	if(env_u("CFD_FACETTEN", 0u)<3u) print_error("CFD_FAC_REK braucht CFD_FACETTEN>=3 (iMEM): das Host-Flag fac_rek_on traegt s_fac_imem als Bedingung, der Kernel bekaeme den Block also gar nicht -- waehrend der Zensus munter Marken meldet. Stiller No-Op mit Erfolgsmeldung.");
 	if(env_u("CFD_FAC_MESSNUR", 0u)>0u) print_error("CFD_FAC_REK + CFD_FAC_MESSNUR: der Mess-Nur-Modus steigt VOR der ELIBB-Blende und damit vor dem Rekonstruktionsblock aus (kernel.cpp). Slot 328 bliebe 0.");
 	if(env_u("CFD_FAC_ELIBB", 0u)==2u) print_error("CFD_FAC_REK + CFD_FAC_ELIBB=2 (PUR-Arm): der Pur-Arm kehrt vor dem Rekonstruktionsblock zurueck. Slot 328 bliebe 0.");
+	// ★ 23.09.2026 S1b: Waechter fuer die Amplitude. Die Grenzen sind HERGELEITET, nicht geraten.
+	// OBEN: u_t an einer beschatteten Rang-0-Wandzelle ist GEMESSEN 0,0051 (KDIAG am 26-Grad-Kanal;
+	//   die konkave Eckzelle tastet 0,0051 ab, die freie Zelle darueber 0,0224). Ein Sondierhub ueber
+	//   1e-2 waere so gross wie die Groesse, die er sondieren soll.
+	// UNTEN: bindend ist NICHT FP32, sondern die FP16S-Stoerform (11 Mantissenbits, relatives Quantum
+	//   2^-12). Der Block addiert je Richtung rund 0,167*eps; unter etwa 1e-5 ueberlebt der Hub den
+	//   store_f-Umlauf nicht. NACHGERECHNET (Pruefung 23.09.): das FP16S-Quantum ist NICHT fest relativ,
+	//   es skaliert mit dem gespeicherten verschobenen DDF. Bei |f-w| = 1e-3 hat der Hub bei eps = 1e-4
+	//   noch 17,5 Quanten, bei |f-w| = 1e-2 nur 2,2 -- auf den lautesten Richtungen ist die Reserve also
+	//   knapp. 1e-4 ist die praktische UNTERGRENZE, nicht 1e-5.
+	//   Das ist die gefaehrliche Richtung: ALLE Zaehler messen REGISTERSEITIG,
+	//   vor dem Speichern -- ein zu kleines eps liefert gruene Abnahmen und ist trotzdem ein No-Op.
+	const float rek_eps_w = env_f("CFD_FAC_REK_EPS", 0.0f);
+	const float rek_eps_b = fabs(rek_eps_w);
+	if(!std::isfinite(rek_eps_w)) print_error("CFD_FAC_REK_EPS ist keine endliche Zahl.");
+	if(getenv("CFD_FAC_REK_EPS")!=nullptr&&rek_eps_w==0.0f) print_warning("CFD_FAC_REK_EPS ist gesetzt, wird aber als 0 gelesen. env_f ist atof: ein Dezimalkomma (0,0001) oder ein Tippfehler (1e-4x) ergibt STILL 0 -- der Lauf waere wieder S0. Gemeint war vermutlich 1e-4.");
+	if(rek_eps_b>1.0E-2f) print_error("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" ist kein Sondierhub mehr: u_t an einer beschatteten Rang-0-Wandzelle ist gemessen 0,0051, der Hub laege in derselben Groessenordnung wie die gestoerte Groesse selbst.");
+	if(rek_eps_b>0.0f&&rek_eps_b<1.0E-6f) print_error("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" liegt unter dem FP16S-Impulsquantum: der Hub ueberlebt store_f nicht. Die Zaehler 328..332 messen registerseitig und blieben trotzdem gruen -- ein getarnter No-Op.");
+	if(rek_eps_b>=1.0E-6f&&rek_eps_b<1.0E-5f) print_warning("CFD_FAC_REK_EPS = "+to_string(rek_eps_w,9u)+" liegt dicht am FP16S-Impulsquantum. Die Zaehler koennen gruen sein, ohne dass der Hub den naechsten Zeitschritt erreicht. Empfohlen ist 1e-4.");
 }
 
 static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
 	if(D==nullptr||!D->fac_rek_on) return;
 	const uint* H = D->rho_clamp_hits.data();
 	const ulong wp=(ulong)H[328], wirk=(ulong)H[329], rund=(ulong)H[330], kreuz=(ulong)H[331];
+	const ulong dmasse=(ulong)H[332];
+	const ulong mom2=(ulong)H[333]; // ★ 23.09. S1b: Massenneutralitaet, Soll 0 in JEDER Stufe
 	const ulong slots=(t_ende>0ull?(t_ende-1ull)/zaehl_takt():0ull)+1ull;
 	if(wp==0ull) { print_error("["+ort+"] REKONSTRUKTION: Slot 328 = 0 -- der Block wurde NIE erreicht. STILLER NO-OP (Marke nicht gesetzt? Define nicht emittiert? Gate davor?)."); return; }
 	// ★ 23.09.2026 Pruefbefund MITTEL-6, zwei Fehler in einer Zeile:
@@ -779,11 +803,28 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		if(wirk>0ull) print_error("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 = "+to_string(wirk)+", Soll EXAKT 0. Die Rekonstruktion hat u veraendert, obwohl die Amplitude null ist -- die Delta-Form ist nicht strukturell null (Entscheid R1) oder eps kommt nicht als echte Null an.");
 		else print_info("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 (Wirkung) = 0 wie gefordert -- die Delta-Form ist bei du = 0 strukturell +0.");
 	} else {
-		if(wirk==0ull) print_error("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = 0 -- der Schalter ist ein NO-OP in der Gegenrichtung (Nullbeweis gescheitert).");
-		else print_info("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 (Wirkung) = "+to_string(wirk)+" von "+to_string(wp)+" Besuchen.");
+		// ★ 23.09.2026 S1b: das Soll ist SCHAERFER als "groesser null". eps = 1e-4 liegt rund
+		// 2e4-fach ueber der Wirkungsschwelle 1e-6*|u|, also MUSS jeder Besuch eine Wirkung zeigen.
+		// "329 > 0, aber < 328" hiesse: der Hub kommt nicht an allen Marken an -- und genau das
+		// wuerde die alte Bedingung durchwinken.
+		const double vorhersage = (double)D->fac_rek_marken*(double)fabs(D->fac_rek_eps);
+		if(wirk==0ull) print_error("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = 0 -- der Schalter ist ein NO-OP in der Gegenrichtung. Der Nullbeweis ist gescheitert.");
+		else if(wirk!=wp) print_error("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = "+to_string(wirk)+", aber Slot 328 = "+to_string(wp)+". Bei diesem eps liegt der Hub 2e4-fach ueber der Wirkungsschwelle 1e-6*|u| -- JEDER Besuch muss wirken. Die Differenz "+to_string(wp-wirk)+" heisst, dass der Hub an einem Teil der Marken nicht ankommt.");
+		else print_info("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 (Wirkung) = "+to_string(wirk)+" = Slot 328 -- jeder Besuch wirkt. Vorhersage je Zaehlschritt: |D(rho u)| = rho*eps an "+to_string(D->fac_rek_marken)+" Marken = "+to_string((float)vorhersage,6u)+" (Summe der BETRAEGE ueber alle Marken, rho ~ 1; die Huebe zeigen in verschiedene Tangentialrichtungen, die Vektorsumme ist kleiner).");
 	}
-	if(rund>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Rundungsschranke 1e-6*|u| (ab S1b summiert calculate_rho_u 19 Terme, Rundung gibt es also; erwartet ist ~1e-7*|u|), ist also ein BAUFEHLER und keine Rundung (Entscheid R1).");
+	if(rund>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Schranke 1e-3*|eps| + 1e-6*|u| (Boden 5e-8), ist also ein BAUFEHLER und keine Rundung (Entscheid R1).");
 	else print_info("["+ort+"] REKONSTRUKTION: Slot 330 (Ziel getroffen) = 0 -- u_rek landet exakt auf u_lok + eps*t1.");
+	// ★ 23.09.2026 S1b: Massenneutralitaet. Die Delta-Form erhaelt die Masse ANALYTISCH exakt --
+	// Sum w_i = 1 und Sum w_i c_i c_i = c_s^2 I heben den -1,5(s.du)-Term genau auf. Soll also 0 in
+	// JEDER Stufe, nicht nur in S0. Ein Ausschlag heisst: die 19 Beitraege sind nicht mehr die Delta-Form.
+	if(dmasse>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 332 = "+to_string(dmasse)+" -- die Rekonstruktion hat die DICHTE veraendert. In der Delta-Form ist Sum_i Df_i analytisch exakt 0; ein Ausschlag ist ein Baufehler an den Richtungsgewichten.");
+	else print_info("["+ort+"] REKONSTRUKTION: Slot 332 (Massenneutralitaet) = 0 -- die Dichte bleibt unberuehrt, wie die Delta-Form es verlangt.");
+	// ★ 23.09.2026 Pruefbefund MITTEL-2: 330 und 332 pruefen nur das erste und nullte Moment und sind
+	// GEMEINSAM blind fuer einen Fehler im s-Vektor -- der s-Term faellt in beiden Momenten analytisch
+	// heraus, fuer JEDES s. Erst das zweite Moment sieht ihn. Ohne diese Probe waeren zwei gruene
+	// Zaehler als Beleg der Delta-Form gelesen worden, obwohl s falsch sein koennte.
+	if(mom2>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 333 = "+to_string(mom2)+" -- das ZWEITE Moment trifft nicht. Summe c_x c_y Df_i weicht von rho*(u_x du_y + du_x u_y + du_x du_y) ab. Das ist die einzige Probe, die den s-Vektor (s = 2u + du) wirklich prueft; 330 und 332 sind dafuer konstruktiv blind.");
+	else print_info("["+ort+"] REKONSTRUKTION: Slot 333 (zweites Moment, xy) = 0 -- auch der s-Vektor stimmt, nicht nur Masse und Impuls.");
 	if(kreuz!=wp) print_warning("["+ort+"] REKONSTRUKTION: Slot 331 = "+to_string(kreuz)+" != Slot 328 = "+to_string(wp)+" -- in S0 muessen beide gleich sein, es wird noch kein Solve uebersprungen.");
 }
 
@@ -3238,10 +3279,28 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 		LBM_Domain* D_ = L.lbm_domain[0];
 		if(D_==nullptr||D_->fac_geo.length()<8ull*D_->fac_N||D_->fac_N==0ull) print_error("["+ort+"] REKONSTRUKTION: fac_geo ist nicht belegt -- alloc_facetten lief nicht oder ist leer.");
 		else {
-			for(ulong q=0ull; q<D_->fac_N; q++) { D_->fac_geo[8ull*q+7ull]=0.0f; D_->fac_geo[8ull*q+6ull]=0.0f; } // Amplitude eps: S0 = 0
+			// ★ 23.09.2026 S1b: die Amplitude kommt DIREKT hier aus der Umgebung, bewusst NICHT als
+			// LBM_Domain-Statik. Sie ist nicht JIT-relevant (lbm.hpp:416: ein Define fuer die Amplitude
+			// wuerde die Identitaet wegoptimierbar machen), sie hat genau EINEN Verbraucher, und der
+			// liegt lange nach dem Konstruktor. Eine Statik haette drei Lese- und sechs Nullstellen und
+			// damit genau die Falle wieder aufgemacht, an der HOCH-1 heute frueh haftete: die Nullstelle
+			// des dd-Falls liegt ZWISCHEN Lesestelle und Zensus. env_f hier ist strukturell immun,
+			// weil Lesen und Verbrauchen dieselbe Zeile sind.
+			const float rek_eps = env_f("CFD_FAC_REK_EPS", 0.0f);
+			for(ulong q=0ull; q<D_->fac_N; q++) {
+				D_->fac_geo[8ull*q+7ull]=0.0f;
+				D_->fac_geo[8ull*q+6ull]=0.0f;
+			}
 			ulong n_gesetzt=0ull, n_ausserhalb=0ull;
-			for(const auto& m : marken) { if(m.first>=D_->fac_N) { n_ausserhalb++; continue; } D_->fac_geo[8ull*m.first+7ull]=m.second; n_gesetzt++; }
-			D_->fac_rek_marken = n_gesetzt; D_->fac_rek_eps = 0.0f; // ★ 22.09. S0: Vergleichsgroessen fuer pruefe_rek_wirkpfad; eps kommt in S1b aus CFD_FAC_REK_EPS
+			// Marke UND Amplitude im selben Durchgang: so koennen sie nie auseinanderlaufen.
+			for(const auto& m : marken) {
+				if(m.first>=D_->fac_N) { n_ausserhalb++; continue; }
+				D_->fac_geo[8ull*m.first+7ull]=m.second;
+				D_->fac_geo[8ull*m.first+6ull]=rek_eps;
+				n_gesetzt++;
+			}
+			D_->fac_rek_marken = n_gesetzt;
+			D_->fac_rek_eps = rek_eps;
 			D_->fac_geo.write_to_device();
 			// ABNAHME 1 (Ist=Soll): Zahl der Marken == Rang-0-Zahl dieses Berichts.
 			if(n_ausserhalb>0ull) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_ausserhalb)+" Marken liegen ausserhalb von fac_N = "+to_string(D_->fac_N)+" -- der fid-Zaehler des Zensus laeuft gegen die Allokation auseinander (Entscheid R2).");
@@ -3269,7 +3328,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			if(fabs(ywm-ywr)>1e-9) print_error("["+ort+"] REKONSTRUKTION: y_w-Mittel der Marken "+to_string((float)ywm,6u)+" != y_w-Mittel der Rang-0-Menge "+to_string((float)ywr,6u)+".");
 			print_info("["+ort+"] REKONSTRUKTION (CFD_FAC_REK=1, Umfang Rang 0): "+to_string(n_gesetzt)+" von "+to_string(D_->fac_N)
 				+" Facetten markiert = "+to_string((float)(100.0*(double)n_gesetzt/(double)D_->fac_N),2u)+" %, Ist=Soll gegen Rang 0 erfuellt; "
-				+"y_w-Mittel der Marken "+to_string((float)ywm,4u)+" (Rang-0-Menge "+to_string((float)ywr,4u)+"); Amplitude eps = 0 (Stufe S0). "
+				+"y_w-Mittel der Marken "+to_string((float)ywm,4u)+" (Rang-0-Menge "+to_string((float)ywr,4u)+"); Amplitude eps = "+to_string(rek_eps,9u)+" (Stufe "+(rek_eps==0.0f?string("S0, bitneutral"):string("S1b, WIRKSAM"))+"). "
 				+"fac_geo zum zweiten Mal hochgeladen, kein Rebind noetig.");
 		}
 	}
@@ -5127,6 +5186,20 @@ void main_setup_kanal() {
 					" unter u_w ist sie frei. LESART: 1,00 +- 0,01 = Buchung bleibt twe, K2 gilt weiter, cd_reib mit der Basis vergleichbar."
 					" ~3 = gebucht wird der aufgeloeste viskose Fluss nu_eff*A (an kipp0 ist nu_eff*A/twe = 3,106), Buchungskonvention neu entscheiden."
 					" >>10 = P1 ist nicht linear in u_0, die Zerlegung faellt. VORSICHT: cd_reib aus diesem Arm ist bis zur Klaerung NICHT mit Basislaeufen vergleichbar.");
+			}
+			else if(LBM_Domain::s_fac_rek>0u&&env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) {
+				// ★ 23.09.2026 S1b, nach dem Vorbild der CFD_FAC_UW-Behandlung drei Zeilen darueber:
+				// mit wirksamer Amplitude ist die Buchungsidentitaet KONSTRUKTIV gebrochen. Der Block
+				// aendert fhn VOR dem Solve, waehrend die Tangentialbasis ut/utx..utz den alten Wert
+				// behaelt; P1/P2 lesen also gestoerte Populationen mit ungestoerter Basis. Solange
+				// Entscheid R3 (Marke gewinnt, Solve wird uebersprungen) nicht gebaut ist, MUSS K2
+				// abweichen. Ein exit(1) haette hier die eigentliche S1b-Abnahme gefressen -- die
+				// Slots 328..333 stehen weiter unten. Warnung mit der Zahl, und der Arm ist
+				// ausdruecklich NICHT abgenommen, sondern messbar.
+				const double vh2 = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
+				print_warning("K2 unter wirksamer CFD_FAC_REK (eps = "+to_string(env_f("CFD_FAC_REK_EPS", 0.0f),9u)+"): Verhaeltnis Reibungspfad/Kraftbilanz = "+to_string((float)vh2,4u)
+					+" -- KEIN Abbruch. Die Abweichung ist konstruktiv, weil der Rekonstruktionsblock vor dem Solve wirkt und R3 noch nicht gebaut ist."
+					" cd_reib, c_f und U_b+ aus diesem Arm sind KEINE Messwerte. Abgenommen wird dieser Arm ueber die Slots 328..333, nicht ueber K2.");
 			}
 			else if(LBM_Domain::s_fac_messnur>0u) print_info("K2 im MESS-NUR-Arm uebersprungen (das Wandmodell wendet nichts an, der Reibungspfad ist konstruktiv leer -- 31.08./02.09., gleiche Logik wie der Pur-Guard bei K3).");
 			else if(soll_rx!=0.0&&fabs(FK.rx/soll_rx-1.0)>0.01) print_error("K2 verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab -- Abnahmelauf disqualifiziert.");

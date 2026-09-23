@@ -1,0 +1,20 @@
+# 23.09.2026 S1b -- die erste WIRKSAME Stufe der Wandzell-Rekonstruktion (eps != 0).
+# Vier Arme, zwei Zwecke:
+#  Arm 1 (volle Laenge, eps=0): RUECKFALLPRUEFUNG des S1b-Baus. Der Hash MUSS wieder
+#    7980041572697087411 sein -- sonst hat der Einbau der Amplitude die Nullstufe angefasst.
+#  Arme 2..4 (KURZ, ETT=10/WARM=2): der eigentliche A/B. Kurz mit Absicht, und zwar physikalisch:
+#    eps ist eine Einspeisung JE SCHRITT, nicht eine einmalige Verschiebung. Je Zaehlschritt sind
+#    10620 Marken x 1e-4 = 1,062 Gitterimpuls gegen einen Kanalantrieb von f_lat*N = 1,11 --
+#    ueber 80 ETT wuerde die Antriebsregelung dagegenhalten und c_f waere kein Messwert mehr.
+# eps = 1e-4 ist HERGELEITET: obere Schranke 2 % von u_t(Rang 0) = 0,0051 (gemessen, KDIAG),
+#   untere Schranke das FP16S-Impulsquantum (~1e-5). Das Fenster ist nur eine Dekade breit;
+#   1e-4 liegt an der Obergrenze, weil der Fehler nach unten (stiller Verlust im Speicher)
+#   UNSICHTBAR ist und der nach oben sichtbar.
+# ABNAHME Arm 2 gegen Arm 3: FELD-HASH MUSS VERSCHIEDEN sein (Nullbeweis in der Gegenrichtung),
+#   Slot 329 == Slot 328 (jeder Besuch wirkt), Slot 330 = 0 (Ziel getroffen, neue eps-Toleranz),
+#   Slot 332 = 0 (Masse analytisch erhalten). Arm 4 ist der Vorzeichentest.
+# NICHT-ABNAHME, ausdruecklich: c_f und U_b+ der eps!=0-Arme sind KEIN Ergebnis (siehe oben).
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: s1b_eps0_lang
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_KANAL_ETT=10 CFD_KANAL_WARM=2 CFD_FAC_REK_EPS=0 :: s1b_eps0_kurz
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_KANAL_ETT=10 CFD_KANAL_WARM=2 CFD_FAC_REK_EPS=1e-4 :: s1b_epsp_kurz
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_KANAL_ETT=10 CFD_KANAL_WARM=2 CFD_FAC_REK_EPS=-1e-4 :: s1b_epsm_kurz

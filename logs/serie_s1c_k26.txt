@@ -1,0 +1,19 @@
+# 23.09.2026 S1b, ZWEITER ANLAUF. Was der erste gelehrt hat (Serie s1b_k26_igpu, 08:07-08:19):
+#  - Die KURZE Sprosse (ETT=10/WARM=2) ist fuer eine Abnahme untauglich: K2 (Reibungspfad gegen
+#    Kraftbilanz, >1 %) schlug in ALLEN drei kurzen Armen an, AUCH bei eps=0. Das ist kein Defekt,
+#    sondern fehlende statistische Auslaufzeit -- und das exit(1) hat die eigentliche S1b-Abnahme
+#    (Slots 328..333, die weiter unten stehen) mitgefressen. Also: volle Laenge.
+#  - Der LANGE Arm mit eps=0 lief sauber durch (rc=0) und reproduzierte den S0-Anker
+#    7980041572697087411 aus DIESEM Binary. Damit ist der Bau in der Nullstufe belegt bitneutral.
+# NEU im Code seit dem ersten Anlauf: K2 wird unter wirksamer Amplitude zur WARNUNG mit der Zahl
+#   (Vorbild: dieselbe Behandlung unter CFD_FAC_UW drei Zeilen darueber) -- der Arm ist damit
+#   ausdruecklich NICHT abgenommen, sondern messbar; und Slot 333 prueft das ZWEITE Moment.
+# ABNAHME: Arm 1 muss 7980041572697087411 liefern. Arme 2 und 3 muessen davon ABWEICHEN
+#   (Nullbeweis in der Gegenrichtung) UND Slot 329 == Slot 328 UND 330 = 0 UND 332 = 0 UND 333 = 0.
+# Arm 1 laeuft auf der iGPU (neuer Kernelcode, Geraeteleiter), Arme 2-4 auf der B70 -- dort ist
+#   dieselbe Sprosse 2 statt 9 min, und iGPU/B70 sind heute als bitgleich gemessen (Protokoll C8).
+#   Verglichen wird trotzdem B70 gegen B70: Arm 2 ist die geraetegleiche Nullreferenz.
+CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: s1c_eps0_igpu
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=0 :: s1c_eps0_b70
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=1e-4 :: s1c_epsp_b70
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=-1e-4 :: s1c_epsm_b70
