@@ -761,10 +761,16 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	const ulong soll_roh=D->fac_rek_marken*slots;
 	const ulong soll=soll_roh&0xFFFFFFFFull;
 	const bool wickelt=soll_roh>=0x100000000ull;
-	const ulong aus = (ulong)H[9]; // Aussteiger am ut-Tor, ungegatet gezaehlt
+	const ulong aus = (ulong)H[9]; // Aussteiger am ut-Tor -- MIT DEMSELBEN t%def_zaehl_takt-Gate wie Slot 328 (kernel.cpp:2058). Genau deshalb ist die harte Schranke unten zulaessig.
 	if(wickelt) print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+", Soll "+to_string(soll_roh)+" liegt UEBER 2^32 -- der uint wickelt, die Ist=Soll-Probe ist hier stumpf und wird nicht als Abnahme gewertet.");
 	else if(wp>soll) print_error("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" UEBER dem Soll "+to_string(soll)+" = "+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots. Mehr Besuche als markierte Facetten gibt es nur, wenn der Block an UNMARKIERTEN Facetten feuert -- Baufehler an der Marke oder am fid.");
 	else {
+		// ★ 23.09.2026 Pruefagent Durchgang 2 (NEU-4): eine EINSEITIGE Warnung allein liesse einen
+		// TEILWEISEN No-Op durch -- vorher war der exit(1). Zurueckgeholt als HARTE, aber korrekte
+		// Schranke: jede markierte Facette landet in jedem Zaehlslot entweder in Slot 328 oder am
+		// ut-Tor in Slot 9, und beide tragen dasselbe Gate. Slot 9 zaehlt zusaetzlich unmarkierte
+		// Aussteiger, ist also eine OBERschranke -- wp+aus < soll kann damit nur ein echter Verlust sein.
+		if(wp+aus < soll) print_error("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" plus ut-Tor Slot 9 = "+to_string(aus)+" ergibt "+to_string(wp+aus)+" und bleibt damit UNTER dem Soll "+to_string(soll)+". Jede Marke muss je Zaehlslot in einem der beiden Zaehler auftauchen -- es gehen also Marken verloren (fid-Versatz, Marke nicht hochgeladen, Block teilweise uebersprungen).");
 		const double fehl = soll>0ull ? ((double)soll-(double)wp)/(double)soll : 0.0;
 		if(fehl>0.02) print_warning("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string((float)(100.0*fehl),2u)+" % fehlen). Das ist KEIN Fehler: der Block sitzt hinter dem Frueh-Return ut<1e-6f, und markierte Facetten sind die entarteten. Slot 9 (Aussteiger am ut-Tor) = "+to_string(aus)+" -- wer den Anteil braucht, misst ihn dort.");
 		else print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" = "+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots, Fehlbetrag "+to_string((float)(100.0*fehl),2u)+" % (ut-Tor).");
@@ -776,7 +782,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		if(wirk==0ull) print_error("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 = 0 -- der Schalter ist ein NO-OP in der Gegenrichtung (Nullbeweis gescheitert).");
 		else print_info("["+ort+"] REKONSTRUKTION S1b (eps = "+to_string(D->fac_rek_eps,9u)+"): Slot 329 (Wirkung) = "+to_string(wirk)+" von "+to_string(wp)+" Besuchen.");
 	}
-	if(rund>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Rundungsschranke 1e-6*|u| (ab S1b summiert calculate_rho_u 19 Terme, Rundung gibt es also; erwartet ist ~1e-7*|u|). keine Rundung (Entscheid R1).");
+	if(rund>0ull) print_error("["+ort+"] REKONSTRUKTION: Slot 330 = "+to_string(rund)+" -- das erreichte u trifft das Ziel u_lok + eps*t1 nicht. Der Fehler liegt OBERHALB der Rundungsschranke 1e-6*|u| (ab S1b summiert calculate_rho_u 19 Terme, Rundung gibt es also; erwartet ist ~1e-7*|u|), ist also ein BAUFEHLER und keine Rundung (Entscheid R1).");
 	else print_info("["+ort+"] REKONSTRUKTION: Slot 330 (Ziel getroffen) = 0 -- u_rek landet exakt auf u_lok + eps*t1.");
 	if(kreuz!=wp) print_warning("["+ort+"] REKONSTRUKTION: Slot 331 = "+to_string(kreuz)+" != Slot 328 = "+to_string(wp)+" -- in S0 muessen beide gleich sein, es wird noch kein Solve uebersprungen.");
 }
@@ -3239,6 +3245,11 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			D_->fac_geo.write_to_device();
 			// ABNAHME 1 (Ist=Soll): Zahl der Marken == Rang-0-Zahl dieses Berichts.
 			if(n_ausserhalb>0ull) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_ausserhalb)+" Marken liegen ausserhalb von fac_N = "+to_string(D_->fac_N)+" -- der fid-Zaehler des Zensus laeuft gegen die Allokation auseinander (Entscheid R2).");
+			// ★ 23.09.2026 Pruefagent Durchgang 2 (NEU-3): n_marke war nach dem Wegfall der alten y_w-Summe
+			// ein toter Zaehler. Jetzt traegt er die dritte, billigste Probe: in der Schleife gezaehlt gegen
+			// im Puffer geschrieben. Faengt einen Verlust ZWISCHEN Sammeln und Schreiben, den die anderen
+			// beiden Proben nicht sehen (beide vergleichen gegen n_rang[0], nicht gegeneinander).
+			if(n_gesetzt+n_ausserhalb!=n_marke) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_marke)+" Marken gesammelt, aber "+to_string(n_gesetzt)+" geschrieben plus "+to_string(n_ausserhalb)+" ausserhalb -- zwischen Sammeln und Schreiben ist eine Marke verloren gegangen.");
 			if(n_gesetzt!=n_rang[0]) print_error("["+ort+"] REKONSTRUKTION: "+to_string(n_gesetzt)+" Marken gesetzt, aber Rang 0 = "+to_string(n_rang[0])+" -- Ist != Soll.");
 			// ABNAHME 2 (unabhaengig): mittleres y_w der markierten Facetten == mittleres y_w der Rang-0-Menge. Faengt einen
 			// fid-Versatz, den Abnahme 1 NICHT sieht (die Zahl stimmt, die Zellen nicht).
