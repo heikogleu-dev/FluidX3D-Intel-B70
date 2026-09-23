@@ -2069,6 +2069,11 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 				rho_roh_vor = fhn[0];
 				for(uint i=1u; i<def_velocity_set; i++) rho_roh_vor += fhn[i];
 				rho_roh_vor += 1.0f;
+				const float t1x_m = utx/ut;
+				const uint kx = t1x_m<-0.5f ? 0u : (t1x_m<-0.1f ? 1u : (t1x_m<0.0f ? 2u : (t1x_m<0.1f ? 3u : (t1x_m<0.5f ? 4u : (t1x_m<0.9f ? 5u : (t1x_m<0.99f ? 6u : 7u))))));
+				atomic_inc(&hits[336ul+(ulong)kx]);
+				const uint kr = rhon<0.55f ? 0u : (rhon<0.7f ? 1u : (rhon<0.85f ? 2u : (rhon<0.95f ? 3u : (rhon<1.05f ? 4u : (rhon<1.2f ? 5u : (rhon<1.45f ? 6u : 7u))))));
+				atomic_inc(&hits[344ul+(ulong)kr]);
 			}
 			if(rek_probe) atomic_inc(&hits[328]);
 			const float rek_inv = 1.0f/ut;

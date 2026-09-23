@@ -811,6 +811,31 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	const ulong dmasse=(ulong)H[332];
 	const ulong mom2=(ulong)H[333];
 	const ulong mom2_leer=(ulong)H[334];
+	// ★ 23.09.: die beiden Histogramme, die den Faktor zwischen nominell eingespeistem und
+	// wirklich ankommendem Impuls entscheiden sollen. Sie sind bitneutral (kein Zugriff auf fhn).
+	{
+		const char* kx_txt[8] = {"t1x < -0,5", "-0,5..-0,1", "-0,1..0", "0..0,1", "0,1..0,5", "0,5..0,9", "0,9..0,99", "t1x >= 0,99"};
+		const char* kr_txt[8] = {"rho < 0,55 (KLEMME)", "0,55..0,7", "0,7..0,85", "0,85..0,95", "0,95..1,05", "1,05..1,2", "1,2..1,45", "rho >= 1,45"};
+		ulong nx=0ull, nr=0ull;
+		double t1x_gewicht=0.0, rho_gewicht=0.0;
+		const double kx_mitte[8] = {-0.75, -0.30, -0.05, 0.05, 0.30, 0.70, 0.945, 0.995};
+		const double kr_mitte[8] = {0.525, 0.625, 0.775, 0.90, 1.00, 1.125, 1.325, 1.50};
+		for(uint b=0u; b<8u; b++) { nx += (ulong)H[336+b]; nr += (ulong)H[344+b]; }
+		if(nx>0ull) {
+			string zx = "", zr = "";
+			for(uint b=0u; b<8u; b++) {
+				t1x_gewicht += kx_mitte[b]*(double)H[336+b];
+				rho_gewicht += kr_mitte[b]*(double)H[344+b];
+				zx += string(b>0u?" | ":"")+kx_txt[b]+" "+to_string((float)(100.0*(double)H[336+b]/(double)nx),1u)+" %";
+				zr += string(b>0u?" | ":"")+kr_txt[b]+" "+to_string((float)(100.0*(double)H[344+b]/(double)(nr>0ull?nr:1ull)),1u)+" %";
+			}
+			const double t1x_mittel = t1x_gewicht/(double)nx;
+			const double rho_mittel = nr>0ull ? rho_gewicht/(double)nr : 0.0;
+			print_info("["+ort+"] REKONSTRUKTION Hubrichtung t1.x ueber "+to_string(nx)+" Besuche: "+zx);
+			print_info("["+ort+"] REKONSTRUKTION Dichte rhon ueber "+to_string(nr)+" Besuche: "+zr);
+			print_info("["+ort+"] REKONSTRUKTION WIRKSAME AMPLITUDE: <t1.x> ~ "+to_string((float)t1x_mittel,4u)+", <rho> ~ "+to_string((float)rho_mittel,4u)+" -> der NETTO-x-Impuls je Schritt ist rund "+to_string((float)(t1x_mittel*rho_mittel*(double)D->fac_rek_marken*(double)fabs(D->fac_rek_eps)),6u)+" statt der Betragssumme "+to_string((float)((double)D->fac_rek_marken*(double)fabs(D->fac_rek_eps)),6u)+". Beides aus Eimermitten geschaetzt, nicht exakt.");
+		}
+	}
 	// ★ 23.09. Befund M3: der Kohaerenzwaechter war tautologisch. DAS hier ist der Beleg, dass der
 	// Block wirklich im uebersetzten Geraetecode steht -- der Kernel schreibt die Kennzahl selbst.
 	if(H[335]!=0x5245464Bu) print_error("["+ort+"] REKONSTRUKTION: der Konstantenspiegel Slot 335 traegt "+to_string((ulong)H[335])+" statt 0x5245464B. Der FAC_REK-Block steht NICHT im uebersetzten Geraetecode, obwohl der Host ihn eingeschaltet hat."); // ★ 23.09.: wie oft hatte [333] gar nichts zu pruefen // ★ 23.09. S1b: Massenneutralitaet, Soll 0 in JEDER Stufe
