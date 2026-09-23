@@ -1833,7 +1833,15 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// DIE BEDINGUNG IST EINSEITIG UND DESHALB SICHER: is_zero_copy verlangt uses_ram, also
 		// schliesst !uses_ram Zero-Copy aus. Auf der iGPU IST der Host-Puffer der Geraetespeicher,
 		// dort wuerde die Freigabe die laufende Rechnung lautlos zerstoeren -- deshalb nur dGPU.
-		if(!device.info.uses_ram&&apg_haken==0u) fac_nb.delete_host_buffer(); // ★ 16.09.: unter CFD_FAC_APG_HAKEN bleibt der Host-Spiegel -- der Bericht liest grad rho zurueck
+		// ★★ 23.09.2026, GERAETEFEHLER aus dem A2-Bau, auf der B70 gefunden und auf der iGPU UNSICHTBAR.
+		// uses_ram ist auf der iGPU true (gemeinsamer Speicher, Spiegel bleibt), auf der diskreten B70
+		// false -- dort wurde der Host-Spiegel freigegeben, und das Ruecklesen des Impuls-Akkumulators
+		// (setup.cpp, Fensterschnappschuss und K2-Block) lief in den Waechter "read_from_device() auf
+		// einem Puffer, dessen Host-Spiegel freigegeben wurde". Der Lauf starb nach 48 s bei 25 %.
+		// LEHRE: die iGPU ist ein Stellvertreter fuer BITGLEICHHEIT, nicht fuer das Speichermodell.
+		// Kosten des Spiegels (System-RAM, NICHT VRAM): nb_stride*fac_N*4 B, bei 4 mm mit 3,13 Mio
+		// Facetten 113 MB unter APG+REK, 75 MB ohne APG -- und nur unter CFD_FAC_REK.
+		if(!device.info.uses_ram&&apg_haken==0u&&!fac_rek_on) fac_nb.delete_host_buffer(); // ★ 16.09.: unter CFD_FAC_APG_HAKEN bleibt der Host-Spiegel -- der Bericht liest grad rho zurueck
 		kernel_fac_nachbar = Kernel(device, aktiv, "fac_nachbar_ab", u, flags, fac_geo, gd_zellen, (uint)aktiv, fac_nb);
 		if(apg_on) { // ★ 16.09. APG-Vorkernel: eigener Kernel (Gate-Befund Spill), liest die DDFs, schreibt grad rho nach fac_nb[2..4]; t (Position 5) wird je Schritt nachgesetzt
 			kernel_fac_apg = Kernel(device, aktiv, "fac_apg_ab", flags, gd_zellen, (uint)aktiv, fac_nb, fi, t, rho_clamp_hits);

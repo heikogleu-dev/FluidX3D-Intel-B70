@@ -1,0 +1,46 @@
+# 23.09.2026 FAHRZEUG 8 mm -- Rekonstruktion am Fall mit den verlaesslichsten Bezugswerten.
+# Heiko 20:26: "Du kannst auch gern den 8mm Fahrzeugfall nehmen...da haben wir noch mehr
+# verlaessliche Werte." Gegenueber der Kugel hat das zwei harte Vorteile: der Cd-Pfad ueber
+# cd_bericht.csv ist etabliert (cd_druck_rest, cz_rest), waehrend der Kugel-Cd ueber object_force
+# bei FACETTEN>0 ausdruecklich als KONTAMINIERT deklariert ist (setup.cpp) -- dort waere nur der
+# projizierte Pfad zulaessig gewesen.
+#
+# BASISZEILE aus werkzeuge/basis_zeile.py 8, NICHT von Hand. Eine handrekonstruierte 8-mm-Zeile
+# kostete am 28.08. einen Messvormittag; das Werkzeug rechnet mit denselben Regeln wie pruefe_basis.
+# EINZIGE Abweichung: CFD_T_END 0,741 -> 0,501. Grund doppelt: die 501-ms-Regel (1 ms ueber dem
+# runden Wert, sonst faellt der letzte Slice aus) und die Vergleichbarkeit mit den 8-mm-Laeufen vom
+# 22.09., auf die sich die belastbaren Werte beziehen.
+#
+# ARM 0 ist eine GEGENPROBE, kein Messarm, und sie traegt jetzt zwei Fragen:
+#   (1) Ist die B70 gesund? Sie hatte heute frueh 08:34/08:37 Engine-CAT-Errors und einen Haenger.
+#   (2) Haelt der Fix von 20:35? Der erste B70-Versuch um 20:25 starb nach 48 s bei 25 % an
+#       "read_from_device() auf einem Puffer, dessen Host-Spiegel freigegeben wurde". Ursache:
+#       lbm.cpp gibt den fac_nb-Hostspiegel frei, wenn das Geraet NICHT im System-RAM rechnet --
+#       auf der iGPU (gemeinsamer Speicher) bleibt er stehen, auf der diskreten B70 nicht. Der
+#       Impuls-Akkumulator las damit ins Leere. Die iGPU ist ein Stellvertreter fuer BITGLEICHHEIT,
+#       NICHT fuer das Speichermodell -- das ist der Tagesbefund.
+#   ABNAHME ARM 0: FELD-HASH MUSS 8818300773062204851 sein (gemessen 19:21 auf der iGPU).
+#   Weicht er ab, sind die drei Fahrzeugarme dahinter wertlos.
+#
+# ARM 1 ist der BEZUG: dieselbe Zeile ohne Rekonstruktion, frisch gefahren. NICHT aus einem alten
+# Lauf rekonstruiert -- genau das verbietet die Regel, die am 28.08. elf Schalter gekostet hat.
+#
+# ARME 2/3: beide Vorzeichen bei |eps| = 1e-3, weil ein Vorzeichenfehler sich nur als ANTISYMMETRIE
+# zeigt. Gesucht ist die EMPFINDLICHKEIT von cd_druck_rest und cz_rest je Einheit eps -- eps ist
+# eine Sondenamplitude, KEIN physikalisches Ziel.
+#
+# ERWARTUNG, vorab festgehalten:
+#   - Die wirksame Amplitude war am Kanal nur eps*0,148, weil die ELIBB-Blende auf der Treppe
+#     84,4 % der Facetten klemmte. Am 8-mm-Fahrzeug trifft die Dichteklemme an Facetten nur
+#     97-mal im GANZEN Lauf (PLAN-APG-2026-09-16.md) -- ich erwarte hier eine deutlich hoehere
+#     wirksame Amplitude. Die Histogramme (Slots 336..351) beantworten das mit.
+#   - Ob cd_druck_rest reagiert, ist OFFEN und der eigentliche Test: tau_w ist am 8-mm-Fahrzeug
+#     ENDGUELTIG kein Hebel auf Cd_Druck (22.09., +-100 % Modulation an 97-98,5 % der Facetten
+#     bewegte nur die Reibung). Die Rekonstruktion greift an einer ANDEREN Stelle an -- an der
+#     Geschwindigkeit der Wandzelle statt an der Wandschubspannung. Genau das ist die Frage.
+#
+# Auswertung IMMER mit cd_rest UND cz_rest (cd_druck_rest OHNE Reibung, aus cd_bericht.csv).
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=2 CFD_FAC_REK_EPS=-0.001 :: f8_gegenprobe_b70
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_BODEN_EQ=2 CFD_BODEN_EQ_ABSTAND=1 CFD_BODEN_EQ_DOWN=1 CFD_CASE=fahrzeug_dd CFD_DX=8 CFD_FACETTEN=3 CFD_FACETTEN_KANTE_KOH=1 CFD_FACETTEN_NORMQUELLE=1 CFD_FACETTEN_YWKLEMME=1 CFD_FAC_ALPHA=2 CFD_FAC_APG=0 CFD_FAC_CD_EVERY=1 CFD_FAC_DETEPS=16 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_PINV=1 CFD_FAC_SATGATE=1 CFD_FAC_UTKORR=1.5 CFD_FERN_BODEN_EQ=2 CFD_FERN_BODEN_EQ_DOWN=1 CFD_FERN_EINLASS_EQ=2 CFD_F_LISTE=1 CFD_KOPPLUNG_GLATT=1 CFD_KRAFT_ZBAND=3 CFD_N2F_BAND=1 CFD_N2F_BAND_N=4 CFD_N2F_BAND_PLATEAU=1 CFD_N2F_BAND_PROFIL=2 CFD_N2F_BAND_WAKE=1 CFD_N2F_BAND_WAKE_ABSTAND=16 CFD_N2F_BAND_WAKE_START=3 CFD_N2F_BAND_WANDFREI=1 CFD_N2F_SCHALE=0.5 CFD_PERF_AB=0.1 CFD_POSITIV=2 CFD_PTRT=1.90 CFD_RHO_SPARSAM=1 CFD_SCHRITTE_PRO_ZELLE=8 CFD_SGS_BAND=2 CFD_SGS_BAND_PI=1 CFD_SGS_FDWAND=1 CFD_SGS_SISM=1 CFD_SGS_SISM_AB=15000 CFD_SGS_SISM_T=5000 CFD_SLICE_NEAR_STEPS=5000 CFD_SPONGE_N=32 CFD_T_END=0.501 CFD_T_WARMUP=0.201 CFD_U_KLEMME=1 CFD_U_SPARSAM=0 CFD_VTK_DT=0.15 CFD_VTK_ENDE=1 CFD_Y_VERSATZ=1 CFD_ZAEHL_TAKT=1000 CFD_BASIS_ABWEICHUNG=CFD_T_END=0.501 :: f8_basis
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_BODEN_EQ=2 CFD_BODEN_EQ_ABSTAND=1 CFD_BODEN_EQ_DOWN=1 CFD_CASE=fahrzeug_dd CFD_DX=8 CFD_FACETTEN=3 CFD_FACETTEN_KANTE_KOH=1 CFD_FACETTEN_NORMQUELLE=1 CFD_FACETTEN_YWKLEMME=1 CFD_FAC_ALPHA=2 CFD_FAC_APG=0 CFD_FAC_CD_EVERY=1 CFD_FAC_DETEPS=16 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_PINV=1 CFD_FAC_SATGATE=1 CFD_FAC_UTKORR=1.5 CFD_FERN_BODEN_EQ=2 CFD_FERN_BODEN_EQ_DOWN=1 CFD_FERN_EINLASS_EQ=2 CFD_F_LISTE=1 CFD_KOPPLUNG_GLATT=1 CFD_KRAFT_ZBAND=3 CFD_N2F_BAND=1 CFD_N2F_BAND_N=4 CFD_N2F_BAND_PLATEAU=1 CFD_N2F_BAND_PROFIL=2 CFD_N2F_BAND_WAKE=1 CFD_N2F_BAND_WAKE_ABSTAND=16 CFD_N2F_BAND_WAKE_START=3 CFD_N2F_BAND_WANDFREI=1 CFD_N2F_SCHALE=0.5 CFD_PERF_AB=0.1 CFD_POSITIV=2 CFD_PTRT=1.90 CFD_RHO_SPARSAM=1 CFD_SCHRITTE_PRO_ZELLE=8 CFD_SGS_BAND=2 CFD_SGS_BAND_PI=1 CFD_SGS_FDWAND=1 CFD_SGS_SISM=1 CFD_SGS_SISM_AB=15000 CFD_SGS_SISM_T=5000 CFD_SLICE_NEAR_STEPS=5000 CFD_SPONGE_N=32 CFD_T_END=0.501 CFD_T_WARMUP=0.201 CFD_U_KLEMME=1 CFD_U_SPARSAM=0 CFD_VTK_DT=0.15 CFD_VTK_ENDE=1 CFD_Y_VERSATZ=1 CFD_ZAEHL_TAKT=1000 CFD_FAC_REK=2 CFD_FAC_REK_EPS=0.001 CFD_BASIS_ABWEICHUNG=CFD_T_END=0.501,CFD_FAC_REK=2,CFD_FAC_REK_EPS=0.001 :: f8_rek_p3
+CFD_QUEUE_DEV=1 CFD_QUEUE_HANG_S=900 CFD_BODEN_EQ=2 CFD_BODEN_EQ_ABSTAND=1 CFD_BODEN_EQ_DOWN=1 CFD_CASE=fahrzeug_dd CFD_DX=8 CFD_FACETTEN=3 CFD_FACETTEN_KANTE_KOH=1 CFD_FACETTEN_NORMQUELLE=1 CFD_FACETTEN_YWKLEMME=1 CFD_FAC_ALPHA=2 CFD_FAC_APG=0 CFD_FAC_CD_EVERY=1 CFD_FAC_DETEPS=16 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_PINV=1 CFD_FAC_SATGATE=1 CFD_FAC_UTKORR=1.5 CFD_FERN_BODEN_EQ=2 CFD_FERN_BODEN_EQ_DOWN=1 CFD_FERN_EINLASS_EQ=2 CFD_F_LISTE=1 CFD_KOPPLUNG_GLATT=1 CFD_KRAFT_ZBAND=3 CFD_N2F_BAND=1 CFD_N2F_BAND_N=4 CFD_N2F_BAND_PLATEAU=1 CFD_N2F_BAND_PROFIL=2 CFD_N2F_BAND_WAKE=1 CFD_N2F_BAND_WAKE_ABSTAND=16 CFD_N2F_BAND_WAKE_START=3 CFD_N2F_BAND_WANDFREI=1 CFD_N2F_SCHALE=0.5 CFD_PERF_AB=0.1 CFD_POSITIV=2 CFD_PTRT=1.90 CFD_RHO_SPARSAM=1 CFD_SCHRITTE_PRO_ZELLE=8 CFD_SGS_BAND=2 CFD_SGS_BAND_PI=1 CFD_SGS_FDWAND=1 CFD_SGS_SISM=1 CFD_SGS_SISM_AB=15000 CFD_SGS_SISM_T=5000 CFD_SLICE_NEAR_STEPS=5000 CFD_SPONGE_N=32 CFD_T_END=0.501 CFD_T_WARMUP=0.201 CFD_U_KLEMME=1 CFD_U_SPARSAM=0 CFD_VTK_DT=0.15 CFD_VTK_ENDE=1 CFD_Y_VERSATZ=1 CFD_ZAEHL_TAKT=1000 CFD_FAC_REK=2 CFD_FAC_REK_EPS=-0.001 CFD_BASIS_ABWEICHUNG=CFD_T_END=0.501,CFD_FAC_REK=2,CFD_FAC_REK_EPS=-0.001 :: f8_rek_m3
