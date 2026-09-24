@@ -924,6 +924,10 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 	// Auswertung abbricht -- jede folgende Null waere ohne ihn bedeutungslos -- und der Lauf endet
 	// ueber klemm_bilanz_abschluss weiterhin mit rc 1, waehrend die fremden Berichte ueberleben.
 	if(H[335]!=0x5245464Bu) k_befund("["+ort+"] REKONSTRUKTION: der Konstantenspiegel Slot 335 traegt "+to_string((ulong)H[335])+" statt 0x5245464B. Der FAC_REK-Block steht NICHT im uebersetzten Geraetecode, obwohl der Host ihn eingeschaltet hat."); // ★ 23.09.: wie oft hatte [333] gar nichts zu pruefen // ★ 23.09. S1b: Massenneutralitaet, Soll 0 in JEDER Stufe
+	// ★ 24.09., Pruefbefund aus Durchgang 6: diese Ansage haengt NICHT an Slot 335 -- ihr Spiegel
+	// kommt aus dem JIT-TEXT, einer geraeteunabhaengigen Quelle. Sie fiel durch das return unten
+	// mit weg, ausgerechnet im R3-Arm, wo sie am meisten wert ist. Deshalb VOR dem return.
+	if(env_u("CFD_FAC_REK",0u)>=2u&&!D->fac_rek_r3_jit) k_befund("["+ort+"] R3: CFD_FAC_REK=2 ist gesetzt, aber '#define FAC_REK_R3' steht NICHT im uebersetzten Kernel -- Gate und Buchung sind tote Zeilen. (env statt Statik gelesen: die Statik ist im dd-Fall genullt.)");
 	if(H[335]!=0x5245464Bu) return;
 	const ulong slots=(t_ende>0ull?(t_ende-1ull)/zaehl_takt():0ull)+1ull;
 	if(wp==0ull) { k_befund("["+ort+"] REKONSTRUKTION: Slot 328 = 0 -- der Block wurde NIE erreicht. STILLER NO-OP (Marke nicht gesetzt? Define nicht emittiert? Gate davor?)."); return; }
@@ -1016,7 +1020,6 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		if(D->fac_rek_eps==0.0f&&fabs(je_schritt)>1.0E-12) k_befund("["+ort+"] REKONSTRUKTION: bei eps = 0 wurde x-Impuls "+to_string((float)je_schritt,9u)+" je Schritt eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
 		else print_info("["+ort+"] REKONSTRUKTION Impuls-Akkumulator: "+to_string((float)je_schritt,9u)+" x-Impuls je Schritt, gemittelt ueber den GANZEN Lauf ("+to_string(t_ende)+" Schritte, Warmlauf EINGESCHLOSSEN). ★ Das ist NICHT die Groesse der Kanalbilanz -- die mittelt ueber das Fenster ab dem Warmup-Schnappschuss und steht im Cd-Pfad-Block. Hier ist es eine Groessenordnung und der Wirkpfadbeleg des Akkumulators, keine Abnahme. Der float-Akkumulator degradiert zudem ueber lange Laeufe (Zuwachs von der Groessenordnung eines ulp der Summe).");
 	}
-	if(env_u("CFD_FAC_REK",0u)>=2u&&!D->fac_rek_r3_jit) k_befund("["+ort+"] R3: CFD_FAC_REK=2 ist gesetzt, aber '#define FAC_REK_R3' steht NICHT im uebersetzten Kernel -- Gate und Buchung sind tote Zeilen. (env statt Statik gelesen: die Statik ist im dd-Fall genullt.)");
 	if(D->fac_rek_r3_jit) {
 		// Wirkpfad ZUERST: ohne den Beleg, dass der R3-Block ueberhaupt im uebersetzten Kernel steht,
 		// sind alle folgenden Nullen bedeutungslos (Iron Rule: ein Schalter ohne feuernden Zaehler
@@ -5626,10 +5629,13 @@ void main_setup_kanal() {
 		}
 	}
 	// ★★ 24.09., Pruefbefund H-N5: VORGEZOGEN. Diese Abnahme stand hinter den fremden Waechtern
-	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen 18 bis 27 harte print_error = exit(1) tragen (gezaehlt: Kanal 18, Kugel 24, Nahfeld 27)
-	// tragen -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
-	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme
-	// vorzuziehen aendert nichts als ihre Reihenfolge. Genau dieses Muster hat der Code am
+	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen 18 bis 27 harte print_error = exit(1) tragen (gezaehlt: Kanal 18, Kugel 24, Nahfeld 27) -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
+	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme vorzuziehen aendert
+	// ihre Reihenfolge -- ★ 24.09. BERICHTIGT: NICHT "nichts als". Dieser Satz hat den Befund H5-1
+	// eine Runde lang gedeckt. Er ist zweifach widerlegt: das Vorziehen hat die Verschluckung
+	// UMGEDREHT (die zwei harten Abbrueche in der Abnahme frassen danach die fremden Berichte,
+	// inzwischen behoben), UND es hat eine Kontamination entfernt -- unter CFD_RHO_REK_PRUEF lief
+	// die Abnahme vorher mit zwei zusaetzlichen Zeitschritten aus lbm.run(1u) in t_ende. Genau dieses Muster hat der Code am
 	// 10.09. schon einmal fuer die Diagnostik-Abnahme vor dem K-Kriterienblock angewandt.
 	// Die Funktion ist dafuer geeignet: sie holt ihre Zaehler selbst zurueck und haengt an
 	// keinem der Waechter darunter.
@@ -6885,10 +6891,13 @@ void main_setup_kugel() {
 		}
 	}
 	// ★★ 24.09., Pruefbefund H-N5: VORGEZOGEN. Diese Abnahme stand hinter den fremden Waechtern
-	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen 18 bis 27 harte print_error = exit(1) tragen (gezaehlt: Kanal 18, Kugel 24, Nahfeld 27)
-	// tragen -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
-	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme
-	// vorzuziehen aendert nichts als ihre Reihenfolge. Genau dieses Muster hat der Code am
+	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen 18 bis 27 harte print_error = exit(1) tragen (gezaehlt: Kanal 18, Kugel 24, Nahfeld 27) -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
+	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme vorzuziehen aendert
+	// ihre Reihenfolge -- ★ 24.09. BERICHTIGT: NICHT "nichts als". Dieser Satz hat den Befund H5-1
+	// eine Runde lang gedeckt. Er ist zweifach widerlegt: das Vorziehen hat die Verschluckung
+	// UMGEDREHT (die zwei harten Abbrueche in der Abnahme frassen danach die fremden Berichte,
+	// inzwischen behoben), UND es hat eine Kontamination entfernt -- unter CFD_RHO_REK_PRUEF lief
+	// die Abnahme vorher mit zwei zusaetzlichen Zeitschritten aus lbm.run(1u) in t_ende. Genau dieses Muster hat der Code am
 	// 10.09. schon einmal fuer die Diagnostik-Abnahme vor dem K-Kriterienblock angewandt.
 	// Die Funktion ist dafuer geeignet: sie holt ihre Zaehler selbst zurueck und haengt an
 	// keinem der Waechter darunter.
@@ -6924,8 +6933,6 @@ void main_setup_kugel() {
 	// Vorziehen (H-N5) weiter oben steht. Er gilt jetzt fuer klemm_bilanz_abschluss darunter.
 	// ★ 23.09.2026 Pruefbefund MITTEL-7: diese Abnahme stand VOR SGS-Band, nut_skal, SISM, van Driest,
 	// P-TRT und rho_rand. print_error ist exit(1) -- ein Fehlbefund haette nach 90 min ALLE folgenden
-	// ★ 24.09.: der folgende Kommentarblock bezog sich auf pruefe_rek_wirkpfad, der seit dem
-	// Vorziehen (H-N5) weiter oben steht. Er gilt jetzt fuer klemm_bilanz_abschluss darunter.
 	// Abnahmen mitgerissen. Die Datei sagt das drei Zeilen weiter oben selbst; jetzt gilt es auch hier.
 	klemm_bilanz_abschluss("main_setup_kugel"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
@@ -11043,10 +11050,13 @@ static void main_setup_fahrzeug_dd() {
 		print_info("ACHTUNG P8: Fx_far (forces.csv) und der Fernfeld-Fahrzeugkraft-Anker oben sind in diesem Arm PHANTOMBEHAFTET (object_force an facettenbehandelten Links); kraft_facetten bleibt Nahfeld-only -- fuer A/B nur die VERSCHIEBUNG werten.");
 	}
 	// ★★ 24.09., Pruefbefund H-N5: VORGEZOGEN. Diese Abnahme stand hinter den fremden Waechtern
-	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen 18 bis 27 harte print_error = exit(1) tragen (gezaehlt: Kanal 18, Kugel 24, Nahfeld 27)
-	// tragen -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
-	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme
-	// vorzuziehen aendert nichts als ihre Reihenfolge. Genau dieses Muster hat der Code am
+	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen 18 bis 27 harte print_error = exit(1) tragen (gezaehlt: Kanal 18, Kugel 24, Nahfeld 27) -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
+	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme vorzuziehen aendert
+	// ihre Reihenfolge -- ★ 24.09. BERICHTIGT: NICHT "nichts als". Dieser Satz hat den Befund H5-1
+	// eine Runde lang gedeckt. Er ist zweifach widerlegt: das Vorziehen hat die Verschluckung
+	// UMGEDREHT (die zwei harten Abbrueche in der Abnahme frassen danach die fremden Berichte,
+	// inzwischen behoben), UND es hat eine Kontamination entfernt -- unter CFD_RHO_REK_PRUEF lief
+	// die Abnahme vorher mit zwei zusaetzlichen Zeitschritten aus lbm.run(1u) in t_ende. Genau dieses Muster hat der Code am
 	// 10.09. schon einmal fuer die Diagnostik-Abnahme vor dem K-Kriterienblock angewandt.
 	// Die Funktion ist dafuer geeignet: sie holt ihre Zaehler selbst zurueck und haengt an
 	// keinem der Waechter darunter.
@@ -11072,12 +11082,8 @@ static void main_setup_fahrzeug_dd() {
 		pruefe_rho_rekonstruktion(lbm_f, fNx, fNy, fNz, 1u, fNy/2u, u_lat, rr_dir, "Nahfeld");
 		pruefe_rho_rekonstruktion(lbm_f, fNx, fNy, fNz, 2u, 1u, u_lat, rr_dir, "Nahfeld");
 	}
-	// ★ 24.09.: der folgende Kommentarblock bezog sich auf pruefe_rek_wirkpfad, der seit dem
-	// Vorziehen (H-N5) weiter oben steht. Er gilt jetzt fuer klemm_bilanz_abschluss darunter.
 	// ★ 23.09.2026 Pruefbefund MITTEL-7: diese Abnahme stand VOR SGS-Band, nut_skal, SISM, van Driest,
 	// P-TRT und rho_rand. print_error ist exit(1) -- ein Fehlbefund haette nach 90 min ALLE folgenden
-	// ★ 24.09.: der folgende Kommentarblock bezog sich auf pruefe_rek_wirkpfad, der seit dem
-	// Vorziehen (H-N5) weiter oben steht. Er gilt jetzt fuer klemm_bilanz_abschluss darunter.
 	// Abnahmen mitgerissen. Die Datei sagt das drei Zeilen weiter oben selbst; jetzt gilt es auch hier.
 	klemm_bilanz_abschluss("main_setup_fahrzeug_dd"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
