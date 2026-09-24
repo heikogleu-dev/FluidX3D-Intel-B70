@@ -227,29 +227,27 @@ cannot use them, and does not need to.
 That is also why the projection below is defensible at all. It scales two things — the work, which
 is physics, and the bandwidth, which is a published hardware figure — and nothing else.
 
-| Near-field memory | Fine cells | Resolution | Work vs 4 mm | Peak bandwidth | Run time, *this rig's bandwidth* | Run time, *scaled by bandwidth* |
-|---|---|---|---|---|---|---|
-| 32 GB — Arc Pro B70 — *measured* | 0.65 G | **4.00 mm** | 1× | 608 GB/s | **1.8 h** | **1.8 h** *(measured)* |
-| 96 GB — RTX PRO 6000 Blackwell | 2.19 G | **2.67 mm** | ~5× | 1 792 GB/s | ~9 h | **~3.2 h** |
-| 320 GB — 4 × H100 80 GB | 7.30 G | **1.79 mm** | ~25× | 13 400 GB/s | ~46 h | **~2.1 h** |
-| 768 GB — 8 × 96 GB node | 17.5 G | **1.34 mm** | ~80× | 14 336 GB/s | ~148 h | **~6.2 h** |
+| Near-field memory | Fine cells | Resolution | Work vs 4 mm | Peak bandwidth | Run time |
+|---|---|---|---|---|---|
+| 32 GB — **Intel Arc Pro B70** | 0.65 G | **4.00 mm** | 1× | 608 GB/s | **75 min** — *measured* |
+| 96 GB — **NVIDIA RTX PRO 6000 Blackwell** | 2.19 G | **2.67 mm** | ~5× | 1 792 GB/s | ~2.1 h |
+| 320 GB — **4 × NVIDIA H100 80 GB SXM** | 7.30 G | **1.79 mm** | ~25× | 13 400 GB/s | ~1.4 h |
+| 768 GB — **8 × RTX PRO 6000 Blackwell** | 17.5 G | **1.34 mm** | ~80× | 14 336 GB/s | ~4.2 h |
 
-**How each column is built.** Cells go as dx⁻³ and, at fixed physical time, the step count goes as
+**How the table is built.** Cells go as dx⁻³ and, at fixed physical time, the step count goes as
 dx⁻¹, so work goes as **dx⁻⁴** — that factor is physics and holds on any hardware. Memory per cell
-is the one measured input: **43.8 B**, from the anchor run. The run-time anchor is
-**75 min for 501 ms of physical time** at 4 mm (`p4_bandpi2_4`), rescaled to the 739 ms standard run
-length (5 × vehicle length).
+is the one measured input: **43.8 B**, from the anchor run.
 
-The two run-time columns then differ in exactly one assumption:
+> [!NOTE]
+> **All four figures are for 501 ms of physical time**, the length of the measured anchor run
+> `p4_bandpi2_4`. The project's current standard run length is **739 ms** (5 × vehicle length), so
+> multiply by **1.48** for a standard-length run — on the B70 that is 111 min rather than 75.
 
-- ***This rig's bandwidth*** asks what the run would cost if the larger machine were no faster per
-  cell than this B70. It transfers nothing and is therefore a hard upper bound, but it is not a
-  forecast of anything.
-- ***Scaled by bandwidth*** divides that by the ratio of peak memory bandwidths, on the assumption
-  that a bandwidth-bound kernel reaches a **similar fraction of peak** elsewhere as the 94 % measured
-  here. For NVIDIA hardware that assumption is untested by this project — it is an inference from
-  the roofline, not a benchmark. Upstream FluidX3D reports 96–100 % of peak across vendors, which is
-  the reason to expect it to hold.
+The three projected rows divide the measured 75 min by the ratio of **peak memory bandwidths**, on
+one assumption: that a bandwidth-bound kernel reaches a **similar fraction of peak** elsewhere as
+the 94 % measured here. For NVIDIA hardware that assumption is untested by this project — it is an
+inference from the roofline, not a benchmark. Upstream FluidX3D reports 96–100 % of peak across
+vendors, which is the reason to expect it to hold.
 
 **Bandwidth figures are vendor specifications, not measurements taken here:** Arc Pro B70 608 GB/s
 (256-bit, [Puget Systems review](https://www.pugetsystems.com/labs/articles/intel-arc-pro-b70-review/)
