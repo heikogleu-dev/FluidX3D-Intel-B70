@@ -384,7 +384,7 @@ boundary geometry, a specular symmetry plane — are exactly what this fork adds
 
 ## Companion repositories
 
-- [ParaView / OSPRay ray-tracing on the B70](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing)
+- [ParaView / OSPRay ray-tracing and path-tracing on the B70](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing)
 - [OpenFOAM v2512 + PETSc-Kokkos-SYCL](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)
 - [OpenFOAM 13 GPU offloading (Ginkgo SYCL)](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)
 
