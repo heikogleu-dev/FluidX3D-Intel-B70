@@ -741,6 +741,28 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		return;
 	}
 	if(LBM_Domain::s_fac_rek>3u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter), 2 (R3: Gate + Buchung) und 3 (S2: Amplitude aus dem Wandmodellziel statt aus CFD_FAC_REK_EPS). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
+	// ★★★ CFD_FAC_REK=3 (S2) IST GEMESSEN WIDERLEGT -- 24.09.2026, drei Laeufe am kipp26.
+	// Der Arm bleibt im Code, weil der Befund an ihm haengt und weil nichts geloescht wird, was
+	// eine Messung traegt. Er ist aber KEIN Messarm mehr. Wer ihn faehrt, bekommt das hier:
+	//   cf_kraftbilanz = 0,00000 gegen 1,45889e-2 im AUS-Arm -- der Kanalantrieb bricht zusammen.
+	//   R1 > 0 an 99,7 % der Besuche, die Wand BESCHLEUNIGT also fast ueberall. Erwartet waren
+	//     41,4 % nach der RDIAG-Leiter vom 07.09.
+	//   Die Amplitude konvergiert nicht (79,2 % Schrittaenderung ueber 5 %).
+	// AUSGESCHLOSSEN als Ursache (jeweils gemessen, nicht vermutet):
+	//   - Periode-2-Mode: die Gegenphase [400..402] zeigt 99,7 % gegen 99,7 %, Abstand 0,0
+	//     Prozentpunkte. Meine Aliasing-Hypothese ist damit widerlegt.
+	//   - Der Lag-1-Kreis allein: er bliebe auch nach dem geplanten Umbau (Injektion hinter die
+	//     Momentenschleife) an der Ursache vorbei.
+	// DIE URSACHE IST DIE KONSTRUKTION, nicht der Bau: R1 = -def_fac_tau*twe - P1, und |P1|/twe
+	// liegt zwischen 25 und 1145 (Histogramm 54..58). S2 setzt also keine Wandschubspannung, es
+	// hebt zu ueber 99 % den Bounce-Back-Austausch weg -- und tut das mit einer ZELLQUELLE. Genau
+	// das ist CFD_FAC_KRAFT, und der ist in beiden Stufen gemessen negativ (Stufe 1 cd_druck_rest
+	// +0,2313 +- 0,0102 = 22,7 sigma; Stufe 2 +21,6 %). S2 reproduziert dieses Versagen ueber
+	// einen anderen Aktor (Kupershtokh-EDM statt Guo) und auf einer kleineren Zellmenge.
+	// WAS BLEIBT: die Amplitude aus dem Wandmodellziel abzuleiten ist damit NICHT widerlegt --
+	// widerlegt ist, es ueber eine Zellquelle zu tun, die R1 tragen soll. Ein Nachfolger muesste
+	// am WANDLINK-Fluss ansetzen, nicht am Zellimpuls.
+	if(LBM_Domain::s_fac_rek>=3u) print_warning("CFD_FAC_REK=3 (S2) ist am 24.09.2026 in drei Laeufen am kipp26 WIDERLEGT: der Kanalantrieb bricht zusammen (cf 0,00000 gegen 1,45889e-2), die Wand beschleunigt an 99,7 % der Besuche statt zu bremsen, und die Amplitude konvergiert nicht. Eine Periode-2-Mode ist als Ursache AUSGESCHLOSSEN (Gegenphase 99,7 % gegen 99,7 %). Ursache ist die Konstruktion: R1 wird von -P1 dominiert, S2 hebt damit den Bounce-Back-Austausch weg statt eine Wandschubspannung zu setzen -- dasselbe Versagen wie CFD_FAC_KRAFT. DIESER ARM IST KEIN MESSARM. Er steht nur noch, weil der Befund an ihm haengt.");
 	if(LBM_Domain::s_fac_rek>=3u&&env_f("CFD_FAC_REK_EPS",0.0f)!=0.0f) print_error("CFD_FAC_REK=3 (S2) bestimmt die Amplitude je Facette und Schritt aus dem Wandmodellziel (rho*du = R1*t1). CFD_FAC_REK_EPS ist in diesem Arm WIRKUNGSLOS und darf nicht gesetzt sein -- sonst ist der Handwert nur umbenannt, und genau das soll S2 abschaffen.");
 	if(LBM_Domain::s_fac_rek>0u) {
 		// ★★ 23.09. spaet, Pruefbefund H-N3: hier stand erst >=2u (zu lasch), dann >0u fuer ALLE fuenf
@@ -1155,7 +1177,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 			{
 				const ulong leer=(ulong)H[398], wid=(ulong)H[399];
 				if(g_alle>0ull&&leer>0ull) print_warning("["+ort+"] R3 LEERE PROBE: an "+to_string((float)(100.0*(double)leer/(double)g_alle),1u)+" % der markierten Besuche ist rho*|du| = 0. Dort pruefen die Histogramme [381..385] und [388..392] NICHTS, legen den Besuch aber ins unterste Fach -- ihre Prozentzahlen sind um diesen Anteil zu guenstig.");
-				if(g_alle>0ull&&wid>g_alle/20ull) k_befund("["+ort+"] R3 WIDERSPRUCH: an "+to_string((float)(100.0*(double)wid/(double)g_alle),1u)+" % der Besuche weicht rek_dp1 um mehr als 20 % von rho*du*G11roh ab. Beide sind dieselbe Groesse in fuehrender Ordnung, gliedweise vorzeichengleich, ohne Ausloeschung. Eine Abweichung heisst, dass eines der beiden Histogramme [373..377] oder [381..385] falsch ist -- und die H1-Korrektur (P1 - rek_dp1) steht genau darauf.");
+				if(g_alle>0ull&&wid>g_alle/20ull) k_befund("["+ort+"] R3 WIDERSPRUCH: an "+to_string((float)(100.0*(double)wid/(double)g_alle),1u)+" % der Besuche weicht rek_dp1 um mehr als 20 % von rho*du*G11roh ab. Beide sind dieselbe Groesse in fuehrender Ordnung, gliedweise vorzeichengleich, ohne Ausloeschung. ACHTUNG, HIER STAND EINE FALSCHE DEUTUNG (berichtigt 24.09. nach dem dritten S2-Lauf): die H1-Korrektur (P1 - rek_dp1) steht NICHT auf dieser Gleichheit. Sie steht darauf, dass rek_dp1 die EXAKTE Df-Projektion ist, und das ist es unabhaengig von der fuehrenden Ordnung. Was dieser Zaehler wirklich misst, ist der Abstand zur LINEARISIERUNG: eine hohe Quote heisst, die Amplitude liegt weit ausserhalb des Bereichs, in dem DP1 = rho*du*G11roh gilt. Gemessen am kipp26 unter S2: 99,3 %.");
 				else if(g_alle>0ull) print_info("["+ort+"] R3 WIDERSPRUCH: rek_dp1 und rho*du*G11roh stimmen an "+to_string((float)(100.0*(double)(g_alle-wid)/(double)g_alle),1u)+" % der Besuche auf 20 % ueberein -- die Voraussetzung der H1-Korrektur traegt.");
 			}
 			if(k_bl>0ull) print_warning("["+ort+"] R3 KORREKTUR: Slot 387 = "+to_string(k_bl)+" -- an so vielen Marken ist |DP2| mehr als das 1000-fache von |DP1|. Dort faengt Slot 378 zwar noch ein verkehrtes Vorzeichen (bis rund 1e4), aber keinen toten Code mehr. Seine Null ist an diesen Besuchen nur eingeschraenkt belastbar.");
