@@ -416,17 +416,62 @@ form that belongs here.
 
 ## 🗺️ LBM solver landscape — why FluidX3D on this hardware
 
-| Solver | Runs GPU-accelerated on an Intel Arc B70? | |
+An LBM step reads and writes every cell's distributions and does almost no arithmetic in between.
+**Two numbers therefore decide everything: how many bytes a cell costs per step, and what fraction
+of peak bandwidth the code actually reaches.** Everything else is features.
+
+### What a cell costs, and why it is the whole game
+
+| | Bytes per cell per step | Source |
 |---|---|---|
-| **FluidX3D** | OpenCL, native, highest bandwidth utilisation in the field | ✅ **chosen** |
-| OpenLB-SYCL | experimental, not yet production-grade on Intel | ⚠️ |
-| Sailfish | OpenCL, abandoned upstream | ⚠️ |
-| waLBerla · TCLB · Palabos · lbmpy · Musubi | require CUDA or HIP | ❌ |
+| Textbook D3Q19, two lattices, FP32 | **152 B** | 19 × 4 B, read + write — arithmetic from the scheme |
+| FluidX3D, FP32/FP32 | **153 B** | upstream, [`README_UPSTREAM.md`](README_UPSTREAM.md) |
+| **FluidX3D, FP32/FP16 — Esoteric-Pull + compressed storage** | **77 B** | upstream, same source |
+| **This fork, measured on the B70** | **~123 B** | 4 648 MLUPs ↔ 572 GB/s, measured here |
 
-FluidX3D's missing pieces for this case — a wall model, sub-cell boundary geometry, a specular
-symmetry plane — are exactly what this fork adds.
+The fork sits above upstream's 77 B because a vehicle case carries what a generic solver does not:
+per-facet wall-model state, the neighbour sampling, the coupling buffers. **That is the price of the
+physics, and it is stated rather than hidden.**
 
----
+> [!TIP]
+> **Arithmetic intensity 2.37 / 5.27 / 16.56 FLOPs per byte** (FP32/FP32, FP16S, FP16C — upstream's
+> figures). At those ratios no GPU on the market is compute-limited for LBM. **A solver's FLOPs are
+> irrelevant; only its bytes and its bandwidth efficiency matter.**
+
+### Reaching peak bandwidth — the one number we measured ourselves
+
+| | |
+|---|---|
+| Arc Pro B70, peak | 608 GB/s ([Puget Systems](https://www.pugetsystems.com/labs/articles/intel-arc-pro-b70-review/)) |
+| **This fork, sustained** | **572 GB/s = 94 % of peak** — measured, sphere case at matched cell count |
+| Upstream's claim across vendors | 96–100 % of peak |
+
+> [!IMPORTANT]
+> **We have no comparable figure for any other solver.** Published MLUPs numbers are not comparable
+> without the bytes-per-cell of the same build, and we have not benchmarked the others on this
+> hardware. Stating a percentage for them would be a guess, so this table does not.
+
+### Which solvers run on this hardware at all
+
+| Solver | GPU backend | Runs on Intel Arc? | Built-in wall model |
+|---|---|---|---|
+| **FluidX3D** | OpenCL | ✅ **native** | ❌ — *this fork adds it* |
+| Palabos | C++ stdpar since the 2025 GPU port ([arXiv:2506.09242](http://arxiv.org/abs/2506.09242)) | ⚠️ hardware-agnostic in principle, untested here | ✅ Werner–Wengle |
+| OpenLB | SYCL / CUDA | ⚠️ experimental on Intel | ✅ Musker + van Driest |
+| waLBerla | CUDA / HIP | ❌ | ✅ generic (power-law, Spalding) |
+| TCLB · lbmpy · Musubi | CUDA / HIP | ❌ | partly |
+| Sailfish | OpenCL | ⚠️ abandoned upstream | ✅ Bouzidi + power-law |
+
+### What none of them solves
+
+Several carry a wall function. **None carries a wall model that works on a staircase-voxelised
+curved body at automotive Reynolds numbers** — the case where the surface normal is not the cell
+normal and a fifth of all wall cells cannot span two tangential directions. That gap is the reason
+this fork exists, and it is the part that is genuinely hard.
+
+The honest summary: **FluidX3D was chosen because it is the only production-grade LBM solver that
+runs natively on this hardware and moves the fewest bytes per cell.** What it lacked for a vehicle
+— the wall model, sub-cell boundary geometry, the two-device split — is what the fork adds.
 
 ## 🔗 Companion repositories
 
