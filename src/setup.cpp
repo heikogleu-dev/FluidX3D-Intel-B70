@@ -882,6 +882,9 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 				const double kn_mitte[8] = {-0.75, -0.30, -0.05, 0.05, 0.30, 0.70, 0.945, 0.995};
 				const double kc_mitte[8] = {-0.75, -0.25, 0.15, 0.45, 0.70, 0.875, 0.975, 0.9995};
 				for(uint b=0u; b<8u; b++) { nn += (ulong)H[352+b]; nc += (ulong)H[360+b]; }
+				// ★ 24.09., Pruefbefund N1: bei nn==0 (alle markierten Besuche ohne Fluidnachbar) wurden
+				// beide Identitaeten uebersprungen und H[368] blieb ungeprueft. Jetzt mit eigener Ansage.
+				if(nn==0ull&&wp>0ull) print_warning("["+ort+"] REKONSTRUKTION: das Richtungshistogramm ist LEER (nn = 0) bei "+to_string(wp)+" markierten Besuchen -- entweder hatte keine Marke einen Fluidnachbarn (dann muss Slot 368 = "+to_string((ulong)H[368])+" gleich "+to_string(wp)+" sein), oder die Histogrammschreibung ist tot.");
 				if(nn>0ull) {
 					string zn = "";
 					string zc = "";
@@ -1063,7 +1066,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// ★ Pruefbefund N2/N6: zwei Divergenzen ansagen, die sonst still falsch gelesen werden.
 		print_warning("["+ort+"] R3 ANSAGE: (1) cd_bericht.csv (fac_tau) enthaelt die Rekonstruktionsquelle jetzt HERAUSGERECHNET, forces.csv (object_force ueber update_force_field) dagegen NICHT -- beide weichen um genau Summe rho*du voneinander ab, das ist kein Fehler. (2) Unter CFD_FAC_RDIAG/KDIAG mischen die R3-erzwungenen Zellen unter die echten Rang-0-Rueckfaelle; die Rueckfall-Diagnose ist in diesem Arm NICHT mehr die Einzellink-Klasse.");
 	}
-	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[380]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/380 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
+	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[373]+(ulong)H[374]+(ulong)H[375]+(ulong)H[376]+(ulong)H[377]+(ulong)H[380]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/380 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
 }
 
 static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
@@ -1463,6 +1466,8 @@ static void pruefe_rueckfall_buchung(const ulong h69, const ulong h10, const ulo
 	const string formel = uw_an ? string("124 (untere u_w-Klemme = reines BB)") : (string("13+15+64")+(satgate?"+10+16":"")+(h94>0ull?"+94(Schatten)":"")+(h331>0ull?"+331(R3-Gate)":""));
 	if(h69>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung Slot 69 saettigt ("+to_string(h69)+", Soll "+to_string(soll)+") -- Identitaet nicht pruefbar.");
 	else if(h331>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung: Slot 331 saettigt ("+to_string(h331)+") -- die Identitaet ist nicht pruefbar.");
+	// ★ 24.09., Pruefbefund M7: h94 saettigt ebenfalls (ARM X), hatte aber keinen Vorbehalt.
+	else if(h94>=0xF0000000ull) print_info("["+ort+"] Rueckfall-Buchung: Slot 94 saettigt ("+to_string(h94)+") -- die Identitaet ist nicht pruefbar.");
 	// ★ 23.09. abends, Pruefbefund A2/N3: war print_error und laeuft mehrere tausend Zeilen VOR der
 	// R3-Abnahme -- ein Treffer haette sie komplett gefressen, wie K2 es heute viermal getan hat.
 	// Und dieser Diff hat genau diese Identitaet veraendert (soll += h331). Sammelform; geworfen
@@ -5612,6 +5617,15 @@ void main_setup_kanal() {
 				else if(FK.px!=0.0) print_info("K3: Druck_x = "+to_string((float)FK.px)+" innerhalb Toleranz "+to_string((float)tol_px)+" (nicht exakt 0, Rundungsrest der double-Summe)."); }
 		}
 	}
+	// ★★ 24.09., Pruefbefund H-N5: VORGEZOGEN. Diese Abnahme stand hinter den fremden Waechtern
+	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen dreizehn harte print_error = exit(1)
+	// tragen -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
+	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme
+	// vorzuziehen aendert nichts als ihre Reihenfolge. Genau dieses Muster hat der Code am
+	// 10.09. schon einmal fuer die Diagnostik-Abnahme vor dem K-Kriterienblock angewandt.
+	// Die Funktion ist dafuer geeignet: sie holt ihre Zaehler selbst zurueck und haengt an
+	// keinem der Waechter darunter.
+	pruefe_rek_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kanal");
 	if(env_u("CFD_SGS_BAND",0u)>0u) pruefe_band_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kanal");
 	if(env_u("CFD_SGS_BAND",0u)>0u) bericht_gdiag_band(lbm.lbm_domain[0], out_dir, "Kanal"); // ★ 22.09. Band-g-Diagnose hinter der Band-Abnahme
 	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kanal"); pruefe_sism_drift("Kanal"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil, WIRKLICH ans Ende des Fallberichts. Nachpruefung der Audit-Schleife 2: der erste Versuch setzte den Aufruf hinter bericht_gdiag und liess im Kanal noch ~170 Berichtszeilen dahinter -- also FRUEHER als vor dem Fix. Die Funktion enthaelt print_error = exit; hier frisst es nichts mehr.
@@ -5626,7 +5640,6 @@ void main_setup_kanal() {
 	// ★ 23.09.2026 Pruefbefund MITTEL-7: diese Abnahme stand VOR SGS-Band, nut_skal, SISM, van Driest,
 	// P-TRT und rho_rand. print_error ist exit(1) -- ein Fehlbefund haette nach 90 min ALLE folgenden
 	// Abnahmen mitgerissen. Die Datei sagt das drei Zeilen weiter oben selbst; jetzt gilt es auch hier.
-	pruefe_rek_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kanal");
 	klemm_bilanz_abschluss("main_setup_kanal"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
@@ -6859,6 +6872,15 @@ void main_setup_kugel() {
 				+", Reibung x = "+to_string((float)FKu.rx,6u)+" | n_voll "+to_string(FKu.n_voll)+", projiziert "+to_string(FKu.n_proj)+", unklar "+to_string(FKu.n_unklar));
 		}
 	}
+	// ★★ 24.09., Pruefbefund H-N5: VORGEZOGEN. Diese Abnahme stand hinter den fremden Waechtern
+	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen dreizehn harte print_error = exit(1)
+	// tragen -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
+	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme
+	// vorzuziehen aendert nichts als ihre Reihenfolge. Genau dieses Muster hat der Code am
+	// 10.09. schon einmal fuer die Diagnostik-Abnahme vor dem K-Kriterienblock angewandt.
+	// Die Funktion ist dafuer geeignet: sie holt ihre Zaehler selbst zurueck und haengt an
+	// keinem der Waechter darunter.
+	pruefe_rek_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kugel");
 	if(env_u("CFD_SGS_BAND",0u)>0u) pruefe_band_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kugel");
 	if(lbm.lbm_domain[0]->nut_skal!=1.0f) pruefe_nut_skal_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.lbm_domain[0]->nut_skal, "Kugel"); // ★ 10.09. Diskriminator-Messarm (Konstruktionszustand, nicht env)
 	if(env_u("CFD_SGS_SISM",0u)>0u) { pruefe_sism_wirkpfad(lbm.lbm_domain[0]->rho_clamp_hits.data(), lbm.get_t(), lbm.lbm_domain[0]->sism_ab, lbm.lbm_domain[0]->sism_T, lbm.lbm_domain[0]->sism_on, "Kugel"); pruefe_sism_drift("Kugel"); } // ★ 07.09. SISM-Wirkpfad + Drift-Urteil, WIRKLICH ans Ende des Fallberichts. Nachpruefung der Audit-Schleife 2: der erste Versuch setzte den Aufruf hinter bericht_gdiag und liess im Kanal noch ~170 Berichtszeilen dahinter -- also FRUEHER als vor dem Fix. Die Funktion enthaelt print_error = exit; hier frisst es nichts mehr.
@@ -6889,7 +6911,6 @@ void main_setup_kugel() {
 	// ★ 23.09.2026 Pruefbefund MITTEL-7: diese Abnahme stand VOR SGS-Band, nut_skal, SISM, van Driest,
 	// P-TRT und rho_rand. print_error ist exit(1) -- ein Fehlbefund haette nach 90 min ALLE folgenden
 	// Abnahmen mitgerissen. Die Datei sagt das drei Zeilen weiter oben selbst; jetzt gilt es auch hier.
-	pruefe_rek_wirkpfad(lbm.lbm_domain[0], lbm.get_t(), "Kugel");
 	klemm_bilanz_abschluss("main_setup_kugel"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
@@ -11005,6 +11026,15 @@ static void main_setup_fahrzeug_dd() {
 		}
 		print_info("ACHTUNG P8: Fx_far (forces.csv) und der Fernfeld-Fahrzeugkraft-Anker oben sind in diesem Arm PHANTOMBEHAFTET (object_force an facettenbehandelten Links); kraft_facetten bleibt Nahfeld-only -- fuer A/B nur die VERSCHIEBUNG werten.");
 	}
+	// ★★ 24.09., Pruefbefund H-N5: VORGEZOGEN. Diese Abnahme stand hinter den fremden Waechtern
+	// (Band, nut_skal, SISM, van Driest, P-TRT), die zusammen dreizehn harte print_error = exit(1)
+	// tragen -- jeder davon frass den kompletten Rekonstruktions- und R3-Bericht. Sie auf
+	// Sammelform umzustellen haette das Verhalten FREMDER Mechanismen geaendert; die Abnahme
+	// vorzuziehen aendert nichts als ihre Reihenfolge. Genau dieses Muster hat der Code am
+	// 10.09. schon einmal fuer die Diagnostik-Abnahme vor dem K-Kriterienblock angewandt.
+	// Die Funktion ist dafuer geeignet: sie holt ihre Zaehler selbst zurueck und haengt an
+	// keinem der Waechter darunter.
+	pruefe_rek_wirkpfad(lbm_f.lbm_domain[0], lbm_f.get_t(), "Nahfeld");
 	if(env_u("CFD_SGS_BAND",0u)>0u) pruefe_band_wirkpfad(lbm_f.lbm_domain[0], lbm_f.get_t(), "Nahfeld");
 	if(env_u("CFD_SGS_BAND",0u)>0u&&env_u("CFD_FACETTEN",0u)>0u) bericht_gdiag_band(lbm_f.lbm_domain[0], out_dir, "Nahfeld"); // ★ 22.09. Band-g-Diagnose HINTER der Band-Abnahme (Pruefbefund M1: Abnahmen ans Funktionsende)
 	if(lbm_f.lbm_domain[0]->nut_skal!=1.0f) pruefe_nut_skal_wirkpfad(lbm_f.lbm_domain[0]->rho_clamp_hits.data(), lbm_f.lbm_domain[0]->nut_skal, "Nahfeld"); // ★ 10.09. Diskriminator-Messarm (Konstruktionszustand, nicht env)
@@ -11029,7 +11059,6 @@ static void main_setup_fahrzeug_dd() {
 	// ★ 23.09.2026 Pruefbefund MITTEL-7: diese Abnahme stand VOR SGS-Band, nut_skal, SISM, van Driest,
 	// P-TRT und rho_rand. print_error ist exit(1) -- ein Fehlbefund haette nach 90 min ALLE folgenden
 	// Abnahmen mitgerissen. Die Datei sagt das drei Zeilen weiter oben selbst; jetzt gilt es auch hier.
-	pruefe_rek_wirkpfad(lbm_f.lbm_domain[0], lbm_f.get_t(), "Nahfeld");
 	klemm_bilanz_abschluss("main_setup_fahrzeug_dd"); // ★ 15.09.2026 Klemmen S0b: Abbruch bei verletzter Abnahme erst am Fallende
 	_exit(0);
 }
@@ -11530,7 +11559,7 @@ void main_setup() { // Fallauswahl: CFD_CASE = kugel (Default) | kanal | fahrzeu
 	if(env_u("CFD_FAC_REK", 0u)>0u) {
 		const string fall_rek = c!=nullptr ? string(c) : string("kugel");
 		if(fall_rek!="kanal"&&fall_rek!="kugel"&&fall_rek!="fahrzeug_dd")
-			print_error("CFD_FAC_REK=1 gesetzt, aber CFD_CASE="+fall_rek+" kennt die Wandzell-Rekonstruktion nicht: dieser Fall ruft zensus_statische_klassen gar nicht auf, die Markenmenge bliebe leer und der Schalter waere ein vollstaendiger stiller No-Op. Verdrahtet sind kanal, kugel und fahrzeug_dd.");
+			print_error("CFD_FAC_REK>0 gesetzt, aber CFD_CASE="+fall_rek+" kennt die Wandzell-Rekonstruktion nicht (★ 24.09., Pruefbefund M8: das betrifft namentlich CFD_CASE=fahrzeug, den Einzeldomaenen-Fall -- er ruft weder pruefe_rek_vorbedingungen noch pruefe_rek_wirkpfad und haette die Marken ohne jede Abnahme gefahren): dieser Fall ruft zensus_statische_klassen gar nicht auf, die Markenmenge bliebe leer und der Schalter waere ein vollstaendiger stiller No-Op. Verdrahtet sind kanal, kugel und fahrzeug_dd.");
 	}
 	if(getenv("CFD_RHO_RAND")!=nullptr&&c!=nullptr&&string(c)!="fahrzeug_dd"&&string(c)!="kugel") print_warning("CFD_RHO_RAND ist gesetzt, wird aber NUR im fahrzeug_dd-Nahfeld und am Kugel-Pruefstand angewandt (15.09.2026; Ansage-Doktrin)."); // ★ 15.09. RHO_RAND C0/C2c
 	// ★★ 22.09.2026, Pruefrunde 2 Befund B1 (MITTEL) -- ANSAGE VOR DER FALLAUSWAHL.

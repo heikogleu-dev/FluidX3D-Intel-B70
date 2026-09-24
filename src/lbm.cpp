@@ -373,7 +373,7 @@ LBM_Domain::LBM_Domain(const Device_Info& device_info, const uint Nx, const uint
 	opencl_c_code = device_defines(device_info)+get_opencl_c_code();
 #endif // GRAPHICS
 	fac_rek_jit = opencl_c_code.find("#define FAC_REK\n")!=string::npos; // ★ 23.09. Pruefbefund M5: das \n MUSS mit -- "#define FAC_REK" ist Teilstring von "#define FAC_REK_R3", ein reiner R3-Text haette hier faelschlich "MIT FAC_REK" gemeldet (messwerte/_bb-Teilstringfalle vom 03.09.)
-	fac_rek_r3_jit = opencl_c_code.find("#define FAC_REK_R3")!=string::npos; // ★ 23.09. R3: eigener Spiegel, sonst traegt der Arm-2-Lauf keinen Wirkpfadbeleg fuer das Gate. Gelesen NUR in setup.cpp (pruefe_rek_wirkpfad); der Kohaerenzvergleich gegen fac_rek_on in alloc_facetten_domain betrifft fac_rek_jit, nicht dieses Feld. // ★ 22.09. S0, Lehre M2: Kernelzustand aus dem JIT-Text einfrieren; alloc_facetten_domain vergleicht ihn gegen fac_rek_on
+	fac_rek_r3_jit = opencl_c_code.find("#define FAC_REK_R3")!=string::npos; // ★ 23.09. R3: eigener Spiegel, sonst traegt der Arm-2-Lauf keinen Wirkpfadbeleg fuer das Gate. Gelesen in setup.cpp: pruefe_rek_wirkpfad (Wirkpfadwaechter) UND der K2-Zweig des Cd-Pfads sowie der Bilanzblock (★ 24.09., Pruefbefund N3: hier stand "NUR in pruefe_rek_wirkpfad"). Der Kohaerenzvergleich gegen fac_rek_on in alloc_facetten_domain betrifft fac_rek_jit, nicht dieses Feld. // ★ 22.09. S0, Lehre M2: Kernelzustand aus dem JIT-Text einfrieren; alloc_facetten_domain vergleicht ihn gegen fac_rek_on
 	band_pi_jit = opencl_c_code.find("#define SGS_BAND_PI")!=string::npos; // ★ 22.09. Pruefbefund A-M2: Kernel-Modus aus dem JIT-Text einfrieren, alloc_sgs_band vergleicht ihn mit dem Host-Modus (H1-Klasse: Host FD, Kernel Pi -> 6x Ueberlauf; war nur ueber Symptome zu finden). Durchgang 2 N-2: HINTER dem #endif, damit auch ein GRAPHICS-Bau ihn setzt.
 	// ★ C2 (aus V1 portiert, 2026-08-15): CFD_DUMP_DEFINES druckt die tatsaechlich emittierte
 	// Define-Liste (schliesst die Fehlerklasse "Host-Define != OpenCL-Define" -- ein #define in
@@ -1821,10 +1821,14 @@ void LBM_Domain::alloc_facetten_domain(const std::vector<Facette>& F, const uint
 		// ★ 23.09. Stufe A: die Erwartung traegt jetzt auch die drei Richtungsfloats. Wer sie hier vergisst,
 		// baut genau den Ueberlauf vom 22.09. nach -- deshalb steht die Formel an BEIDEN Stellen ausgeschrieben.
 		const ulong nbs_soll = (apg_on ? 5ull : 2ull) + (fac_rek_on ? nb_rek_floats : 0ull);
-		// ★ 23.09. abends, Pruefbefund M3/M5: nb_roff war unbewacht, waehrend nb_stride einen Waechter
-		// hat. Ein Versatz traefe die SCHREIBseite des Impuls-Akkumulators (def_nb_roff+3) und wuerde
-		// unter APG die Gradienten in fac_nb[+2..4] ueberschreiben -- lautlos. Slot 369 faengt einen
-		// Versatz nur auf der Leseseite von t_nb.
+		// ★ 23.09. abends, Pruefbefund M3/M5: nb_roff war unbewacht, waehrend nb_stride einen Waechter hat.
+		// ★ 24.09. BERICHTIGT, Pruefbefund M1: der Kommentar behauptete hier, der Waechter schuetze die
+		// SCHREIBseite des Impuls-Akkumulators. Das trifft NICHT zu -- die Schreibseite benutzt
+		// def_nb_roff aus den STATIKEN (device_defines), nicht dieses Instanzfeld. Was er wirklich
+		// faengt: eine verschluckte Zuweisungszeile, nach der nb_roff auf dem Header-Default 2ull
+		// staende -- genau die Klasse, die am 22.09. den 2,5-fachen Pufferueberlauf gekostet hat.
+		// Ein Auseinanderlaufen von Host und JIT bliebe unentdeckt; dafuer gibt es den Stride-Waechter
+		// darunter und Slot 369 auf der Leseseite von t_nb.
 		const ulong roff_soll = apg_on ? 5ull : 2ull;
 		if(nb_roff != roff_soll) print_error("fac_nb-Offset inkonsistent: nb_roff = "+to_string(nb_roff)+", erwartet "+to_string(roff_soll)+" (apg_on = "+string(apg_on?"true":"false")+"). Der Impuls-Akkumulator wuerde in die APG-Gradienten schreiben.");
 		if(nbs != nbs_soll) print_error("fac_nb-Stride inkonsistent: nb_stride = "+to_string(nbs)
