@@ -2059,6 +2059,14 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	const float utx=uxn-und*nx, uty=uyn-und*ny, utz=uzn-und*nz;
 	float ut = sqrt(utx*utx+uty*uty+utz*utz);
 	if(t%def_zaehl_takt==0ul) atomic_inc(&hits[7]); // Wirkpfad (Soll = fac_N * ceil(n/100), wie Paararm)
+)+"#ifdef FAC_REK"+R(
+	// ★★ 24.09., Pruefbefund H5-2: der Konstantenspiegel stand HINTER dem ut-Tor. Dort heisst
+	// "335 = 0" zweierlei -- der Block steht nicht im uebersetzten Geraetecode ODER alle
+	// Facettenbesuche an Zaehlschritten sind am ut-Tor ausgestiegen. Der Host behauptet nur die
+	// erste Ursache und brach darauf ab. Jetzt davor: der Spiegel belegt ausschliesslich, dass der
+	// uebersetzte Kernel den Block traegt. Bleibt in #ifdef FAC_REK, der AUS-Arm ist unberuehrt.
+	if(t%def_zaehl_takt==0ul) hits[335] = 0x5245464Bu;
+)+"#endif"+R( // FAC_REK
 	if(ut<1e-6f) { if(t%def_zaehl_takt==0ul) atomic_inc(&hits[9]); return (float3)(0.0f,0.0f,0.0f); }
 )+"#ifdef FAC_REK_R3"+R(
 	// ★★ R3 (Entscheid REKONSTRUKTION-PLAN.md §12): wo die statische Marke sitzt, setzt die
@@ -2081,7 +2089,6 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FAC_REK"+R(
 	{
-		if(t%def_zaehl_takt==0ul) hits[335] = 0x5245464Bu; // ★ 23.09. abends: gegattet. Vorher ein ungegatterter globaler Store JE Facettenbesuch JE Schritt auf dieselbe Adresse (Cache-Zeile der Atomics 328..343). Der Host braucht den Wert genau einmal.
 		const float rek_marke = fac_geo[b+7ul];
 		const float rek_eps = fac_geo[b+6ul];
 		if(rek_marke>0.5f) {
