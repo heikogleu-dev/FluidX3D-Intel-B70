@@ -2649,7 +2649,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			if(rhon<=0.5f&&hits[394]<0xF0000000u) atomic_inc(&hits[394]);
 			// [395] die Schranke hat gegriffen, die Zelle faellt auf Bounce-Back zurueck.
 			if(!s2_ok&&hits[395]<0xF0000000u) atomic_inc(&hits[395]);
-			// [396] Vorzeichen: R1 > 0 heisst beschleunigen statt bremsen.
+			// [396] Vorzeichen von R1. ★ BERICHTIGT 24.09.: hier stand "beschleunigen statt bremsen" -- das
+			// ist FALSCH. R1 ist die KORREKTUR, nicht die Wandkraft; nach Anwendung ist
+			// phi1 = -def_fac_tau*twe < 0, die Wand bremst (gemessen: phi1 = -twe exakt). R1 > 0
+			// heisst nur, dass Bounce-Back hier MEHR bremst als das Modell will.
 			if(s2_r1>0.0f&&hits[396]<0xF0000000u) atomic_inc(&hits[396]);
 			// [397] WIRKPFAD und Nenner fuer alle vier.
 			if(hits[397]<0xF0000000u) atomic_inc(&hits[397]);

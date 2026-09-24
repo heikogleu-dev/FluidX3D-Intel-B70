@@ -741,28 +741,48 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		return;
 	}
 	if(LBM_Domain::s_fac_rek>3u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter), 2 (R3: Gate + Buchung) und 3 (S2: Amplitude aus dem Wandmodellziel statt aus CFD_FAC_REK_EPS). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
-	// ★★★ CFD_FAC_REK=3 (S2) IST GEMESSEN WIDERLEGT -- 24.09.2026, drei Laeufe am kipp26.
-	// Der Arm bleibt im Code, weil der Befund an ihm haengt und weil nichts geloescht wird, was
-	// eine Messung traegt. Er ist aber KEIN Messarm mehr. Wer ihn faehrt, bekommt das hier:
-	//   cf_kraftbilanz = 0,00000 gegen 1,45889e-2 im AUS-Arm -- der Kanalantrieb bricht zusammen.
-	//   R1 > 0 an 99,7 % der Besuche, die Wand BESCHLEUNIGT also fast ueberall. Erwartet waren
-	//     41,4 % nach der RDIAG-Leiter vom 07.09.
-	//   Die Amplitude konvergiert nicht (79,2 % Schrittaenderung ueber 5 %).
-	// AUSGESCHLOSSEN als Ursache (jeweils gemessen, nicht vermutet):
-	//   - Periode-2-Mode: die Gegenphase [400..402] zeigt 99,7 % gegen 99,7 %, Abstand 0,0
-	//     Prozentpunkte. Meine Aliasing-Hypothese ist damit widerlegt.
-	//   - Der Lag-1-Kreis allein: er bliebe auch nach dem geplanten Umbau (Injektion hinter die
-	//     Momentenschleife) an der Ursache vorbei.
-	// DIE URSACHE IST DIE KONSTRUKTION, nicht der Bau: R1 = -def_fac_tau*twe - P1, und |P1|/twe
-	// liegt zwischen 25 und 1145 (Histogramm 54..58). S2 setzt also keine Wandschubspannung, es
-	// hebt zu ueber 99 % den Bounce-Back-Austausch weg -- und tut das mit einer ZELLQUELLE. Genau
-	// das ist CFD_FAC_KRAFT, und der ist in beiden Stufen gemessen negativ (Stufe 1 cd_druck_rest
-	// +0,2313 +- 0,0102 = 22,7 sigma; Stufe 2 +21,6 %). S2 reproduziert dieses Versagen ueber
-	// einen anderen Aktor (Kupershtokh-EDM statt Guo) und auf einer kleineren Zellmenge.
-	// WAS BLEIBT: die Amplitude aus dem Wandmodellziel abzuleiten ist damit NICHT widerlegt --
-	// widerlegt ist, es ueber eine Zellquelle zu tun, die R1 tragen soll. Ein Nachfolger muesste
-	// am WANDLINK-Fluss ansetzen, nicht am Zellimpuls.
-	if(LBM_Domain::s_fac_rek>=3u) print_warning("CFD_FAC_REK=3 (S2) ist am 24.09.2026 in drei Laeufen am kipp26 WIDERLEGT: der Kanalantrieb bricht zusammen (cf 0,00000 gegen 1,45889e-2), die Wand beschleunigt an 99,7 % der Besuche statt zu bremsen, und die Amplitude konvergiert nicht. Eine Periode-2-Mode ist als Ursache AUSGESCHLOSSEN (Gegenphase 99,7 % gegen 99,7 %). Ursache ist die Konstruktion: R1 wird von -P1 dominiert, S2 hebt damit den Bounce-Back-Austausch weg statt eine Wandschubspannung zu setzen -- dasselbe Versagen wie CFD_FAC_KRAFT. DIESER ARM IST KEIN MESSARM. Er steht nur noch, weil der Befund an ihm haengt.");
+	// ★★★ CFD_FAC_REK=3 (S2) KIPPT GEMESSEN -- aber die URSACHE stand hier zuerst FALSCH.
+	// Berichtigt 24.09.2026 nach einer adversarialen Gegenpruefung, die meine Begruendung mit
+	// einem Lauf DESSELBEN VORMITTAGS widerlegt hat.
+	//
+	// WAS GEMESSEN IST (kipp26, iGPU, Ub_ziel = 0,072312):
+	//   s2_regress3      (kein Aktor)                  Ub 0,073203   cf 1,459e-2
+	//   s2_kraft1_klasse (R1 als Guo-Kraft,  LAG 0)    Ub 0,073471   cf 3,574e-2
+	//   s2_probe3        (R1 als EDM-Hub,   LAG 1)     Ub 0,175672   cf 0        <-- kippt
+	//
+	// HIER STAND: "S2 ist dasselbe wie CFD_FAC_KRAFT, die Konstruktion ist schuld -- R1 wird von
+	// -P1 dominiert, eine Zellquelle darauf kann nicht tragen." DAS IST WIDERLEGT: CFD_FAC_KRAFT
+	// speist GENAU DASSELBE R1 als Zellquelle ein, an einer OBERMENGE der S2-Zellen (Rueckfall
+	// 100/81,6/51,6 % der drei Klassen gegen die 1-Link-Klasse allein), und haelt den Antrieb auf
+	// 1,6 %. Waere die Begruendung richtig, haette dieser Arm kippen muessen. Er kippt nicht.
+	// WAS DIE BEIDEN TRENNT, IST DER LAG-1 -- den ich fuer unerheblich erklaert hatte.
+	//
+	// WEITERE EIGENE FEHLER IN DIESEM BLOCK, alle berichtigt:
+	//  - "R1 > 0 heisst, die Wand BESCHLEUNIGT": FALSCH. R1 ist die KORREKTUR, nicht die Wandkraft.
+	//    Nach Anwendung ist phi1 = -def_fac_tau*twe < 0, die Wand bremst. An der S2-Zellmenge
+	//    gemessen: phi1 = -6,733998e-06 gegen twe = 6,733998e-06, also phi1 = -twe EXAKT.
+	//    R1 > 0 heisst nur: Bounce-Back bremst hier MEHR als das Modell will.
+	//  - "|P1|/twe zwischen 25 und 1145": das ist der FAHRZEUGWERT. Am kipp26 hat die S2-Zellmenge
+	//    (1-Link-Klasse) 67,85 -- den KLEINSTEN Quotienten der drei Klassen.
+	//  - "drei Laeufe": es sind zwei. s2_probe2 und s2_probe3 sind in kanal_zeit.csv bitgleich.
+	//  - Die rho-Klemme als Ursache: Slot 394 = 710 480 von 53 195 580 = 1,3 %, nicht 85 %.
+	//  - Slot 399 (der schaerfste Disqualifikator) ist an 1-Link-Facetten ein FEHLALARM: der
+	//    Restterm 2*h3*(S1.t1) traegt u_t/ct1 statt du und hebt sich nur bei SYMMETRISCHER
+	//    Linkmenge weg. Die Behauptung "gliedweise vorzeichengleich, keine Ausloeschung" gilt an
+	//    der ebenen Wand und an der 4-Link-Treppe (dort 0,00 %), NICHT an einem einzelnen Link.
+	//
+	// WAS WEITER GILT: der Arm kippt, und der Impuls-Akkumulator zeigt +64,63 x-Impuls je Schritt
+	// gegen ein Gesamtbudget von 0,998 -- das Vorzeichen und die Groessenordnung stimmen, und sie
+	// entsprechen fast genau |P1|/twe = 67,85 an dieser Zellmenge. Die uebersehene dritte Ursache
+	// ist die TEILMENGE: P1 ist an Treppen der deviatorische Austausch und im FLAECHENINTEGRAL
+	// exakt 0 (kernel.cpp beim P1-Kommentar) -- ueber die ganze Wand hebt -P1 sich weg, ueber die
+	// markierte Teilmenge NICHT. Das ist ein reparierbarer Befund, kein Konstruktionsversagen.
+	//
+	// STATUS: der Arm ist KEIN Messarm, aber auch NICHT als Prinzip widerlegt. Offen sind drei
+	// einzeln abnehmbare Schritte: (1) den reinen Modellanteil -def_fac_tau*twe als Ziel, ohne
+	// P1 -- dann kann die Schranke strukturell nie reissen und Slot 395 MUSS 0 sein; (2) den Lag
+	// entfernen; (3) Zellmenge gegen Aktor trennen (CFD_FAC_KRAFT auf die Markenmenge).
+	if(LBM_Domain::s_fac_rek>=3u) print_warning("CFD_FAC_REK=3 (S2) kippt gemessen: der Kanalantrieb verfehlt Ub um +143 % und cf faellt auf 0. ★ DIE URSACHE IST NICHT, wie hier zuerst stand, die Konstruktion: CFD_FAC_KRAFT speist DASSELBE R1 als Zellquelle an einer OBERMENGE der Zellen ein und haelt den Antrieb auf 1,6 % (s2_kraft1_klasse, 24.09.). Was die beiden trennt, ist der LAG-1. Der Arm ist KEIN Messarm, aber auch nicht als Prinzip widerlegt -- siehe den Kommentarblock ueber dieser Zeile fuer fuenf weitere eigene Fehlschluesse, die dort berichtigt sind.");
 	if(LBM_Domain::s_fac_rek>=3u&&env_f("CFD_FAC_REK_EPS",0.0f)!=0.0f) print_error("CFD_FAC_REK=3 (S2) bestimmt die Amplitude je Facette und Schritt aus dem Wandmodellziel (rho*du = R1*t1). CFD_FAC_REK_EPS ist in diesem Arm WIRKUNGSLOS und darf nicht gesetzt sein -- sonst ist der Handwert nur umbenannt, und genau das soll S2 abschaffen.");
 	if(LBM_Domain::s_fac_rek>0u) {
 		// ★★ 23.09. spaet, Pruefbefund H-N3: hier stand erst >=2u (zu lasch), dann >0u fuer ALLE fuenf
@@ -1169,7 +1189,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 						if(fabs(p1-p2)>20.0) k_befund("["+ort+"] S2 PERIODE-2-MODE: das Vorzeichen von R1 unterscheidet sich zwischen den beiden Paritaeten um "+to_string((float)fabs(p1-p2),1u)+" Prozentpunkte. Die Amplitude SCHWINGT, statt zu konvergieren. Der Plan fuehrt diese Mode als real; sie ist mit einem Lag-1-Kreis nicht heilbar, die Injektion muss hinter die Momentenschleife. KEINE Kraftzahl dieses Arms ist deutbar.");
 						else print_info("["+ort+"] S2 GEGENPHASE: beide Paritaeten stimmen im Vorzeichen auf "+to_string((float)fabs(p1-p2),1u)+" Prozentpunkte ueberein -- keine Periode-2-Mode.");
 					}
-					if(vz>0ull) print_info("["+ort+"] S2 VORZEICHEN: an "+to_string((float)(100.0*(double)vz/(double)w),1u)+" % der Besuche ist R1 > 0, die Wand BESCHLEUNIGT dort also. Erwartet nach der RDIAG-Leiter vom 07.09. rund 40 % -- eine stark abweichende Quote heisst, dass P1 oder twe nicht das sind, wofuer sie hier gehalten werden.");
+					if(vz>0ull) print_info("["+ort+"] S2 VORZEICHEN: an "+to_string((float)(100.0*(double)vz/(double)w),1u)+" % der Besuche ist R1 > 0. ★ BERICHTIGT 24.09.: hier stand \"die Wand BESCHLEUNIGT dort also\" -- FALSCH. R1 ist die KORREKTUR, nicht die Wandkraft; nach Anwendung ist phi1 = -def_fac_tau*twe < 0, die Wand bremst (an dieser Zellmenge gemessen: phi1 = -twe exakt). R1 > 0 heisst nur, dass Bounce-Back hier MEHR bremst als das Modell will. Die Erwartung von rund 40 % stammt aus der RDIAG-Leiter vom 07.09., die aber mit acht anderen Schaltern lief (u. a. CFD_FAC_UTKORR=1.5, das twe skaliert) -- der Abstand zu dieser Quote ist damit KEIN sauberer Beleg.");
 				}
 			}
 			// ★★ HOCH-3 und HOCH-4: die beiden Zaehler, die sagen, ob die Prozentzahlen oben ueberhaupt
