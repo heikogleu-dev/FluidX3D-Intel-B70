@@ -5,7 +5,8 @@ workstation, on Intel hardware — and can prove every number it reports.**
 
 A fork of [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann. Upstream is
 the fastest LBM solver of its class, running at 96–100 % of peak memory bandwidth. This fork does
-not try to improve on that. It adds what a vehicle aerodynamics case needs and upstream does not
+not try to improve on that — and, at 94 % of peak measured on the Arc Pro B70, it does not give it
+away either. It adds what a vehicle aerodynamics case needs and upstream does not
 have: a wall model, sub-cell boundary geometry, a two-device domain decomposition, and an
 instrumentation layer that makes silent errors loud.
 
@@ -21,12 +22,20 @@ instrumentation layer that makes silent errors loud.
 | **Downforce** | **Cz −1.0535 ± 0.0234** vs OF13 **−1.301** — **81 %** of the reference |
 | **Hardware** | One workstation. No cluster, no CUDA, no NVIDIA |
 | **Memory** | **47 B per cell** on device, against 93 B for upstream FP32 |
+| **Bandwidth** | **572 GB/s sustained — 94 % of the B70's 608 GB/s peak.** The solver is memory-bound by design; the card's 22.9 TFLOPs go unused |
 | **Proof** | Every mechanism carries an action-path counter with an is = should acceptance. A switch without a firing counter is treated as a hard error |
 
 <sub>Forces from the anchor run `p4_bandpi2_4` (git tag `anker-p4-bandpi2-4`), computed from the
 field data in `cd_facetten.csv` over the window t ≥ 0.201 s, n = 300 samples, uncertainty = standard
 error over six 50 ms block means. Composition is stated below — the two coefficients are not
 interchangeable with the `cd_rest` figures in the run report, which are pressure-only.</sub>
+
+![The 4 mm production run — near field at 500 ms](docs/anker_p4_bandpi2_nah_500ms.png)
+
+*The production run this page reports. `p4_bandpi2_4`, Toyota MR2 at 30 m/s, near-field |u| on the
+Y = 0.025 m slice at t = 500 ms — 15→45 m/s blue→white→red, black = solid. 654.9 M cells at 4 mm on
+a single Arc Pro B70; engine bay with radiator fins resolved, rear wing attached, full turbulent
+wake. This is an instantaneous LES field, not a mean.*
 
 ---
 
@@ -78,6 +87,24 @@ reported separately rather than quietly absorbed.
 against an earlier version of one's own code is banned by project rule: it can only find porting
 errors, and it confirms shared mistakes.
 
+![4 mm against OpenFOAM 13 — velocity difference](docs/diff_p4dt_deteps_vs_of13_501ms.png)
+
+***The 4 mm field against the OpenFOAM 13 reference***, Y = 0.025 m slice: ΔU = |u|_OF13 − |u|_FX,
+red = OF13 faster, blue = OF13 slower / FX over-accelerated, ±15 m/s, black = solid. The red rim
+hugging the body is the boundary layer — the wall model brakes slightly harder than the RANS
+reference. The mottled wake is the snapshot-versus-mean caveat and not a discrepancy: FX is an
+instantaneous LES field, OF13 a RANS mean, so resolved eddies are being held against a smooth
+average. **The mean-flow regions are the part that carries meaning.** Field statistics over
+636 437 evaluable cells, frames aligned by x_v2 = x_OF13 + 2.2063: **RMS 4.26 m/s, median
+−0.57 m/s, 1.66 % of cells clipping the ±15 m/s scale**.
+
+<sub>**Which run this diff is from.** This is the 4 mm run `p4dt_deteps` (2026-09-11), not the
+`p4_bandpi2_4` anchor whose forces head this page: no paired OF13 difference field has been produced
+at 4 mm for the anchor yet, and rendering one from a different run and labelling it as the anchor's
+would be exactly the kind of quiet substitution this project's rules exist to prevent. The two runs
+differ in the Π-band wall treatment, whose effect was measured separately at 12/8 mm (RMS against
+OF13 −9.9 %, share above 15 m/s −42.5 %).</sub>
+
 **The open gap is downforce.** Drag is essentially closed; Cz sits at 81 % of the reference. That
 deficit is the active work item, and it is stated here rather than hidden behind a favourable
 selection of runs.
@@ -101,38 +128,58 @@ buys resolution where it matters, and the domain that only has to be *present* c
 
 ### What more memory would buy
 
-This is **arithmetic, not a measurement**. It uses one measured input — the 43.8 B per cell above —
-and two scaling laws: cells go as dx⁻³, and at fixed physical time the step count goes as dx⁻¹, so
-total work goes as **dx⁻⁴**.
+**First, the number that makes this table possible.** On the Arc Pro B70 this solver sustains
+**4 648 MLUPs, which is 572 GB/s of memory traffic — 94 % of the card's 608 GB/s peak**. That is
+measured here, on the sphere case at matched cell count, and it is the decisive property: an LBM
+step reads and writes every cell's distributions once and does almost no arithmetic in between, so
+**run time is set by memory bandwidth, not by FLOPs**. The B70 delivers 22.9 TFLOPs; this code
+cannot use them, and does not need to.
 
-| Near-field memory | Fine cells | Resolution | Work vs 4 mm | Run time *at this rig's throughput* |
-|---|---|---|---|---|
-| 32 GB — *measured, this rig* | 0.65 G | **4.00 mm** | 1× | **1.8 h** |
-| 96 GB — RTX 6000 Pro class | 2.19 G | **2.67 mm** | ~5× | ~9 h |
-| 320 GB — 4 × H100 80 GB | 7.30 G | **1.79 mm** | ~25× | ~46 h |
-| 768 GB — 8 × 96 GB node | 17.5 G | **1.34 mm** | ~80× | ~148 h |
+That is also why the projection below is defensible at all. It scales two things — the work, which
+is physics, and the bandwidth, which is a published hardware figure — and nothing else.
 
-**Read the last column carefully — it is a counterfactual, not a forecast.** It asks: *if a machine
-of that memory size delivered exactly the per-cell throughput measured on this Arc Pro B70, how long
-would the run take?* It therefore contains no claim whatsoever about H100 or RTX 6000 Pro
-performance. Bigger accelerators are faster per cell, so the real time would be lower — **by how
-much is not something this project can state**, because it would mean transferring vendor bandwidth
-figures into wall clocks, and no such number has been measured here.
+| Near-field memory | Fine cells | Resolution | Work vs 4 mm | Peak bandwidth | Run time, *this rig's bandwidth* | Run time, *scaled by bandwidth* |
+|---|---|---|---|---|---|---|
+| 32 GB — Arc Pro B70 — *measured* | 0.65 G | **4.00 mm** | 1× | 608 GB/s | **1.8 h** | **1.8 h** *(measured)* |
+| 96 GB — RTX PRO 6000 Blackwell | 2.19 G | **2.67 mm** | ~5× | 1 792 GB/s | ~9 h | **~3.2 h** |
+| 320 GB — 4 × H100 80 GB | 7.30 G | **1.79 mm** | ~25× | 13 400 GB/s | ~46 h | **~2.1 h** |
+| 768 GB — 8 × 96 GB node | 17.5 G | **1.34 mm** | ~80× | 14 336 GB/s | ~148 h | **~6.2 h** |
 
-The anchor of that column is one measurement: **75 min for 501 ms of physical time** at 4 mm
-(`p4_bandpi2_4`), rescaled to the 739 ms standard run length (5 × vehicle length) and then multiplied
-by the dx⁻⁴ work factor.
+**How each column is built.** Cells go as dx⁻³ and, at fixed physical time, the step count goes as
+dx⁻¹, so work goes as **dx⁻⁴** — that factor is physics and holds on any hardware. Memory per cell
+is the one measured input: **43.8 B**, from the anchor run. The run-time anchor is
+**75 min for 501 ms of physical time** at 4 mm (`p4_bandpi2_4`), rescaled to the 739 ms standard run
+length (5 × vehicle length).
 
-**What the table does say** is the useful part: the memory wall, not the algorithm, is what sets the
-resolution today. The code already fits a full vehicle at 4 mm into 32 GB, and the cost of the next
-halving in dx is a factor of sixteen in work — on any hardware, because that factor is physics, not
-silicon.
+The two run-time columns then differ in exactly one assumption:
 
-**One honest caveat for the multi-GPU rows.** Upstream FluidX3D carries a multi-GPU domain
-decomposition; this fork's own decomposition is a *near/far* split across two devices of different
-speed, not an N-way split of the fine domain. Running the fine domain across four cards would use
-the upstream path, which this fork has not exercised — so those two rows describe what the memory
-allows, not a configuration that has been run here.
+- ***This rig's bandwidth*** asks what the run would cost if the larger machine were no faster per
+  cell than this B70. It transfers nothing and is therefore a hard upper bound, but it is not a
+  forecast of anything.
+- ***Scaled by bandwidth*** divides that by the ratio of peak memory bandwidths, on the assumption
+  that a bandwidth-bound kernel reaches a **similar fraction of peak** elsewhere as the 94 % measured
+  here. For NVIDIA hardware that assumption is untested by this project — it is an inference from
+  the roofline, not a benchmark. Upstream FluidX3D reports 96–100 % of peak across vendors, which is
+  the reason to expect it to hold.
+
+**Bandwidth figures are vendor specifications, not measurements taken here:** Arc Pro B70 608 GB/s
+(256-bit, [Puget Systems review](https://www.pugetsystems.com/labs/articles/intel-arc-pro-b70-review/)
+— the same source's 22.94 TFLOPS matches what our own device query reports, 22.938); RTX PRO 6000
+Blackwell Workstation 1 792 GB/s (512-bit GDDR7, NVIDIA specification as tabulated by
+[HOSTKEY](https://hostkey.com/blog/109-nvidia-rtx-6000-blackwell-server-edition-tests-benchmarks-comparison-with-workstation-and-rtx-5090-cooling-features/));
+H100 80 GB SXM 3 350 GB/s (HBM3).
+
+**Two caveats that the last column does not contain.** The multi-GPU rows assume **perfect weak
+scaling** — no interconnect cost, no halo exchange, no load imbalance. Real multi-GPU LBM does not
+achieve that, so those two figures are optimistic by an amount this project cannot quantify. And
+this fork's own decomposition is a *near/far* split across two devices of different speed, not an
+N-way split of the fine domain; running the fine domain across four cards would use the upstream
+path, **which this fork has not exercised**.
+
+**What the table says without any assumption at all** is the useful part: the memory wall, not the
+algorithm, sets the resolution today. The code already fits a full vehicle at 4 mm into 32 GB, and
+the cost of the next halving in dx is a factor of sixteen in work — on any hardware, because that
+factor is physics, not silicon.
 
 ### Independent validation rigs
 
