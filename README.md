@@ -37,7 +37,7 @@ instrumentation layer that makes silent errors loud.
 
 ---
 
-## At a glance
+## 📊 At a glance
 
 | | |
 |---|---|
@@ -64,7 +64,7 @@ wake. This is an instantaneous LES field, not a mean.*
 
 ---
 
-## What this is, and what problem it solves
+## 🎯 What this is, and what problem it solves
 
 Vehicle aerodynamics at engineering accuracy normally means a RANS or hybrid solver on a cluster,
 with a body-fitted mesh and a wall function that assumes the first cell sits in a log layer. That
@@ -90,7 +90,34 @@ Everything in this fork exists to pay that price honestly:
 
 ---
 
-## How the two devices split the problem
+## 🧱 Why two domains: the blockage trap
+
+A wall-modelled LES of a car needs two things that pull in opposite directions. The **near field**
+must be fine enough to resolve the body — 4 mm. The **outer boundary** must be far enough away that
+the tunnel walls do not squeeze the flow around the car and inflate the forces. That second
+requirement is **blockage**: the model's frontal area against the tunnel cross-section.
+
+Put numbers on it, and the trap is obvious:
+
+| | Cross-section | Blockage vs A_ref = 1.850 m² | |
+|---|---|---|---|
+| Near box alone — 2.768 × 1.888 m | 5.23 m² | **35.4 %** | 🚫 unusable, the walls *are* the flow |
+| With the far field — 10.160 × 9.712 m | 98.67 m² | **1.875 %** | ✅ below the 2 % convention |
+
+> [!TIP]
+> **1.875 % is measured on this grid, and it beats the paired reference:** the OpenFOAM 13 case
+> `mr2v40H` this fork is validated against sits at **1.93 %**.
+
+**So why not simply make the fine grid that big?** Because of what it costs. The far-field box is
+**1 261 m³**. Filled uniformly at 4 mm that is **19.7 billion cells** — about **926 GB** at this
+fork's measured 47 B per cell. No workstation has that.
+
+The two-domain split buys the same blockage for **964 M cells instead of 19.7 G — a factor of 20** —
+by spending resolution only where the forces are made, and merely *being present* everywhere else.
+
+---
+
+## 🔀 How the two devices split the problem
 
 ```mermaid
 flowchart LR
@@ -104,6 +131,7 @@ flowchart LR
     N -- "fine → coarse<br/>wake outflow" --> F
     N --> OUT["Forces per facet<br/>pressure · friction · per zone"]
     OUT --> VAL{"Paired OpenFOAM 13<br/>34 M cells, k-ω-SST<br/><b>same STL</b>"}
+    IGPU -.-> BL["<b>Blockage 1.875 %</b><br/>what the far field is <i>for</i>"]
 
     style B70 fill:#0A7BBB22,stroke:#0A7BBB,stroke-width:2px
     style IGPU fill:#6E778122,stroke:#6E7781,stroke-width:2px
@@ -111,14 +139,16 @@ flowchart LR
     style N stroke-width:0px
     style F stroke-width:0px
     style OUT stroke-width:0px
+    style BL fill:#2E9E5B22,stroke:#2E9E5B,stroke-width:2px
 ```
 
 The discrete card's 32 GB buys resolution exactly where the forces are made. The domain that only
-has to be *present* lives in system RAM, where it costs nothing scarce.
+has to be *present* — the one that pushes blockage from 35 % down to 1.9 % — lives in system RAM,
+where it costs nothing scarce.
 
 ---
 
-## Results
+## 📐 Results
 
 Both coefficients are **totals**, because the OpenFOAM 13 reference is a total. The composition is
 spelled out so that no figure here can be confused with another:
@@ -255,7 +285,7 @@ factor is physics, not silicon.
 
 ---
 
-## What this fork adds to upstream FluidX3D
+## 🧬 What this fork adds to upstream FluidX3D
 
 Upstream is a general-purpose LBM solver. None of the following exists there; all of it was added
 for this case. Every figure was measured on this rig.
@@ -297,7 +327,7 @@ it can be retested on a future driver.
 
 ---
 
-## How every number is proven
+## 🔬 How every number is proven
 
 This is the part that generalises beyond this car.
 
@@ -329,7 +359,7 @@ archaeology. GPU runs go through a locked queue with a status file and a process
 
 ---
 
-## Build and run
+## ⚙️ Build and run
 
 ```bash
 g++ src/*.cpp -o bin/FluidX3D -std=c++17 -pthread -O -Wno-comment \
@@ -342,9 +372,19 @@ reconstructing one by hand once cost a full morning of measurements.
 
 ---
 
-## Status
+## 🚦 Status
 
-Drag is closed against the reference. **Downforce sits at 81 % of it, and that is the open problem.**
+<div align="center">
+
+| | | |
+|---|---|---|
+| ✅ | **Drag** | closed against the reference — within **1.6 %** |
+| 🚧 | **Downforce** | **81 %** of the reference — *the open problem* |
+| ✅ | **Wall-cell reconstruction** | built, force-booked, booking defect corrected and accepted |
+| 🚧 | **…at 4 mm** | **never run there** — effect on Cz is unmeasured |
+| 🚧 | **…amplitude derived** | still a hand-set knob — next build step |
+
+</div>
 
 The current line of work is a **wall-cell reconstruction**: it imposes the wall-model target on the
 cells where the tangential solve is rank-deficient — roughly a fifth of all wall facets, because a
@@ -374,21 +414,37 @@ rejected, is in [HISTORY.md](HISTORY.md).
 
 ---
 
-## LBM solver landscape — why FluidX3D on this hardware
+## 🗺️ LBM solver landscape — why FluidX3D on this hardware
 
-Of the major open-source LBM solvers, three run GPU-accelerated on the B70: **FluidX3D** (OpenCL,
-native, highest bandwidth utilisation in the field), **OpenLB-SYCL** (experimental, not yet
-production-grade on Intel) and **Sailfish** (OpenCL, abandoned upstream). waLBerla, TCLB, Palabos,
-lbmpy and Musubi all require CUDA or HIP. FluidX3D's missing pieces — a wall model, sub-cell
-boundary geometry, a specular symmetry plane — are exactly what this fork adds.
+| Solver | Runs GPU-accelerated on an Intel Arc B70? | |
+|---|---|---|
+| **FluidX3D** | OpenCL, native, highest bandwidth utilisation in the field | ✅ **chosen** |
+| OpenLB-SYCL | experimental, not yet production-grade on Intel | ⚠️ |
+| Sailfish | OpenCL, abandoned upstream | ⚠️ |
+| waLBerla · TCLB · Palabos · lbmpy · Musubi | require CUDA or HIP | ❌ |
 
-## Companion repositories
+FluidX3D's missing pieces for this case — a wall model, sub-cell boundary geometry, a specular
+symmetry plane — are exactly what this fork adds.
 
-- [ParaView / OSPRay ray-tracing and path-tracing on the B70](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing)
-- [OpenFOAM v2512 + PETSc-Kokkos-SYCL](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)
-- [OpenFOAM 13 GPU offloading (Ginkgo SYCL)](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)
+---
 
-## Original FluidX3D documentation
+## 🔗 Companion repositories
+
+Same hardware, same fight — getting a professional CFD stack to run on Intel instead of NVIDIA.
+
+<div align="center">
+
+[![ParaView](https://img.shields.io/badge/ParaView%20·%20OSPRay-ray--%20and%20path--tracing%20on%20the%20B70-E8683D?style=for-the-badge)](https://github.com/heikogleu-dev/Paraview---Intel-B70-Pro-OSPRAY-Raytracing-Pathtracing)
+
+[![OpenFOAM v2512](https://img.shields.io/badge/OpenFOAM%20v2512-PETSc%20·%20Kokkos%20·%20SYCL-1D8CC4?style=for-the-badge)](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)
+
+[![OpenFOAM 13](https://img.shields.io/badge/OpenFOAM%2013-GPU%20offloading%20·%20Ginkgo%20SYCL-1D8CC4?style=for-the-badge)](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)
+
+</div>
+
+---
+
+## 📚 Original FluidX3D documentation
 
 The upstream README is preserved verbatim as **[README_UPSTREAM.md](README_UPSTREAM.md)** — including
 upstream's benchmark tables and, importantly, its **reference list**. Publications that use this
@@ -399,10 +455,13 @@ Nothing on this page replaces those. Where this README and the upstream one disa
 software does, the difference is a modification made here, and
 [MODIFICATIONS.md](MODIFICATIONS.md) is the place it is accounted for.
 
-## License & Attribution
+---
 
-**This is not FluidX3D.** It is a modified version of it, and it is not endorsed by FluidX3D's
-author. "FluidX3D" is a protected work title of Dr. Moritz Lehmann.
+## ⚖️ License & Attribution
+
+> [!WARNING]
+> **This is not FluidX3D.** It is a modified version of it, and it is **not endorsed** by FluidX3D's
+> author. *"FluidX3D"* is a protected work title of Dr. Moritz Lehmann.
 
 - Original software: **FluidX3D**, © 2022–2026 **Dr. Moritz Lehmann** —
   <https://github.com/ProjectPhysX/FluidX3D>
