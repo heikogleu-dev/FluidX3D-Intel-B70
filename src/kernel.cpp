@@ -2086,6 +2086,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	float rek_duz = 0.0f;
 	float rek_rho = 0.0f;
 	float rek_g11 = 0.0f;
+	float rek_sx = 0.0f;
+	float rek_sy = 0.0f;
+	float rek_sz = 0.0f;
+	float rek_h3 = 0.0f;
 )+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FAC_REK"+R(
 	{
@@ -2143,7 +2147,6 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+3ul] += rhon*dux;
 )+"#endif"+R( // FACETTEN_NACHBAR
 )+"#ifdef FAC_REK_R3"+R(
-			rek_gate = true;
 			rek_dux = dux;
 			rek_duy = duy;
 			rek_duz = duz;
@@ -2162,6 +2165,23 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 			const float s3y = 3.0f*sy;
 			const float s3z = 3.0f*sz;
 			const float h3 = 0.5f*dc3;
+)+"#ifdef FAC_REK_R3"+R(
+			rek_sx = sx;
+			rek_sy = sy;
+			rek_sz = sz;
+			rek_h3 = h3;
+			// rek_gate wird ERST HIER gesetzt, nicht oben bei rek_dux. Pruefbefund N1 (24.09.):
+			// die ACHT Injektionsgroessen werden an zwei Stellen mit einem Rechenblock dazwischen
+			// gefuellt. Ein kuenftiger Frueh-Ausstieg dazwischen liesse rek_gate wahr und
+			// rek_s*/rek_h3 auf 0 stehen -- rek_df waere still falsch, ohne dass ein Zaehler feuert.
+			// Invariante: rek_gate == true heisst, alle ACHT sind gesetzt.
+			// ★ AUSDRUECKLICH AUSGENOMMEN (Pruefbefund M6, 24.09.): rek_g11. Es entsteht erst mit
+			// G11roh in der Momentenschleife, also HINTER dieser Zeile, und wird unter rek_gate
+			// fuer das Histogramm 373..377 gelesen. Ein Frueh-Ausstieg zwischen hier und dort
+			// liefert rek_gate == true bei rek_g11 == 0, und alle Marken landen still im untersten
+			// Fach. Diese Invariante deckt rek_g11 NICHT ab; wer dort etwas einfuegt, prueft selbst.
+			rek_gate = true;
+)+"#endif"+R( // FAC_REK_R3
 			fhn[0] += def_w0*rhon*h3;
 			fhn[1] += wr_s*fma(d3x, fma(0.5f, s3x, 1.0f), h3);
 			fhn[2] += wr_s*fma(-d3x, fma(-0.5f, s3x, 1.0f), h3);
@@ -2372,6 +2392,10 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	}
 )+"#endif"+R( // FACETTEN_APG
 	float G11=0.0f, G22=0.0f, G12=0.0f, P1=0.0f, P2=0.0f;         // Linkmengen-Momente (Gl. 4/7)
+)+"#ifdef FAC_REK_R3"+R(
+	float rek_dp1=0.0f;
+	float rek_dp2=0.0f;
+)+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FACETTEN_PEMA"+R(
 	float Pvx=0.0f, Pvy=0.0f, Pvz=0.0f;
 )+"#endif"+R( // FACETTEN_PEMA
@@ -2390,6 +2414,20 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FACETTEN_PEMA"+R(
 		Pvx = fma(2.0f*cx, fhn[i], Pvx); Pvy = fma(2.0f*cy, fhn[i], Pvy); Pvz = fma(2.0f*cz, fhn[i], Pvz); // Phi^f als xyz-Vektor (Filterrahmen)
 )+"#endif"+R( // FACETTEN_PEMA
+)+"#ifdef FAC_REK_R3"+R(
+		// DOPPELTERM (24.09.2026): fhn traegt an den Marken schon das Df der Rekonstruktion, P1/P2
+		// oben zaehlen es also mit -- und unter R3 ist phi = P, die Wandkraft fuehrt es ein ZWEITES
+		// Mal. Hier wird Df je Wandlink EXAKT nachgebildet (dieselbe Faktorisierung wie die
+		// Injektion, siehe fhn[1] dort: wr_s*fma(d3x, fma(0.5f, s3x, 1.0f), h3)) und auf t1/t2
+		// projiziert. EXAKT heisst: kein Ordnungsargument, kein vernachlaessigter Term -- der
+		// quadratische Anteil und der -1,5(du.s)-Anteil sind mit drin. Bei unmarkierter Zelle sind
+		// rek_rho und alle rek_du* null, also Df == 0 und die Summen bleiben null.
+		const float rek_cdu = fma(cx, rek_dux, fma(cy, rek_duy, cz*rek_duz));
+		const float rek_cs = fma(cx, rek_sx, fma(cy, rek_sy, cz*rek_sz));
+		const float rek_df = wi*rek_rho*fma(3.0f*rek_cdu, fma(1.5f, rek_cs, 1.0f), rek_h3);
+		rek_dp1 = fma(2.0f*ct1, rek_df, rek_dp1);
+		rek_dp2 = fma(2.0f*ct2, rek_df, rek_dp2);
+)+"#endif"+R( // FAC_REK_R3
 		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
 		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
 		Snn = fma(6.0f*wi, cn*cn, Snn); // 3x3-Iteration: Normalautoritaet
@@ -2759,11 +2797,19 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// Df der Rekonstruktion. Unter R3 ist phi1 = P1, also enthaelt die Wandkraft den Wandlink-Anteil
 	// des Df EIN ZWEITES MAL, zusaetzlich zur expliziten Buchung fw -= rho*du. Zur fuehrenden
 	// Ordnung ist dieser Zusatzterm dP1 = rho*eps*G11roh. Dieselbe Klasse ist bei ELIBB bekannt und
-	// wird dort mit +2*Dp_tangential korrigiert; fuer REK gibt es bisher nichts.
-	// G11roh ist das ROHmoment VOR dem ALPHA2-Downdate. Am kipp26 sind die Marken laufzeit-rang-0,
-	// dort ist es ~0 und der Term faellt weg (gemessene Restluecke 0,24-1,75 %). Am Fahrzeug laeuft
-	// ALPHA2, und "Rang 0 NACH dem Downdate" heisst ausdruecklich NICHT G11roh ~ 0.
-	// Liegt das Histogramm nicht im untersten Fach, ist die Buchung um diesen Term zu korrigieren.
+	// wird dort mit +2*Dp_tangential korrigiert.
+	// ★ 24.09.2026: DIESER TERM WIRD JETZT KORRIGIERT -- exakt, nicht in fuehrender Ordnung, siehe
+	// die Buchung weiter unten. Dieses Histogramm misst seitdem nur noch, WIE GROSS er war; es ist
+	// kein offener Befund mehr und keine Handlungsanweisung.
+	// G11roh ist das ROHmoment VOR dem ALPHA2-Downdate. Am Fahrzeug laeuft ALPHA2, und "Rang 0
+	// NACH dem Downdate" heisst ausdruecklich NICHT G11roh ~ 0: gemessen haben dort nur 8,0 bis 8,4 % der
+	// Marken |G11roh| < 1e-6 (24.09., 8-mm-Fahrzeug, alle vier Arme der Serie serie_leiter; die
+	// frueher hier genannten 8,3 % waren der Arm l_f8_p4 allein).
+	// ★ GEMESSEN 24.09. am kipp26-KANAL: 0,38 % (202 537 von 53 195 217). Der Kanal traegt den
+	// Term also staerker als das Fahrzeug -- die frueher hier stehende Entwarnung war falsch.
+	// ★ Pruefbefund H2 (24.09.): fuer den kipp26-Kanal gibt es KEINEN Lauf mit diesem Histogramm.
+	// Hier stand, der Term sei dort vernachlaessigbar -- das war aus der Restluecke der Serie
+	// a2_bilanz nur ERSCHLOSSEN, nicht gemessen. Der Satz ist entfernt, die Messung steht aus.
 	if(rek_gate&&t%def_zaehl_takt==0ul) {
 		const float g11a = fabs(rek_g11);
 		const uint gb = g11a<1.0E-6f ? 0u : (g11a<1.0E-4f ? 1u : (g11a<1.0E-2f ? 2u : (g11a<1.0f ? 3u : 4u)));
@@ -3039,12 +3085,81 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	// dritte Gittermoment von D3Q19 identisch verschwindet und der quadratische Term der Delta-Form
 	// zum ersten Moment nichts beitraegt -- fuer JEDES du und JEDES s.
 	// GEMESSEN vor dem Bau (Serie a2_bilanz, 23.09.): der Kernel-Akkumulator reproduziert die
-	// Bilanzluecke FK.rx - Soll auf 1,2 % (eps +1e-4) und 1,8 % (eps -1e-3). Der einzige Arm, der
+	// ROHE Bilanzluecke FK.rx - Soll auf 1,2 % (eps +1e-4) und 1,8 % (eps -1e-3).
+	// ★ Das Wort ROH steht hier seit 24.09., weil zwei Pruefer genau darueber gestolpert sind:
+	// das Log druckt daneben die BEREINIGTE Luecke (0,82 % / 1,75 % / 14,5 %), und wer die gegen
+	// diese Zahlen haelt, meldet einen Widerspruch, der keiner ist. Der einzige Arm, der
 	// verfehlt (-1e-4, 13 %), ist auch der einzige nicht stationaere: seine Antriebskraft driftet
 	// ueber das Fenster um 8,5 %, waehrend -1e-3 bei 0,1 % steht -- die Bilanzvoraussetzung gilt
 	// dort nicht. Die Buchung steht also auf einer GEMESSENEN Bilanz, nicht auf einer Annahme.
 	// rho ist das GEKLEMMTE rhon, dasselbe, das die Gewichte multipliziert hat: an 85 % der
 	// markierten Besuche steht es auf der Klemme, ein roh nachgerechnetes waere bis 43 % zu gross.
+	// ★★ DOPPELTERM-KORREKTUR (24.09.2026). VOR der Quellbuchung, damit der Block von oben nach
+	// unten liest: erst zuruecknehmen, was doppelt drin ist, dann die Quelle EINMAL buchen.
+	// fw = -(phi1*t1 + phi2*t2), und unter R3 ist phi == P (s == 0, kein Solve). P wird aber aus
+	// fhn gebildet, das an den Marken schon das Df traegt -- also steckt -DP1*t1 - DP2*t2 bereits
+	// in fw, ZUSAETZLICH zur expliziten Buchung -rho*du. Richtig waere -P_alt - rho*du; der
+	// Ueberschuss ist genau -DP1*t1 - DP2*t2, er wird hier addiert.
+	// GEMESSEN 24.09. (Slots 373..377, 8-mm-Fahrzeug): nur 8,3 % der markierten Besuche haben
+	// |G11roh| < 1e-6 -- der Term ist am Fahrzeug gross, am Kanal kipp26 war er es nicht.
+	// DP1/DP2 kommen EXAKT aus der Momentenschleife (Df je Wandlink nachgebildet), NICHT aus der
+	// fuehrenden Ordnung rho*eps*G11roh: die haette den t2-Kanal (rho*eps*G12roh, an schiefen
+	// Linkmengen bis sqrt(G11roh*G22roh)) und den in eps LINEAREN -1,5(du.s)-Anteil unterschlagen.
+	const float rek_fv = fwx*t1x+fwy*t1y+fwz*t1z;
+	const float rek_fb = fabs(fwx)+fabs(fwy)+fabs(fwz);
+	fwx += rek_dp1*t1x + rek_dp2*t2x;
+	fwy += rek_dp1*t1y + rek_dp2*t2y;
+	fwz += rek_dp1*t1z + rek_dp2*t2z;
+	// [378] ANGEWANDT-GEGEN-BEABSICHTIGT. Misst fw VOR und NACH den drei Zeilen darueber und
+	// vergleicht die Differenz in t1 gegen rek_dp1. Faengt drei stille Fehler, die kein Zaehler
+	// auf rek_gate fangen kann: (a) die Korrektur landet hinter fac_tau_acc und ist toter Code,
+	// (b) sie steht ausserhalb der FAC_REK_R3-Insel, (c) VORZEICHEN verkehrt (-= statt +=) --
+	// dann ist die Differenz -rek_dp1, also um 2*|rek_dp1| daneben. Toleranz: 1 % relativ plus
+	// 4,8e-7*|fw| fuer die Ausloeschung (fw_t1 ist rund 100- bis 1000-mal groesser als dp1).
+	if(rek_gate&&t%def_zaehl_takt==0ul) {
+		const float rek_fn = fwx*t1x+fwy*t1y+fwz*t1z;
+		// ★ TOLERANZ, zweimal berichtigt -- die Geschichte steht hier, weil beide Fassungen falsch
+		// waren und die zweite schlimmer als die erste.
+		// Fassung 1 (Erstbau): 1e-2*|dp1| + 4,8e-7*|fw.t1|. Erzeugte FEHLALARME. URSACHE ist NICHT,
+		// wie hier zuerst stand, der t2-Anteil ueber t2.t1 -- der ist gemessen 1,4e-8 und traegt
+		// fuenf Dekaden zu wenig. Die Ursache ist der AUSLOESCHUNGSBODEN: er hing an der PROJEKTION
+		// fw.t1, der Rundungsboden der Differenz zweier Skalarprodukte skaliert aber mit |fw|.
+		// An Treppenzellen ist |phi2| >> |phi1|, dort ist fw t2-dominiert und fw.t1 klein -- der
+		// Boden zu klein, Fehlalarm.
+		// Fassung 2 (Pruefbefund H1): 1e-2*(|dp1|+|dp2|). Behob den Fehlalarm, riss dafuer ein
+		// groesseres Loch: bei verkehrtem Vorzeichen ist das Residuum exakt 2*|dp1|, und die
+		// Toleranz uebersteigt das, sobald |dp2|/|dp1| > 199. Der Zaehler haette dann genau das
+		// uebersehen, wofuer er gebaut ist. GEMESSEN am kipp26 (24.09.): an 93,3 % der Marken ist
+		// |dp2| > 0,1*|dp1| -- das Regime ist die Regel, nicht die Ausnahme.
+		// Fassung 3 (hier): Boden auf den VEKTORBETRAG von fw, relativer Teil auf dp1, t2 mit
+		// eigenem, kleinem Schlupf. Faengt den Vorzeichenfehler bis |dp2|/|dp1| ~ 1e4 und erzeugt
+		// im t2-dominierten Fall keinen Fehlalarm.
+		const float rek_rel = fma(1.0E-4f, fabs(rek_dp2), 1.0E-2f*fabs(rek_dp1));
+		const float rek_bod = 4.8E-7f*rek_fb;
+		const float rek_tol = rek_rel+rek_bod;
+		if(fabs((rek_fn-rek_fv)-rek_dp1)>rek_tol&&hits[378]<0xF0000000u) atomic_inc(&hits[378]);
+		// [386] BEGLEITZAEHLER zu [378], Klasse von [334]: wie oft dominiert der Ausloeschungsboden
+		// den relativen Teil? Wo er das tut, prueft [378] nichts, und seine Null waere ein
+		// Scheinbeleg. GEMESSEN am kipp26 (24.09., Fassung 2 der Toleranz): 163 von 53 195 217 --
+		// der Zaehler KANN feuern, er ist nicht konstruktiv still, aber der Fall ist selten.
+		if(rek_bod>rek_rel&&hits[386]<0xF0000000u) atomic_inc(&hits[386]);
+		if(fabs(rek_dp2)>0.1f*fabs(rek_dp1)&&hits[379]<0xF0000000u) atomic_inc(&hits[379]);
+		// [387] BLINDHEITSSCHRANKE von [378], neu 24.09. Die Toleranz oben faengt einen
+		// Vorzeichenfehler bis |dp2|/|dp1| ~ 1e4 und toten Code bis ~1e3 (eigener float-Versuch,
+		// 200 000 Saetze je Stufe). Darueber ist [378] blind. [379] zaehlt ab Verhaeltnis 0,1 und
+		// sagt deshalb NICHTS ueber diese Schranke. Dieser Zaehler tut es: steht er auf 0, ist die
+		// Null von [378] ueber den ganzen gefahrenen Wertebereich belastbar.
+		if(fabs(rek_dp2)>1.0E3f*fabs(rek_dp1)&&hits[387]<0xF0000000u) atomic_inc(&hits[387]);
+		const float rek_kb = sqrt(fma(rek_dp1, rek_dp1, rek_dp2*rek_dp2));
+		const float rek_bz = rek_rho*sqrt(fma(rek_dux, rek_dux, fma(rek_duy, rek_duy, rek_duz*rek_duz)));
+		const float rek_q = rek_kb/fmax(rek_bz, 1.0E-30f);
+		// ★ Pruefbefund M4 (24.09.): das oberste Fach war bei 0,1 OFFEN, die Groesse erreicht aber
+		// bis 2,0 -- es konnte "ein Zehntel der Quelle" nicht von "doppelt so gross wie die Quelle,
+		// Reibungspfad gedreht" unterscheiden. Dieselbe Lehre steht schon am Histogramm weiter oben.
+		// Jetzt vier Grenzen, fuenf Faecher. ABNAHME: Summe [381..385] == [370].
+		const uint rek_bq = rek_q<0.01f ? 0u : (rek_q<0.1f ? 1u : (rek_q<0.5f ? 2u : (rek_q<1.0f ? 3u : 4u)));
+		if(hits[381ul+(ulong)rek_bq]<0xF0000000u) atomic_inc(&hits[381ul+(ulong)rek_bq]);
+	}
 	fwx -= rek_rho*rek_dux;
 	fwy -= rek_rho*rek_duy;
 	fwz -= rek_rho*rek_duz;

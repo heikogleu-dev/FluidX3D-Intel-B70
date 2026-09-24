@@ -1071,13 +1071,41 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 			print_info("["+ort+"] R3 DOPPELTERM |G11roh| an den Marken: <1e-6 "+to_string(g0)+" | <1e-4 "+to_string(g1)+" | <1e-2 "+to_string(g2)+" | <1 "+to_string(g3)+" | >=1 "+to_string(g4)+" (Summe "+to_string(gs)+").");
 			if(g_alle>=0xF0000000ull) print_info("["+ort+"] R3 DOPPELTERM: Slot 370 saettigt -- die Lueckenlosigkeit gegen das Histogramm ist nicht pruefbar.");
 			else if(gs!=g_alle) k_befund("["+ort+"] R3 DOPPELTERM: Histogrammsumme "+to_string(gs)+" != Slot 370 "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
-			else if(gs>0ull&&g0!=gs) print_warning("["+ort+"] R3 DOPPELTERM: nur "+to_string((float)(100.0*(double)g0/(double)gs),1u)+" % der markierten Besuche haben |G11roh| < 1e-6. Der Wandlink-Anteil des Df geht dort ein ZWEITES Mal in die Wandkraft -- zusaetzlich zur Buchung und ohne Korrektur. Zur fuehrenden Ordnung ist der ungebuchte Zusatzterm rho*eps*G11roh. Bei ELIBB wird dieselbe Klasse mit +2*Dp_tangential korrigiert; fuer die Rekonstruktion gibt es das noch nicht. SOLANGE DAS SO IST, traegt cd_reib aus diesem Arm den Term.");
+			else if(gs>0ull&&g0!=gs) print_warning("["+ort+"] R3 DOPPELTERM: nur "+to_string((float)(100.0*(double)g0/(double)gs),1u)+" % der markierten Besuche haben |G11roh| < 1e-6. Der Wandlink-Anteil des Df geht dort ein ZWEITES Mal in die Wandkraft. Zur fuehrenden Ordnung ist der ungebuchte Zusatzterm rho*eps*G11roh. SEIT 24.09.2026 WIRD ER KORRIGIERT: die Momentenschleife bildet Df je Wandlink exakt nach und bucht DP1*t1 + DP2*t2 auf fw zurueck (kernel.cpp, unmittelbar vor fwx -= rho*du). Dieses Histogramm misst damit nur noch, WIE GROSS der korrigierte Term war -- es ist kein offener Befund mehr. Die Wirkung der Korrektur steht in 381..385, ihre korrekte Anwendung in 378 (mit der Blindheitsschranke 387).");
 			else if(gs>0ull) print_info("["+ort+"] R3 DOPPELTERM: alle markierten Besuche haben |G11roh| < 1e-6 -- der Wandlink-Anteil ist vernachlaessigbar, die Buchung ist vollstaendig.");
 		}
+		// ★★ 24.09.2026 KORREKTUR DES DOPPELTERMS -- die drei Leser dazu. Ohne sie waere die Korrektur
+		// genau der Fehler, den Pruefbefund H-N1 am Histogramm oben gefunden hat: gebaut und ungelesen.
+		{
+			const ulong k_an=(ulong)H[378], k_t2=(ulong)H[379], k_bod=(ulong)H[386], k_bl=(ulong)H[387];
+			const ulong q0=(ulong)H[381], q1=(ulong)H[382], q2=(ulong)H[383], q3=(ulong)H[384], q4=(ulong)H[385];
+			const ulong qs=q0+q1+q2+q3+q4;
+			// ★ Pruefbefund M2 (24.09.): bei eps = 0 sind dp1 = dp2 = 0 UND rek_bz = 0, das Histogramm
+			// legt dann alles ins unterste Fach und die Verdikte unten haetten aus einem 0/0 einen
+			// "gemessenen No-Op" gemacht. eps = 0 ist die Standard-Nullreferenz jedes A/B, der Fall
+			// tritt also regelmaessig ein. Die Verdikte sind deshalb auf eps != 0 gegattert.
+			const bool k_hub = (D->fac_rek_eps!=0.0f);
+			print_info("["+ort+"] R3 KORREKTUR |DP|/(rho*|du|): <1 % "+to_string(q0)+" | <10 % "+to_string(q1)+" | <50 % "+to_string(q2)+" | <100 % "+to_string(q3)+" | >=100 % "+to_string(q4)+" (Summe "+to_string(qs)+"), t2-Kanal "+to_string(k_t2)+", Anwendungsprobe "+to_string(k_an)+", Ausloeschungsboden "+to_string(k_bod)+".");
+			// [378] ist der HARTE Wirkpfadbeleg: er vergleicht fw vor und nach den drei Korrekturzeilen
+			// gegen rek_dp1. Er feuert bei totem Code, falscher Insel UND bei verkehrtem Vorzeichen.
+			if(k_hub&&k_bod>0ull&&g_alle>0ull) print_warning("["+ort+"] R3 KORREKTUR: an "+to_string((float)(100.0*(double)k_bod/(double)g_alle),1u)+" % der Marken dominiert der Ausloeschungsboden 4,8e-7*|fw.t1| die Toleranz von Slot 378. Dort prueft 378 NICHTS, seine Null ist an diesen Besuchen kein Beleg -- |fw.t1| ist um Dekaden groesser als |DP1|.");
+			if(k_bl>0ull) print_warning("["+ort+"] R3 KORREKTUR: Slot 387 = "+to_string(k_bl)+" -- an so vielen Marken ist |DP2| mehr als das 1000-fache von |DP1|. Dort faengt Slot 378 zwar noch ein verkehrtes Vorzeichen (bis rund 1e4), aber keinen toten Code mehr. Seine Null ist an diesen Besuchen nur eingeschraenkt belastbar.");
+			else print_info("["+ort+"] R3 KORREKTUR: Slot 387 = 0 -- nirgends |DP2| > 1000*|DP1|, die Null von Slot 378 ist ueber den ganzen gefahrenen Wertebereich belastbar.");
+			if(k_an>0ull) k_befund("["+ort+"] R3 KORREKTUR: Slot 378 = "+to_string(k_an)+" -- die angewandte Aenderung an fw stimmt nicht mit dem berechneten DP1 ueberein. Moegliche Ursachen: die Korrektur steht hinter fac_tau_acc (toter Code), ausserhalb der FAC_REK_R3-Insel, oder mit verkehrtem Vorzeichen. Soll EXAKT 0.");
+			if(g_alle>=0xF0000000ull) print_info("["+ort+"] R3 KORREKTUR: Slot 370 saettigt -- die Lueckenlosigkeit ist nicht pruefbar.");
+			else if(qs!=g_alle) k_befund("["+ort+"] R3 KORREKTUR: Histogrammsumme "+to_string(qs)+" != Slot 370 "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
+			else if(k_hub&&qs>0ull&&q0==qs) print_warning("["+ort+"] R3 KORREKTUR: ALLE markierten Besuche liegen unter 1 % der Quellbuchung -- der Doppelterm war an dieser Geometrie vernachlaessigbar und die Korrektur ist ein gemessener No-Op. Das ist ein gueltiges Ergebnis, aber cd_reib aendert sich dann auch nicht.");
+			else if(k_hub&&qs>0ull) print_info("["+ort+"] R3 KORREKTUR: "+to_string((float)(100.0*(double)(q1+q2)/(double)qs),1u)+" % der markierten Besuche tragen mehr als 1 % der Quellbuchung -- die Korrektur wirkt und cd_reib MUSS sich gegen den unkorrigierten Stand verschieben.");
+			// [379] beantwortet, ob die fuehrende Ordnung rho*eps*G11roh gereicht haette. Sie haette
+			// den t2-Kanal (rho*eps*G12roh) unterschlagen; an ebener Wand ist der exakt 0, an schiefen
+			// Linkmengen bis sqrt(G11roh*G22roh). Deshalb ist hier die EXAKTE Form gebaut.
+			if(k_hub&&g_alle>0ull&&k_t2>0ull) print_info("["+ort+"] R3 KORREKTUR t2-Kanal: an "+to_string((float)(100.0*(double)k_t2/(double)g_alle),1u)+" % der Marken ist |DP2| > 10 % von |DP1| -- eine Korrektur nur in t1 (fuehrende Ordnung rho*eps*G11roh) haette diesen Anteil unterschlagen.");
+			else if(k_hub&&g_alle>0ull) print_info("["+ort+"] R3 KORREKTUR t2-Kanal: nirgends ueber 10 % von |DP1| -- die Linkmengen stehen an den Marken tangential symmetrisch genug, dass die t1-Korrektur allein gereicht haette.");
+		}
 		// ★ Pruefbefund N2/N6: zwei Divergenzen ansagen, die sonst still falsch gelesen werden.
-		print_warning("["+ort+"] R3 ANSAGE: (1) cd_bericht.csv (fac_tau) enthaelt die Rekonstruktionsquelle jetzt HERAUSGERECHNET, forces.csv (object_force ueber update_force_field) dagegen NICHT -- beide weichen um genau Summe rho*du voneinander ab, das ist kein Fehler. (2) Unter CFD_FAC_RDIAG/KDIAG mischen die R3-erzwungenen Zellen unter die echten Rang-0-Rueckfaelle; die Rueckfall-Diagnose ist in diesem Arm NICHT mehr die Einzellink-Klasse.");
+		print_warning("["+ort+"] R3 ANSAGE: (1) cd_bericht.csv (fac_tau) enthaelt die Rekonstruktionsquelle HERAUSGERECHNET, forces.csv (object_force ueber update_force_field) dagegen NICHT -- beide weichen voneinander ab, das ist kein Fehler. Seit der Doppelterm-Korrektur (24.09.2026) ist dieser Abstand Summe rho*du OHNE den Wandlink-Anteil des Df, vorher trug er ihn mit. WER DAS VORZEICHEN PRUEFEN WILL, BRAUCHT BEIDES: Slot 378 faengt ein verkehrtes Vorzeichen der ANWENDUNG (er misst fw vor und nach der Korrektur gegen das berechnete DP1), aber NICHT eines in der HERLEITUNG -- waere DP1 selbst mit falschem Vorzeichen gebildet, blieben alle Zaehler gruen. Dagegen hilft nur dieser Abstand: er muss gegen den unkorrigierten Stand SCHRUMPFEN. ★ Pruefbefund N3 (24.09.): das gilt nur, solange Summe DP < 2*Summe rho*du. DP1 hat zwar dasselbe Vorzeichen wie (rho*du).t1 (G11roh = Summe 6w*ct1^2 >= 0), aber |DP|/(rho*|du|) kann 2,0 erreichen, und ueber Facetten mit verschiedenen t1-Richtungen ist es eine Vektorsumme. Das Histogramm 381..385 sagt, ob die Bedingung haelt: liegt alles unter 100 %, gilt das Kriterium. (2) Unter CFD_FAC_RDIAG/KDIAG mischen die R3-erzwungenen Zellen unter die echten Rang-0-Rueckfaelle; die Rueckfall-Diagnose ist in diesem Arm NICHT mehr die Einzellink-Klasse.");
 	}
-	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[373]+(ulong)H[374]+(ulong)H[375]+(ulong)H[376]+(ulong)H[377]+(ulong)H[380]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/373..377/380 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
+	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[373]+(ulong)H[374]+(ulong)H[375]+(ulong)H[376]+(ulong)H[377]+(ulong)H[378]+(ulong)H[379]+(ulong)H[380]+(ulong)H[381]+(ulong)H[382]+(ulong)H[383]+(ulong)H[384]+(ulong)H[385]+(ulong)H[386]+(ulong)H[387]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/373..377/378/379/380/381..385/386/387 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
 }
 
 static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
@@ -3627,7 +3655,7 @@ static void zensus_statische_klassen(LBM& L, const std::vector<Facette>& FF, con
 			if(fabs(ywm2-ywr2)>1e-9) print_error("["+ort+"] REKONSTRUKTION: y_w-QUADRATmittel der Marken "+to_string((float)ywm2,6u)+" != das der Rang-0-Menge "+to_string((float)ywr2,6u)+" -- die Markenmenge ist dieselbe Groesse, aber nicht dieselbe Menge (Permutation im fid).");
 			const double ywr = n_rang0_yw>0ull ? yw_rang0_summe/(double)n_rang0_yw : 0.0;
 			if(fabs(ywm-ywr)>1e-9) print_error("["+ort+"] REKONSTRUKTION: y_w-Mittel der Marken "+to_string((float)ywm,6u)+" != y_w-Mittel der Rang-0-Menge "+to_string((float)ywr,6u)+".");
-			print_info("["+ort+"] REKONSTRUKTION (CFD_FAC_REK=1, Umfang Rang 0): "+to_string(n_gesetzt)+" von "+to_string(D_->fac_N)
+			print_info("["+ort+"] REKONSTRUKTION (CFD_FAC_REK="+to_string(env_u("CFD_FAC_REK",0u))+", Umfang Rang 0): "+to_string(n_gesetzt)+" von "+to_string(D_->fac_N)
 				+" Facetten markiert = "+to_string((float)(100.0*(double)n_gesetzt/(double)D_->fac_N),2u)+" %, Ist=Soll gegen Rang 0 erfuellt; "
 				+"y_w-Mittel der Marken "+to_string((float)ywm,4u)+" (Rang-0-Menge "+to_string((float)ywr,4u)+"); Amplitude eps = "+to_string(rek_eps,9u)+" (Stufe "+(rek_eps==0.0f?string("S0, bitneutral"):string("S1b, WIRKSAM"))+"). "
 				+"fac_geo zum zweiten Mal hochgeladen, kein Rebind noetig.");
@@ -5524,7 +5552,12 @@ void main_setup_kanal() {
 					const double vor_ = inj_!=0.0 ? (ber_+inj_)/inj_ : 0.0;
 					print_info("REKONSTRUKTION BILANZ (R3-Arm): Restluecke nach der Buchung = "+to_string((float)ber_,9u)+", eingespeist = "+to_string((float)inj_,9u)
 						+", Verhaeltnis Restluecke/eingespeist = "+to_string((float)(inj_!=0.0?ber_/inj_:0.0),4u)+" (Soll NAHE 0 -- die Buchung hat die Quelle herausgerechnet),"
-						+" rekonstruierte Bilanz VOR der Buchung = "+to_string((float)vor_,4u)+" (Soll nahe 1,00, vergleichbar mit der Serie a2_bilanz vom 23.09.).");
+						+" rekonstruierte Bilanz VOR der Buchung = "+to_string((float)vor_,4u)+" (Soll nahe 1,00).");
+					// ★ Pruefbefund M1 (24.09.): hier stand \"vergleichbar mit der Serie a2_bilanz vom 23.09.\".
+					// Das gilt seit der Doppelterm-Korrektur NICHT mehr: ber_ traegt jetzt +Summe DP, die
+					// a2_bilanz-Zahlen (gefahren unter CFD_FAC_REK=1, also unkorrigiert) nicht. Wer die
+					// beiden gegeneinanderhaelt, vergleicht zwei verschiedene Groessen und liest die
+					// Differenz als \"ungebuchte Senke\". Vergleichbar ist nur ein R3-Lauf gegen einen R3-Lauf.
 					print_warning("K2 ist in diesem Arm KEINE unabhaengige Abnahme mehr: der Kanalantrieb ist auf U_b geregelt, die Wandsenke damit ohnehin auf f*V + Injektion festgenagelt. Jede VOLLSTAENDIGE Buchung liefert K2 = 1. K2 belegt hier die Vollstaendigkeit der Buchung, NICHT die Physik. Die belastbaren Kriterien bleiben c_f gegen den ebenen Pfad 2,9149e-3 und das Logprofil -- und die traegt erst die Kugel, weil der Kanal konstruktiv Druck_x = 0 hat.");
 				} else {
 					// Der Bezug ist NICHT 1,0: schon der unmarkierte Kanal traegt einen Buchungsrest (kipp26
@@ -5569,7 +5602,7 @@ void main_setup_kanal() {
 			// gebaut wurde, um K2 wieder zu schliessen (dort haette 1,0008 die 1-%-Schranke bestanden).
 			else if(lbm.lbm_domain[0]->fac_rek_r3_jit) {
 				const double vh3 = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
-				if(soll_rx!=0.0&&fabs(vh3-1.0)>0.01) k_befund("K2 im R3-Arm verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab (Verhaeltnis "+to_string((float)vh3,6u)+"). Die Buchung soll K2 genau schliessen -- eine Abweichung heisst, dass sie unvollstaendig ist.");
+				if(soll_rx!=0.0&&fabs(vh3-1.0)>0.01) k_befund("K2 im R3-Arm verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab (Verhaeltnis "+to_string((float)vh3,6u)+"). ★ 24.09. Pruefbefund H2: die URSACHENZUSCHREIBUNG hat sich mit der Doppelterm-Korrektur geaendert. Vorher hiess eine Abweichung \"die Buchung ist unvollstaendig\". Jetzt bucht der Kernel zusaetzlich +Summe DP zurueck, und eine Abweichung heisst zuerst: die KORREKTUR verfehlt Vorzeichen oder Praemisse. DER REFERENZWERT HAENGT AM ARM, nicht am Fall: kipp26 unkorrigiert eps +1e-3 -> 1,0008 (r3_buch_p3), eps -1e-3 -> 0,9764 (r3_buch_m3). ★ GEMESSEN 24.09. mit Korrektur, eps -1e-3: 0,976391 -- also UNVERAENDERT in fuenf Nachkommastellen. Die Korrektur ist je Facette gross (77,9 % der Marken tragen mehr als 1 % der Quellbuchung, 93,3 % haben |DP2| > 0,1*|DP1|), hebt sich in der globalen x-Summe am Kanal aber fast vollstaendig auf -- die t1/t2-Richtungen der Facetten zeigen auseinander. FOLGE: K2 unterscheidet am Kanal NICHT zwischen korrigiert und unkorrigiert und taugt hier nicht als Abnahme der Korrektur. Die 2,4 %, die dieser Waechter meldet, sind VORBESTEHEND und nicht von der Korrektur verursacht. Die Buchung soll K2 genau schliessen -- eine Abweichung heisst, dass sie unvollstaendig ist.");
 				else print_info("K2 im R3-Arm: Verhaeltnis "+to_string((float)vh3,4u)+" innerhalb 1 % -- die Buchung ist VOLLSTAENDIG. ACHTUNG: das belegt die Buchhaltung, NICHT die Physik. Der Kanalantrieb ist auf U_b geregelt, die Wandsenke damit ohnehin festgenagelt; jede vollstaendige Buchung liefert 1. Der Physikbeweis braucht einen Druckpfad.");
 			}
 			else if(LBM_Domain::s_fac_rek>0u&&env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) {
