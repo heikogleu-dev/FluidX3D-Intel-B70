@@ -2094,7 +2094,22 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FAC_REK"+R(
 	{
 		const float rek_marke = fac_geo[b+7ul];
+)+"#ifdef FAC_REK_S2"+R(
+		// ★★ STUFE S2 (24.09.2026): die Amplitude ist KEIN Handwert mehr. Sie steht in
+		// fac_nb[...roff+4] und wurde im VORSCHRITT aus dem Wandmodellziel bestimmt:
+		//   rho*du = R1*t1  mit  R1 = -def_fac_tau*twe - P1
+		// Die Gleichung ist erzwungen, nicht gewaehlt: nach der Doppelterm-Korrektur ist
+		// fw.t1 = -P1_vor - rho*delta, und das soll def_fac_tau*twe sein.
+		// LAG 1 IST BEWUSST UND MUSS GEMESSEN WERDEN. Der Wert stammt aus dem Vorschritt, weil
+		// P1 erst nach der Momentenschleife feststeht, die Injektion aber davor laeuft. Die
+		// Ein-Zellen-Linearisierung des Planungsschritts gibt einen Kontraktionsfaktor
+		// G11roh/rho <= 1/3 -- das ist eine ABSCHAETZUNG, kein Stabilitaetsbeweis, und die
+		// Periode-2-Mode an Wandzellen ist im Plan als real gefuehrt. Slot 393 misst die
+		// Schrittaenderung, damit Konvergenz nicht behauptet, sondern gesehen wird.
+		const float rek_eps = fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+4ul];
+)+"#else"+R(
 		const float rek_eps = fac_geo[b+6ul];
+)+"#endif"+R( // FAC_REK_S2
 		if(rek_marke>0.5f) {
 			const bool rek_probe = (t%def_zaehl_takt==0ul);
 			const float mxy_vor = rek_probe ? fhn[7]+fhn[8]-fhn[13]-fhn[14] : 0.0f;
@@ -2395,6 +2410,7 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 )+"#ifdef FAC_REK_R3"+R(
 	float rek_dp1=0.0f;
 	float rek_dp2=0.0f;
+	float rek_dpn=0.0f;
 )+"#endif"+R( // FAC_REK_R3
 )+"#ifdef FACETTEN_PEMA"+R(
 	float Pvx=0.0f, Pvy=0.0f, Pvz=0.0f;
@@ -2427,6 +2443,12 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		const float rek_df = wi*rek_rho*fma(3.0f*rek_cdu, fma(1.5f, rek_cs, 1.0f), rek_h3);
 		rek_dp1 = fma(2.0f*ct1, rek_df, rek_dp1);
 		rek_dp2 = fma(2.0f*ct2, rek_df, rek_dp2);
+		// NORMALANTEIL des Wandlink-Flusses. NICHT dasselbe wie [372]: der prueft |du.n|, und du
+		// steht konstruktiv tangential, also ist [372] konstruktiv 0. DP_n dagegen ist der
+		// Normalanteil des FLUSSES ueber die Wandlinks, und der verschwindet nur an der EBENEN
+		// Wand. An einer Einzellink-Zelle -- und 92 % der Rang-0-Facetten haben einen Link --
+		// ist c.n von null verschieden, also auch DP_n. Planungsschritt S2, Befund H1 (24.09.).
+		rek_dpn = fma(2.0f*cn, rek_df, rek_dpn);
 )+"#endif"+R( // FAC_REK_R3
 		S1x = fma(wi, cx, S1x); S1y = fma(wi, cy, S1y); S1z = fma(wi, cz, S1z);
 		Sn1 = fma(6.0f*wi, ct1*cn, Sn1); Sn2 = fma(6.0f*wi, ct2*cn, Sn2);
@@ -2581,6 +2603,73 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 	}
 )+"#endif"+R( // FACETTEN_PEMA
 )+"#ifndef FACETTEN_UW"+R(
+	// ★ N4 GEPRUEFT UND VERWORFEN (24.09.): ein #error-Waechter "FAC_REK_S2 ohne FAC_REK_R3" ist
+	// hier NICHT baubar. Am Zeilenanfang trifft ihn der C++-Praeprozessor (sofortiger Bauabbruch),
+	// und als String-Literal zerreisst ihn get_opencl_c_code(): das ersetzt JEDES Leerzeichen
+	// durch einen Zeilenumbruch und repariert nur #ifdef/#ifndef/#define/#undef/#if/#elif/#pragma,
+	// nicht #error. Der Fall ist ohnehin strukturell ausgeschlossen: FAC_REK_S2 wird nur bei
+	// s_fac_rek>=3 emittiert, FAC_REK_R3 schon bei >=2 (lbm.cpp, JIT-Zeile).
+)+"#ifdef FAC_REK_S2"+R(
+	// ★★ S2: hier entsteht die Amplitude des NAECHSTEN Schritts. rho ist das geklemmte rhon,
+	// dasselbe, das die Gewichte multipliziert -- und es steht jetzt im NENNER, die Klemme wirkt
+	// also verstaerkend statt daempfend (an 85 % der Marken liegt rhon auf der Klemme). Slot 394.
+	// Die Schranke ist KEIN neuer Knopf: tw_max = 0,5*rhon*ut ist derselbe Ausdruck, gegen den
+	// twe oben schon geklemmt wird. Reisst sie, faellt die Zelle auf reines Bounce-Back zurueck
+	// (du := 0) statt zu klemmen -- SATGATE-Logik, Befund G8: die geklemmte Anwendung hat einen
+	// vorzeichen-definiten Bias, der Rueckfall hat keinen.
+	if(rek_gate) {
+		// ★★ H1 (24.09., eigener Verdacht, vom Pruefagenten bestaetigt und beziffert): P1 traegt an
+		// dieser Stelle das Df des LAUFENDEN Schritts mit -- die Injektion lief davor. Exakt gilt
+		// P1 = P1_vor + rek_dp1, und rek_dp1 ist die Nachbildung ueber dieselbe Linkmenge. Ohne die
+		// Ruecknahme lautet die Iteration e_{n+1} = e* - G11roh*e_n, und der Fixpunkt liegt bei
+		// e*/(1+G11roh) -- der Arm verfehlt sein eigenes Ziel AUCH NACH KONVERGENZ, um 25 % bei
+		// G11roh = 1/3 und 40-57 % an Treppenzellen. Mit der Ruecknahme entfaellt die algebraische
+		// Rueckkopplung vollstaendig (e_{n+1} = e*, deadbeat); der physikalische Ein-Schritt-Lag
+		// bleibt und wird von Slot 393 gemessen.
+		// ★★ H5: die ELIBB-Tangentialbuchung +2*Dp_t (weiter unten, hinter fw) gehoert in die
+		// Zielgleichung. Tatsaechlich ist fw.t1 = -P1_vor - rho*d + 2*(elibb_dp.t1); ohne den
+		// dritten Summanden zielt S2 auf die falsche Groesse. Am Fahrzeug ist ELIBB nicht
+		// abschaltbar (ohne ihn verzehnfacht sich die Reibung), der Term ist dort kein Rest.
+		float s2_r1 = -def_fac_tau*twe - (P1 - rek_dp1);
+)+"#ifdef FACETTEN_ELIBB"+R(
+		s2_r1 = fma(2.0f, elibb_dp.x*t1x+elibb_dp.y*t1y+elibb_dp.z*t1z, s2_r1);
+)+"#endif"+R( // FACETTEN_ELIBB
+		const float s2_d1 = s2_r1/rhon;
+		const float s2_max = 0.5f*ut;
+		const float s2_alt = fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+4ul];
+		const bool s2_ok = (fabs(s2_d1)<=s2_max);
+		const float s2_neu = s2_ok ? s2_d1 : 0.0f;
+		fac_nb[def_nb_stride*(ulong)fid+def_nb_roff+4ul] = s2_neu;
+		if(t%def_zaehl_takt==0ul) {
+			// [393] KONVERGENZ: relative Schrittaenderung ueber der Schwelle. Faellt sie nicht,
+			// ist der Lag-1-Kreis nicht kontrahiert und die Amplitude schwingt.
+			const float s2_dd = fabs(s2_neu-s2_alt);
+			if(s2_dd>0.05f*fmax(fabs(s2_neu), 1.0E-30f)&&hits[393]<0xF0000000u) atomic_inc(&hits[393]);
+			// [394] die rho-Klemme VERSTAERKT hier, statt zu daempfen -- eigene Klasse, eigener Zaehler.
+			if(rhon<=0.5f&&hits[394]<0xF0000000u) atomic_inc(&hits[394]);
+			// [395] die Schranke hat gegriffen, die Zelle faellt auf Bounce-Back zurueck.
+			if(!s2_ok&&hits[395]<0xF0000000u) atomic_inc(&hits[395]);
+			// [396] Vorzeichen: R1 > 0 heisst beschleunigen statt bremsen.
+			if(s2_r1>0.0f&&hits[396]<0xF0000000u) atomic_inc(&hits[396]);
+			// [397] WIRKPFAD und Nenner fuer alle vier.
+			if(hits[397]<0xF0000000u) atomic_inc(&hits[397]);
+		}
+		// ★★ HOCH-2 (Nachpruefung 24.09.): die fuenf Zaehler oben tasten ALLE dieselbe Paritaet ab.
+		// def_zaehl_takt ist gerade, die Zaehlschritte sind also 0, takt, 2*takt, ... und damit alle
+		// gerade -- waehrend die dort gelesene Amplitude vom Schritt DAVOR stammt, also von einem
+		// ungeraden. Eine Periode-2-Mode, die der Plan ausdruecklich als real fuehrt, ist so
+		// KONSTRUKTIV UNSICHTBAR: sie liest sich als einseitiges Vorzeichen (gemessen 99,7 %), als
+		// Schranke die nie greift (gemessen 0 bzw. 9) und als dauerhafte Schrittaenderung (79 %).
+		// Genau dieses Muster lag vor. Diese drei Zaehler tasten die ANDERE Phase ab, zum selben
+		// Preis. Weichen 400/401 stark von 395/396 ab, schwingt die Amplitude, statt einseitig zu
+		// sein -- und dann ist keine der Kraftzahlen dieses Arms deutbar.
+		if(t%def_zaehl_takt==1ul) {
+			if(!s2_ok&&hits[400]<0xF0000000u) atomic_inc(&hits[400]);
+			if(s2_r1>0.0f&&hits[401]<0xF0000000u) atomic_inc(&hits[401]);
+			if(hits[402]<0xF0000000u) atomic_inc(&hits[402]);
+		}
+	}
+)+"#endif"+R( // FAC_REK_S2
 	const float R1 = -def_fac_tau*twe - P1, R2 = -P2; // Ziel: (-def_fac_tau*twe, 0, 0_normal) -- 3x3-Plan Gl. 18
 )+"#endif"+R( // FACETTEN_UW -- eigener Guard an der URSPRUENGLICHEN Stelle, damit der Kontrollarm bei CFD_FAC_UW=0 QUELLTEXTIDENTISCH bleibt (Pruefbefund M2)
 	float s1=0.0f, s2=0.0f, sn=0.0f;
@@ -3159,6 +3248,27 @@ float3 apply_facette_imem)+"("+R(const uxx n, float* fhn, const uxx* j, const gl
 		// Jetzt vier Grenzen, fuenf Faecher. ABNAHME: Summe [381..385] == [370].
 		const uint rek_bq = rek_q<0.01f ? 0u : (rek_q<0.1f ? 1u : (rek_q<0.5f ? 2u : (rek_q<1.0f ? 3u : 4u)));
 		if(hits[381ul+(ulong)rek_bq]<0xF0000000u) atomic_inc(&hits[381ul+(ulong)rek_bq]);
+		// [388..392] HISTOGRAMM |DP_n|/(rho*|du|). Beantwortet, ob der Normalanteil des
+		// Wandlink-Flusses gross genug ist, um im Druckpfad aufzufallen. Nur eine MESSUNG --
+		// ob er dort ueberhaupt ankommt und ob er ungebucht ist, ist eine ANDERE Frage und
+		// ausdruecklich noch nicht beantwortet. Grenzen 0,01/0,05/0,15/0,3.
+		const float rek_qn = fabs(rek_dpn)/fmax(rek_bz, 1.0E-30f);
+		const uint rek_bn = rek_qn<0.01f ? 0u : (rek_qn<0.05f ? 1u : (rek_qn<0.15f ? 2u : (rek_qn<0.3f ? 3u : 4u)));
+		if(hits[388ul+(ulong)rek_bn]<0xF0000000u) atomic_inc(&hits[388ul+(ulong)rek_bn]);
+		// [398] HOCH-3 (Nachpruefung 24.09.): unter S2 ist die Amplitude JE FACETTE UND SCHRITT 0 --
+		// beim ersten Schritt immer, und jedes Mal, wenn die Schranke im Schritt davor gegriffen hat.
+		// Dann ist rek_bz = 0, und beide Histogramme legen den Besuch stumm ins unterste Fach. Ohne
+		// diesen Zaehler liest sich das als "der Anteil ist vernachlaessigbar", wo gar nichts geprueft
+		// wurde -- dieselbe Klasse wie [334] und [386].
+		if(rek_bz<=0.0f&&hits[398]<0xF0000000u) atomic_inc(&hits[398]);
+		// [399] HOCH-4: die beiden Histogramme [373..377] und [381..385] widersprachen sich im
+		// S2-Lauf (G11roh >= 1e-2 an 92 %, |DP|/(rho|du|) >= 1e-2 an 21 %). Zur fuehrenden Ordnung
+		// ist DP1 = rho*d*G11roh, und zwar GLIEDWEISE vorzeichengleich je Wandlink -- es gibt keine
+		// Ausloeschung. Beides zusammen kann nicht stimmen. Dieser Zaehler entscheidet es direkt,
+		// statt zwei Histogramme gegeneinanderzuhalten: er vergleicht rek_dp1 gegen rho*d*rek_g11.
+		// Das ist wichtig, weil die H1-Korrektur (P1 - rek_dp1) genau darauf steht.
+		const float rek_soll = rek_rho*rek_g11*(rek_dux*t1x+rek_duy*t1y+rek_duz*t1z);
+		if(fabs(rek_dp1-rek_soll)>0.2f*fmax(fabs(rek_soll), 1.0E-30f)&&hits[399]<0xF0000000u) atomic_inc(&hits[399]);
 	}
 	fwx -= rek_rho*rek_dux;
 	fwy -= rek_rho*rek_duy;

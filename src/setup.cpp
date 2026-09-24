@@ -740,7 +740,8 @@ static void pruefe_rek_vorbedingungen(const string& ort, const bool hat_zensus) 
 		if(env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) print_warning("CFD_FAC_REK_EPS ist gesetzt, aber CFD_FAC_REK=0 -- die Amplitude wirkt NICHT (Ansage-Doktrin).");
 		return;
 	}
-	if(LBM_Domain::s_fac_rek>2u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter) und 2 (R3: Gate + Buchung). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
+	if(LBM_Domain::s_fac_rek>3u) print_error("CFD_FAC_REK kennt 0 (aus), 1 (nur die Delta-Form, Solve laeuft weiter), 2 (R3: Gate + Buchung) und 3 (S2: Amplitude aus dem Wandmodellziel statt aus CFD_FAC_REK_EPS). Weitere Umfaenge sind im Plan vorgesehen, aber nicht gebaut.");
+	if(LBM_Domain::s_fac_rek>=3u&&env_f("CFD_FAC_REK_EPS",0.0f)!=0.0f) print_error("CFD_FAC_REK=3 (S2) bestimmt die Amplitude je Facette und Schritt aus dem Wandmodellziel (rho*du = R1*t1). CFD_FAC_REK_EPS ist in diesem Arm WIRKUNGSLOS und darf nicht gesetzt sein -- sonst ist der Handwert nur umbenannt, und genau das soll S2 abschaffen.");
 	if(LBM_Domain::s_fac_rek>0u) {
 		// ★★ 23.09. spaet, Pruefbefund H-N3: hier stand erst >=2u (zu lasch), dann >0u fuer ALLE fuenf
 		// Sperren (zu scharf). Richtig ist die Trennung: Gate und Buchung liegen ausschliesslich unter
@@ -835,7 +836,10 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		for(ulong q=0ull; q<D->fac_N; q++) {
 			const float mk = D->fac_geo[8ull*q+7ull];
 			const float ep = D->fac_geo[8ull*q+6ull];
-			if(mk>0.5f) { n_marke_ger++; if(ep!=D->fac_rek_eps) n_eps_falsch++; }
+			// ★ 24.09. S2: unter CFD_FAC_REK=3 traegt fac_geo[8q+6] keine Amplitude mehr (die steht in
+			// fac_nb[...roff+4] und wird je Schritt neu bestimmt). Die Marken werden weiter geprueft,
+			// der eps-Vergleich entfaellt -- er wuerde sonst an JEDER Marke fehlschlagen.
+			if(mk>0.5f) { n_marke_ger++; if(!D->fac_rek_s2_jit&&ep!=D->fac_rek_eps) n_eps_falsch++; }
 			else if(ep!=0.0f) n_rest_belegt++;
 		}
 		if(n_marke_ger!=D->fac_rek_marken) k_befund("["+ort+"] REKONSTRUKTION: auf dem GERAET stehen "+to_string(n_marke_ger)+" Marken, der Host hat "+to_string(D->fac_rek_marken)+" geschrieben. Der zweite Upload von fac_geo ist nicht angekommen oder wurde ueberschrieben.");
@@ -957,9 +961,23 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		if(fehl>0.02) print_warning("["+ort+"] REKONSTRUKTION Wirkpfad Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string((float)(100.0*fehl),2u)+" % fehlen). Das ist KEIN Fehler: der Block sitzt hinter dem Frueh-Return ut<1e-6f, und markierte Facetten sind die entarteten. Slot 9 (Aussteiger am ut-Tor) = "+to_string(aus)+" -- wer den Anteil braucht, misst ihn dort.");
 		else print_info("["+ort+"] REKONSTRUKTION Wirkpfad: Slot 328 = "+to_string(wp)+" von "+to_string(soll)+" moeglichen ("+to_string(D->fac_rek_marken)+" markierte Facetten x "+to_string(slots)+" Zaehlslots), Differenz "+to_string(soll-wp)+", Fehlbetrag "+to_string((float)(100.0*fehl),2u)+" % (ut-Tor).");
 	}
-	if(D->fac_rek_eps==0.0f) {
+	// ★ Pruefbefund H3 (24.09., S2): dieser ganze Block ist der NULLARM-Test und verlangt Slot 329
+	// = 0. Unter CFD_FAC_REK=3 ist CFD_FAC_REK_EPS zwingend 0 -- die Amplitude kommt dort aber aus
+	// dem Wandmodellziel und ist NICHT null. Ohne diese Ausnahme feuert 329 an jedem Besuch und
+	// k_befund disqualifiziert JEDEN S2-Lauf nach voller Laufzeit. Die spiegelbildliche Abnahme
+	// fuer S2 steht im S2-Leserblock: dort muss 329 GLEICH 328 sein.
+	if(D->fac_rek_eps==0.0f&&!D->fac_rek_s2_jit) {
 		if(wirk>0ull) k_befund("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 = "+to_string(wirk)+", Soll EXAKT 0. Die Rekonstruktion hat u veraendert, obwohl die Amplitude null ist -- die Delta-Form ist nicht strukturell null (Entscheid R1) oder eps kommt nicht als echte Null an.");
 		else print_info("["+ort+"] REKONSTRUKTION S0 (eps = 0): Slot 329 (Wirkung) = 0 wie gefordert -- die Delta-Form ist bei du = 0 strukturell +0.");
+	} else if(D->fac_rek_s2_jit) {
+		// ★★ HOCH-1 (Nachpruefung 24.09.): H3 war UNVOLLSTAENDIG. Der S1b-Zweig darunter haette
+		// jeden S2-Lauf ebenso disqualifiziert -- er verlangt 329 == 328, und das ist unter S2
+		// STRUKTURELL verletzt: beim ersten Zaehlschritt (t=0) ist die Amplitude aus fac_nb noch 0,
+		// also zaehlt 328 und 329 kann nicht. Gemessen im Probelauf: 53 184 793 gegen 53 195 580,
+		// Differenz 10 787 = ein Zaehlslot Marken. Genau die Klasse, die H3 schliessen sollte.
+		if(wirk==0ull) k_befund("["+ort+"] S2: Slot 329 = 0 -- die Rekonstruktion hat u an KEINEM Besuch veraendert, obwohl der Bestimmungsblock lief. Der Arm ist ein stiller No-Op.");
+		else if(wp>wirk+D->fac_rek_marken) k_befund("["+ort+"] S2: Slot 329 = "+to_string(wirk)+", Slot 328 = "+to_string(wp)+" -- die Luecke ist groesser als ein Zaehlslot Marken ("+to_string(D->fac_rek_marken)+"). Der erste Schritt erklaert sie nicht mehr; an weiteren Besuchen kommt die Amplitude nicht an.");
+		else print_info("["+ort+"] S2: Slot 329 = "+to_string(wirk)+" gegen Slot 328 = "+to_string(wp)+" -- die Luecke von "+to_string(wp-wirk)+" liegt im Rahmen eines Zaehlslots (Amplitude beim ersten Schritt noch 0). Jeder weitere Besuch wirkt.");
 	} else {
 		// ★ 23.09.2026 S1b: das Soll ist SCHAERFER als "groesser null". eps = 1e-4 liegt rund
 		// 2e4-fach ueber der Wirkungsschwelle 1e-6*|u|, also MUSS jeder Besuch eine Wirkung zeigen.
@@ -1017,7 +1035,9 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		double imp=0.0;
 		for(ulong i=0ull;i<D->fac_N;i++) imp += (double)D->fac_nb[D->nb_stride*i+D->nb_roff+3ull];
 		const double je_schritt = imp/(double)t_ende;
-		if(D->fac_rek_eps==0.0f&&fabs(je_schritt)>1.0E-12) k_befund("["+ort+"] REKONSTRUKTION: bei eps = 0 wurde x-Impuls "+to_string((float)je_schritt,9u)+" je Schritt eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
+		// ★ H3: unter S2 ist eps zwingend 0, der eingespeiste Impuls aber konstruktiv NICHT.
+		if(D->fac_rek_s2_jit&&fabs(je_schritt)<=1.0E-12) k_befund("["+ort+"] S2: der Impuls-Akkumulator steht bei "+to_string((float)je_schritt,9u)+", also praktisch auf 0. Unter CFD_FAC_REK=3 muss er UNGLEICH 0 sein -- sonst wurde nie eine Amplitude bestimmt und der Arm ist ein stiller No-Op.");
+		else if(D->fac_rek_eps==0.0f&&!D->fac_rek_s2_jit&&fabs(je_schritt)>1.0E-12) k_befund("["+ort+"] REKONSTRUKTION: bei eps = 0 wurde x-Impuls "+to_string((float)je_schritt,9u)+" je Schritt eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
 		else print_info("["+ort+"] REKONSTRUKTION Impuls-Akkumulator: "+to_string((float)je_schritt,9u)+" x-Impuls je Schritt, gemittelt ueber den GANZEN Lauf ("+to_string(t_ende)+" Schritte, Warmlauf EINGESCHLOSSEN). ★ Das ist NICHT die Groesse der Kanalbilanz -- die mittelt ueber das Fenster ab dem Warmup-Schnappschuss und steht im Cd-Pfad-Block. Hier ist es eine Groessenordnung und der Wirkpfadbeleg des Akkumulators, keine Abnahme. Der float-Akkumulator degradiert zudem ueber lange Laeufe (Zuwachs von der Groessenordnung eines ulp der Summe).");
 	}
 	if(D->fac_rek_r3_jit) {
@@ -1079,16 +1099,65 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		{
 			const ulong k_an=(ulong)H[378], k_t2=(ulong)H[379], k_bod=(ulong)H[386], k_bl=(ulong)H[387];
 			const ulong q0=(ulong)H[381], q1=(ulong)H[382], q2=(ulong)H[383], q3=(ulong)H[384], q4=(ulong)H[385];
+			const ulong n0=(ulong)H[388], n1=(ulong)H[389], n2=(ulong)H[390], n3=(ulong)H[391], n4=(ulong)H[392];
+			const ulong ns=n0+n1+n2+n3+n4;
 			const ulong qs=q0+q1+q2+q3+q4;
 			// ★ Pruefbefund M2 (24.09.): bei eps = 0 sind dp1 = dp2 = 0 UND rek_bz = 0, das Histogramm
 			// legt dann alles ins unterste Fach und die Verdikte unten haetten aus einem 0/0 einen
 			// "gemessenen No-Op" gemacht. eps = 0 ist die Standard-Nullreferenz jedes A/B, der Fall
 			// tritt also regelmaessig ein. Die Verdikte sind deshalb auf eps != 0 gegattert.
-			const bool k_hub = (D->fac_rek_eps!=0.0f);
+			const bool k_hub = (D->fac_rek_eps!=0.0f||D->fac_rek_s2_jit); // ★ H3/H4 (24.09.): unter S2 ist eps zwingend 0, der Hub aber vorhanden. Ohne das zweite Glied waeren ALLE Verdikte darunter genau in dem Arm stumm, den derselbe Bau erzeugt -- ein Zaehler ohne Leser.
 			print_info("["+ort+"] R3 KORREKTUR |DP|/(rho*|du|): <1 % "+to_string(q0)+" | <10 % "+to_string(q1)+" | <50 % "+to_string(q2)+" | <100 % "+to_string(q3)+" | >=100 % "+to_string(q4)+" (Summe "+to_string(qs)+"), t2-Kanal "+to_string(k_t2)+", Anwendungsprobe "+to_string(k_an)+", Ausloeschungsboden "+to_string(k_bod)+".");
 			// [378] ist der HARTE Wirkpfadbeleg: er vergleicht fw vor und nach den drei Korrekturzeilen
 			// gegen rek_dp1. Er feuert bei totem Code, falscher Insel UND bei verkehrtem Vorzeichen.
 			if(k_hub&&k_bod>0ull&&g_alle>0ull) print_warning("["+ort+"] R3 KORREKTUR: an "+to_string((float)(100.0*(double)k_bod/(double)g_alle),1u)+" % der Marken dominiert der Ausloeschungsboden 4,8e-7*|fw.t1| die Toleranz von Slot 378. Dort prueft 378 NICHTS, seine Null ist an diesen Besuchen kein Beleg -- |fw.t1| ist um Dekaden groesser als |DP1|.");
+			// ★★ NORMALANTEIL des Wandlink-Flusses, Planungsschritt S2 Befund H1 (24.09.).
+			print_info("["+ort+"] R3 NORMALANTEIL |DP_n|/(rho*|du|): <1 % "+to_string(n0)+" | <5 % "+to_string(n1)+" | <15 % "+to_string(n2)+" | <30 % "+to_string(n3)+" | >=30 % "+to_string(n4)+" (Summe "+to_string(ns)+").");
+			// ★ MITTEL-4 (Nachpruefung 24.09.): der Kernel BEHAUPTET "Summe [381..385] == [370]", der
+			// Host hat sie nie verglichen -- qs wurde gebildet und nicht geprueft. Jetzt gebaut.
+			if(g_alle<0xF0000000ull&&qs!=g_alle) k_befund("["+ort+"] R3 KORREKTUR: Histogrammsumme [381..385] = "+to_string(qs)+" != Slot 370 = "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
+			if(g_alle<0xF0000000ull&&ns!=g_alle) k_befund("["+ort+"] R3 NORMALANTEIL: Histogrammsumme "+to_string(ns)+" != Slot 370 "+to_string(g_alle)+" -- jeder markierte Besuch muss in genau einem Fach landen.");
+			else if(k_hub&&ns>0ull&&n0==ns) print_info("["+ort+"] R3 NORMALANTEIL: ueberall unter 1 % -- der Wandlink-Fluss der Rekonstruktion steht praktisch tangential, wie an einer ebenen Wand.");
+			else if(k_hub&&ns>0ull) print_warning("["+ort+"] R3 NORMALANTEIL: an "+to_string((float)(100.0*(double)(ns-n0)/(double)ns),1u)+" % der Marken traegt der Wandlink-Fluss mehr als 1 % NORMALANTEIL, an "+to_string((float)(100.0*(double)(n3+n4)/(double)ns),1u)+" % mehr als 15 %. ACHTUNG, WAS DAS IST UND WAS NICHT: gemessen ist allein die GROESSE von DP_n. Slot 372 prueft |du.n| und ist konstruktiv 0 -- eine ANDERE Groesse. Ob dieser Normalanteil im Druckpfad ankommt und ob er dort ungebucht ist, ist damit NICHT beantwortet und braucht eine eigene Messung.");
+			// ★★ STUFE S2 (24.09.2026): die Amplitude kommt aus dem Wandmodellziel, nicht aus eps.
+			if(D->fac_rek_s2_jit) {
+				const ulong w=(ulong)H[397], nk=(ulong)H[393], rk=(ulong)H[394], kl=(ulong)H[395], vz=(ulong)H[396];
+				const ulong w2=(ulong)H[402], kl2=(ulong)H[400], vz2=(ulong)H[401];
+				print_info("["+ort+"] S2 AMPLITUDE AUS DEM ZIEL: Besuche "+to_string(w)+", Schrittaenderung ueber 5 % "+to_string(nk)+", rho auf der unteren Klemme "+to_string(rk)+", Schranke gegriffen (Rueckfall) "+to_string(kl)+", R1 > 0 (beschleunigend) "+to_string(vz)+".");
+				if(g_alle<0xF0000000ull&&w!=g_alle) k_befund("["+ort+"] S2: Slot 397 = "+to_string(w)+" != Slot 370 = "+to_string(g_alle)+". Beide haengen am selben Gate und es liegt kein return dazwischen -- die Gleichheit ist strikt. Eine Abweichung heisst, dass der Bestimmungsblock nicht jeden markierten Besuch sieht.");
+				if(w==0ull) k_befund("["+ort+"] S2: Slot 397 = 0 -- der Bestimmungsblock wurde NIE erreicht, obwohl FAC_REK_S2 im uebersetzten Kernel steht. Die Amplitude bleibt dann auf ihrem Anfangswert 0 und der Arm ist ein stiller No-Op.");
+				else {
+					// DIE Abnahme des Lag-1-Kreises. Kontrahiert er, faellt die Schrittaenderung gegen 0.
+					// Tut sie das nicht, schwingt die Amplitude -- die Periode-2-Mode, die der Plan als
+					// real fuehrt. Das ist KEIN Baufehler, sondern ein Messergebnis, und es entscheidet,
+					// ob S2 so bleiben kann oder die Injektion hinter die Momentenschleife muss.
+					if(nk>w/2ull) print_warning("["+ort+"] S2 KONVERGENZ: an "+to_string((float)(100.0*(double)nk/(double)w),1u)+" % der gezaehlten Besuche aendert sich die Amplitude noch um mehr als 5 %. Der Lag-1-Kreis ist NICHT erkennbar kontrahiert. Vor jeder Deutung der Kraefte: den Impuls-Akkumulator als Zeitreihe ansehen -- driftet er oder oszilliert er?");
+					else print_info("["+ort+"] S2 KONVERGENZ: nur "+to_string((float)(100.0*(double)nk/(double)w),1u)+" % der Besuche aendern die Amplitude noch um mehr als 5 % -- der Lag-1-Kreis kontrahiert.");
+					// H2 des Planungsschritts: wird die Schranke zum neuen Knopf?
+					if(kl>w/2ull) k_befund("["+ort+"] S2 SCHRANKE: an "+to_string((float)(100.0*(double)kl/(double)w),1u)+" % der Besuche greift 0,5*u_t und die Zelle faellt auf Bounce-Back zurueck. Die wirksame Amplitude stammt dann von der SCHRANKE und nicht vom Wandmodell -- eine Konstante mit physikalischem Namen. Genau das sollte S2 abschaffen.");
+					else if(kl>w/5ull) print_warning("["+ort+"] S2 SCHRANKE: an "+to_string((float)(100.0*(double)kl/(double)w),1u)+" % der Besuche greift 0,5*u_t. Noch tragbar, aber die Amplitude ist dort nicht mehr aus dem Ziel bestimmt.");
+					if(rk>0ull) print_info("["+ort+"] S2 rho-KLEMME: an "+to_string((float)(100.0*(double)rk/(double)w),1u)+" % der Besuche liegt rhon auf der unteren Klemme. ACHTUNG, VORZEICHENUMKEHR gegen die frueheren Stufen: rho steht hier im NENNER, die Klemme VERSTAERKT die Amplitude (rho 0,5 gibt doppeltes du), waehrend sie sie unter eps gedaempft hat.");
+					// ★★ HOCH-2: die GEGENPHASE. Weicht sie stark ab, schwingt die Amplitude mit Periode 2,
+					// statt einseitig zu sein -- und dann ist KEINE Kraftzahl dieses Arms deutbar.
+					if(w2==0ull) k_befund("["+ort+"] S2 GEGENPHASE: Slot 402 = 0 -- die zweite Paritaet wurde nie abgetastet. Ohne sie kann eine Periode-2-Mode nicht von einem einseitigen Vorzeichen unterschieden werden.");
+					else {
+						const double p1=100.0*(double)vz/(double)w, p2=100.0*(double)vz2/(double)w2;
+						const double q1=100.0*(double)kl/(double)w, q2=100.0*(double)kl2/(double)w2;
+						print_info("["+ort+"] S2 GEGENPHASE: Vorzeichen R1>0 "+to_string((float)p1,1u)+" % (gerade) gegen "+to_string((float)p2,1u)+" % (ungerade); Schranke "+to_string((float)q1,1u)+" % gegen "+to_string((float)q2,1u)+" %.");
+						if(fabs(p1-p2)>20.0) k_befund("["+ort+"] S2 PERIODE-2-MODE: das Vorzeichen von R1 unterscheidet sich zwischen den beiden Paritaeten um "+to_string((float)fabs(p1-p2),1u)+" Prozentpunkte. Die Amplitude SCHWINGT, statt zu konvergieren. Der Plan fuehrt diese Mode als real; sie ist mit einem Lag-1-Kreis nicht heilbar, die Injektion muss hinter die Momentenschleife. KEINE Kraftzahl dieses Arms ist deutbar.");
+						else print_info("["+ort+"] S2 GEGENPHASE: beide Paritaeten stimmen im Vorzeichen auf "+to_string((float)fabs(p1-p2),1u)+" Prozentpunkte ueberein -- keine Periode-2-Mode.");
+					}
+					if(vz>0ull) print_info("["+ort+"] S2 VORZEICHEN: an "+to_string((float)(100.0*(double)vz/(double)w),1u)+" % der Besuche ist R1 > 0, die Wand BESCHLEUNIGT dort also. Erwartet nach der RDIAG-Leiter vom 07.09. rund 40 % -- eine stark abweichende Quote heisst, dass P1 oder twe nicht das sind, wofuer sie hier gehalten werden.");
+				}
+			}
+			// ★★ HOCH-3 und HOCH-4: die beiden Zaehler, die sagen, ob die Prozentzahlen oben ueberhaupt
+			// etwas bedeuten. Ohne sie liest sich ein Saegezahn wie "der Anteil ist vernachlaessigbar".
+			{
+				const ulong leer=(ulong)H[398], wid=(ulong)H[399];
+				if(g_alle>0ull&&leer>0ull) print_warning("["+ort+"] R3 LEERE PROBE: an "+to_string((float)(100.0*(double)leer/(double)g_alle),1u)+" % der markierten Besuche ist rho*|du| = 0. Dort pruefen die Histogramme [381..385] und [388..392] NICHTS, legen den Besuch aber ins unterste Fach -- ihre Prozentzahlen sind um diesen Anteil zu guenstig.");
+				if(g_alle>0ull&&wid>g_alle/20ull) k_befund("["+ort+"] R3 WIDERSPRUCH: an "+to_string((float)(100.0*(double)wid/(double)g_alle),1u)+" % der Besuche weicht rek_dp1 um mehr als 20 % von rho*du*G11roh ab. Beide sind dieselbe Groesse in fuehrender Ordnung, gliedweise vorzeichengleich, ohne Ausloeschung. Eine Abweichung heisst, dass eines der beiden Histogramme [373..377] oder [381..385] falsch ist -- und die H1-Korrektur (P1 - rek_dp1) steht genau darauf.");
+				else if(g_alle>0ull) print_info("["+ort+"] R3 WIDERSPRUCH: rek_dp1 und rho*du*G11roh stimmen an "+to_string((float)(100.0*(double)(g_alle-wid)/(double)g_alle),1u)+" % der Besuche auf 20 % ueberein -- die Voraussetzung der H1-Korrektur traegt.");
+			}
 			if(k_bl>0ull) print_warning("["+ort+"] R3 KORREKTUR: Slot 387 = "+to_string(k_bl)+" -- an so vielen Marken ist |DP2| mehr als das 1000-fache von |DP1|. Dort faengt Slot 378 zwar noch ein verkehrtes Vorzeichen (bis rund 1e4), aber keinen toten Code mehr. Seine Null ist an diesen Besuchen nur eingeschraenkt belastbar.");
 			else print_info("["+ort+"] R3 KORREKTUR: Slot 387 = 0 -- nirgends |DP2| > 1000*|DP1|, die Null von Slot 378 ist ueber den ganzen gefahrenen Wertebereich belastbar.");
 			if(k_an>0ull) k_befund("["+ort+"] R3 KORREKTUR: Slot 378 = "+to_string(k_an)+" -- die angewandte Aenderung an fw stimmt nicht mit dem berechneten DP1 ueberein. Moegliche Ursachen: die Korrektur steht hinter fac_tau_acc (toter Code), ausserhalb der FAC_REK_R3-Insel, oder mit verkehrtem Vorzeichen. Soll EXAKT 0.");
@@ -1105,7 +1174,7 @@ static void pruefe_rek_wirkpfad(LBM_Domain* D, const ulong t_ende, const string&
 		// ★ Pruefbefund N2/N6: zwei Divergenzen ansagen, die sonst still falsch gelesen werden.
 		print_warning("["+ort+"] R3 ANSAGE: (1) cd_bericht.csv (fac_tau) enthaelt die Rekonstruktionsquelle HERAUSGERECHNET, forces.csv (object_force ueber update_force_field) dagegen NICHT -- beide weichen voneinander ab, das ist kein Fehler. Seit der Doppelterm-Korrektur (24.09.2026) ist dieser Abstand Summe rho*du OHNE den Wandlink-Anteil des Df, vorher trug er ihn mit. WER DAS VORZEICHEN PRUEFEN WILL, BRAUCHT BEIDES: Slot 378 faengt ein verkehrtes Vorzeichen der ANWENDUNG (er misst fw vor und nach der Korrektur gegen das berechnete DP1), aber NICHT eines in der HERLEITUNG -- waere DP1 selbst mit falschem Vorzeichen gebildet, blieben alle Zaehler gruen. Dagegen hilft nur dieser Abstand: er muss gegen den unkorrigierten Stand SCHRUMPFEN. ★ Pruefbefund N3 (24.09.): das gilt nur, solange Summe DP < 2*Summe rho*du. DP1 hat zwar dasselbe Vorzeichen wie (rho*du).t1 (G11roh = Summe 6w*ct1^2 >= 0), aber |DP|/(rho*|du|) kann 2,0 erreichen, und ueber Facetten mit verschiedenen t1-Richtungen ist es eine Vektorsumme. Das Histogramm 381..385 sagt, ob die Bedingung haelt: liegt alles unter 100 %, gilt das Kriterium. (2) Unter CFD_FAC_RDIAG/KDIAG mischen die R3-erzwungenen Zellen unter die echten Rang-0-Rueckfaelle; die Rueckfall-Diagnose ist in diesem Arm NICHT mehr die Einzellink-Klasse.");
 	}
-	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[373]+(ulong)H[374]+(ulong)H[375]+(ulong)H[376]+(ulong)H[377]+(ulong)H[378]+(ulong)H[379]+(ulong)H[380]+(ulong)H[381]+(ulong)H[382]+(ulong)H[383]+(ulong)H[384]+(ulong)H[385]+(ulong)H[386]+(ulong)H[387]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/373..377/378/379/380/381..385/386/387 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
+	else if((ulong)H[370]+(ulong)H[371]+(ulong)H[372]+(ulong)H[373]+(ulong)H[374]+(ulong)H[375]+(ulong)H[376]+(ulong)H[377]+(ulong)H[378]+(ulong)H[379]+(ulong)H[380]+(ulong)H[381]+(ulong)H[382]+(ulong)H[383]+(ulong)H[384]+(ulong)H[385]+(ulong)H[386]+(ulong)H[387]+(ulong)H[388]+(ulong)H[389]+(ulong)H[390]+(ulong)H[391]+(ulong)H[392]+(ulong)H[393]+(ulong)H[394]+(ulong)H[395]+(ulong)H[396]+(ulong)H[397]+(ulong)H[398]+(ulong)H[399]+(ulong)H[400]+(ulong)H[401]+(ulong)H[402]>0ull) k_befund("["+ort+"] R3: FAC_REK_R3 steht NICHT im uebersetzten Kernel, aber die R3-Slots 370/371/372/373..377/378/379/380/381..385/386/387/388..392 haben gezaehlt -- der Gate-Code laeuft, obwohl der Arm aus ist.");
 }
 
 static void pruefe_band_wirkpfad(LBM_Domain* D, const ulong t_ende, const string& ort) {
@@ -5537,7 +5606,8 @@ void main_setup_kanal() {
 				print_info("REKONSTRUKTION BILANZ: eingespeister x-Impuls je Schritt = "+to_string((float)inj_,9u)
 					+" (gemessen im Kernel, Fenster "+to_string(n_steps-fac_snap_step)+" Schritte), Bilanzluecke FK.rx - Soll = "+to_string((float)luecke_,9u)
 					+", gemeinsames Moment <rho*t1.x> = "+to_string((float)moment_,4u)+" (zum Vergleich: das PRODUKT der getrennten Histogramme ueberschaetzt es, wenn rho und t1.x antikorreliert sind).");
-				if(eps_==0.0) {
+				// ★ H3: unter S2 ist eps_ zwingend 0, der Arm aber kein Nullarm.
+				if(eps_==0.0&&!dr_->fac_rek_s2_jit) {
 					if(fabs(inj_)>1.0E-12) k_befund("REKONSTRUKTION BILANZ: bei eps = 0 wurde x-Impuls "+to_string((float)inj_,9u)+" eingespeist -- die Delta-Form muss bei du = 0 strukturell +0 liefern.");
 					else print_info("REKONSTRUKTION BILANZ: bei eps = 0 ist der eingespeiste Impuls exakt 0 -- der Akkumulator ist im Nullarm stumm, wie gefordert.");
 				} else if(lbm.lbm_domain[0]->fac_rek_r3_jit) {
@@ -5602,7 +5672,8 @@ void main_setup_kanal() {
 			// gebaut wurde, um K2 wieder zu schliessen (dort haette 1,0008 die 1-%-Schranke bestanden).
 			else if(lbm.lbm_domain[0]->fac_rek_r3_jit) {
 				const double vh3 = soll_rx!=0.0 ? FK.rx/soll_rx : 0.0;
-				if(soll_rx!=0.0&&fabs(vh3-1.0)>0.01) k_befund("K2 im R3-Arm verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab (Verhaeltnis "+to_string((float)vh3,6u)+"). ★ 24.09. Pruefbefund H2: die URSACHENZUSCHREIBUNG hat sich mit der Doppelterm-Korrektur geaendert. Vorher hiess eine Abweichung \"die Buchung ist unvollstaendig\". Jetzt bucht der Kernel zusaetzlich +Summe DP zurueck, und eine Abweichung heisst zuerst: die KORREKTUR verfehlt Vorzeichen oder Praemisse. DER REFERENZWERT HAENGT AM ARM, nicht am Fall: kipp26 unkorrigiert eps +1e-3 -> 1,0008 (r3_buch_p3), eps -1e-3 -> 0,9764 (r3_buch_m3). ★ GEMESSEN 24.09. mit Korrektur, eps -1e-3: 0,976391 -- also UNVERAENDERT in fuenf Nachkommastellen. Die Korrektur ist je Facette gross (77,9 % der Marken tragen mehr als 1 % der Quellbuchung, 93,3 % haben |DP2| > 0,1*|DP1|), hebt sich in der globalen x-Summe am Kanal aber fast vollstaendig auf -- die t1/t2-Richtungen der Facetten zeigen auseinander. FOLGE: K2 unterscheidet am Kanal NICHT zwischen korrigiert und unkorrigiert und taugt hier nicht als Abnahme der Korrektur. Die 2,4 %, die dieser Waechter meldet, sind VORBESTEHEND und nicht von der Korrektur verursacht. Die Buchung soll K2 genau schliessen -- eine Abweichung heisst, dass sie unvollstaendig ist.");
+				if(soll_rx==0.0) print_warning("K2 im R3-Arm: die ANTRIEBSKRAFT ist 0 -- K2 ist nicht auswertbar, und der Arm hat seinen Regelzustand verloren. ★ MITTEL-1 (Nachpruefung 24.09.): hier wurde die harte Pruefung bisher still uebersprungen und der Log meldete woertlich \"Verhaeltnis 0.0000 innerhalb 1 % -- die Buchung ist VOLLSTAENDIG\". Das war der EINZIGE Ort, an dem der Zusammenbruch des Antriebs im S2-Probelauf haette auffallen muessen, und er meldete gruen.");
+				else if(fabs(vh3-1.0)>0.01) k_befund("K2 im R3-Arm verletzt: Reibungspfad weicht >1 % von der Kraftbilanz ab (Verhaeltnis "+to_string((float)vh3,6u)+"). ★ 24.09. Pruefbefund H2: die URSACHENZUSCHREIBUNG hat sich mit der Doppelterm-Korrektur geaendert. Vorher hiess eine Abweichung \"die Buchung ist unvollstaendig\". Jetzt bucht der Kernel zusaetzlich +Summe DP zurueck, und eine Abweichung heisst zuerst: die KORREKTUR verfehlt Vorzeichen oder Praemisse. DER REFERENZWERT HAENGT AM ARM, nicht am Fall: kipp26 unkorrigiert eps +1e-3 -> 1,0008 (r3_buch_p3), eps -1e-3 -> 0,9764 (r3_buch_m3). ★ GEMESSEN 24.09. mit Korrektur, eps -1e-3: 0,976391 -- also UNVERAENDERT in fuenf Nachkommastellen. Die Korrektur ist je Facette gross (77,9 % der Marken tragen mehr als 1 % der Quellbuchung, 93,3 % haben |DP2| > 0,1*|DP1|), hebt sich in der globalen x-Summe am Kanal aber fast vollstaendig auf -- die t1/t2-Richtungen der Facetten zeigen auseinander. FOLGE: K2 unterscheidet am Kanal NICHT zwischen korrigiert und unkorrigiert und taugt hier nicht als Abnahme der Korrektur. Die 2,4 %, die dieser Waechter meldet, sind VORBESTEHEND und nicht von der Korrektur verursacht. Die Buchung soll K2 genau schliessen -- eine Abweichung heisst, dass sie unvollstaendig ist.");
 				else print_info("K2 im R3-Arm: Verhaeltnis "+to_string((float)vh3,4u)+" innerhalb 1 % -- die Buchung ist VOLLSTAENDIG. ACHTUNG: das belegt die Buchhaltung, NICHT die Physik. Der Kanalantrieb ist auf U_b geregelt, die Wandsenke damit ohnehin festgenagelt; jede vollstaendige Buchung liefert 1. Der Physikbeweis braucht einen Druckpfad.");
 			}
 			else if(LBM_Domain::s_fac_rek>0u&&env_f("CFD_FAC_REK_EPS", 0.0f)!=0.0f) {
