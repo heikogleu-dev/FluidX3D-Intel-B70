@@ -422,16 +422,34 @@ of peak bandwidth the code actually reaches.** Everything else is features.
 
 ### What a cell costs, and why it is the whole game
 
-| | Bytes per cell per step | Source |
-|---|---|---|
-| Textbook D3Q19, two lattices, FP32 | **152 B** | 19 × 4 B, read + write — arithmetic from the scheme |
-| FluidX3D, FP32/FP32 | **153 B** | upstream, [`README_UPSTREAM.md`](README_UPSTREAM.md) |
-| **FluidX3D, FP32/FP16 — Esoteric-Pull + compressed storage** | **77 B** | upstream, same source |
-| **This fork, measured on the B70** | **~123 B** | 4 648 MLUPs ↔ 572 GB/s, measured here |
+**Two different numbers, and they are often confused.** *Storage* is what a cell occupies in VRAM;
+*traffic* is what must cross the memory bus every time step. The resolution you can fit is set by
+storage; the run time is set by traffic.
 
-The fork sits above upstream's 77 B because a vehicle case carries what a generic solver does not:
-per-facet wall-model state, the neighbour sampling, the coupling buffers. **That is the price of the
-physics, and it is stated rather than hidden.**
+| Storage per cell, on device | | |
+|---|---|---|
+| Upstream, FP32 throughout | 93 B | |
+| Upstream, FP16S for the distributions | 55 B | |
+| **This fork** | **47 B** | 38 (19 × FP16S) + 6 (u) + 2 (ρ) + 1 (flags) |
+
+> [!NOTE]
+> **Three numbers appear for this in the project, and all three are right — they measure different
+> things.** **47 B** is the per-cell arithmetic above. **45.7 B** is a measured allocation
+> (23 734 MB for 519 139 485 cells). **43.8 B** is the 4 mm anchor run (28 698 MB for 654.9 M
+> cells) — *lower*, because buffers that do not scale with cell count amortise better on a larger
+> grid. The force field `F` is the main one: it lives only over the wall bounding box, not over the
+> domain, which is what buys 4.31 GB at 4 mm.
+
+| Traffic per cell per step | | |
+|---|---|---|
+| Textbook D3Q19, two lattices, FP32 | 152 B | 19 × 4 B, read + write |
+| FluidX3D, FP32/FP32 | 153 B | upstream, [`README_UPSTREAM.md`](README_UPSTREAM.md) |
+| FluidX3D, FP32/FP16 — distributions + flags only | 77 B | upstream, same source |
+| **This fork, vehicle case** | **115 B** | `bandwidth_bytes_per_cell_device()`, `src/lbm.cpp` |
+
+The 38 B above upstream's 77 B are not overhead — they are the vehicle case: **u (6) + ρ (2) for the
+field output, the force field (12), and the neighbour flags (18) that a moving-boundary case must
+load.** Upstream's 77 B counts distributions and flags alone.
 
 > [!TIP]
 > **Arithmetic intensity 2.37 / 5.27 / 16.56 FLOPs per byte** (FP32/FP32, FP16S, FP16C — upstream's
