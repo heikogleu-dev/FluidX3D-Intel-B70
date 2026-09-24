@@ -1,8 +1,0 @@
-# 23.09.2026 S1b Vorzeichentest, AUSWEICHEND auf die iGPU.
-# Grund: der B70-Arm s1c_epsm_b70 haengt nach "Allocating memory". Signatur vollstaendig belegt --
-#   export/s1c_epsm_b70/ enthaelt nur "code", ein Thread Rl ohne wchan bei 99,9 %, Logdatei waechst
-#   seit 08:38:24 nicht mehr, und journalctl -k meldet "Engine memory CAT error" um 08:37:24, also
-#   genau im Abbau des VORIGEN Laufs. Das ist die seit 05.09./06.09. dokumentierte Kette, drittes Mal.
-# Verglichen wird iGPU gegen iGPU: die Nullreferenz ist s1c_eps0_igpu = 7980041572697087411.
-# ABNAHME: Hash MUSS abweichen, Slot 329 == Slot 328, Slot 330 = 0, Slot 332 = 0, Slot 333 = 0.
-CFD_QUEUE_DEV=2 CFD_QUEUE_HANG_S=900 CFD_CASE=kanal CFD_KANAL_N=20 CFD_KANAL_KIPP=26.565 CFD_FACETTEN=3 CFD_FAC_SATGATE=1 CFD_FAC_ALPHA=2 CFD_FAC_ELIBB=1 CFD_FAC_NACHBAR=1 CFD_FAC_DETEPS=16 CFD_FACETTEN_YWMIN=0.18 CFD_FELD_HASH=1 CFD_FAC_REK=1 CFD_FAC_REK_EPS=-1e-4 :: s1c_epsm_igpu

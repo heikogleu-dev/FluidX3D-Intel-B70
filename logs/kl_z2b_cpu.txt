@@ -1,3 +1,0 @@
-# ★ 15.09.2026 Z2b CPU (Kugel 40 mm): a Hash 6457576348268651081 unveraendert, [295] = [28] = 0; h2 (def_c 0,05): [295] = [28] > 0, [296] - [297] = [295], Diagonalluecke [297] > 0 erwartet.
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 :: kl_z2b_ku_a_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_KLEMM_HAKEN=2 CFD_KLEMM_BUDGET=1 :: kl_z2b_ku_h2_cpu

@@ -1,4 +1,0 @@
-# ★ 15.09.2026 Klemmen S0b Pruefpass 1 (Host-Fixes): a Soll Hash 6457576348268651081; h3 Soll: Bericht vollstaendig, Abbruch erst am Fallende; h1 Soll Ist=Soll + F-BBox-Hinweis.
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 :: kl_s0b2_ku_a_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_KLEMM_HAKEN=1 :: kl_s0b2_ku_h1_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_KLEMM_HAKEN=3 :: kl_s0b2_ku_h3_cpu

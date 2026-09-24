@@ -1,8 +1,0 @@
-# ★ 15.09.2026 Stufe 1 P1c CPU (Kugel 40 mm): p2 ohne Haken Hash = Modus 0 (keine natuerlichen Kandidaten); p2h1 Selbstpruefung [290] = 0, Summe (1-s) > 0, Nachladeprobe 0 (statt 664 im Messarm), Ist=Soll;
-# p2h2 alles machtlos -> nichts angewandt -> Hash = Modus 0; p2fh1 (Kugel ohne Facetten) Hash = p2h1; p2h3 genau die Klassen-Beanstandung.
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 :: kl_p1c_ku_p2_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 CFD_POSITIV_HAKEN=1 :: kl_p1c_ku_p2h1_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 CFD_POSITIV_HAKEN=2 :: kl_p1c_ku_p2h2_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 CFD_POSITIV_HAKEN=1 CFD_POSITIV_FACETTE=1 :: kl_p1c_ku_p2fh1_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 CFD_POSITIV_HAKEN=3 :: kl_p1c_ku_p2h3_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=1 :: kl_p1c_ku_p1_cpu

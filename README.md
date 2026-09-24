@@ -409,8 +409,10 @@ bit-identical across it, in both signs of the amplitude.
    rather than a model. That derivation is the next build step, and it is larger than anything
    behind it.
 
-Development history, including the measurements behind every claim above and the arms that were
-rejected, is in [HISTORY.md](HISTORY.md).
+The measurements behind every claim above — including the arms that were rejected — live in the
+project's working notes and the run archive, which are kept out of this repository on purpose: they
+are a laboratory notebook, not documentation. The commit history carries the same record in the
+form that belongs here.
 
 ---
 

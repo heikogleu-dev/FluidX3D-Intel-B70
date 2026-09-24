@@ -1,3 +1,0 @@
-# 17.09.2026 Upstream (mr2-singledomain 022cefb) S3 iGPU: 16 mm 20 ms, 8 mm 50 ms. Abnahmen wie S1 (Flag-Zensus, P1-Schliessung, kein NaN), Slices/VTK geschrieben.
-CFD_BIN=upstream CFD_DX=16 CFD_T_END=0.02 CFD_T_WARMUP=0 CFD_VTK_ZEITEN=0.02 CFD_SLICE_DT=0.01 :: up16_s3_igpu
-CFD_BIN=upstream CFD_DX=8 CFD_T_END=0.05 CFD_T_WARMUP=0 CFD_VTK_ZEITEN=0.05 CFD_SLICE_DT=0.025 :: up8_s3_igpu

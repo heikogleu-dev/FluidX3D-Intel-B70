@@ -1,9 +1,0 @@
-# ★ 15.09.2026 Stufe 1 P1b CPU (Kugel 40 mm, Zaehltakt 100 -> Zaehlschritte t = 2, 102; Pruefpunkt 102/103): a Hash 6457576348268651081 (Modus 0);
-# p1 Hash gleich a + Ist=Soll; h1 Eimer-Soll = Hakenzellen, [289] gegen p1 um <= 2 N_H hoeher; h2 Kandidaten = machtlos > 0, Klassen 0, Hash gleich a;
-# h3 genau die Klassen-Beanstandung (rc 1); p2 verweigert (P1c).
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 :: kl_p1b_ku_a_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=1 :: kl_p1b_ku_p1_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=1 CFD_POSITIV_HAKEN=1 :: kl_p1b_ku_h1_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=1 CFD_POSITIV_HAKEN=2 :: kl_p1b_ku_h2_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=1 CFD_POSITIV_HAKEN=3 :: kl_p1b_ku_h3_cpu
-CFD_CASE=kugel CFD_KUGEL_DX=40 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 :: kl_p1b_ku_p2_cpu

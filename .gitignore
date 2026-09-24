@@ -55,3 +55,37 @@ __pycache__/
 # Analyse-Zwischenspeicher der Werkzeuge (03.09.2026)
 *.npz
 /UEBERGABE-*.md
+
+# ── Arbeitsdokumente: bleiben LOKAL, gehoeren nicht auf GitHub ──────────────
+# Heiko 24.09.2026: "nur das rein fuer Github notwendige sowie den Code".
+# Zweites Mal so entschieden (erstmals 27.08.2026, damals 21 Dateien).
+# Auf GitHub bleiben: README.md, LICENSE.md (unveraendert, Lizenzpflicht),
+# NOTICE.md und MODIFICATIONS.md (Lizenz-Compliance des Forks),
+# README_UPSTREAM.md (traegt die Referenzliste, die die Lizenz zu zitieren
+# verlangt) und DOCUMENTATION.md (Upstream-Doku, aus dem README verlinkt).
+/TODO.md
+/TODO2-BAUPLAN.md
+/HISTORY.md
+/WANDMODELL.md
+/FACETTEN.md
+/LEISTUNG.md
+/BOX-REGELWERK.md
+/DOPPEL-DOMAENE.md
+/EINLASS-AUSLASS.md
+/GITTERGESCHWINDIGKEIT.md
+/BAND-ARTEFAKT-8MM.md
+/FREMDSOLVER-OPENLUDWIG.md
+/PLAN-*.md
+/KLEMMEN-*.md
+/RHO_RAND-*.md
+/REKONSTRUKTION-PLAN.md
+/PERFORMANCE-ROHBEFUNDE-*.md
+/SKALIERUNG-BEFUNDE-*.md
+/FACETTEN-*.md
+/AUDIT-BEFUNDE.md
+wissensspeicher-tagesprotokoll/
+
+# Kompilate der Hilfswerkzeuge gehoeren nicht ins Repo (24.09.2026)
+werkzeuge/elibb_harness/elibb_harness
+werkzeuge/elibb_harness/elibb_harness3d
+werkzeuge/ccs_kanarie/ccs_kanarie

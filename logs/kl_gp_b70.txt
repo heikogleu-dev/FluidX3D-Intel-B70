@@ -1,3 +1,0 @@
-# ★ 16.09.2026 B70-Gegenprobe nach CAT-Error 15.09. 22:49: exakt die zwei Z2e/Z2f-Kugelzeilen (16 mm) in derselben Reihenfolge, an deren Uebergang es knallte. Soll: rc 0, keine Haengesignatur, Hash 13385224609926903411 wie gestern, journalctl -k sauber.
-CFD_CASE=kugel CFD_KUGEL_DX=16 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_TOR_HUELLE=1 :: kl_gp_ku16_t_b70
-CFD_CASE=kugel CFD_KUGEL_DX=16 CFD_T_END=0.02 CFD_T_WARMUP=0.01 CFD_SLICE_DT=0.005 CFD_FELD_HASH=1 CFD_POSITIV=2 CFD_U_KLEMME=1 CFD_RHO_HUELLE=1 :: kl_gp_ku16_r_b70

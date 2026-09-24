@@ -1,4 +1,0 @@
-# 17.09.2026 Upstream ORIGINAL (Heiko 12:50: Upstream-Voxelizer, pures BB, keine v2-Geometrienachbearbeitung), mr2-singledomain 8947861.
-# S1b CPU 16 mm 20 ms: Flag-Zensus, P1-Schliessung, P1 Laufzeit = offline. S2b CPU 4 mm NUR_GEOMETRIE Y_VERSATZ=0: 0x41-Maske gegen p4_pu8 zaehlen (nur Upstream / nur v2 / beide).
-CFD_BIN=upstream CFD_DX=16 CFD_T_END=0.02 CFD_T_WARMUP=0 CFD_VTK_ZEITEN=0.02 CFD_SLICE_DT=0.01 :: up16_s1b_cpu
-CFD_BIN=upstream CFD_DX=4 CFD_NUR_GEOMETRIE=1 CFD_Y_VERSATZ=0 :: up4_s2b_geo_cpu

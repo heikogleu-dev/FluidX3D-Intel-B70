@@ -21,11 +21,10 @@ are deliberately left untouched so that upstream changes can still be merged.
 A second, coarser lattice covers the far field while the fine lattice resolves the vehicle. The two
 are coupled each outer step; the near domain advances several steps per coarse step. Added
 throughout `src/setup.cpp` and `src/lbm.cpp`, with the coupling cadence derived from the resolution
-ratio rather than configured by hand. Documented in `DOPPEL-DOMAENE.md`.
+ratio rather than configured by hand.
 
 Also in this area: a rescaling band between the domains, inlet/outlet treatment for the coarse
-domain, and a grid-velocity convention for the moving ground. See `EINLASS-AUSLASS.md`,
-`GITTERGESCHWINDIGKEIT.md`, `BAND-ARTEFAKT-8MM.md`.
+domain, and a grid-velocity convention for the moving ground.
 
 ## 2. Two-device topology
 
@@ -49,7 +48,8 @@ Added, all under `src/kernel.cpp` and configured from `src/setup.cpp`:
 - a **wall-cell reconstruction** (`CFD_FAC_REK`) in Kupershtokh exact-difference form, currently
   under calibration and switched off by default.
 
-Documented in `WANDMODELL.md`, `FACETTEN.md` and the plan files in the repository root.
+The switches that control all of this are environment variables read in `src/setup.cpp`; each one
+is validated there and carries an acceptance check.
 
 ## 4. Memory layout
 
