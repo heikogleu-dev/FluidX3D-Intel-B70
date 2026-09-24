@@ -1,13 +1,32 @@
+<div align="center">
+
 # MaxAttack CFD Bench
 
-> **Modified fork of [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann.
-> Not the original software. Licensed under the unaltered FluidX3D license (non-commercial, no
-> military use). See [NOTICE.md](NOTICE.md) and [MODIFICATIONS.md](MODIFICATIONS.md).**
+### Vehicle aerodynamics at 4 mm on a single Intel GPU
 
-*Vehicle aerodynamics on a single Intel GPU.*
+**A lattice-Boltzmann wall-modelled LES that resolves the forces on a road vehicle<br>
+on one workstation — and can prove every number it reports.**
 
-**A lattice-Boltzmann wall-modelled LES that resolves the forces on a road vehicle at 4 mm on one
-workstation, on Intel hardware — and can prove every number it reports.**
+<br>
+
+![Resolution](https://img.shields.io/badge/resolution-4%20mm-0A7BBB?style=for-the-badge)
+![Cells](https://img.shields.io/badge/fine%20cells-654.9%20M-0A7BBB?style=for-the-badge)
+![Drag](https://img.shields.io/badge/Cd%20vs%20OpenFOAM%2013-within%201.6%25-2E9E5B?style=for-the-badge)
+![Bandwidth](https://img.shields.io/badge/memory%20bandwidth-94%25%20of%20peak-2E9E5B?style=for-the-badge)
+
+![Hardware](https://img.shields.io/badge/Intel%20Arc%20Pro%20B70-32%20GB-0068B5?style=flat-square&logo=intel&logoColor=white)
+![iGPU](https://img.shields.io/badge/Arrow%20Lake%20iGPU-far%20field-0068B5?style=flat-square&logo=intel&logoColor=white)
+![OpenCL](https://img.shields.io/badge/OpenCL-C%2B%2B17-FF6F00?style=flat-square)
+![No CUDA](https://img.shields.io/badge/no%20CUDA-no%20cluster-6E7781?style=flat-square)
+![License](https://img.shields.io/badge/license-FluidX3D%20·%20non--commercial-A0439C?style=flat-square)
+
+</div>
+
+> [!IMPORTANT]
+> **Modified fork of [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann.**
+> This is **not** the original software and is not endorsed by its author. Licensed under the
+> **unaltered** FluidX3D license — non-commercial use only, no military use.
+> See **[NOTICE.md](NOTICE.md)** and **[MODIFICATIONS.md](MODIFICATIONS.md)**.
 
 Built on [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann. Upstream is
 the fastest LBM solver of its class, running at 96–100 % of peak memory bandwidth. This fork does
@@ -71,6 +90,34 @@ Everything in this fork exists to pay that price honestly:
 
 ---
 
+## How the two devices split the problem
+
+```mermaid
+flowchart LR
+    subgraph B70["🟦 Intel Arc Pro B70 · 32 GB VRAM"]
+        N["<b>Near field · 4 mm</b><br/>654.9 M cells<br/>vehicle, wheels, wake<br/>facet wall model"]
+    end
+    subgraph IGPU["🟦 Arrow Lake iGPU · system RAM"]
+        F["<b>Far field · 16 mm</b><br/>289.0 M cells<br/>tunnel, inlet, outlet"]
+    end
+    F -- "coarse → fine<br/>rescaled inflow" --> N
+    N -- "fine → coarse<br/>wake outflow" --> F
+    N --> OUT["Forces per facet<br/>pressure · friction · per zone"]
+    OUT --> VAL{"Paired OpenFOAM 13<br/>34 M cells, k-ω-SST<br/><b>same STL</b>"}
+
+    style B70 fill:#0A7BBB22,stroke:#0A7BBB,stroke-width:2px
+    style IGPU fill:#6E778122,stroke:#6E7781,stroke-width:2px
+    style VAL fill:#2E9E5B22,stroke:#2E9E5B,stroke-width:2px
+    style N stroke-width:0px
+    style F stroke-width:0px
+    style OUT stroke-width:0px
+```
+
+The discrete card's 32 GB buys resolution exactly where the forces are made. The domain that only
+has to be *present* lives in system RAM, where it costs nothing scarce.
+
+---
+
 ## Results
 
 Both coefficients are **totals**, because the OpenFOAM 13 reference is a total. The composition is
@@ -84,6 +131,12 @@ spelled out so that no figure here can be confused with another:
 | `cz_druck_rest` | **−1.1290 ± 0.0238** | Pressure downforce, band removed |
 | `cz_reib` | +0.0755 ± 0.0004 | Friction — it works *against* downforce |
 | **Cz total** | **−1.0535 ± 0.0234** | vs OF13 **−1.301** |
+
+> [!NOTE]
+> **Every mechanism in this fork carries an action-path counter with an is = should acceptance,
+> and a switch without a firing counter is treated as a hard error.** The reason is concrete:
+> in the predecessor fork, the central moving-floor fix was a silent no-op for years.
+> See [How every number is proven](#how-every-number-is-proven).
 
 **Why the band is split off.** The moving z-band around the wheel contact patch produces roughly
 −0.7 of purely artificial downforce from the floor imprint. It is removed from the pressure term and
@@ -175,12 +228,17 @@ Blackwell Workstation 1 792 GB/s (512-bit GDDR7, NVIDIA specification as tabulat
 [HOSTKEY](https://hostkey.com/blog/109-nvidia-rtx-6000-blackwell-server-edition-tests-benchmarks-comparison-with-workstation-and-rtx-5090-cooling-features/));
 H100 80 GB SXM 3 350 GB/s (HBM3).
 
-**Two caveats that the last column does not contain.** The multi-GPU rows assume **perfect weak
+<details>
+<summary><b>Two caveats that the last column does not contain</b> — click to read them, they matter</summary>
+
+ The multi-GPU rows assume **perfect weak
 scaling** — no interconnect cost, no halo exchange, no load imbalance. Real multi-GPU LBM does not
 achieve that, so those two figures are optimistic by an amount this project cannot quantify. And
 this fork's own decomposition is a *near/far* split across two devices of different speed, not an
 N-way split of the fine domain; running the fine domain across four cards would use the upstream
 path, **which this fork has not exercised**.
+
+</details>
 
 **What the table says without any assumption at all** is the useful part: the memory wall, not the
 algorithm, sets the resolution today. The code already fits a full vehicle at 4 mm into 32 GB, and
@@ -286,18 +344,30 @@ reconstructing one by hand once cost a full morning of measurements.
 
 ## Status
 
-Drag is closed against the reference; downforce sits at 81 % and is the active work. The current
-line of work is a **wall-cell reconstruction** that imposes the wall-model target on the cells where
-the tangential solve is rank-deficient — roughly a fifth of all wall facets, because a cell with a
-single wall link cannot span two tangential directions. It is built and force-booked, and the
-momentum balance behind the booking is measured rather than assumed.
+Drag is closed against the reference. **Downforce sits at 81 % of it, and that is the open problem.**
 
-The first vehicle measurement points the pressure path in the promising direction — which wall shear
-stress alone provably does not — but it is **not an accepted result yet**: the arm it came from is
-disqualified by one of its own acceptance checks, and a second finding is open (the wall-link part of
-the correction enters the wall force twice, once implicitly and once through the explicit booking).
-Both are in the current audit round. The number is written down here as what it is — a direction, not
-a validated figure — because the alternative is to publish it as one.
+The current line of work is a **wall-cell reconstruction**: it imposes the wall-model target on the
+cells where the tangential solve is rank-deficient — roughly a fifth of all wall facets, because a
+cell with a single wall link cannot span two tangential directions. It is built, force-booked, and
+the momentum balance behind the booking is measured rather than assumed.
+
+**What is accepted.** The mechanism is bit-neutral where it must be: with zero amplitude the field
+hash is identical to the reference, measured, not argued. A defect found in the force booking — the
+wall-link part of the injected momentum entered the wall force twice — is corrected exactly rather
+than to leading order, which the measurement justified: at 93 % of marked cells the second
+tangential channel carries more than a tenth of the first, and a leading-order fix would have
+dropped it. The correction is confined to the friction path; every pressure-path quantity is
+bit-identical across it, in both signs of the amplitude.
+
+**What is not.** Two things, stated plainly because they are what a reader would otherwise assume:
+
+1. **The reconstruction has never run at 4 mm.** Every arm so far is a channel, a sphere, or the
+   vehicle at 8 mm — and 8 mm cannot resolve Cz. What it does to downforce at production resolution
+   is *unmeasured*. The 81 % above is the production baseline **without** it.
+2. **Its amplitude is still a hand-set knob.** The project rule is that constants are derived, not
+   dialled, and until the wall-model target sets the injected momentum itself, this is a probe
+   rather than a model. That derivation is the next build step, and it is larger than anything
+   behind it.
 
 Development history, including the measurements behind every claim above and the arms that were
 rejected, is in [HISTORY.md](HISTORY.md).
