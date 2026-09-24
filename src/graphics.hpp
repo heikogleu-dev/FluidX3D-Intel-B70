@@ -1,6 +1,6 @@
 #pragma once
 
-#define WINDOW_NAME "FluidX3D"
+#define WINDOW_NAME "MaxAttack CFD Bench (FluidX3D-based)"
 //#define INTERACTIVE_GRAPHICS
 //#define INTERACTIVE_GRAPHICS_ASCII
 //#define GRAPHICS

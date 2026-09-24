@@ -18,12 +18,12 @@ BEGIN
 		BLOCK "040904E4"
 		BEGIN
 			VALUE "CompanyName", "ProjectPhysX"
-			VALUE "FileDescription", "FluidX3D"
+			VALUE "FileDescription", "MaxAttack CFD Bench (modified FluidX3D)"
 			VALUE "FileVersion", "0.0.0.0"
 			VALUE "InternalName", "FluidX3D"
 			VALUE "LegalCopyright", "(c) Dr. Moritz Lehmann"
 			VALUE "OriginalFilename", "FluidX3D.exe"
-			VALUE "ProductName", "FluidX3D"
+			VALUE "ProductName", "MaxAttack CFD Bench"
 			VALUE "ProductVersion", "v3.7"
 		END
 	END

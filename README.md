@@ -1,9 +1,15 @@
-# FluidX3D-v2 — Vehicle Aerodynamics on a Single Intel GPU
+# MaxAttack CFD Bench
+
+> **Modified fork of [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann.
+> Not the original software. Licensed under the unaltered FluidX3D license (non-commercial, no
+> military use). See [NOTICE.md](NOTICE.md) and [MODIFICATIONS.md](MODIFICATIONS.md).**
+
+*Vehicle aerodynamics on a single Intel GPU.*
 
 **A lattice-Boltzmann wall-modelled LES that resolves the forces on a road vehicle at 4 mm on one
 workstation, on Intel hardware — and can prove every number it reports.**
 
-A fork of [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann. Upstream is
+Built on [FluidX3D](https://github.com/ProjectPhysX/FluidX3D) by Dr. Moritz Lehmann. Upstream is
 the fastest LBM solver of its class, running at 96–100 % of peak memory bandwidth. This fork does
 not try to improve on that — and, at 94 % of peak measured on the Arc Pro B70, it does not give it
 away either. It adds what a vehicle aerodynamics case needs and upstream does not
@@ -312,10 +318,31 @@ boundary geometry, a specular symmetry plane — are exactly what this fork adds
 - [OpenFOAM v2512 + PETSc-Kokkos-SYCL](https://github.com/heikogleu-dev/Openfoam-v2512-Petsc-Kokkos-Sycl-Intel-B70)
 - [OpenFOAM 13 GPU offloading (Ginkgo SYCL)](https://github.com/heikogleu-dev/Openfoam13---GPU-Offloading-Intel-B70-Pro)
 
-## License and attribution
+## Original FluidX3D documentation
 
-Original FluidX3D © 2022–2026 Dr. Moritz Lehmann. The license is **unchanged** from upstream — see
-[LICENSE.md](LICENSE.md): non-commercial, no military or defence use, no AI training on the source,
-altered versions must be marked and their source published, and the FluidX3D references must be
-cited in publications. This is an altered version; the alterations are described above and in the
-commit history. Origin is not misrepresented and the license notice is preserved.
+The upstream README is preserved verbatim as **[README_UPSTREAM.md](README_UPSTREAM.md)** — including
+upstream's benchmark tables and, importantly, its **reference list**. Publications that use this
+software must cite those references. Upstream's user documentation is likewise preserved as
+[DOCUMENTATION.md](DOCUMENTATION.md).
+
+Nothing on this page replaces those. Where this README and the upstream one disagree about what the
+software does, the difference is a modification made here, and
+[MODIFICATIONS.md](MODIFICATIONS.md) is the place it is accounted for.
+
+## License & Attribution
+
+**This is not FluidX3D.** It is a modified version of it, and it is not endorsed by FluidX3D's
+author. "FluidX3D" is a protected work title of Dr. Moritz Lehmann.
+
+- Original software: **FluidX3D**, © 2022–2026 **Dr. Moritz Lehmann** —
+  <https://github.com/ProjectPhysX/FluidX3D>
+- License: **[LICENSE.md](LICENSE.md)**, byte-identical to upstream and not to be altered.
+  Non-commercial use only. No military or defence use. No AI training on the source. Altered
+  versions must be marked as such and their source published. The FluidX3D references must be cited
+  in scientific publications.
+- Attribution notice: **[NOTICE.md](NOTICE.md)**
+- What was changed, and what deliberately was not: **[MODIFICATIONS.md](MODIFICATIONS.md)**
+
+This fork is marked as altered, its origin is not misrepresented, the license notice is preserved,
+and its source is public. Internal code identifiers still carry the upstream names so that upstream
+changes remain mergeable — that is a compatibility decision, not a claim of identity.
